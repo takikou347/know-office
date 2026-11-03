@@ -11,7 +11,7 @@ AI 社員を管理するアプリ。組織の決まりは takikou347/knowidea �
 ## 直し方
 
 - main を直に触らず、ブランチで直して PR にし、作った者と別のモデルの見る役が可を出してから入れる
-- push の前に、テストと `npx @fission-ai/openspec validate --all --strict` と `python3 knowidea/tools/check.py know-office` を通す
+- push の前に、テストと `npx @fission-ai/openspec@1.16.0 validate --all --strict` と `python3 knowidea/tools/check.py know-office` を通す
 - 要件の残りとこの後の仕事は GitHub Issues に 1 つ 1 件で置く
 
 ## 書き方
