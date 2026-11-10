@@ -1,5 +1,6 @@
 node_modules
 dist
+.wrangler
 # openspec init が作る道具。200 行を超えるので入れない。要る時は npx @fission-ai/openspec@1.16.0 init --tools claude で作る
 .claude/skills/openspec-*
 .claude/commands/opsx
