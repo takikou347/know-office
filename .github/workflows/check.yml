@@ -1,4 +1,4 @@
-# PR と main で、OpenSpec の仕様の形を確かめる。アプリのテストは、コードを置いた時にここへ足す
+# PR と main で、OpenSpec の仕様の形と、アプリの型、テスト、ビルドを確かめる
 name: Check
 
 on:
@@ -12,10 +12,16 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
       - run: npx -y @fission-ai/openspec@1.16.0 validate --all --strict
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
