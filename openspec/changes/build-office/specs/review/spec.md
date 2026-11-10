@@ -30,7 +30,7 @@
 
 ### Requirement: 読みやすさと補完
 
-エディタ SHALL 言語ごとの色分け、括弧の対応、折り畳み、定義への移動、型と説明の表示を行い、書く時に言語とフレームワークに合った候補を出す。Rust、TypeScript、CSS、Markdown から始め、Next.js、React、knowidea-ui の部品の名前と引数も候補に出す。書き間違いはその場で下線で示す。
+エディタ SHALL 言語ごとの色分け、括弧の対応、折り畳み、定義への移動、型と説明の表示を行い、書く時に言語とフレームワークに合った候補を出す。TypeScript、CSS、Markdown から始め、React、Hono、knowidea-ui の部品の名前と引数も候補に出す。書き間違いはその場で下線で示す。
 
 #### Scenario: 部品の引数を補完する
 
