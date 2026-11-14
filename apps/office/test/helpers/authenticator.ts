@@ -74,12 +74,18 @@ function clientData(type: string, challenge: string, origin: string): Uint8Array
   return new TextEncoder().encode(JSON.stringify({ type, challenge, origin, crossOrigin: false }));
 }
 
+/** 登録のオプションのうち、認証器が読む所。PublicKeyCredentialCreationOptionsJSON はこの形を満たす */
+export type RegistrationOptions = Pick<PublicKeyCredentialCreationOptionsJSON, "challenge"> & { rp: { id?: string }; user: { id: string } };
+
+/** 確認のオプションのうち、認証器が読む所。PublicKeyCredentialRequestOptionsJSON はこの形を満たす */
+export type AuthenticationOptions = Pick<PublicKeyCredentialRequestOptionsJSON, "challenge" | "rpId">;
+
 /** ソフトウェアの認証器 */
 export type Authenticator = {
   /** 登録の返事を作る */
-  register(options: PublicKeyCredentialCreationOptionsJSON, origin: string): Promise<RegistrationResponseJSON>;
+  register(options: RegistrationOptions, origin: string): Promise<RegistrationResponseJSON>;
   /** 確認の返事を作る。作るたびに数を 1 つ進める */
-  authenticate(options: PublicKeyCredentialRequestOptionsJSON, origin: string): Promise<AuthenticationResponseJSON>;
+  authenticate(options: AuthenticationOptions, origin: string): Promise<AuthenticationResponseJSON>;
 };
 
 /**

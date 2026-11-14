@@ -124,6 +124,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@asteasolutions/zod-to-openapi':
+        specifier: 9.1.0
+        version: 9.1.0(zod@4.6.7)
       zod:
         specifier: 4.6.7
         version: 4.6.7

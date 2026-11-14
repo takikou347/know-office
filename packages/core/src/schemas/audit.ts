@@ -1,5 +1,5 @@
 // 監査ログに頼む 1 件の形。記録 DO が受ける前に確かめる (データの 2.1)
-import { z } from "zod";
+import { z } from "./zod.ts";
 
 /** 監査ログに頼む 1 件。actor は owner、社員 ID、system のどれか */
 export const AuditInput = z

@@ -3,6 +3,7 @@ export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
 export { newId } from "./id.ts";
+export { deriveKey, type KeyPurpose } from "./keys.ts";
 export { log, redact, redactText } from "./log.ts";
 export { jstClock, jstDay, jstYear } from "./time.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";

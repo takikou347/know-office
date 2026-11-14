@@ -1,5 +1,5 @@
 // ログインセッションとパスキーの返す形と入力。名前は v1.yaml の components/schemas と同じ (ログインと記録の 1.1)
-import { z } from "zod";
+import { z } from "./zod.ts";
 
 /** ログインセッション 1 件。current は今の要求のセッションか */
 export const Session = z
@@ -49,10 +49,10 @@ export const PasskeyOptionsInput = z
 export type PasskeyOptionsInput = z.infer<typeof PasskeyOptionsInput>;
 
 /** WebAuthn の PublicKeyCredentialCreationOptions か RequestOptions の JSON。中身は @simplewebauthn/server が作る */
-export const PasskeyOptions = z.looseObject({}).meta({ id: "PasskeyOptions" });
+export const PasskeyOptions = z.record(z.string(), z.unknown()).meta({ id: "PasskeyOptions" });
 
 /** ブラウザーが返した WebAuthn の返事。中身は @simplewebauthn/server が確かめる */
-export const WebAuthnResponse = z.looseObject({}).meta({ id: "WebAuthnResponse" });
+export const WebAuthnResponse = z.record(z.string(), z.unknown()).meta({ id: "WebAuthnResponse" });
 
 /** 登録したパスキー。鍵そのものは返さない */
 export const Passkey = z.object({ id: z.uuid(), createdAt: z.iso.datetime() }).strict().meta({ id: "Passkey" });

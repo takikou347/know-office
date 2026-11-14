@@ -1,5 +1,5 @@
 // どのルートにも共通の返す形。meta の id は v1.yaml の components/schemas の名前と同じ
-import { z } from "zod";
+import { z } from "./zod.ts";
 import { ERROR_CODES } from "../errors.ts";
 
 /** 成功の返事の meta。どの返事も traceId を持つ */

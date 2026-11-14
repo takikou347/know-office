@@ -5981,11 +5981,11 @@ components:
     PasskeyOptions:
       type: object
       description: WebAuthn の PublicKeyCredentialCreationOptions または RequestOptions の JSON
-      additionalProperties: true
+      additionalProperties: {}
     WebAuthnResponse:
       type: object
       description: ブラウザーが返した WebAuthn のレスポンス。RegistrationResponseJSON または AuthenticationResponseJSON
-      additionalProperties: true
+      additionalProperties: {}
     Passkey:
       type: object
       properties:
