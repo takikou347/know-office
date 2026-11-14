@@ -22,8 +22,8 @@
 
 ## 4. 土台
 
-- [ ] 4.0 knowidea の know-office/docs/detail.md に「土台」の節を足し、詳細設計 (API の道と Zod の形、Drizzle で書く D1 の表と年ごとの分け方、DO の受け口、作業場の起こし方) を書く。5 章から後も、作る直前に同じく節を足す
-- [ ] 4.1 Containers で外向きの通信を入口だけに絞れるかを確かめる。絞れなければ予備の形 (knowidea の know-office/docs/architecture.md の「社員の動かし方」) に切り替え、設計書を直す。費用か外部連携が変わる時はオーナーに聞く
+- [ ] 4.0 knowidea の services/know-office/docs/detail.md に「土台」の節を足し、詳細設計 (API の道と Zod の形、Drizzle で書く D1 の表と年ごとの分け方、DO の受け口、作業場の起こし方) を書く。5 章から後も、作る直前に同じく節を足す
+- [ ] 4.1 Containers で外向きの通信を入口だけに絞れるかを確かめる。絞れなければ予備の形 (knowidea の services/know-office/docs/architecture.md の 3.2「社員の動かし方」) に切り替え、設計書を直す。費用か外部連携が変わる時はオーナーに聞く
 - [ ] 4.2 オーナーに Cloudflare の申し込み、Google のログイン用の鍵、パスキーの登録を頼む
 - [ ] 4.3 ログインの証明、セッション、パスキーの確認のテストを先に書く
 - [ ] 4.4 ログインの確認、セッション、パスキーの確認を作る
