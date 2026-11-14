@@ -7,6 +7,7 @@ import type { GuardDeps, ReviewAnswer } from "../../src/gate/guard/deps.ts";
 import { OfficeGuard } from "../../src/gate/guard/office-guard.ts";
 import { StaffGuard } from "../../src/gate/guard/staff-guard.ts";
 import { createGate } from "../../src/gate/index.ts";
+import { pullNext } from "../../src/gate/work/loop.ts";
 import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/work/staff-book.ts";
 import type { TestD1 } from "./d1.ts";
 
@@ -179,6 +180,20 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     const { book, guard: g } = staff[id];
     return {
       status: book.status.bind(book),
+      wake: async (now: number) => {
+        await book.wake(now);
+        return null;
+      },
+      take: overRpc(book.take.bind(book)),
+      finish: overRpc(async (result: unknown, now: number) => {
+        await book.finish(result, now);
+        return null;
+      }),
+      call: overRpc(async (task: unknown, now: number) => {
+        await book.call(task, now);
+        return null;
+      }),
+      pull: (now: number) => pullNext(env, book, now),
       stop: book.stop.bind(book),
       resume: book.resume.bind(book),
       observe: g.observe.bind(g),

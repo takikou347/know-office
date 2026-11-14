@@ -49,7 +49,7 @@ export function useGuardWorld(): GuardWorld {
     ] as const;
     await world.d1.DB.batch(
       staff.map(([id, boss]) =>
-        world.d1.DB.prepare("INSERT INTO staff (id, role, boss_id, model, effort, prompt_version, created_at) VALUES (?, ?, ?, 'claude-opus-5-5', 'high', 1, 0)").bind(id, id, boss),
+        world.d1.DB.prepare("INSERT OR REPLACE INTO staff (id, role, boss_id, model, effort, prompt_version, created_at) VALUES (?, ?, ?, 'claude-opus-5-5', 'high', 1, 0)").bind(id, id, boss),
       ),
     );
   }, 30_000);
