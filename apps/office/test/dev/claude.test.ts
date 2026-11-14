@@ -52,4 +52,23 @@ describe("開発環境の代わりの物", () => {
     const res = await claude.app.request("/__fake/requests");
     expect(await res.json()).toMatchObject([{ model: "claude-opus-5-5" }]);
   });
+
+  it("代わりの Claude API は積んだ上限の返事を、その状態と Anthropic の形の失敗で返す", async () => {
+    const claude = createFakeClaude();
+    claude.pushError(429, "rate_limit_error");
+    claude.pushError(529, "overloaded_error");
+    const first = await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
+    const second = await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
+    expect(first.status).toBe(429);
+    expect(await first.json()).toMatchObject({ type: "error", error: { type: "rate_limit_error" } });
+    expect(second.status).toBe(529);
+    expect(claude.requests).toHaveLength(2);
+  });
+
+  it("代わりの Claude API は数えるだけの呼び出しに積んだ返事を使わずに答え、届いた鍵を残す", async () => {
+    const claude = createFakeClaude();
+    const res = await claude.app.request("/v1/messages/count_tokens", { method: "POST", headers: HEADERS, body: BODY });
+    expect(await res.json()).toEqual({ input_tokens: expect.any(Number) });
+    expect(claude.keys).toEqual(["test-key"]);
+  });
 });

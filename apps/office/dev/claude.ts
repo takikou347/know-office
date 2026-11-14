@@ -1,4 +1,4 @@
-// 開発環境の代わりの Claude API。テストが積んだ返事を順に返し、届いた要求を残す
+// 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、届いた要求と鍵を残す
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -13,6 +13,9 @@ export const ScriptedMessage = z.object({
 /** 積む返事の型 */
 export type ScriptedMessage = z.infer<typeof ScriptedMessage>;
 
+/** 積んだ失敗。上限 (429) と混み合い (529) を Anthropic の形で返す */
+type ScriptedError = { error: { status: 429 | 529 | 500; type: string } };
+
 const MessagesRequest = z.looseObject({ model: z.string().optional(), stream: z.boolean().optional() });
 
 /** 代わりの Claude API */
@@ -21,8 +24,12 @@ export type FakeClaude = {
   app: Hono;
   /** 届いた要求の本文 */
   requests: z.infer<typeof MessagesRequest>[];
+  /** 届いた x-api-key。プロキシが鍵を替えた事を確かめる */
+  keys: string[];
   /** 返事を積む */
   push(message: ScriptedMessage): void;
+  /** 失敗を積む */
+  pushError(status: 429 | 529 | 500, type: string): void;
 };
 
 /**
@@ -50,19 +57,31 @@ function toMessage(message: ScriptedMessage, model: unknown, index: number) {
  * @returns Hono、届いた要求、返事を積む push
  */
 export function createFakeClaude(): FakeClaude {
-  const queue: ScriptedMessage[] = [];
+  const queue: (ScriptedMessage | ScriptedError)[] = [];
   const requests: z.infer<typeof MessagesRequest>[] = [];
+  const keys: string[] = [];
 
   const app = new Hono()
+    .use("/v1/*", async (c, next) => {
+      const key = c.req.header("x-api-key");
+      if (!key) return c.json({ type: "error", error: { type: "authentication_error", message: "x-api-key が無い" } }, 401);
+      keys.push(key);
+      await next();
+    })
+    // 数えるだけの呼び出しは積んだ返事を使わず、本文の長さから決まった数を返す
+    .post("/v1/messages/count_tokens", async (c) => c.json({ input_tokens: Math.ceil((await c.req.text()).length / 4) }))
     .post("/v1/messages", async (c) => {
-      if (!c.req.header("x-api-key")) {
-        return c.json({ type: "error", error: { type: "authentication_error", message: "x-api-key が無い" } }, 401);
-      }
       const body = MessagesRequest.parse(await c.req.json());
       requests.push(body);
       const next = queue.shift();
       if (!next) {
         return c.json({ type: "error", error: { type: "api_error", message: "代わりの Claude API に返事が積まれていない" } }, 500);
+      }
+      if ("error" in next) {
+        return new Response(JSON.stringify({ type: "error", error: { type: next.error.type, message: "代わりの Claude API が積んだ失敗" } }), {
+          status: next.error.status,
+          headers: { "content-type": "application/json" },
+        });
       }
       const message = toMessage(next, body.model, requests.length);
       if (body.stream !== true) return c.json(message);
@@ -86,5 +105,11 @@ export function createFakeClaude(): FakeClaude {
     })
     .get("/__fake/requests", (c) => c.json(requests));
 
-  return { app, requests, push: (message) => queue.push(message) };
+  return {
+    app,
+    requests,
+    keys,
+    push: (message) => queue.push(message),
+    pushError: (status, type) => queue.push({ error: { status, type } }),
+  };
 }

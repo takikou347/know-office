@@ -1,6 +1,7 @@
-// ゲートウェイをテストで起こす。D1 は手元の本物、Access は代わりの物、DO はゲートウェイから見た境目の代わりを渡す
+// ゲートウェイをテストで起こす。D1 は手元の本物、Access と Claude API は代わりの物、DO はゲートウェイから見た境目の代わりを渡す
 import { AppError, type AuditInput, type Clock, type Fetcher, type StaffId } from "@know-office/core";
 import { createFakeAccess, type FakeAccess } from "../../dev/access.ts";
+import { createFakeClaude, type FakeClaude } from "../../dev/claude.ts";
 import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts";
 import type { Bindings } from "../../src/gate/env.ts";
 import type { GuardDeps, ReviewAnswer } from "../../src/gate/guard/deps.ts";
@@ -14,6 +15,8 @@ import type { TestD1 } from "./d1.ts";
 const FAKES = "http://localhost:5199";
 /** テストのゲートウェイの origin。app.request は http://localhost に要求を出す */
 export const ORIGIN = "http://localhost";
+/** テストの Anthropic の鍵。ゲートウェイだけが持ち、代わりの Claude API に届く */
+export const ANTHROPIC_KEY = "test-anthropic-key-0123456789";
 /** テストのオーナー */
 export const OWNER = "owner@example.com";
 
@@ -25,6 +28,10 @@ export type TestGate = {
   env: Bindings;
   /** 代わりの Access。証明を出し、鍵を取り替える */
   access: FakeAccess;
+  /** 代わりの Claude API。返事を積み、届いた要求と鍵を読む */
+  claude: FakeClaude;
+  /** ゲートウェイが外へ出す fetch。代わりの Access と Claude API に回す */
+  fetch: Fetcher;
   /** Access の公開鍵を取りに来た回数と、返し方。down は 503、malformed は形の違う JSON を返す */
   certs: { calls: number; answer: "ok" | "down" | "malformed" };
   /** 記録 DO に頼んだ監査ログ */
@@ -152,7 +159,9 @@ function namespace<T>(stub: T) {
 export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Promise<TestGate> {
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
-  const fetcher: Fetcher = (url) => {
+  const claude = createFakeClaude();
+  const fetcher: Fetcher = (url, init) => {
+    if (url.startsWith(`${FAKES}/anthropic/`)) return Promise.resolve(claude.app.request(url.slice(`${FAKES}/anthropic`.length), init));
     if (!url.startsWith(`${FAKES}/access/`)) return Promise.reject(new Error(`テストで外へ出た: ${url}`));
     certs.calls += 1;
     if (certs.answer === "down") return Promise.resolve(new Response("", { status: 503 }));
@@ -215,6 +224,8 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
       heartbeat: overRpc(book.heartbeat.bind(book)),
       checkpoint: overRpc(book.checkpoint.bind(book)),
       stop: book.stop.bind(book),
+      waitStart: overRpc(book.waitStart.bind(book)),
+      waitEnd: book.waitEnd.bind(book),
       resume: book.resume.bind(book),
       observe: g.observe.bind(g),
       dropTask: g.dropTask.bind(g),
@@ -261,6 +272,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     ACCESS_AUD: "test-aud",
     OWNER_EMAIL: OWNER,
     MASTER_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
+    ANTHROPIC_API_KEY: ANTHROPIC_KEY,
   } as unknown as Bindings;
   const app = createGate({ clock: options.clock, fetch: fetcher, guard: deps });
   const request = (path: string, init: RequestInit = {}) => Promise.resolve(app.request(path, init, env));
@@ -268,6 +280,8 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     app,
     env,
     access,
+    claude,
+    fetch: fetcher,
     certs,
     audits,
     storage,
