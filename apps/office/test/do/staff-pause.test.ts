@@ -30,6 +30,24 @@ describe("勤怠は実際の動きから付ける", () => {
     expect(await segments()).toHaveLength(2);
   });
 
+  it("alarm が遅れて上限を過ぎてから再開が来ても、上限の時刻で退勤する", async () => {
+    const stopped = hire("builder");
+    await startDay(stopped);
+    await run(stopped, jst(16));
+    await stopped.book.stop(jst(16));
+    // 17 時 30 分の alarm が鳴る前に 18 時の再開が来る
+    await stopped.book.resume(jst(18));
+    expect((await stopped.book.status(jst(18))).state).toBe("off");
+    expect((await segments("builder")).at(-1)).toMatchObject({ kind: "stopped", started_at: jst(16), ended_at: jst(17, 30) });
+    const waiting = hire("reviewer");
+    await startDay(waiting);
+    await run(waiting, jst(16));
+    await waiting.book.waitStart("rate_limit", jst(16));
+    await waiting.book.waitEnd(jst(18));
+    expect((await waiting.book.status(jst(18))).state).toBe("off");
+    expect((await segments("reviewer")).at(-1)).toMatchObject({ kind: "waiting", started_at: jst(16), ended_at: jst(17, 30) });
+  });
+
   it("止められていた分だけ 30 分の期限をずらす", async () => {
     const s = hire();
     await startDay(s);

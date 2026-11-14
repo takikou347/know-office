@@ -221,6 +221,8 @@ export class StaffBook {
    */
   async waitEnd(now: number): Promise<void> {
     const s = await this.#load();
+    // alarm が遅れて上限を過ぎていれば、戻る前に上限の時刻で退勤する
+    await this.#process(s, now);
     if (s.m.state === "waiting" && s.m.open?.reason === "rate_limit") s.resume(now);
     await this.#save(s, now);
   }
@@ -249,6 +251,8 @@ export class StaffBook {
    */
   async resume(now: number): Promise<void> {
     const s = await this.#load();
+    // alarm が遅れて上限を過ぎていれば、戻る前に上限の時刻で退勤する
+    await this.#process(s, now);
     if (s.m.state === "stopped") s.resume(now);
     await this.#save(s, now);
   }
