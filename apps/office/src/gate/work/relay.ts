@@ -1,14 +1,12 @@
 // Claude のプロキシ。作業トークンを確かめた要求を、鍵を替えて Claude API へ流れのまま送り、使った量と上限の待ちを残す (社員が考えるの 3.3)
 import { allowedFetch, allowedModels, AppError, type ClaudeUsage, costMicroUsd, log, newId, Secret, type StaffId } from "@know-office/core";
-import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { z } from "zod";
-import { stops } from "../db/main.ts";
 import { usage } from "../db/records.ts";
 import { endpoints } from "../endpoints.ts";
 import type { Bindings, GateEnv } from "../env.ts";
-import { openStops, staffOf } from "../guard/actions.ts";
+import { ensureRunning, staffOf } from "../guard/actions.ts";
 import { observe } from "../guard/observe.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { clockAt } from "./attendance.ts";
@@ -53,21 +51,6 @@ type Metered = { model: string; usage: ClaudeUsage };
 
 /** 1 回の呼び出しの記録に要る事 */
 type Call = { staffId: StaffId; nodeId: string; requestId: string | null; waitedMs: number | null };
-
-/**
- * 社員、タスク、全体のどれかが止まっていれば断る。SDK が待ち直さないよう、やり直さない印を付ける
- * @param env バインディング
- * @param staffId 社員 ID
- * @param nodeId タスク ID
- * @throws stopped 止めた記録がまだ再開していない時
- */
-async function ensureRunning(env: Bindings, staffId: StaffId, nodeId: string): Promise<void> {
-  const officeStopped = and(eq(stops.scope, "office"), eq(stops.target, "office"));
-  const staffStopped = and(eq(stops.scope, "staff"), eq(stops.target, staffId));
-  const taskStopped = and(eq(stops.scope, "task"), eq(stops.target, nodeId));
-  const open = await openStops(env.DB, or(officeStopped, staffStopped, taskStopped));
-  if (open.length > 0) throw new AppError("stopped", "社員かタスクが止まっている", { headers: { "x-should-retry": "false" } });
-}
 
 /**
  * Claude API の鍵を Secret に包んで読む

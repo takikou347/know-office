@@ -1,7 +1,7 @@
 // 範囲ごとに止める動き、止めた記録と近かった記録、再開、止める前に見せる数 (自動停止の 3.2、3.4、3.5、3.6、3.7)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, type GuardScope, type Judgment, newId, StaffId, type StopPreview } from "@know-office/core";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { rotateVaultKeys } from "../auth/vault.ts";
@@ -86,6 +86,22 @@ export async function openStops(db: D1Database, where?: ReturnType<typeof and>):
     .from(stops)
     .where(and(eq(stops.kind, "stop"), resumed, where))
     .orderBy(desc(stops.id));
+}
+
+/**
+ * 社員、タスク、全体のどれかが止まっていれば断る。ワークスペースからの要求は、ルールの判断と Claude のプロキシの頭でこれを通す
+ * Claude Agent SDK は 409 を待ち直すので、やり直さない印を付ける
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param nodeId タスク ID
+ * @throws stopped 止めた記録がまだ再開していない時
+ */
+export async function ensureRunning(env: Bindings, staffId: StaffId, nodeId: string): Promise<void> {
+  const officeStopped = and(eq(stops.scope, "office"), eq(stops.target, "office"));
+  const staffStopped = and(eq(stops.scope, "staff"), eq(stops.target, staffId));
+  const taskStopped = and(eq(stops.scope, "task"), eq(stops.target, nodeId));
+  const open = await openStops(env.DB, or(officeStopped, staffStopped, taskStopped));
+  if (open.length > 0) throw new AppError("stopped", "社員かタスクが止まっている", { headers: { "x-should-retry": "false" } });
 }
 
 /**

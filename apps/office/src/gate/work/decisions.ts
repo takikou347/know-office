@@ -1,7 +1,6 @@
 // ワークスペースのフックが聞くルールの判断 (POST /ws/v1/decisions)。core の decide() で決め、tool_calls と自動停止に渡す (社員が考えるの 3.4)
 import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
 import {
-  AppError,
   DecideInput,
   Decision,
   DEFAULT_RULES,
@@ -17,12 +16,10 @@ import {
   type StaffId,
   toOperation,
 } from "@know-office/core";
-import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { stops } from "../db/main.ts";
 import { toolCalls } from "../db/records.ts";
 import type { Bindings, GateEnv } from "../env.ts";
-import { openStops, staffOf } from "../guard/actions.ts";
+import { ensureRunning, staffOf } from "../guard/actions.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { okResponse, problems } from "../openapi.ts";
@@ -40,21 +37,6 @@ const decideRoute = createRoute({
   request: { body: { content: { "application/json": { schema: DecideInput } }, required: true } },
   responses: { 200: okResponse(Decision), ...problems(400, 401, 403, 409, 413, 415, 422, 500) },
 });
-
-/**
- * 社員、タスク、全体のどれかが止まっていれば断る
- * @param env バインディング
- * @param staffId 社員 ID
- * @param nodeId タスク ID
- * @throws stopped 止めた記録がまだ再開していない時
- */
-async function ensureRunning(env: Bindings, staffId: StaffId, nodeId: string): Promise<void> {
-  const officeStopped = and(eq(stops.scope, "office"), eq(stops.target, "office"));
-  const staffStopped = and(eq(stops.scope, "staff"), eq(stops.target, staffId));
-  const taskStopped = and(eq(stops.scope, "task"), eq(stops.target, nodeId));
-  const open = await openStops(env.DB, or(officeStopped, staffStopped, taskStopped));
-  if (open.length > 0) throw new AppError("stopped", "社員かタスクが止まっている");
-}
 
 /**
  * タスクの範囲の触れない所を読む。サービスのタスクはサービスの設定、ほかは office の初期値を使い、判断のたびに読む
