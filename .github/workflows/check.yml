@@ -47,3 +47,13 @@ jobs:
       - run: pnpm build
       - run: pnpm --filter @know-office/office exec playwright install --with-deps chromium webkit
       - run: pnpm e2e
+      # 落ちた時に、どの画面で何が出ていたかを後から読めるよう残す
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          # ログインのクッキーの置き場は残さない
+          path: |
+            apps/office/test-results/
+            !apps/office/test-results/.session-*.json
+          retention-days: 7

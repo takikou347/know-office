@@ -37,7 +37,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env["CI"]),
   reporter: process.env["CI"] ? "github" : "list",
-  use: { baseURL: `http://localhost:${port}`, trace: "off" },
+  use: { baseURL: `http://localhost:${port}`, trace: "off", screenshot: "only-on-failure" },
   projects: [
     // 記録は 1 度だけ置き、ログインセッションはブラウザーごとに作る。クッキーの扱いがブラウザーで違うため
     { name: "records", testMatch: /records\.setup\.ts/ },
