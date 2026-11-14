@@ -551,12 +551,16 @@ paths:
       tags:
       - system
       summary: traceId で 1 つの要求をたどる
-      description: 同じ traceId のエラー、監査ログ、ツールの呼び出し、使用量、タスクの出来事、会話を時刻の順に返す。
+      description: 同じ traceId のエラー、監査ログ、ツールの呼び出し、使用量、タスクの出来事、会話を時刻の順に返す。パスキーの確認が 15 分のうちに要る。
+      x-step-up: true
       parameters:
       - name: traceId
         in: path
         required: true
-        schema: *id001
+        schema:
+          type: string
+          pattern: ^[0-9a-f]{32}$
+          description: traceparent の trace-id と同じ 32 桁の 16 進
       security:
       - accessJwt: []
         session: []
@@ -582,6 +586,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -2650,13 +2656,17 @@ paths:
       tags:
       - github
       summary: GitHub の通知を受ける
-      description: 署名、時刻、配信の番号を確かめる。本文は GitHub の形。
+      description: 署名、時刻、配信の番号を確かめる。本文は GitHub の形で 5MB まで。1 分 60 回まで。
       security: []
       responses:
         '204':
           description: 成功。本文は無い
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/services:
@@ -5778,19 +5788,97 @@ components:
         events:
           type: array
           items:
-            type: object
-            required:
-            - kind
-            properties:
-              kind:
-                type: string
-                enum:
-                - message
-                - tool_result
-                - checkpoint
-                - error
-                - result
-            additionalProperties: true
+            oneOf:
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - message
+                body:
+                  type: string
+                  maxLength: 20000
+              required:
+              - kind
+              - body
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - tool_result
+                toolName: *id001
+                command: *id001
+                exitCode: *id007
+                failedChecks:
+                  type: array
+                  items: *id001
+              required:
+              - kind
+              - toolName
+              - command
+              - exitCode
+              - failedChecks
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - checkpoint
+                nodeId: *id004
+                checkpoint:
+                  type: string
+                  enum:
+                  - test_pass
+                  - commit
+                  - pr
+                  - note
+                note: *id001
+              required:
+              - kind
+              - nodeId
+              - checkpoint
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - error
+                name:
+                  type: string
+                  maxLength: 100
+                message:
+                  type: string
+                  maxLength: 200
+              required:
+              - kind
+              - name
+              - message
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - result
+                nodeId: *id004
+                result:
+                  type: string
+                  enum:
+                  - done
+                  - handed_back
+                  - stopped
+                  - continued
+              required:
+              - kind
+              - nodeId
+              - result
+              additionalProperties: false
+            discriminator:
+              propertyName: kind
       required:
       - events
       additionalProperties: false
