@@ -5,5 +5,5 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   // e2e は Playwright が本物のブラウザで流す
-  test: { include: ["test/**/*.test.{ts,tsx}"] },
+  test: { include: ["test/**/*.test.{ts,tsx}"], setupFiles: ["test/setup.ts"] },
 });

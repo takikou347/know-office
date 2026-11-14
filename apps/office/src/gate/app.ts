@@ -1,8 +1,9 @@
 // ゲートウェイの Hono を作る。入力の検証に落ちた時の返し方と失敗の返し方をそろえる
 import { OpenAPIHono, type Hook } from "@hono/zod-openapi";
-import { AppError, type Clock, type FieldError, systemClock } from "@know-office/core";
+import { AppError, type Clock, type Fetcher, type FieldError, systemClock } from "@know-office/core";
 import { HTTPException } from "hono/http-exception";
 import type { ZodError } from "zod";
+import { accessProof, admission, loginSession, sameOrigin } from "./auth/middleware.ts";
 import { bodyShape } from "./body.ts";
 import { securityHeaders } from "./headers.ts";
 import type { GateEnv } from "./env.ts";
@@ -50,18 +51,28 @@ export function createRouter() {
 
 /**
  * 共通のミドルウェアと失敗の返し方を付けた Hono を作る
- * @param options clock は今の時刻。テストは決まった時刻を渡す
+ * @param options テストは決まった時刻と、外への fetch の代わりを渡す
+ * @param options.clock 今の時刻
+ * @param options.fetch 外への fetch
  * @returns ルートを足す前のゲートウェイ
  */
-export function createApp(options: { clock?: Clock } = {}) {
+export function createApp(options: { clock?: Clock; fetch?: Fetcher } = {}) {
   const clock = options.clock ?? systemClock;
+  // Workers の fetch は this を持たずに呼ぶと落ちるので、包んで渡す
+  const fetcher: Fetcher = options.fetch ?? ((input, init) => fetch(input, init));
   const app = new OpenAPIHono<GateEnv>({ defaultHook });
   app.use("*", async (c, next) => {
     c.set("clock", clock);
+    c.set("fetch", fetcher);
     await next();
   });
   app.use("*", trace);
+  // 順は API の決まりの 1.2。ここで落ちた要求はルートの処理に届かない
   app.use("/api/*", securityHeaders);
+  app.use("/api/*", admission);
+  app.use("/api/*", accessProof);
+  app.use("/api/*", loginSession);
+  app.use("/api/*", sameOrigin);
   app.use("/api/*", bodyShape);
   app.notFound((c) => {
     const allowed = allowedMethods(app, c.req.path);

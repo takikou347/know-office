@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.0.0
+  version: 1.0.1
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -50,7 +50,10 @@ paths:
       tags:
       - system
       summary: ゲートウェイの稼働確認
-      description: '処理の流れ:
+      description: 'D1 が止まっても答えるよう、ログインセッションの検証を通らない。
+
+
+        処理の流れ:
 
 
         1. `DB` に `SELECT 1` を実行する
@@ -69,7 +72,6 @@ paths:
       - '503 `unavailable`: D1 が応答しない'
       security:
       - accessJwt: []
-        session: []
       responses:
         '200':
           description: 成功
@@ -122,7 +124,6 @@ paths:
       - クッキーを設定し、201 を返す
       security:
       - accessJwt: []
-        session: []
       responses:
         '201':
           description: 作成した
@@ -5705,17 +5706,14 @@ components:
       in: query
       required: false
       schema:
-        type: string
+        $ref: '#/components/schemas/Cursor'
       description: 前のレスポンスの meta.next
     Limit:
       name: limit
       in: query
       required: false
       schema:
-        type: integer
-        minimum: 1
-        maximum: 100
-        default: 50
+        $ref: '#/components/schemas/Limit'
   responses:
     BadRequest:
       description: リクエストを解釈できない。JSON として不正か、未知のクエリパラメーターがある
@@ -5800,6 +5798,15 @@ components:
           schema:
             type: integer
   schemas:
+    Cursor:
+      type: string
+      description: 一覧の次のページのカーソル。前のレスポンスの meta.next
+    Limit:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 50
+      description: 一覧の 1 ページの件数
     Meta:
       type: object
       properties:

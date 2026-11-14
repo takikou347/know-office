@@ -55,6 +55,17 @@ export function listResponse<T extends ZodType>(item: T) {
 }
 
 /**
+ * 一覧のクエリ (cursor と limit) を作る。components/parameters を指すよう、ルートを書く Hono の登録簿に置く
+ * @param router ルートのまとまりの Hono
+ * @returns `.strict()` を付けた一覧のクエリの Zod スキーマ
+ */
+export function listQuery(router: OpenAPIHono<GateEnv>) {
+  const cursor = router.openAPIRegistry.registerParameter("Cursor", z.string().optional().openapi({ param: { name: "cursor", in: "query" } }));
+  const limit = router.openAPIRegistry.registerParameter("Limit", z.coerce.number().int().min(1).max(100).default(50).openapi({ param: { name: "limit", in: "query" } }));
+  return z.object({ cursor, limit }).strict();
+}
+
+/**
  * 共通のスキーマと失敗の応答を components に登録する
  * @param app ゲートウェイ
  */

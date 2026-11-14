@@ -1,14 +1,21 @@
 // DO を本物の workerd で試すための入口。テストだけが使う
 import { z } from "zod";
+import { GuardDO } from "../../src/gate/do/guard.ts";
 import { RecorderDO } from "../../src/gate/do/recorder.ts";
 import type { Bindings } from "../../src/gate/env.ts";
 
-export { RecorderDO };
+export { GuardDO, RecorderDO };
 
 const Binding = z.enum(["DB", "REC_2026", "REC_2027"]);
 const Migrate = z.object({ binding: Binding, statements: z.array(z.string()) });
 const Query = z.object({ binding: Binding, sql: z.string() });
 const Call = z.object({ method: z.enum(["append", "verify"]), args: z.array(z.unknown()) });
+const GuardCall = z.discriminatedUnion("method", [
+  z.object({ method: z.literal("admit"), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) }),
+  z.object({ method: z.literal("fail"), args: z.tuple([z.string(), z.number()]) }),
+  z.object({ method: z.literal("putChallenge"), args: z.tuple([z.string(), z.object({ challenge: z.string(), purpose: z.enum(["register", "step_up"]) }), z.number()]) }),
+  z.object({ method: z.literal("takeChallenge"), args: z.tuple([z.string(), z.number()]) }),
+]);
 
 /**
  * 名前の D1 を返す
@@ -34,6 +41,14 @@ export default {
     if (path === "/query") {
       const { binding, sql } = Query.parse(body);
       return Response.json((await d1(env, binding).prepare(sql).all()).results);
+    }
+    if (path === "/guard") {
+      const call = GuardCall.parse(body);
+      const guard = env.GUARD.get(env.GUARD.idFromName("guard"));
+      if (call.method === "admit") return Response.json(await guard.admit(...call.args));
+      if (call.method === "fail") return Response.json(await guard.fail(...call.args));
+      if (call.method === "putChallenge") return Response.json(await guard.putChallenge(...call.args));
+      return Response.json(await guard.takeChallenge(...call.args));
     }
     const { method, args } = Call.parse(body);
     const stub = env.RECORDER.get(env.RECORDER.idFromName("recorder"));

@@ -18,8 +18,13 @@
     { "binding": "REC_2030", "database_name": "know-office-rec-2030", "database_id": "local-rec-2030", "migrations_dir": "migrations/ledger" },
     { "binding": "REC_2031", "database_name": "know-office-rec-2031", "database_id": "local-rec-2031", "migrations_dir": "migrations/ledger" }
   ],
-  "durable_objects": { "bindings": [{ "name": "RECORDER", "class_name": "RecorderDO" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO"] }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "RECORDER", "class_name": "RecorderDO" },
+      { "name": "GUARD", "class_name": "GuardDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO"] }],
   "assets": {
     // /api の下だけ入口が受け、ほかは画面のファイルを返す
     "not_found_handling": "single-page-application",

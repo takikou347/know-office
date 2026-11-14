@@ -4,3 +4,4 @@ DEV_FAKES_URL=http://localhost:5199
 ACCESS_TEAM=dev
 ACCESS_AUD=dev-aud
 OWNER_EMAIL=owner@example.com
+MASTER_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=

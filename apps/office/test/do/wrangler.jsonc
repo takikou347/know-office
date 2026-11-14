@@ -8,6 +8,11 @@
     { "binding": "REC_2026", "database_name": "rec-2026", "database_id": "local-rec-2026" },
     { "binding": "REC_2027", "database_name": "rec-2027", "database_id": "local-rec-2027" }
   ],
-  "durable_objects": { "bindings": [{ "name": "RECORDER", "class_name": "RecorderDO" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO"] }]
+  "durable_objects": {
+    "bindings": [
+      { "name": "RECORDER", "class_name": "RecorderDO" },
+      { "name": "GUARD", "class_name": "GuardDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO"] }]
 }

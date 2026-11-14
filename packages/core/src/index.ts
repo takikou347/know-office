@@ -1,11 +1,13 @@
 // ゲートウェイ、社員 DO、ワークスペース、画面が共に使う型と判断を置く
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
+export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
 export { newId } from "./id.ts";
 export { log, redact, redactText } from "./log.ts";
 export { jstClock, jstDay, jstYear } from "./time.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
 export { AuditInput } from "./schemas/audit.ts";
+export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 
 /**

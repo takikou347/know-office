@@ -6,8 +6,10 @@ import { z } from "zod";
 
 /** 起こしたテストの入口 */
 export type TestWorker = {
-  /** DO のメソッドを呼ぶ */
+  /** 記録 DO のメソッドを呼ぶ */
   call(method: string, ...args: unknown[]): Promise<unknown>;
+  /** 全体のセキュリティ DO のメソッドを呼ぶ */
+  guard(method: string, ...args: unknown[]): Promise<unknown>;
   /** D1 に SQL を流して行を返す */
   query(binding: string, sql: string): Promise<unknown[]>;
   /** 止める */
@@ -56,6 +58,7 @@ export async function startTestWorker(): Promise<TestWorker> {
   await post("/migrate", { binding: "REC_2027", statements: statements("ledger") });
   return {
     call: (method, ...args) => post("/rpc", { method, args }),
+    guard: (method, ...args) => post("/guard", { method, args }),
     query: async (binding, sql) => z.array(z.unknown()).parse(await post("/query", { binding, sql })),
     dispose: () => worker.dispose(),
   };
