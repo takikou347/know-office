@@ -5,13 +5,14 @@ import { screens } from "../src/screen/routes.ts";
 // 使いやすさ: キーボードだけで承認まで出せ、8 画面と深い所に axe の critical と serious が無い。画面の 3.5
 
 /** axe に掛ける所。8 画面に、その他と、社員とサービスを選んだ所を足す */
-const pages: readonly { name: string; path: string; heading: string }[] = [
+const pages: readonly { name: string; path: string; heading: string; ready?: string }[] = [
   ...screens.map((s) => ({ name: s.label, path: s.path, heading: s.label })),
   { name: "その他", path: "/more", heading: "その他" },
-  { name: "社員の会話", path: "/staff/maker", heading: "社員と仕事" },
-  { name: "社員の仕事の山", path: "/staff/maker?tab=tasks", heading: "社員と仕事" },
-  { name: "社員の勤怠", path: "/staff/maker?tab=attendance", heading: "社員と仕事" },
-  { name: "変更のレビュー", path: "/staff/maker/tasks/t2", heading: "社員と仕事" },
+  { name: "社員の会話", path: "/staff/builder", heading: "社員と仕事" },
+  { name: "社員の仕事の山", path: "/staff/builder?tab=tasks", heading: "社員と仕事" },
+  // 勤怠は records.setup.ts が手元の D1 に置いた日を開き、表を読み終えてから掛ける
+  { name: "社員の勤怠", path: "/staff/builder?tab=attendance&day=2026-11-13", heading: "社員と仕事", ready: "出勤 9:00" },
+  { name: "変更のレビュー", path: "/staff/builder/tasks/t2", heading: "社員と仕事" },
   { name: "サービスの様子", path: "/services/knowidea-ui", heading: "アイデアとサービス" },
 ];
 
@@ -128,6 +129,7 @@ test.describe("使いやすさ", () => {
       test(p.name, async ({ page }) => {
         await page.goto(p.path);
         await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
+        if (p.ready) await expect(page.getByText(p.ready)).toBeVisible();
         const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
         const bad = violations
           .filter((v) => v.impact === "critical" || v.impact === "serious")

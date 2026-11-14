@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { SESSION_STATE } from "./e2e/helpers/session.ts";
+import { LOGIN_PROJECT, sessionState } from "./e2e/helpers/session.ts";
 
 // 画面を本物のブラウザで開いて確かめる。手元の入口 (workerd) を起こし、Chrome と Safari の 3 つの幅で見る
 const port = 5174;
@@ -39,13 +39,14 @@ export default defineConfig({
   reporter: process.env["CI"] ? "github" : "list",
   use: { baseURL: `http://localhost:${port}`, trace: "off" },
   projects: [
-    // 記録とログインセッションを先に 1 度だけ置く
-    { name: "setup", testMatch: /records\.setup\.ts/, use: chosen[0]?.use ?? {} },
+    // 記録は 1 度だけ置き、ログインセッションはブラウザーごとに作る。クッキーの扱いがブラウザーで違うため
+    { name: "records", testMatch: /records\.setup\.ts/ },
+    ...chosen.map((b) => ({ name: `${LOGIN_PROJECT}${b.name}`, testMatch: /login\.setup\.ts/, dependencies: ["records"], use: b.use })),
     ...chosen.flatMap((b) =>
       widths.map((w) => ({
         name: `${b.name}-${w.name}`,
-        dependencies: ["setup"],
-        use: { ...b.use, viewport: w.viewport, storageState: SESSION_STATE },
+        dependencies: [`${LOGIN_PROJECT}${b.name}`],
+        use: { ...b.use, viewport: w.viewport, storageState: sessionState(b.name) },
       })),
     ),
   ],
