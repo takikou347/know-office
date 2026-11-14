@@ -1,5 +1,6 @@
 // 勤怠の訂正。元の行を残し、訂正の行を足して集計を作り直す。社員と勤怠の 3.6
 import { describe, expect, it } from "vitest";
+import { rebuildDailyTotals } from "../../src/gate/work/attendance.ts";
 import { DAY, hire, type Hired, HOUR, jst, MINUTE, rows, run, startDay, TASK, testDb, totals, useD1 } from "../helpers/staff.ts";
 
 /**
@@ -84,5 +85,24 @@ describe("勤怠は書き換えない", () => {
     const reviewer = hire("reviewer");
     const values = { kind: "extension", startedAt: jst(17), endedAt: jst(17, 5), reason: "checkpoint_wait", note: "違う社員" };
     await expect(reviewer.book.correct(await extensionId(), values, jst(18))).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("区分が重なった日を何度作り直しても、通知は 1 件", async () => {
+    // 9 時から 17 時の所定の勤務と、その中の 12 時から 13 時の呼び出しが重なっている
+    await testDb().batch([
+      testDb()
+        .prepare("INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, created_at) VALUES ('0190f4a8-0000-7000-8000-0000000000c1', 'builder', ?, 'scheduled', ?, ?, 'schedule', ?)")
+        .bind(DAY, jst(9), jst(17), jst(17)),
+      testDb()
+        .prepare("INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, created_at) VALUES ('0190f4a8-0000-7000-8000-0000000000c2', 'builder', ?, 'call', ?, ?, 'owner_instruction', ?)")
+        .bind(DAY, jst(12), jst(13), jst(13)),
+    ]);
+    // 出勤、休み、0 時 5 分のジョブ、退勤から、時刻を変えて作り直す
+    const base = { staffId: "builder" as const, day: DAY, clockIn: null, reasons: [] };
+    await rebuildDailyTotals(testDb(), { ...base, clockIn: jst(9), out: false }, jst(9));
+    await rebuildDailyTotals(testDb(), { ...base, out: false, reasons: ["off:owner_instruction"] }, jst(10));
+    await rebuildDailyTotals(testDb(), { ...base, out: true }, jst(24, 5));
+    await rebuildDailyTotals(testDb(), { ...base, out: true }, jst(25));
+    expect(await rows("SELECT kind, level FROM notices")).toEqual([{ kind: "attendance_overlap", level: "warn" }]);
   });
 });

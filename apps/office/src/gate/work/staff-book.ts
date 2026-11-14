@@ -5,7 +5,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { attendance, workEntries } from "../db/main.ts";
-import { correctAttendance, rebuildDailyTotals } from "./attendance.ts";
+import { correctAttendance, rebuildDailyTotals, rebuildStoredDay } from "./attendance.ts";
 import { planDay, upcomingPlan } from "./plan.ts";
 import { ACTIVE, EMPTY_MEMORY, HEARTBEAT_TIMEOUT_MS, Memory, RETRY_MS, Shift, WRAP_MS } from "./shift.ts";
 
@@ -308,6 +308,19 @@ export class StaffBook {
   }
 
   /**
+   * 1 日の集計を、前の集計の出勤と退勤のまま作り直す。毎日 0 時 5 分の定期ジョブが呼ぶ。勤怠を書くほかの操作と同じ鎖で流すので、書きかけの区分と食い違わない
+   * @param day 日本時間の日
+   * @param now 今の時刻
+   * @returns 無し
+   * @throws validation_failed 日の形が違う時
+   */
+  async rebuildDay(day: unknown, now: number): Promise<void> {
+    const parsed = z.iso.date().safeParse(day);
+    if (!parsed.success) throw new AppError("validation_failed", "日の形が違う");
+    await rebuildStoredDay(this.db, this.staffId, parsed.data, now);
+  }
+
+  /**
    * 時刻で決まる出来事を、何も変わらなくなるまで順に処理する
    * @param s 記憶
    * @param now 今の時刻
@@ -435,7 +448,7 @@ export class StaffBook {
     await this.storage.put("memory", s.m);
     const [first, ...rest] = statements;
     if (first) await this.#orm.batch([first, ...rest]);
-    for (const t of totals) await rebuildDailyTotals(this.db, { staffId: this.staffId, day: t.day, clockIn: null, out: true, reasons: t.reasons, noticeId: t.noticeId }, t.at);
+    for (const t of totals) await rebuildDailyTotals(this.db, { staffId: this.staffId, day: t.day, clockIn: null, out: true, reasons: t.reasons }, t.at);
     s.m.pending = { attendance: [], work: [], totals: [] };
   }
 

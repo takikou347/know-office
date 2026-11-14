@@ -56,6 +56,17 @@ describe("社員 DO", () => {
     await worker.query("DB", `INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, created_at) VALUES ('${id}', 'builder', '${DAY}', 'scheduled', ${String(jst(9))}, ${String(jst(17))}, 'schedule', ${String(jst(17))})`);
     const settled = await Promise.allSettled([worker.staff("builder", "correct", id, values(16), jst(18)), worker.staff("builder", "correct", id, values(15), jst(18))]);
     expect(settled.map((r) => r.status).toSorted()).toEqual(["fulfilled", "rejected"]);
+    // ゲートウェイは RPC を越えて残る code で 409 を返す
+    const rejected = settled.find((r) => r.status === "rejected");
+    expect(String(rejected?.reason)).toMatch(/code=conflict$/);
     expect(await worker.query("DB", `SELECT count(*) AS n FROM attendance WHERE corrects = '${id}'`)).toEqual([{ n: 1 }]);
+  });
+
+  it("0 時 5 分のジョブが社員 DO を通して前の日の集計を作り直す", async () => {
+    await worker.query("DB", `INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, created_at) VALUES ('0190f4a8-0000-7000-8000-0000000000b3', 'builder', '${DAY}', 'scheduled', ${String(jst(9))}, ${String(jst(17))}, 'schedule', ${String(jst(17))})`);
+    await worker.query("DB", `INSERT INTO daily_totals (staff_id, day, clock_in, clock_out, worked_ms, extension_ms, call_ms, stopped_ms, waiting_ms, reasons) VALUES ('builder', '${DAY}', ${String(jst(9))}, ${String(jst(17))}, 0, 0, 0, 0, 0, '[]')`);
+    await worker.staff("builder", "rebuildDay", DAY, jst(24, 5));
+    expect(await worker.query("DB", "SELECT worked_ms, clock_out FROM daily_totals")).toEqual([{ worked_ms: 8 * 60 * MINUTE, clock_out: jst(17) }]);
+    await expect(worker.staff("builder", "rebuildDay", "2030-1-7", jst(24, 5))).rejects.toThrow(/code=validation_failed$/);
   });
 });

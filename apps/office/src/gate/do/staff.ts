@@ -240,6 +240,17 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
+   * 1 日の集計を作り直す。毎日 0 時 5 分の定期ジョブが呼ぶ
+   * @param day 日本時間の日
+   * @param now 今の時刻
+   * @returns 無し
+   * @throws validation_failed 日の形が違う時
+   */
+  rebuildDay(day: unknown, now: number): Promise<null> {
+    return this.#run((book) => book.rebuildDay(day, now));
+  }
+
+  /**
    * 記憶を変える操作を流し、何も返さない
    * @param step StaffBook の操作
    * @returns 無し

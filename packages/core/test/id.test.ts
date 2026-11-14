@@ -1,6 +1,6 @@
 // ID と時刻と JSON の正規化を確かめる。05-conventions.md の 1 章
 import { describe, expect, it } from "vitest";
-import { canonicalJson, jstClock, jstDay, jstYear, newId, sha256Hex } from "../src/index.ts";
+import { canonicalJson, jstClock, jstDay, jstYear, keyedId, newId, sha256Hex } from "../src/index.ts";
 
 const clock = { now: () => Date.UTC(2026, 10, 14, 15, 30, 0) };
 
@@ -11,6 +11,14 @@ describe("共通の道具", () => {
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(Number.parseInt(a.replaceAll("-", "").slice(0, 12), 16)).toBe(clock.now());
     expect(b > a).toBe(true);
+  });
+
+  it("keyedId は同じ時刻と鍵から同じ UUID v7 を返し、鍵が違えば違う ID を返す", async () => {
+    const a = await keyedId(clock.now(), "attendance_overlap:builder:2026-11-15");
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(Number.parseInt(a.replaceAll("-", "").slice(0, 12), 16)).toBe(clock.now());
+    expect(await keyedId(clock.now(), "attendance_overlap:builder:2026-11-15")).toBe(a);
+    expect(await keyedId(clock.now(), "attendance_overlap:reviewer:2026-11-15")).not.toBe(a);
   });
 
   it("日本時間の日と時刻と年を返す", () => {

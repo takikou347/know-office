@@ -36,6 +36,7 @@ const StaffCall = z.object({
     "taskClock",
     "issueToken",
     "checkToken",
+    "rebuildDay",
   ]),
   args: z.array(z.unknown()),
 });
@@ -107,8 +108,9 @@ export default {
         if (method === "wake" || method === "heartbeat" || method === "waitEnd" || method === "stop" || method === "resume") return Response.json(await stub[method](num(0)));
         return Response.json(await stub[method](args[0], num(1)));
       } catch (error) {
-        // RPC を越えた AppError は code を失うので、中身の文を返してテストで比べる
-        return new Response(String(error), { status: 409 });
+        // RPC を越えた AppError はクラスを失い、code だけが残る。ゲートウェイが頼る code を、中身の文と一緒に返してテストで比べる
+        const code = error instanceof Error && "code" in error ? String(error.code) : "none";
+        return new Response(`${String(error)} code=${code}`, { status: 409 });
       }
     }
     if (path === "/guard") {

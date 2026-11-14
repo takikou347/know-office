@@ -6,6 +6,8 @@ import {
   AttendanceReason,
   type Clock,
   DEFAULT_SCHEDULE,
+  jstDayStart,
+  keyedId,
   newId,
   type StaffId,
   WORKED_KINDS,
@@ -14,7 +16,7 @@ import {
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
-import { attendance, dailyTotals, dayOrders, notices, settings } from "../db/main.ts";
+import { attendance, dailyTotals, dayOrders, notices, settings, workEntries } from "../db/main.ts";
 
 /** D1 の attendance の 1 行 */
 export type AttendanceRow = typeof attendance.$inferSelect;
@@ -95,17 +97,17 @@ export async function loadOrders(db: D1Database, staffId: StaffId, day: string):
 }
 
 /**
- * 訂正された行を訂正の行で置き換えた、その日の勤怠を始まりの順に返す
- * @param rows その日の attendance の行
+ * 訂正された行を訂正の行で置き換えた、その日の行を始まりの順に返す。attendance と work_entries に使う
+ * @param rows その日の行
  * @returns 効いている行
  */
-export function effectiveRows(rows: AttendanceRow[]): AttendanceRow[] {
+export function effectiveRows<T extends { id: string; corrects: string | null; startedAt: number }>(rows: T[]): T[] {
   const corrected = new Set(rows.flatMap((r) => (r.corrects ? [r.corrects] : [])));
   return rows.filter((r) => !corrected.has(r.id)).toSorted((a, b) => a.startedAt - b.startedAt);
 }
 
 /** 集計した日の値 */
-type Totals = typeof dailyTotals.$inferInsert;
+export type Totals = typeof dailyTotals.$inferInsert;
 
 /**
  * 効いている行から日ごとの集計を作る。退勤していなければ clock_out は null
@@ -149,7 +151,17 @@ export function sumDay(rows: AttendanceRow[], base: { staffId: StaffId; day: str
 }
 
 /**
- * 日ごとの集計を attendance から作り直す。区分が重なっていれば通知を出す
+ * 区分が重なった時の通知の ID を、社員と日から決める。出勤、退勤、休み、訂正、0 時 5 分のジョブのどこから作り直しても同じ ID になる
+ * @param staffId 社員 ID
+ * @param day 日本時間の日
+ * @returns UUID v7。頭の時刻はその日の 0 時
+ */
+export function overlapNoticeId(staffId: StaffId, day: string): Promise<string> {
+  return keyedId(jstDayStart(day), `attendance_overlap:${staffId}:${day}`);
+}
+
+/**
+ * 日ごとの集計を attendance から作り直す。区分が重なっていれば通知を出す。通知の ID は社員と日から決まるので、何度作り直しても 1 件
  * @param db D1 の DB
  * @param base 社員 ID、日、出勤の時刻、退勤したか、行に出ない理由
  * @param base.staffId 社員 ID
@@ -157,32 +169,68 @@ export function sumDay(rows: AttendanceRow[], base: { staffId: StaffId; day: str
  * @param base.clockIn 行がまだ無い時の出勤の時刻
  * @param base.out 退勤したか
  * @param base.reasons 行に出ない理由 (早い退勤、休み)。前の集計の理由に足す
- * @param base.noticeId 区分が重なった時の通知の ID。渡すと、同じ ID で何度作り直しても通知は 1 件
  * @param now 今の時刻
  * @returns 無し
  */
 export async function rebuildDailyTotals(
   db: D1Database,
-  base: { staffId: StaffId; day: string; clockIn: number | null; out: boolean; reasons: string[]; noticeId?: string },
+  base: { staffId: StaffId; day: string; clockIn: number | null; out: boolean; reasons: string[] },
   now: number,
 ): Promise<void> {
   const orm = drizzle(db);
   const rows = await orm.select().from(attendance).where(and(eq(attendance.staffId, base.staffId), eq(attendance.day, base.day)));
   const [before] = await orm.select({ reasons: dailyTotals.reasons }).from(dailyTotals).where(and(eq(dailyTotals.staffId, base.staffId), eq(dailyTotals.day, base.day)));
-  const { noticeId, ...sumBase } = base;
-  const { totals, overlap } = sumDay(effectiveRows(rows), { ...sumBase, reasons: [...keptReasons(before?.reasons), ...base.reasons] });
+  const { totals, overlap } = sumDay(effectiveRows(rows), { ...base, reasons: [...keptReasons(before?.reasons), ...base.reasons] });
   const { staffId: _s, day: _d, ...rest } = totals;
   const upsert = orm.insert(dailyTotals).values(totals).onConflictDoUpdate({ target: [dailyTotals.staffId, dailyTotals.day], set: rest });
   if (overlap) {
     const body = `${base.staffId} の ${base.day} の勤怠で、同じ時刻が 2 つの区分に入っている`;
     const notice = orm
       .insert(notices)
-      .values({ id: noticeId ?? newId(clockAt(now)), at: now, level: "warn", kind: "attendance_overlap", title: "勤怠の区分が重なっている", body, scope: "office" })
+      .values({ id: await overlapNoticeId(base.staffId, base.day), at: now, level: "warn", kind: "attendance_overlap", title: "勤怠の区分が重なっている", body, scope: "office" })
       .onConflictDoNothing();
     await orm.batch([upsert, notice]);
     return;
   }
   await upsert;
+}
+
+/**
+ * 前の集計の出勤と退勤のまま、日ごとの集計を作り直す。毎日 0 時 5 分の定期ジョブが社員 DO を通して呼ぶ。行も集計も無い日は作らない
+ * @param db D1 の DB
+ * @param staffId 社員 ID
+ * @param day 日本時間の日
+ * @param now 今の時刻
+ * @returns 無し
+ */
+export async function rebuildStoredDay(db: D1Database, staffId: StaffId, day: string, now: number): Promise<void> {
+  const orm = drizzle(db);
+  const [before] = await orm.select({ clockIn: dailyTotals.clockIn, clockOut: dailyTotals.clockOut }).from(dailyTotals).where(and(eq(dailyTotals.staffId, staffId), eq(dailyTotals.day, day)));
+  const [row] = await orm.select({ id: attendance.id }).from(attendance).where(and(eq(attendance.staffId, staffId), eq(attendance.day, day))).limit(1);
+  if (!before && !row) return;
+  // 日をまたいで働いている間は退勤の時刻が無いので、退勤していない形のまま作り直す
+  await rebuildDailyTotals(db, { staffId, day, clockIn: before?.clockIn ?? null, out: typeof before?.clockOut === "number", reasons: [] }, now);
+}
+
+/** D1 の work_entries の 1 行 */
+export type WorkEntryRow = typeof workEntries.$inferSelect;
+
+/**
+ * 1 日の勤怠を、訂正を反映して読む。集計は効いている行から数え直し、出勤と行に出ない理由は daily_totals から取る
+ * @param db D1 の DB
+ * @param staffId 社員 ID
+ * @param day 日本時間の日
+ * @returns 集計の行と、始めた順のした仕事
+ */
+export async function loadDay(db: D1Database, staffId: StaffId, day: string): Promise<{ totals: Totals; entries: WorkEntryRow[] }> {
+  const orm = drizzle(db);
+  const [rows, [before], work] = await Promise.all([
+    orm.select().from(attendance).where(and(eq(attendance.staffId, staffId), eq(attendance.day, day))),
+    orm.select().from(dailyTotals).where(and(eq(dailyTotals.staffId, staffId), eq(dailyTotals.day, day))),
+    orm.select().from(workEntries).where(and(eq(workEntries.staffId, staffId), eq(workEntries.day, day))),
+  ]);
+  const { totals } = sumDay(effectiveRows(rows), { staffId, day, clockIn: before?.clockIn ?? null, out: typeof before?.clockOut === "number", reasons: keptReasons(before?.reasons) });
+  return { totals, entries: effectiveRows(work) };
 }
 
 /**

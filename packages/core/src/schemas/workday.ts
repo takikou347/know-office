@@ -92,3 +92,83 @@ export const StaffStatus = z
 
 /** 社員の今の状態の型 */
 export type StaffStatus = z.infer<typeof StaffStatus>;
+
+/** 1 日の勤怠のまとめ。daily_totals の行を返す形にした物。時刻は RFC 3339 の協定世界時 */
+export const DaySummary = z
+  .object({
+    staffId: StaffId,
+    day: z.iso.date(),
+    clockIn: z.iso.datetime().nullable(),
+    clockOut: z.iso.datetime().nullable(),
+    workedMs: z.number().int(),
+    extensionMs: z.number().int(),
+    callMs: z.number().int(),
+    stoppedMs: z.number().int(),
+    waitingMs: z.number().int(),
+    reasons: z.array(z.string()),
+  })
+  .strict()
+  .meta({ id: "DaySummary" });
+
+/** 1 日の勤怠のまとめの型 */
+export type DaySummary = z.infer<typeof DaySummary>;
+
+/** その日に手を付けたタスク 1 件。activeMs は止められていた時間と待っていた時間を除いた掛かった時間 */
+export const WorkEntry = z
+  .object({
+    id: z.uuid(),
+    nodeId: z.uuid(),
+    scope: z.string(),
+    title: z.string(),
+    startedAt: z.iso.datetime(),
+    endedAt: z.iso.datetime(),
+    activeMs: z.number().int(),
+    result: WorkResult,
+  })
+  .strict()
+  .meta({ id: "WorkEntry" });
+
+/** その日に手を付けたタスク 1 件の型 */
+export type WorkEntry = z.infer<typeof WorkEntry>;
+
+/** 1 日の勤怠。表の上の 1 行のまとめと、タスク 1 件 1 行の明細 */
+export const DayAttendance = z.object({ summary: DaySummary, entries: z.array(WorkEntry) }).strict().meta({ id: "DayAttendance" });
+
+/** 1 日の勤怠の型 */
+export type DayAttendance = z.infer<typeof DayAttendance>;
+
+/** 勤怠の訂正の入力。元の行を置き換える値で、始まりは終わりより前 */
+export const CorrectAttendanceInput = z
+  .object({
+    kind: AttendanceKind,
+    startedAt: z.iso.datetime(),
+    endedAt: z.iso.datetime(),
+    reason: AttendanceReason,
+    note: z.string().min(1),
+  })
+  .strict()
+  .refine((v) => Date.parse(v.startedAt) < Date.parse(v.endedAt), { message: "終わりは始まりより後にする", path: ["endedAt"] })
+  .meta({ id: "CorrectAttendanceInput" });
+
+/** 勤怠の訂正の入力の型 */
+export type CorrectAttendanceInput = z.infer<typeof CorrectAttendanceInput>;
+
+/** 勤怠の 1 行。訂正の行は corrects に元の行の ID を持つ */
+export const AttendanceRow = z
+  .object({
+    id: z.uuid(),
+    staffId: StaffId,
+    day: z.iso.date(),
+    kind: AttendanceKind,
+    startedAt: z.iso.datetime(),
+    endedAt: z.iso.datetime(),
+    reason: AttendanceReason,
+    corrects: z.string().nullable(),
+    note: z.string(),
+    createdAt: z.iso.datetime(),
+  })
+  .strict()
+  .meta({ id: "AttendanceRow" });
+
+/** 勤怠の 1 行の型 */
+export type AttendanceRow = z.infer<typeof AttendanceRow>;

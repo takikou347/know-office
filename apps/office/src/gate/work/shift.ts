@@ -54,8 +54,8 @@ const PendingWork = z
   })
   .strict();
 
-/** 退勤の後に作り直す日ごとの集計。区分が重なった時の通知の ID も退勤の時に決めるので、区分の行を書いた後に何度作り直しても、集計の値も通知も増えない */
-const PendingTotals = z.object({ day: z.string(), reasons: z.array(z.string()), at: z.number(), noticeId: z.string() }).strict();
+/** 退勤の後に作り直す日ごとの集計。区分の行を書いた後に何度作り直しても、集計の値は変わらず、区分が重なった時の通知も社員と日で 1 件 */
+const PendingTotals = z.object({ day: z.string(), reasons: z.array(z.string()), at: z.number() }).strict();
 
 /** 社員 DO の記憶。DO が起き直しても残す */
 export const Memory = z
@@ -162,7 +162,7 @@ export class Shift {
     if (m.task) this.closeTask(now, "continued");
     this.close(now);
     // 集計は区分の行と同じ流れで書く。間で落ちても、起き直した時に作り直す
-    if (m.day) m.pending.totals.push({ day: m.day, reasons: m.reasons, at: now, noticeId: newId(clockAt(now)) });
+    if (m.day) m.pending.totals.push({ day: m.day, reasons: m.reasons, at: now });
     m.reasons = [];
     m.state = "off";
     m.back = null;

@@ -1,5 +1,5 @@
 // ゲートウェイをテストで起こす。D1 は手元の本物、Access は代わりの物、DO はゲートウェイから見た境目の代わりを渡す
-import type { AuditInput, Clock, Fetcher, StaffId } from "@know-office/core";
+import { AppError, type AuditInput, type Clock, type Fetcher, type StaffId } from "@know-office/core";
 import { createFakeAccess, type FakeAccess } from "../../dev/access.ts";
 import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts";
 import type { Bindings } from "../../src/gate/env.ts";
@@ -91,6 +91,22 @@ function testStaff(staffId: StaffId, d1: TestD1): TestStaff {
 }
 
 /**
+ * workerd の RPC と同じく、DO の中で投げた AppError を、code を持った別の Error にして投げ直す。ゲートウェイは instanceof に頼れない
+ * @param call DO のメソッド
+ * @returns RPC を越えた形で投げるメソッド
+ */
+function overRpc<A extends unknown[], R>(call: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  return async (...args) => {
+    try {
+      return await call(...args);
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      throw Object.assign(new Error(error.message), { name: error.name, code: error.code, remote: true });
+    }
+  };
+}
+
+/**
  * DO の ctx.storage と同じ形の、手元の入れ物を作る
  * @returns Map で持つ入れ物
  */
@@ -172,6 +188,11 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
       taskClock: g.taskClock.bind(g),
       issueToken: g.issueToken.bind(g),
       checkToken: g.checkToken.bind(g),
+      correct: overRpc(book.correct.bind(book)),
+      rebuildDay: overRpc(async (day: unknown, now: number) => {
+        await book.rebuildDay(day, now);
+        return null;
+      }),
     };
   };
   const recorder = {

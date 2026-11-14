@@ -2,7 +2,7 @@
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
-export { newId } from "./id.ts";
+export { keyedId, newId } from "./id.ts";
 export { fromBase64, fromBase64url, toBase64, toBase64url } from "./encoding.ts";
 export { deriveKey, type KeyPurpose } from "./keys.ts";
 export { log, redact, redactText } from "./log.ts";
@@ -18,7 +18,11 @@ export { OPERATION_KINDS, toOperation, type Operation, type OperationKind } from
 export {
   AttendanceKind,
   AttendanceReason,
+  AttendanceRow,
   CheckpointInput,
+  CorrectAttendanceInput,
+  DayAttendance,
+  DaySummary,
   DEFAULT_SCHEDULE,
   OrderKind,
   StaffId,
@@ -26,6 +30,7 @@ export {
   StaffStatus,
   StaffTask,
   WORKED_KINDS,
+  WorkEntry,
   WorkResult,
   WorkSchedule,
 } from "./schemas/workday.ts";

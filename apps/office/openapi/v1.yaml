@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.0.4
+  version: 1.0.5
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -1391,6 +1391,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -6433,8 +6435,16 @@ components:
           format: date-time
         reason:
           type: string
+          enum:
+          - schedule
+          - checkpoint_wait
+          - owner_instruction
+          - guard_stop
+          - rate_limit
+          - workspace_down
         note:
           type: string
+          minLength: 1
       required:
       - kind
       - startedAt
@@ -6462,6 +6472,12 @@ components:
           description: 日本時間の日付 YYYY-MM-DD
         kind:
           type: string
+          enum:
+          - scheduled
+          - extension
+          - call
+          - stopped
+          - waiting
         startedAt:
           type: string
           format: date-time
@@ -6470,6 +6486,13 @@ components:
           format: date-time
         reason:
           type: string
+          enum:
+          - schedule
+          - checkpoint_wait
+          - owner_instruction
+          - guard_stop
+          - rate_limit
+          - workspace_down
         corrects:
           type:
           - string

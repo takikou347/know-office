@@ -2,8 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "know-office",
   "main": "src/gate/worker.ts",
-  // 5 分ごとの定期ジョブ。D1 の使った量を見る (ログインと記録の 3.5)
-  "triggers": { "crons": ["*/5 * * * *"] },
+  // 5 分ごとの定期ジョブは D1 の使った量を見る (ログインと記録の 3.5)。15 時 5 分 (協定世界時) は日本時間の 0 時 5 分で、前の日の勤怠の集計を作り直す (社員と勤怠の 3.6)
+  "triggers": { "crons": ["*/5 * * * *", "5 15 * * *"] },
   "compatibility_date": "2026-11-01",
   // Cloudflare が自動で付ける、Access を通らない URL は切る
   "workers_dev": false,

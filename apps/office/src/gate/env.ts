@@ -89,6 +89,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   issueToken(nodeId: string, workspaceId: string, now: number): Promise<{ jti: string }>;
   /** 作業トークンが使えるかを確かめる */
   checkToken(jti: string, workspaceId: string, now: number): Promise<TicketCheck>;
+  /** 1 日の集計を作り直す */
+  rebuildDay(day: unknown, now: number): Promise<null>;
 }
 
 /** 記録を年ごとに置く D1 のバインディングの名前。04-detail.md の 3.5 */
