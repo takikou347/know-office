@@ -158,12 +158,12 @@ paths:
       description: '処理の流れ:
 
 
-        1. `sessions` から有効なセッションを作成順に取得する
+        1. `sessions` から有効なログインセッションを作成順に取得する
 
-        2. 現在のセッションに `current` を付ける'
+        2. 現在のログインセッションに `current` を付ける'
       x-steps:
-      - '`sessions` から有効なセッションを作成順に取得する'
-      - 現在のセッションに `current` を付ける
+      - '`sessions` から有効なログインセッションを作成順に取得する'
+      - 現在のログインセッションに `current` を付ける
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -204,11 +204,11 @@ paths:
       description: '処理の流れ:
 
 
-        1. 現在のセッション以外の有効なセッションに `ended_at` を設定する
+        1. 現在のログインセッション以外の有効なログインセッションに `ended_at` を設定する
 
         2. 監査ログに `session.end_others` を記録する'
       x-steps:
-      - 現在のセッション以外の有効なセッションに `ended_at` を設定する
+      - 現在のログインセッション以外の有効なログインセッションに `ended_at` を設定する
       - 監査ログに `session.end_others` を記録する
       security:
       - accessJwt: []
@@ -233,9 +233,9 @@ paths:
       description: '処理の流れ:
 
 
-        1. 指定したセッションを取得する
+        1. 指定したログインセッションを取得する
 
-        2. `ended_at` を設定する。現在のセッションの場合はクッキーも削除する
+        2. `ended_at` を設定する。現在のログインセッションの場合はクッキーも削除する
 
         3. 監査ログに `session.end` を記録する
 
@@ -245,8 +245,8 @@ paths:
 
         - 404 `not_found`: セッションが存在しないか、すでに終了している'
       x-steps:
-      - 指定したセッションを取得する
-      - '`ended_at` を設定する。現在のセッションの場合はクッキーも削除する'
+      - 指定したログインセッションを取得する
+      - '`ended_at` を設定する。現在のログインセッションの場合はクッキーも削除する'
       - 監査ログに `session.end` を記録する
       x-errors:
       - '404 `not_found`: セッションが存在しないか、すでに終了している'
@@ -283,9 +283,9 @@ paths:
       description: '処理の流れ:
 
 
-        1. 現在のセッションの情報と、パスキーの登録有無を返す'
+        1. 現在のログインセッションの情報と、パスキーの登録有無を返す'
       x-steps:
-      - 現在のセッションの情報と、パスキーの登録有無を返す
+      - 現在のログインセッションの情報と、パスキーの登録有無を返す
       security:
       - accessJwt: []
         session: []
@@ -329,7 +329,7 @@ paths:
 
         2. `passkeys` の `counter` と `last_used_at` を更新する
 
-        3. 現在のセッションを終了し、`expires_at` を引き継いだ新しいセッションを `step_up_until` 付きで作成する
+        3. 現在のログインセッションを終了し、`expires_at` を引き継いだ新しいログインセッションを `step_up_until` 付きで作成する
 
         4. `login_attempts` と監査ログに `session.step_up` を記録する
 
@@ -343,7 +343,7 @@ paths:
       x-steps:
       - '`GuardDO` に保存した challenge をもとに、WebAuthn のレスポンスを検証する'
       - '`passkeys` の `counter` と `last_used_at` を更新する'
-      - 現在のセッションを終了し、`expires_at` を引き継いだ新しいセッションを `step_up_until` 付きで作成する
+      - 現在のログインセッションを終了し、`expires_at` を引き継いだ新しいログインセッションを `step_up_until` 付きで作成する
       - '`login_attempts` と監査ログに `session.step_up` を記録する'
       - 新しいクッキーを設定する
       x-errors:
@@ -398,11 +398,11 @@ paths:
       description: '処理の流れ:
 
 
-        1. challenge を生成し、現在のセッションに紐付けて `GuardDO` に 5 分間保存する
+        1. challenge を生成し、現在のログインセッションに紐付けて `GuardDO` に 5 分間保存する
 
         2. 登録用か確認用かに応じた WebAuthn のオプションを返す'
       x-steps:
-      - challenge を生成し、現在のセッションに紐付けて `GuardDO` に 5 分間保存する
+      - challenge を生成し、現在のログインセッションに紐付けて `GuardDO` に 5 分間保存する
       - 登録用か確認用かに応じた WebAuthn のオプションを返す
       requestBody:
         required: true
@@ -1383,7 +1383,7 @@ paths:
       operationId: listStops
       tags:
       - guard
-      summary: 停止の履歴と、停止しかけた記録
+      summary: 停止の履歴と、停止には至らなかったニアミスの記録
       description: '処理の流れ:
 
 
@@ -1690,7 +1690,7 @@ paths:
 
         - 401 `step_up_required`: パスキーの確認がない
 
-        - 409 `conflict`: 解除済み、停止しかけただけの記録、または鍵の再登録が済んでいない'
+        - 409 `conflict`: 解除済み、停止には至らなかったニアミスの記録、または鍵の再登録が済んでいない'
       x-steps:
       - 停止の記録を取得する
       - 停止範囲がサービスか全体なら `requireStepUp(c)` で確認を求める
@@ -1700,7 +1700,7 @@ paths:
       x-errors:
       - '404 `not_found`: 停止の記録が存在しない'
       - '401 `step_up_required`: パスキーの確認がない'
-      - '409 `conflict`: 解除済み、停止しかけただけの記録、または鍵の再登録が済んでいない'
+      - '409 `conflict`: 解除済み、停止には至らなかったニアミスの記録、または鍵の再登録が済んでいない'
       x-step-up: conditional
       parameters:
       - name: stopId
@@ -3320,7 +3320,7 @@ paths:
 
         1. まだ連携していないことを確認する
 
-        2. セッションの署名鍵で、10 分間有効な `state` を生成する
+        2. ログインセッションの署名鍵で、10 分間有効な `state` を生成する
 
         3. GitHub App の manifest と GitHub の URL を返す
 
@@ -3331,7 +3331,7 @@ paths:
         - 409 `conflict`: すでに連携済み'
       x-steps:
       - まだ連携していないことを確認する
-      - セッションの署名鍵で、10 分間有効な `state` を生成する
+      - ログインセッションの署名鍵で、10 分間有効な `state` を生成する
       - GitHub App の manifest と GitHub の URL を返す
       x-errors:
       - '409 `conflict`: すでに連携済み'
@@ -4250,7 +4250,7 @@ paths:
         このルート固有のエラー:
 
 
-        - 404 `not_found`: 設定項目が存在しない、または専用のルートで変更する項目
+        - 404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない
 
         - 409 `conflict`: バージョンが異なる'
       x-steps:
@@ -4258,7 +4258,7 @@ paths:
       - '`version` が現在と一致することを確認する'
       - '`settings` に追加し、監査ログに `setting.update` を記録する'
       x-errors:
-      - '404 `not_found`: 設定項目が存在しない、または専用のルートで変更する項目'
+      - '404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない'
       - '409 `conflict`: バージョンが異なる'
       parameters:
       - name: key
@@ -5190,7 +5190,7 @@ paths:
         このルート固有のエラー:
 
 
-        - 404 `not_found`: 役割で使えないツール
+        - 404 `not_found`: この社員の役割では使えないツール
 
         - 409 `stopped`: 社員かタスクが停止中'
       x-steps:
@@ -5199,7 +5199,7 @@ paths:
       - '`decide()` で可否を判断する'
       - ゲートウェイがツールを実行し、`tool_calls` と監査ログに記録する
       x-errors:
-      - '404 `not_found`: 役割で使えないツール'
+      - '404 `not_found`: この社員の役割では使えないツール'
       - '409 `stopped`: 社員かタスクが停止中'
       parameters:
       - name: toolName
@@ -5529,7 +5529,7 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
     Unauthorized:
-      description: ログインの証明、セッション、作業トークンがない、または無効。パスキーの確認の期限切れ
+      description: ログインの証明、ログインセッション、作業トークンがない、または無効。パスキーの確認が期限切れ
       content:
         application/problem+json:
           schema:
