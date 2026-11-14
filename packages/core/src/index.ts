@@ -12,6 +12,9 @@ export { AuditInput, AuditRow } from "./schemas/audit.ts";
 export { StorageUse } from "./schemas/storage.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
+export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
+export { DEFAULT_RULES, decide, type RuleContext, type RuleDecision } from "./rules/decide.ts";
+export { OPERATION_KINDS, toOperation, type Operation, type OperationKind } from "./rules/operation.ts";
 
 /**
  * 部分ごとの稼働確認の返事を作る

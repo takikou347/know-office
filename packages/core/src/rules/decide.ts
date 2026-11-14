@@ -1,0 +1,166 @@
+// 社員の操作をオーナーのルールと照らし、通すか断るかを決める (社員が考えるの 3.4)
+import type { Operation } from "./operation.ts";
+
+/** 判断の前提。オーナーのルールとタスクの様子 */
+export type RuleContext = {
+  /** 社員が触れてよい置き場 */
+  workRoot: string;
+  /** 書けない所。リポジトリの頭からの道の頭 */
+  protectedPaths: readonly string[];
+  /** 社員が読んでよいオーナーの情報の項目 */
+  ownerInfoItems: readonly string[];
+  /** そのタスクが外部の文章を読んだ印 */
+  external: boolean;
+};
+
+/** 初期のルール。オーナーの情報はどの項目も読ませない */
+export const DEFAULT_RULES: RuleContext = { workRoot: "/work", protectedPaths: [".github/workflows/"], ownerInfoItems: [], external: false };
+
+/** ルールの判断。marksExternal はそのタスクに外部の文章の印を付けるか */
+export type RuleDecision = {
+  /** 通すか */
+  allow: boolean;
+  /** 社員に返す理由 */
+  reason: string;
+  /** 外部の文章の印を付けるか */
+  marksExternal: boolean;
+};
+
+// /work の外でも触ってよい物。出力を捨てる先だけ
+const OUTSIDE_OK = ["/dev/null"];
+
+/**
+ * 道を / から始まる形に直す。相対の道は root から読み、. と .. を畳む
+ * @param path 道
+ * @param root 相対の道の頭
+ * @returns 畳んだ絶対の道
+ */
+function normalize(path: string, root: string): string {
+  const parts: string[] = [];
+  for (const part of (path.startsWith("/") ? path : `${root}/${path}`).split("/")) {
+    if (part === "..") parts.pop();
+    else if (part !== "" && part !== ".") parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+}
+
+/**
+ * 道が置き場の下にあるかを確かめる
+ * @param path 道
+ * @param ctx 判断の前提
+ * @returns 下にあれば true
+ */
+function inside(path: string, ctx: RuleContext): boolean {
+  const root = normalize(ctx.workRoot, "/");
+  // ~ は社員の家の置き場で、/work の外
+  if (path.startsWith("~") || path.startsWith("$HOME")) return false;
+  const full = normalize(path, root);
+  return full === root || full.startsWith(`${root}/`) || OUTSIDE_OK.includes(full);
+}
+
+/**
+ * 道が書けない所に当たるかを確かめる。置き場の下のどの深さのリポジトリでも当てる
+ * @param path 道
+ * @param ctx 判断の前提
+ * @returns 当たれば true
+ */
+function protectedPath(path: string, ctx: RuleContext): boolean {
+  const full = normalize(path, normalize(ctx.workRoot, "/"));
+  return ctx.protectedPaths.some((p) => full.includes(`/${p.replace(/^\/+/, "")}`));
+}
+
+/**
+ * 命令を断る理由を探す
+ * @param command シェルの命令
+ * @param ctx 判断の前提
+ * @returns 断る理由。通すなら null
+ */
+function shellRefusal(command: string, ctx: RuleContext): string | null {
+  for (const part of command.split(/&&|\|\||[;|\n]/)) {
+    const words = part.trim().split(/\s+/);
+    const git = words[0] === "git" ? words.slice(1) : [];
+    if (git[0] === "push" && git.some((w) => /^(?:\+|(?:.*:)?(?:refs\/heads\/)?(?:main|master)$)/.test(w))) return "main への push は断る";
+    if (git[0] === "push" && git.some((w) => w === "-f" || w.startsWith("--force"))) return "--force の push は断る";
+    if (git[0] === "config" && !git.some((w) => ["--get", "--get-all", "--get-regexp", "--list", "-l"].includes(w))) return "git config の書き換えは断る";
+  }
+  if (/\s--force\b/.test(command)) return "--force は断る";
+  // 道らしい言葉 (/ を含む、~ か .. で始まる) が置き場の外を指せば断る。URL は相対の道として置き場の下に畳まれる
+  const paths = command.split(/[\s;&|<>()='"`]+/).filter((w) => w.includes("/") || w.startsWith("~") || w.startsWith("$HOME"));
+  return paths.every((p) => inside(p, ctx)) ? null : `${ctx.workRoot} の外は触れない`;
+}
+
+/**
+ * 通す判断を作る
+ * @param reason 理由
+ * @param marksExternal 外部の文章の印を付けるか
+ * @returns 通す判断
+ */
+function allow(reason: string, marksExternal = false): RuleDecision {
+  return { allow: true, reason, marksExternal };
+}
+
+/**
+ * 断る判断を作る
+ * @param reason 理由
+ * @returns 断る判断
+ */
+function deny(reason: string): RuleDecision {
+  return { allow: false, reason, marksExternal: false };
+}
+
+/**
+ * 終わりの無い種類を受けた時に型のチェックを落とす
+ * @param op 判断の無い操作
+ * @returns 返らない
+ */
+function unreachable(op: never): never {
+  throw new Error(`判断の無い操作の種類: ${JSON.stringify(op)}`);
+}
+
+/**
+ * 操作をルールと照らし、通すか断るかを決める
+ * @param op toOperation() で直した操作
+ * @param ctx オーナーのルールとタスクの様子
+ * @returns 通すか、理由、外部の文章の印を付けるか
+ */
+export function decide(op: Operation, ctx: RuleContext): RuleDecision {
+  switch (op.kind) {
+    case "file.read":
+    case "file.write": {
+      if (op.target === "") return deny("道の無いファイルの操作は断る");
+      if (!op.paths.every((p) => inside(p, ctx))) return deny(`${ctx.workRoot} の外は触れない`);
+      if (op.kind === "file.write" && op.paths.some((p) => protectedPath(p, ctx))) return deny("ルールで触れない所には書けない");
+      return allow(`${ctx.workRoot} の下`);
+    }
+    case "shell.run": {
+      if (op.target === "") return deny("命令の無いシェルは断る");
+      const refusal = shellRefusal(op.target, ctx);
+      return refusal === null ? allow(`${ctx.workRoot} の下の命令`) : deny(refusal);
+    }
+    case "web.fetch":
+      if (!/^https?:\/\//i.test(op.target)) return deny("http か https の URL だけを読む");
+      return allow("Web の文章はデータとして読む", true);
+    case "web.search":
+      if (op.target.trim() === "") return deny("言葉の無い検索は断る");
+      return allow("Web の文章はデータとして読む", true);
+    case "agent.spawn":
+      if (op.target.trim() === "") return deny("頼む事の無い手分けは断る");
+      return allow("中のツールにも同じ判断を掛ける");
+    case "owner_info.read":
+      if (ctx.external) return deny("外部の文章を読んだタスクにオーナーの情報は渡さない");
+      if (!ctx.ownerInfoItems.includes(op.target)) return deny("ルールで許していない項目");
+      return allow("ルールで許した項目");
+    case "office.tool":
+      return allow("社員のツール");
+    case "secret.read":
+      return deny("鍵には触れない");
+    case "guard.access":
+      return deny("自動停止の基準と数には触れない");
+    case "staff.manage":
+      return deny("社員は社員を触れない");
+    case "unknown":
+      return deny("知らないツールは断る");
+    default:
+      return unreachable(op.kind);
+  }
+}
