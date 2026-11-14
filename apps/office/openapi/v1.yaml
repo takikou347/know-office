@@ -7990,6 +7990,10 @@ components:
             properties:
               key:
                 type: string
+                description: '`group` が service なら `office` かサービスの ID、staff なら社員 ID'
+              name:
+                type: string
+                description: サービスの名前、`office`、社員の役の名前
               workedMs:
                 type: integer
               tasks:
@@ -8004,6 +8008,7 @@ components:
                 type: number
             required:
             - key
+            - name
             - workedMs
             - tasks
             - costMicroUsd
@@ -8011,9 +8016,34 @@ components:
             - deploys
             - failureRatio
             additionalProperties: false
+        total:
+          type: object
+          description: 全体の値。足せる値は `rows` の和と同じ
+          properties:
+            workedMs:
+              type: integer
+            tasks:
+              type: integer
+            costMicroUsd:
+              type: integer
+            tokens:
+              type: integer
+            deploys:
+              type: integer
+            failureRatio:
+              type: number
+          required:
+          - workedMs
+          - tasks
+          - costMicroUsd
+          - tokens
+          - deploys
+          - failureRatio
+          additionalProperties: false
       required:
       - group
       - rows
+      - total
       additionalProperties: false
     Uptime:
       type: object

@@ -15,6 +15,8 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   { name: "変更のレビュー", path: "/staff/builder/tasks/t2", heading: "社員と仕事" },
   { name: "サービスの様子", path: "/services/knowidea-ui", heading: "アイデアとサービス" },
   // 木と組織図は records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
+  // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
+  { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },
   { name: "目的と組織図の木", path: "/goals", heading: "目的と組織図", ready: "目標: know-office を動かし始める" },
 ];
 

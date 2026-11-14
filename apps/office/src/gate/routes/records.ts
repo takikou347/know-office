@@ -1,6 +1,6 @@
 // 記録: 年ごとの置き場から読む監査ログと、置き場ごとの使った量 (ログインと記録の 3.5)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, AuditRow, jstDayStart, jstYear, StorageUse } from "@know-office/core";
+import { AppError, AuditRow, jstDayStart, jstYear, RecordGroup, RecordSummary, StorageUse } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { and, desc, gte, lt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -10,9 +10,10 @@ import { recordYears } from "../db/main.ts";
 import { auditLog } from "../db/records.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 import { storageUses } from "../ledger/storage.ts";
+import { type RecordDb, type SummaryRange, summarize, summaryCsv } from "../ledger/summary.ts";
 import { audit } from "../ledger/record.ts";
-import { listQuery, listResponse, problems } from "../openapi.ts";
-import { list } from "../respond.ts";
+import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { list, ok } from "../respond.ts";
 
 const DAY = 24 * 60 * 60_000;
 const router = createRouter();
@@ -43,6 +44,40 @@ const listStorageRoute = createRoute({
   responses: { 200: listResponse(StorageUse), ...problems(401, 403, 429, 500) },
 });
 
+const SummaryQuery = z
+  .object({ from: Day("from"), to: Day("to"), group: RecordGroup.openapi({ param: { name: "group", in: "query", required: true } }) })
+  .strict();
+
+const getRecordSummaryRoute = createRoute({
+  method: "get",
+  path: "/api/v1/records/summary",
+  operationId: "getRecordSummary",
+  tags: ["records"],
+  request: { query: SummaryQuery },
+  responses: { 200: okResponse(RecordSummary), ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+const exportRecordSummaryRoute = createRoute({
+  method: "get",
+  path: "/api/v1/records/summary/export",
+  operationId: "exportRecordSummary",
+  tags: ["records"],
+  request: { query: SummaryQuery },
+  responses: { 200: { description: "CSV", content: { "text/csv": { schema: z.string() } } }, ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+/**
+ * 日本時間の日の期間を、時刻の期間にする
+ * @param from 始めの日
+ * @param to 終わりの日
+ * @returns 日と時刻の期間
+ * @throws validation_failed from が to より後の時
+ */
+function rangeOf(from: string | undefined, to: string | undefined): SummaryRange {
+  if (from && to && from > to) throw new AppError("validation_failed", "from が to より後", { errors: [{ pointer: "#/query/from", detail: "to より前の日にする" }] });
+  return { from: from ?? null, to: to ?? null, start: from ? jstDayStart(from) : null, end: to ? jstDayStart(to) + DAY : null };
+}
+
 /**
  * record_years の binding を、その年の置き場の D1 にする
  * @param env バインディング
@@ -58,7 +93,19 @@ function recordDb(env: Bindings, binding: string): D1Database {
   return db;
 }
 
-/** 記録のルート: 監査ログの一覧と、置き場ごとの使った量 */
+/**
+ * バインドした REC_<年> を年と並べる
+ * @param env バインディング
+ * @returns 年とその D1
+ */
+function boundRecords(env: Bindings): RecordDb[] {
+  return RECORD_BINDINGS.flatMap((name) => {
+    const db = env[name];
+    return db ? [{ year: Number(name.slice("REC_".length)), db }] : [];
+  });
+}
+
+/** 記録のルート: 監査ログの一覧、置き場ごとの使った量、記録の集計 */
 export const recordRoutes = router
   .openapi(listAuditLogsRoute, async (c) => {
     requireStepUp(c);
@@ -100,4 +147,13 @@ export const recordRoutes = router
     const page = uses.slice(0, limit);
     const next = uses.length > limit ? (page.at(-1)?.binding ?? null) : null;
     return list(c, page, next);
+  })
+  .openapi(getRecordSummaryRoute, async (c) => {
+    const { from, to, group } = c.req.valid("query");
+    return ok(c, await summarize(c.env.DB, boundRecords(c.env), group, rangeOf(from, to)));
+  })
+  .openapi(exportRecordSummaryRoute, async (c) => {
+    const { from, to, group } = c.req.valid("query");
+    const summary = await summarize(c.env.DB, boundRecords(c.env), group, rangeOf(from, to));
+    return c.body(summaryCsv(summary), 200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="records-${group}.csv"` });
   });

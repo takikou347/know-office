@@ -111,12 +111,6 @@ export const lessons = [
   { id: "l1", text: "テストが同じ所で落ち続けたら、直す前に落ちる理由を 1 行書く", from: "x1" },
 ];
 
-export const usage = [
-  { id: "president", who: "社長", tokens: 412_000, cost: 1.9 },
-  { id: "builder", who: "作る役", tokens: 1_830_000, cost: 6.2 },
-  { id: "reviewer", who: "見る役", tokens: 960_000, cost: 3.3 },
-];
-
 export const monthCost = { used: 11.4, budget: 15 };
 
 export const notices = [

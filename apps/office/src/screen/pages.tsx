@@ -1,4 +1,4 @@
-// 8 画面と「その他」の中身。勤怠の表と目的と組織図のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
+// 8 画面と「その他」の中身。勤怠の表、目的と組織図、記録のサービスごとの内訳のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
 import type { Health } from "@know-office/core";
 import {
   Alert,
@@ -41,11 +41,11 @@ import {
   stages,
   stops,
   tasks,
-  usage,
   workEntries,
 } from "./mock.ts";
 import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { StopButton } from "./pages/guard/StopButton.tsx";
+import { ServiceSummary } from "./pages/ledger/ServiceSummary.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
 import { type ScreenId, moreScreens } from "./routes.ts";
 
@@ -503,17 +503,8 @@ function Records() {
           ))}
         </Grid>
       </Part>
-      <Part title="費用とトークン">
-        <Table
-          label="今月の費用とトークン"
-          rowKey={(r) => r.id}
-          rows={usage.map((u) => ({ ...u }))}
-          columns={[
-            { key: "who", header: "社員" },
-            { key: "tokens", header: "トークン", numeric: true, render: (r) => r.tokens.toLocaleString("ja-JP") },
-            { key: "cost", header: "費用", numeric: true, render: (r) => `${r.cost.toFixed(2)} ドル` },
-          ]}
-        />
+      <Part title="サービスごと">
+        <ServiceSummary />
       </Part>
     </Section>
   );

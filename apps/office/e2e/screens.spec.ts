@@ -101,6 +101,18 @@ test("勤怠の上の 1 行は、出勤から止められていた時間まで�
   await expect(table.getByRole("row").nth(3)).toContainText("勤怠の表の画面を作る");
 });
 
+test("記録の画面で、サービスごとの内訳の最後に全体を出し、CSV で出せる", async ({ page }) => {
+  // records.setup.ts が手元の D1 に置いた work_entries を、期間を決めずに入口から集める
+  await page.goto("/records");
+  const table = page.getByRole("region", { name: "サービスごとの記録" }).getByRole("table");
+  await expect(table.getByRole("row", { name: /knowidea-ui/ })).toBeVisible();
+  await expect(table.getByRole("row").last()).toContainText("全体");
+  const link = page.getByRole("link", { name: "CSV で出す" });
+  const res = await page.request.get((await link.getAttribute("href")) ?? "");
+  expect(res.headers()["content-type"]).toMatch(/^text\/csv/);
+  expect((await res.text()).trim().split("\r\n").at(-1)).toMatch(/^total,全体,/);
+});
+
 test("レビューから戻ると、仕事の山のタブに戻る", async ({ page }) => {
   await page.goto("/staff/builder/tasks/t2");
   await page.getByRole("link", { name: "仕事の山に戻る" }).click();
@@ -163,6 +175,8 @@ test("画面を移ると、題が変わり、中身に移る", async ({ page }) 
 test("画面を移ると、中身の先頭に戻り、中身に Tab で入れるままである", async ({ page }) => {
   // 記録も守りも長いので、移った先でも送った分が残りうる。送られるのは中身の main だけ
   await page.goto("/records");
+  // サービスごとの内訳を読み終えるまでは、記録の画面は送るほど長くない
+  await expect(page.getByRole("link", { name: "CSV で出す" })).toBeVisible();
   const main = page.getByRole("main");
   await main.evaluate((el) => el.scrollTo(0, el.scrollHeight));
   expect(await main.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
