@@ -2,7 +2,7 @@
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
-export { allowedModels, type ClaudeUsage, costMicroUsd, HAIKU, OPUS, SONNET } from "./claude.ts";
+export { allowedModels, type ClaudeModel, type ClaudeUsage, costMicroUsd, HAIKU, OPUS, SONNET } from "./claude.ts";
 export { Secret } from "./secret.ts";
 export { CONTAINER_CA, WORKSPACE_KEY_ENV } from "./container.ts";
 export { keyedId, newId } from "./id.ts";

@@ -18,8 +18,16 @@ describe("Claude の単価", () => {
     expect(costMicroUsd("claude-haiku-5-5", { inputTokens: 50_000, outputTokens: 10, cacheReadTokens: 60_000, cacheWriteTokens: 0 })).toBe(25_000 + 25 + 3000);
   });
 
-  it("単価表に無いモデルは null を返す", () => {
-    expect(costMicroUsd("claude-unknown", { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 })).toBeNull();
+  it("1 時間の書き込みは 5 分の 2 倍の単価で数え、残りの書き込みは 5 分の単価で数える", () => {
+    // 書き込み 3000 のうち 1 時間は 1000。5 分は 5、1 時間は 8 ドル / 百万
+    const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 3000, cacheWrite1hTokens: 1000 };
+    expect(costMicroUsd("claude-opus-5-5", usage)).toBe(2000 * 5 + 1000 * 8);
+    // 2.5 と 4 ドル / 百万
+    expect(costMicroUsd("claude-sonnet-5-5", usage)).toBe(2000 * 2.5 + 1000 * 4);
+    // 0.125 と 0.2 ドル / 百万
+    expect(costMicroUsd("claude-haiku-5-5", usage)).toBe(250 + 200);
+    // 入力の合計が 10 万を超えると 0.625 と 1 ドル / 百万
+    expect(costMicroUsd("claude-haiku-5-5", { ...usage, cacheWriteTokens: 200_000, cacheWrite1hTokens: 100_000 })).toBe(62_500 + 100_000);
   });
 });
 

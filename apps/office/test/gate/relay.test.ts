@@ -1,6 +1,6 @@
 // Claude のプロキシを、作業トークンから代わりの Claude API、使った量の記録、勤怠の待ちまで確かめる (社員が考えるの 3.3、4 章)
-import type { StaffId } from "@know-office/core";
-import { describe, expect, it } from "vitest";
+import type { Fetcher, StaffId } from "@know-office/core";
+import { describe, expect, it, vi } from "vitest";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { ANTHROPIC_KEY } from "../helpers/gate.ts";
@@ -47,9 +47,10 @@ async function startTask(staffId: StaffId = "builder"): Promise<Work> {
  * @param work 社員と作業トークン
  * @param body 本文
  * @param path 道
+ * @param fetcher ゲートウェイが外へ出す fetch。省くと代わりの Claude API に回す
  * @returns 受け手の返事
  */
-async function callClaude(work: Work, body: Record<string, unknown>, path = "/v1/messages"): Promise<Response> {
+async function callClaude(work: Work, body: Record<string, unknown>, path = "/v1/messages", fetcher: Fetcher = w.gate.fetch): Promise<Response> {
   // ワークスペースは 30 秒ごとにハートビートを送る。届かないと勤怠が workspace_down の待ちに入るので、呼ぶ前に送っておく
   await w.gate.staff[work.staffId].book.heartbeat(w.clock.now());
   const caller: Caller = { staffId: work.staffId, workspaceId: workspaceIdOf(w.gate.env, work.staffId) };
@@ -58,7 +59,7 @@ async function callClaude(work: Work, body: Record<string, unknown>, path = "/v1
     headers: { "x-api-key": work.token, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  return routeEgress(request, w.gate.env, caller, { clock: w.clock, guard: w.gate.deps, fetch: w.gate.fetch });
+  return routeEgress(request, w.gate.env, caller, { clock: w.clock, guard: w.gate.deps, fetch: fetcher });
 }
 
 /**
@@ -83,6 +84,36 @@ async function usageOf(nodeId: string): Promise<Record<string, unknown>[]> {
     .bind(nodeId)
     .all();
   return found.results;
+}
+
+const encoder = new TextEncoder();
+
+/**
+ * 流れの返事の出来事を 1 つ作る
+ * @param event 出来事の名前
+ * @param data 中身
+ * @returns SSE の 1 つの出来事
+ */
+function sse(event: string, data: Record<string, unknown>): Uint8Array {
+  return encoder.encode(`event: ${event}\ndata: ${JSON.stringify({ type: event, ...data })}\n\n`);
+}
+
+/** 流れの頭。入力 40 と出力 1 を持つ */
+const START = sse("message_start", {
+  message: { id: "msg_1", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, usage: { input_tokens: 40, output_tokens: 1 } },
+});
+
+/** 流れの途中の文 */
+const DELTA = sse("content_block_delta", { index: 0, delta: { type: "text_delta", text: "途中" } });
+
+/**
+ * 決まった返事を返す Claude API の代わりを作る
+ * @param body 本文
+ * @param init ステータスとヘッダー
+ * @returns fetch の代わり
+ */
+function upstream(body: ReadableStream<Uint8Array> | string, init: ResponseInit): Fetcher {
+  return () => Promise.resolve(new Response(body, init));
 }
 
 describe("トークンを減らす", () => {
@@ -196,5 +227,87 @@ describe("Claude のプロキシ", () => {
     expect((await callClaude(work, messages("直す"), "/v1/messages/batches")).status).toBe(404);
     expect((await callClaude(work, { messages: [] })).status).toBe(422);
     expect(w.gate.claude.keys).toEqual([]);
+  });
+
+  it("waitEnd が落ちても返事と使った量が残る", async () => {
+    const work = await startTask();
+    vi.spyOn(w.gate.staff.builder.book, "waitEnd").mockRejectedValue(new Error("社員 DO に届かない"));
+    w.gate.claude.push({ content: [{ type: "text", text: "返す" }] });
+    const res = await callClaude(work, messages("直す"));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("返す");
+    expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ input_tokens: 10, output_tokens: 10, waited_ms: null })]);
+  });
+
+  it("429 の後に 500 が来ても待ちは解けない", async () => {
+    const work = await startTask();
+    w.gate.claude.pushError(429, "rate_limit_error");
+    w.gate.claude.pushError(500, "api_error");
+    expect((await callClaude(work, messages("直す"))).status).toBe(429);
+    expect((await callClaude(work, messages("直す"))).status).toBe(500);
+    expect((await w.gate.staff.builder.book.status(w.clock.now())).state).toBe("waiting");
+    expect(await usageOf(work.nodeId)).toEqual([]);
+  });
+
+  it("ワークスペースが流れを途中で切っても、届いた所までの量を 1 度だけ残す", async () => {
+    const work = await startTask();
+    // 頭と文を 1 つ送った後は終わらない流れ
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(START);
+        controller.enqueue(DELTA);
+      },
+    });
+    const res = await callClaude(work, messages("直す"), "/v1/messages", upstream(body, { status: 200, headers: { "content-type": "text/event-stream" } }));
+    const reader = res.body?.getReader();
+    const first = await reader?.read();
+    expect(new TextDecoder().decode(first?.value)).toContain("message_start");
+    await reader?.cancel();
+    await reader?.cancel();
+    expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ input_tokens: 40, output_tokens: 1, cost_micro_usd: 90 })]);
+  });
+
+  it("Claude API が流れの途中で落ちても、届いた所までの量を残す", async () => {
+    const work = await startTask();
+    let sent = 0;
+    // 頭を送った次に落ちる流れ。10 分の時間切れも同じく読み出しの失敗になる
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 1;
+        if (sent === 1) controller.enqueue(START);
+        else controller.error(new Error("切れた"));
+      },
+    });
+    const res = await callClaude(work, messages("直す"), "/v1/messages", upstream(body, { status: 200, headers: { "content-type": "text/event-stream" } }));
+    await expect(res.text()).rejects.toThrow("切れた");
+    expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ input_tokens: 40, output_tokens: 1 })]);
+  });
+
+  it("返すヘッダーは上限の物と要求 ID だけで、組織の ID を出さない", async () => {
+    const work = await startTask();
+    const answer = JSON.stringify({ model: "claude-sonnet-5-5", usage: { input_tokens: 10, output_tokens: 10 } });
+    const headers = { "content-type": "application/json", "request-id": "req_1", "anthropic-organization-id": "org-1", "anthropic-ratelimit-requests-remaining": "99" };
+    const res = await callClaude(work, { ...messages("直す"), stream: false }, "/v1/messages", upstream(answer, { status: 200, headers }));
+    expect(res.headers.get("anthropic-ratelimit-requests-remaining")).toBe("99");
+    expect(res.headers.get("request-id")).toBe("req_1");
+    expect(res.headers.get("anthropic-organization-id")).toBeNull();
+    expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ request_id: "req_1" })]);
+  });
+
+  it("費用と記録のモデルは、確かめて許した要求のモデルで引く", async () => {
+    const work = await startTask();
+    // 返事のモデルの名前が単価表と違っても、要求のモデルの単価で数える
+    const answer = JSON.stringify({ model: "claude-sonnet-5-5-20261101", usage: { input_tokens: 10, output_tokens: 10 } });
+    await callClaude(work, { ...messages("直す"), stream: false }, "/v1/messages", upstream(answer, { status: 200, headers: { "content-type": "application/json" } }));
+    expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ model: "claude-sonnet-5-5", cost_micro_usd: 120 })]);
+  });
+
+  it("1 時間の読み直しの書き込みは 2 倍の単価で数え、書き込みの数は合計で残す", async () => {
+    const work = await startTask();
+    const usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 3000, cache_creation: { ephemeral_5m_input_tokens: 2000, ephemeral_1h_input_tokens: 1000 } };
+    const answer = JSON.stringify({ model: "claude-sonnet-5-5", usage });
+    await callClaude(work, { ...messages("直す"), stream: false }, "/v1/messages", upstream(answer, { status: 200, headers: { "content-type": "application/json" } }));
+    // 5 分は 2.5、1 時間は 4 ドル / 百万
+    expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ cache_write_tokens: 3000, cost_micro_usd: 2000 * 2.5 + 1000 * 4 })]);
   });
 });
