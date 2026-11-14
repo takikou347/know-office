@@ -1,15 +1,17 @@
 # PR の説明に AI の署名や帰属の行が無い事を確かめる。説明を直した時も回る
+# PR を作る道具は説明の末尾に帰属の行を足すので、PR は下書きで出し、説明を直してからレビュー待ちにする。下書きの間は回さない
 name: PR body
 
 on:
   pull_request:
-    types: [opened, edited, reopened, synchronize]
+    types: [opened, edited, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
 
 jobs:
   body:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

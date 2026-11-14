@@ -10,7 +10,7 @@ description: know-office の tasks.md の 1 項目を、要件のシナリオご
 5. 詳細設計か `v1.yaml` と違う形にした時は、同じ時に knowidea の詳細設計を直すブランチを切る。要件が変わる時は、このブランチで `openspec/` も直す
 6. 通す: `pnpm verify` (画面を変えたら `pnpm verify --e2e`)。落ちた手順は出力の最後だけが出るので、直したらそのファイルだけを走らせ直し (`pnpm --filter <パッケージ> exec vitest run <ファイル>`)、最後にもう一度 `pnpm verify`
 7. tasks.md の項目に印を付け、作った者と別のモデルのレビュー担当 (作ったのが Opus なら `reviewer-alt`、Sonnet なら `reviewer`) に差分と 3 で控えた落ちた理由を見せる。差し戻しなら直して 6 に戻る。待つ間は次のタスクを進める
-8. push して PR を出す。PR を作る道具が本文に足す帰属の行は、作った直後に本文を入れ直して消す (CI の pr-body が確かめる)。CI が通ったら、そのブランチを main へ fast-forward で push し、ブランチを消す
+8. push して PR を下書き (draft) で出す。PR を作る道具が本文に足す帰属の行を、本文を入れ直して消してから、下書きを外す。CI の pr-body は下書きの間は回らず、下書きを外した時に確かめる。CI が通ったら、そのブランチを main へ fast-forward で push し、ブランチを消す
 
 ## 並列で進める時
 

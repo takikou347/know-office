@@ -6,3 +6,6 @@ onlyBuiltDependencies:
   - workerd
 ignoredBuiltDependencies:
   - "@scarf/scarf"
+# drizzle-kit の中の @esbuild-kit が引く esbuild 0.18 には開発サーバーの脆弱性 (GHSA-67mh-4wv8-2f99) があるので、直った版にそろえる
+overrides:
+  "@esbuild-kit/core-utils>esbuild": 0.25.12
