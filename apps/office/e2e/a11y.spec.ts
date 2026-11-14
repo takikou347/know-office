@@ -90,15 +90,18 @@ test.describe("使いやすさ", () => {
     await expect(page.getByText("可を出しました")).toBeVisible();
   });
 
-  for (const p of pages) {
-    test(`自動のチェック (${p.name})`, async ({ page }) => {
-      await page.goto(p.path);
-      await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
-      const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
-      const bad = violations
-        .filter((v) => v.impact === "critical" || v.impact === "serious")
-        .map((v) => ({ id: v.id, impact: v.impact, help: v.help, targets: v.nodes.map((n) => n.target.join(" ")) }));
-      expect(bad).toEqual([]);
-    });
-  }
+  // 1 ページに 2 秒ほど掛かり、14 ページを 1 つの test で回すと 5 秒を超えるので、ページごとに分ける
+  test.describe("自動のチェック", () => {
+    for (const p of pages) {
+      test(p.name, async ({ page }) => {
+        await page.goto(p.path);
+        await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
+        const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
+        const bad = violations
+          .filter((v) => v.impact === "critical" || v.impact === "serious")
+          .map((v) => ({ page: p.path, id: v.id, impact: v.impact, help: v.help, targets: v.nodes.map((n) => n.target.join(" ")) }));
+        expect(bad).toEqual([]);
+      });
+    }
+  });
 });
