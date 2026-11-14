@@ -1,15 +1,28 @@
 import "knowidea-tokens/tokens.css";
 import "knowidea-css/index.css";
 import "./app.css";
-import type { Health } from "@know-office/core";
+import type { Extension, Health } from "@know-office/core";
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
-import { ApiContext, createApi } from "./api.ts";
+import { ApiContext, createApi, sessionFetch } from "./api.ts";
+import { ExtensionFetchContext, withScreens } from "./extensions.ts";
 import { routeOfClick } from "./link.ts";
 import { titleOf } from "./routes.ts";
 
 const api = createApi(window.location.origin);
+
+/** 拡張の画面が自分のルートを呼ぶ口。ログインセッションの作り直しは入口の RPC と同じ */
+const extensionOrigin = { base: window.location.origin, fetch: sessionFetch(window.location.origin) };
+
+/** 入れた拡張の画面の名前を題に使うため、最後に読んだ拡張を覚える */
+let knownExtensions: readonly Extension[] = [];
+
+/**
+ * 今の道の画面の題を作る
+ * @returns ブラウザの題
+ */
+const titleNow = () => titleOf(window.location.pathname, withScreens(knownExtensions));
 
 const urlNow = () => window.location.pathname + window.location.search;
 
@@ -18,7 +31,7 @@ let shownPath = window.location.pathname;
 
 /** 画面が変わった事を、題と読み上げに伝える */
 function announce() {
-  document.title = titleOf(window.location.pathname);
+  document.title = titleNow();
   // AppShell は中身の main だけを送る。main は AppShell が Tab で入れる形にしているので、tabIndex は変えない
   const main = document.querySelector("main");
   if (main) {
@@ -48,7 +61,7 @@ function useRoute() {
     requestAnimationFrame(announce);
   }, []);
   useEffect(() => {
-    document.title = titleOf(window.location.pathname);
+    document.title = titleNow();
     const onPop = () => {
       setUrl(urlNow());
       // 画面が変わった時だけ、先頭へ戻して中身に移る
@@ -87,6 +100,7 @@ function useRoute() {
 
 function Root() {
   const [health, setHealth] = useState<Health>();
+  const [extensions, setExtensions] = useState<readonly Extension[]>([]);
   const { url, navigate } = useRoute();
   useEffect(() => {
     api.api.v1.health
@@ -94,10 +108,28 @@ function Root() {
       .then(async (res) => (res.ok ? (await res.json()).data : undefined))
       .then(setHealth)
       .catch(() => setHealth(undefined));
+    // 拡張は 100 件までを 1 度に読む。読めない間は拡張の画面を並べない
+    api.api.v1.extensions
+      .$get({ query: { limit: "100" } })
+      .then(async (res) => (res.ok ? (await res.json()).data : []))
+      .then(setExtensions)
+      .catch(() => setExtensions([]));
+  }, []);
+  useEffect(() => {
+    knownExtensions = extensions;
+    document.title = titleNow();
+  }, [extensions]);
+  const toggleExtension = useCallback(async (id: string, enabled: boolean) => {
+    const res = await api.api.v1.extensions[":extensionId"].$put({ param: { extensionId: id }, json: { enabled } }).catch(() => null);
+    if (!res?.ok) return;
+    const { data } = await res.json();
+    setExtensions((cur) => cur.map((e) => (e.id === data.id ? data : e)));
   }, []);
   return (
     <ApiContext value={api}>
-      <App health={health} url={url} navigate={navigate} />
+      <ExtensionFetchContext value={extensionOrigin}>
+        <App health={health} url={url} navigate={navigate} extensions={extensions} toggleExtension={toggleExtension} />
+      </ExtensionFetchContext>
     </ApiContext>
   );
 }

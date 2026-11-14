@@ -13,10 +13,12 @@ export type RuleContext = {
   ownerInfoItems: readonly string[];
   /** そのタスクが外部の文章を読んだ印 */
   external: boolean;
+  /** 設定で入れている拡張のツール。`<拡張 ID>.<ツール>` の形 */
+  extensionTools: readonly string[];
 };
 
-/** 初期のルール。オーナーの情報はどの項目も読ませない */
-export const DEFAULT_RULES: RuleContext = { workRoot: "/work", protectedPaths: [".github/workflows/"], ownerInfoItems: [], external: false };
+/** 初期のルール。オーナーの情報はどの項目も読ませず、拡張のツールはどれも入っていない */
+export const DEFAULT_RULES: RuleContext = { workRoot: "/work", protectedPaths: [".github/workflows/"], ownerInfoItems: [], external: false, extensionTools: [] };
 
 /** ルールの判断。marksExternal はそのタスクに外部の文章の印を付けるか */
 export type RuleDecision = {
@@ -91,6 +93,8 @@ export function decide(op: Operation, ctx: RuleContext): RuleDecision {
       return allow("ルールで許した項目");
     case "office.tool":
       return allow("社員のツール");
+    case "ext.tool":
+      return ctx.extensionTools.includes(op.target) ? allow("入れた拡張のツール") : deny("入れていない拡張のツールは断る");
     case "secret.read":
       return deny("鍵には触れない");
     case "guard.access":

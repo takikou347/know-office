@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, recordedText, toOperation, type OperationKind, type RuleContext } from "../src/index.ts";
 
+const EXT_NOTE_READ = "mcp__staff__ext__sample-notes__note_read";
+
 /** ツールの名前と入力、判断の前提の 1 組 */
 type Case = { name: string; tool: string; input: Record<string, unknown>; ctx?: Partial<RuleContext> };
 
@@ -132,6 +134,7 @@ const CASES: Record<OperationKind, { allow: Case[]; deny: Case[] }> = {
     ],
     deny: [],
   },
+  "ext.tool": { allow: [{ name: "入れた拡張のツール", tool: EXT_NOTE_READ, input: {}, ctx: { extensionTools: ["sample-notes.note_read"] } }], deny: [{ name: "入れていない拡張のツール", tool: EXT_NOTE_READ, input: {} }] },
   "secret.read": {
     allow: [],
     deny: [
@@ -223,9 +226,7 @@ describe("ルールの判断", () => {
   });
 
   it("形の違う入力は断る", () => {
-    for (const input of [null, "x", 1, []]) {
-      expect(decide(toOperation("Read", input), DEFAULT_RULES).allow).toBe(false);
-    }
+    for (const input of [null, "x", 1, []]) expect(decide(toOperation("Read", input), DEFAULT_RULES).allow).toBe(false);
   });
 
   describe("種類を 1 つ足すと、判断の漏れでチェックが落ちる", () => {

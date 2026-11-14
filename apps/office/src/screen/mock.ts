@@ -125,7 +125,3 @@ export const sessions = [
   { id: "s1", device: "Mac の Chrome", last: "今", current: true },
   { id: "s2", device: "iPhone の Safari", last: "11/13 22:10", current: false },
 ];
-
-export const extensions = [
-  { id: "career", title: "職務経歴をまとめる", installed: false },
-];

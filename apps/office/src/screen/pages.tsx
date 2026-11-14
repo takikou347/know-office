@@ -1,5 +1,5 @@
-// 8 画面と「その他」の中身。勤怠の表、目的と組織図、記録のサービスごとの内訳のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
-import type { Health } from "@know-office/core";
+// 8 画面と「その他」と入れた拡張の画面の中身。勤怠の表、目的と組織図、記録のサービスごとの内訳、設定の拡張のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
+import type { Extension, Health } from "@know-office/core";
 import {
   Alert,
   Badge,
@@ -22,13 +22,13 @@ import {
   Timeline,
   parseUnifiedDiff,
 } from "knowidea-ui";
-import { type ReactNode, Suspense, lazy, useState } from "react";
+import { type ReactNode, Suspense, lazy, useContext, useMemo, useState } from "react";
+import { EXTENSION_SCREENS, ExtensionFetchContext, extensionApi, withScreens } from "./extensions.ts";
 import { duration, jstTime } from "./format.ts";
 import { LiveNoticeList } from "./parts/notices.tsx";
 import {
   type Staff,
   type Task,
-  extensions,
   flows,
   guardRules,
   ideas,
@@ -47,9 +47,12 @@ import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { StopButton } from "./pages/guard/StopButton.tsx";
 import { RecordBreakdown } from "./pages/ledger/RecordBreakdown.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
-import { type ScreenId, moreScreens } from "./routes.ts";
+import { type ExtensionScreenId, type ScreenId, isExtensionScreen, moreScreensWith } from "./routes.ts";
 
 export type Navigate = (to: string, opts?: { replace?: boolean }) => void;
+
+/** 拡張を入れるか切る。入口の返事で一覧を直す */
+export type ToggleExtension = (id: string, enabled: boolean) => Promise<void>;
 
 // エディタは「直す」を押した時だけ読み込む
 const CodeEditor = lazy(() => import("knowidea-ui/editor").then((m) => ({ default: m.CodeEditor })));
@@ -510,8 +513,8 @@ function Records() {
   );
 }
 
-function Settings() {
-  const [ext, setExt] = useState(() => new Set(extensions.filter((e) => e.installed).map((e) => e.id)));
+function Settings({ extensions, toggleExtension }: { extensions: readonly Extension[]; toggleExtension: ToggleExtension }) {
+  const [busy, setBusy] = useState<string | null>(null);
   const [ended, setEnded] = useState<string[]>([]);
   return (
     <Section>
@@ -547,51 +550,77 @@ function Settings() {
         <p>鍵は入口だけが持ち、画面には出しません</p>
       </Part>
       <Part title="拡張">
-        <List
-          label="拡張"
-          items={extensions.map((e) => ({
-            id: e.id,
-            title: e.title,
-            meta: ext.has(e.id) ? "入れている" : "入れていない",
-            side: (
-              <Button
-                variant="secondary"
-                aria-label={`${e.title}を${ext.has(e.id) ? "外す" : "入れる"}`}
-                onClick={() =>
-                  setExt((cur) => {
-                    const next = new Set(cur);
-                    if (!next.delete(e.id)) next.add(e.id);
-                    return next;
-                  })
-                }
-              >
-                {ext.has(e.id) ? "外す" : "入れる"}
-              </Button>
-            ),
-          }))}
-        />
+        {extensions.length === 0 ? (
+          <p>拡張はありません</p>
+        ) : (
+          <List
+            label="拡張"
+            items={extensions.map((e) => ({
+              id: e.id,
+              title: e.title,
+              meta: e.enabled ? "入れている" : "入れていない",
+              side: (
+                <Button
+                  variant="secondary"
+                  aria-label={`${e.title}を${e.enabled ? "外す" : "入れる"}`}
+                  loading={busy === e.id}
+                  onClick={() => {
+                    setBusy(e.id);
+                    void toggleExtension(e.id, !e.enabled).finally(() => setBusy(null));
+                  }}
+                >
+                  {e.enabled ? "外す" : "入れる"}
+                </Button>
+              ),
+            }))}
+          />
+        )}
+        <p>外しても拡張のデータは消えず、入れ直すと戻ります</p>
       </Part>
     </Section>
   );
 }
 
-function More() {
+function More({ extensions }: { extensions: readonly Extension[] }) {
   return (
     <Section>
-      <List label="その他の画面" items={moreScreens.map((s) => ({ id: s.id, title: s.label, href: s.path }))} />
+      <List label="その他の画面" items={moreScreensWith(withScreens(extensions)).map((s) => ({ id: s.id, title: s.label, href: s.path }))} />
+    </Section>
+  );
+}
+
+/**
+ * 入れた拡張の画面を出す。拡張には、その拡張のルートを呼ぶ口だけを渡す
+ * @param props 拡張 ID
+ * @param props.id 拡張 ID
+ * @returns 拡張の画面
+ */
+function ExtensionPage({ id }: { id: string }) {
+  const origin = useContext(ExtensionFetchContext);
+  const api = useMemo(() => extensionApi(id, origin), [id, origin]);
+  const screen = EXTENSION_SCREENS[id];
+  if (!screen) return null;
+  return (
+    <Section>
+      <screen.Page api={api} />
     </Section>
   );
 }
 
 export interface PageProps {
-  screen: ScreenId | "more";
+  screen: ScreenId | ExtensionScreenId | "more";
   pathname: string;
   query: URLSearchParams;
   health?: Health;
   navigate: Navigate;
+  /** 入口が返した拡張 */
+  extensions: readonly Extension[];
+  /** 拡張を入れるか切る */
+  toggleExtension: ToggleExtension;
 }
 
-export function Page({ screen, pathname, query, health, navigate }: PageProps) {
+export function Page({ screen, pathname, query, health, navigate, extensions, toggleExtension }: PageProps) {
+  if (isExtensionScreen(screen)) return <ExtensionPage id={screen.slice("ext:".length)} />;
   switch (screen) {
     case "dashboard":
       return <Dashboard health={health} />;
@@ -608,9 +637,9 @@ export function Page({ screen, pathname, query, health, navigate }: PageProps) {
     case "records":
       return <Records />;
     case "settings":
-      return <Settings />;
+      return <Settings extensions={extensions} toggleExtension={toggleExtension} />;
     case "more":
-      return <More />;
+      return <More extensions={extensions} />;
     default:
       return screen satisfies never;
   }

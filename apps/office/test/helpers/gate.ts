@@ -4,6 +4,7 @@ import { createFakeAccess, type FakeAccess } from "../../dev/access.ts";
 import { createFakeClaude, type FakeClaude } from "../../dev/claude.ts";
 import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts";
 import type { Bindings } from "../../src/gate/env.ts";
+import type { ExtensionDefinition } from "../../src/gate/extensions/define.ts";
 import type { GuardDeps, ReviewAnswer } from "../../src/gate/guard/deps.ts";
 import { OfficeGuard } from "../../src/gate/guard/office-guard.ts";
 import { StaffGuard } from "../../src/gate/guard/staff-guard.ts";
@@ -157,9 +158,10 @@ function namespace<T>(stub: T) {
  * @param options 時刻と D1
  * @param options.clock 時刻
  * @param options.d1 手元の D1
+ * @param options.extensions 差し込む拡張。無ければ extensions/ から読み込んだ物
  * @returns ゲートウェイと、ログインの手伝い
  */
-export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Promise<TestGate> {
+export async function createTestGate(options: { clock: Clock; d1: TestD1; extensions?: readonly ExtensionDefinition[] }): Promise<TestGate> {
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
@@ -286,7 +288,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     MASTER_KEY,
     ANTHROPIC_API_KEY: ANTHROPIC_KEY,
   } as unknown as Bindings;
-  const app = createGate({ clock: options.clock, fetch: fetcher, guard: deps });
+  const app = createGate({ clock: options.clock, fetch: fetcher, guard: deps, ...(options.extensions ? { extensions: options.extensions } : {}) });
   const request = (path: string, init: RequestInit = {}) => Promise.resolve(app.request(path, init, env));
   return {
     app,

@@ -68,7 +68,9 @@ describe("共通のヘッダー", () => {
     expect(getRoutes.length).toBeGreaterThan(0);
     const results = await Promise.all(
       getRoutes.map(async (path) => {
-        const res = await call(path, { method: "PUT" });
+        // 同じパスで PUT を受けるルート (拡張のメモ) もあるので、そのパスに無いメソッドで呼ぶ
+        const method = ["PUT", "PATCH", "DELETE"].find((m) => !allowOf(path).split(", ").includes(m)) ?? "PATCH";
+        const res = await call(path, { method });
         return [path, res.status, res.headers.get("Allow")];
       }),
     );

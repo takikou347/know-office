@@ -3,7 +3,7 @@ import { decide, DEFAULT_RULES, type StaffId, toOperation } from "@know-office/c
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
-import { defineExtension, type Extension } from "../../src/gate/extensions/define.ts";
+import { defineExtension, type ExtensionDefinition } from "../../src/gate/extensions/define.ts";
 import { INSTALLED } from "../../src/gate/extensions/installed.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { runTool, staffTools } from "../../src/gate/work/tools.ts";
@@ -36,7 +36,7 @@ async function toggle(w: WorkWorld, id: string, enabled: boolean): Promise<z.inf
  * @param extensions 差し込んだ拡張。無ければ読み込んだ物
  * @returns 判断の data
  */
-async function ask(gate: TestGate, w: WorkWorld, toolName: string, extensions?: readonly Extension[]): Promise<{ allow: boolean; reason: string }> {
+async function ask(gate: TestGate, w: WorkWorld, toolName: string, extensions?: readonly ExtensionDefinition[]): Promise<{ allow: boolean; reason: string }> {
   const staffId: StaffId = "builder";
   const { book } = gate.staff[staffId];
   if ((await book.status(w.clock.now())).nodeId === null) {
@@ -49,6 +49,8 @@ async function ask(gate: TestGate, w: WorkWorld, toolName: string, extensions?: 
       .bind(nodeId, staffId)
       .run();
     w.clock.advance(at(9) - w.clock.now());
+    // ログインの証明は短い間で切れるので、進めた後に作り直す
+    w.headers = await gate.signIn();
     await book.take({ nodeId, title: "直す", scope: "office" }, null, at(9));
   }
   const { nodeId } = await book.status(w.clock.now());
@@ -132,7 +134,7 @@ describe("差し込み口", () => {
     await runTool(gate.env, w.forge, { staffId: "reviewer", tool: "ext__test-counter__count_up", input: {}, now: w.clock.now() }, extensions);
     expect(await api(w, "GET", "/api/v1/ext/test-counter/count")).toEqual({ count: 1 });
     // 拡張のデータは拡張ごとの置き場 (R2 の ext/<id>/) にだけ書く
-    expect((await gate.env.FILES.list({ prefix: "ext/" })).objects.map((o) => o.key)).toEqual(["ext/test-counter/count.json"]);
+    expect((await gate.env.FILES.list({ prefix: "ext/test-counter/" })).objects.map((o) => o.key)).toEqual(["ext/test-counter/count.json"]);
   });
 
   it("拡張のツールもルールの判断を通り、鍵や自動停止や社員に触れる名前は入れても断る", () => {

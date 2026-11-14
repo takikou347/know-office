@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.5.1
+  version: 1.6.0
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -5069,9 +5069,9 @@ paths:
       description: '処理の流れ:
 
 
-        1. 読み込んだ拡張機能と、`settings` の有効化の状態を返す'
+        1. 読み込んだ拡張機能を ID の順に並べ、`settings` の `extension.<拡張機能 ID>` の最新の値で有効化の状態を返す。行が無い拡張機能は無効とする'
       x-steps:
-      - 読み込んだ拡張機能と、`settings` の有効化の状態を返す
+      - 読み込んだ拡張機能を ID の順に並べ、`settings` の `extension.<拡張機能 ID>` の最新の値で有効化の状態を返す。行が無い拡張機能は無効とする
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -5096,10 +5096,14 @@ paths:
                 - data
                 - meta
                 additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -5115,7 +5119,7 @@ paths:
 
         1. 拡張機能が存在することを確認する
 
-        2. `settings` に追加し、監査ログに `extension.toggle` を記録する
+        2. `settings` に `extension.<拡張機能 ID>` の行を、最新のバージョンに 1 を足して追加し、監査ログに `extension.toggle` を記録する。無効にしても拡張機能のデータは消さない
 
 
         このルート固有のエラー:
@@ -5123,13 +5127,13 @@ paths:
 
         - 404 `not_found`: 拡張機能が存在しない
 
-        - 409 `conflict`: バージョンが異なる'
+        - 409 `conflict`: 同時に入れ切りされ、バージョンが異なる'
       x-steps:
       - 拡張機能が存在することを確認する
-      - '`settings` に追加し、監査ログに `extension.toggle` を記録する'
+      - '`settings` に `extension.<拡張機能 ID>` の行を、最新のバージョンに 1 を足して追加し、監査ログに `extension.toggle` を記録する。無効にしても拡張機能のデータは消さない'
       x-errors:
       - '404 `not_found`: 拡張機能が存在しない'
-      - '409 `conflict`: バージョンが異なる'
+      - '409 `conflict`: 同時に入れ切りされ、バージョンが異なる'
       parameters:
       - name: extensionId
         in: path
@@ -5155,6 +5159,125 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/Extension'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/ext/sample-notes/note:
+    get:
+      operationId: getSampleNote
+      tags:
+      - extensions
+      summary: 見本の拡張機能のメモを読む
+      description: '処理の流れ:
+
+
+        1. 拡張機能 `sample-notes` が有効であることを確認する
+
+        2. R2 の `ext/sample-notes/note.json` を読む。無ければ空のメモを返す
+
+
+        このルート固有のエラー:
+
+
+        - 404 `not_found`: 拡張機能が無効'
+      x-steps:
+      - 拡張機能 `sample-notes` が有効であることを確認する
+      - R2 の `ext/sample-notes/note.json` を読む。無ければ空のメモを返す
+      x-errors:
+      - '404 `not_found`: 拡張機能が無効'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SampleNote'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: updateSampleNote
+      tags:
+      - extensions
+      summary: 見本の拡張機能のメモを置き換える
+      description: '処理の流れ:
+
+
+        1. 拡張機能 `sample-notes` が有効であることを確認する
+
+        2. R2 の `ext/sample-notes/note.json` を置き換え、監査ログに `extension.write` を記録する
+
+
+        このルート固有のエラー:
+
+
+        - 404 `not_found`: 拡張機能が無効'
+      x-steps:
+      - 拡張機能 `sample-notes` が有効であることを確認する
+      - R2 の `ext/sample-notes/note.json` を置き換え、監査ログに `extension.write` を記録する
+      x-errors:
+      - '404 `not_found`: 拡張機能が無効'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSampleNoteInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SampleNote'
                   meta:
                     $ref: '#/components/schemas/Meta'
                 required:
@@ -8180,6 +8303,24 @@ components:
           type: boolean
       required:
       - enabled
+      additionalProperties: false
+    SampleNote:
+      type: object
+      properties:
+        body:
+          type: string
+          maxLength: 2000
+      required:
+      - body
+      additionalProperties: false
+    UpdateSampleNoteInput:
+      type: object
+      properties:
+        body:
+          type: string
+          maxLength: 2000
+      required:
+      - body
       additionalProperties: false
     HeartbeatInput:
       type: object

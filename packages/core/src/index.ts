@@ -102,6 +102,7 @@ export {
   ServiceKind,
   ServiceStage,
 } from "./schemas/services.ts";
+export { EXTENSION_ID, EXTENSION_TOOL, Extension, ToggleExtensionInput } from "./schemas/extensions.ts";
 export { AskBossTool } from "./schemas/tools/ask-boss.ts";
 export { AskOwnerTool } from "./schemas/tools/ask-owner.ts";
 export { IdeaAddTool } from "./schemas/tools/idea-add.ts";

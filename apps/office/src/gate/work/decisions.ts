@@ -19,6 +19,8 @@ import {
 import { drizzle } from "drizzle-orm/d1";
 import { toolCalls } from "../db/records.ts";
 import type { Bindings, GateEnv } from "../env.ts";
+import type { ExtensionDefinition } from "../extensions/define.ts";
+import { enabledExtensions } from "../extensions/state.ts";
 import { ensureRunning, staffOf } from "../guard/actions.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
@@ -87,8 +89,9 @@ async function count(
  * ワークスペースの受け手に、ルールの判断のルートを足す
  * @param app 送ったワークスペースを結んだ受け手の Hono
  * @param caller 送ったワークスペース
+ * @param extensions 読み込んだ拡張
  */
-export function decisionRoutes(app: OpenAPIHono<GateEnv>, caller: Caller): void {
+export function decisionRoutes(app: OpenAPIHono<GateEnv>, caller: Caller, extensions: readonly ExtensionDefinition[]): void {
   app.openapi(decideRoute, async (c) => {
     const input = c.req.valid("json");
     const now = c.var.clock.now();
@@ -102,6 +105,8 @@ export function decisionRoutes(app: OpenAPIHono<GateEnv>, caller: Caller): void 
       ...DEFAULT_RULES,
       protectedPaths: await protectedPathsOf(c.env, node.scope),
       external: op.kind === "owner_info.read" && (await staff.externalSources(nodeId)).length > 0,
+      // 拡張のツールは、判断のたびに設定で入れている拡張から読む
+      extensionTools: op.kind === "ext.tool" ? (await enabledExtensions(c.env.DB, extensions)).flatMap((e) => Object.keys(e.tools).map((t) => `${e.id}.${t}`)) : [],
     };
     const decision = decide(op, ctx);
     const target = recordedText(op.target);

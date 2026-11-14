@@ -1,9 +1,12 @@
 // ゲートウェイ。API はすべて /api/v1 の下に置き、ほかのパスは画面のファイルを返す
 import type { Clock, Fetcher } from "@know-office/core";
 import { createApp } from "./app.ts";
+import type { ExtensionDefinition } from "./extensions/define.ts";
+import { INSTALLED } from "./extensions/installed.ts";
 import type { GuardDeps } from "./guard/deps.ts";
 import { registerComponents } from "./openapi.ts";
 import { attendanceRoutes } from "./routes/attendance.ts";
+import { extensionRoutes } from "./routes/extensions.ts";
 import { guardRoutes } from "./routes/guard.ts";
 import { nodeRoutes } from "./routes/nodes.ts";
 import { noticeRoutes } from "./routes/notices.ts";
@@ -21,15 +24,17 @@ import { system } from "./routes/system.ts";
  * @param options.clock 今の時刻
  * @param options.fetch 外への fetch
  * @param options.guard 自動停止が外へ頼む口
+ * @param options.extensions 差し込む拡張。無ければ extensions/ から読み込んだ物
  * @returns ゲートウェイ
  */
-export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps } = {}) {
+export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps; extensions?: readonly ExtensionDefinition[] } = {}) {
   const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", attendanceRoutes)
     .route("/", nodeRoutes)
     .route("/", orgRoutes)
     .route("/", serviceRoutes)
     .route("/", settingRoutes)
-    .route("/", noticeRoutes);
+    .route("/", noticeRoutes)
+    .route("/", extensionRoutes(options.extensions ?? INSTALLED));
   registerComponents(app);
   return app;
 }

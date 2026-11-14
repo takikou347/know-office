@@ -20,6 +20,9 @@ import { drizzle } from "drizzle-orm/d1";
 import type { ZodType } from "zod";
 import { approvals, nodes, reviews } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
+import type { ExtensionDefinition, ExtensionTool } from "../extensions/define.ts";
+import { INSTALLED } from "../extensions/installed.ts";
+import { enabledExtensions, extensionStore } from "../extensions/state.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
@@ -328,17 +331,47 @@ const TOOLS: Record<string, Tool> = {
   service_close_request: { schema: ServiceCloseRequestTool, run: serviceCloseRequest },
 };
 
+/** 拡張のツールのゲートウェイでの名前。`ext__<拡張 ID>__<ツール>` */
+const EXT_TOOL_NAME = /^ext__([a-z][a-z\d-]*)__([a-z][a-z\d_]*)$/;
+
+/**
+ * 入れている拡張のツールを、ゲートウェイでの名前で並べる
+ * @param env バインディング
+ * @param extensions 読み込んだ拡張
+ * @returns 名前からツールと拡張への対応
+ */
+async function extensionTools(env: Bindings, extensions: readonly ExtensionDefinition[]): Promise<Map<string, { ext: ExtensionDefinition; tool: ExtensionTool }>> {
+  const out = new Map<string, { ext: ExtensionDefinition; tool: ExtensionTool }>();
+  for (const ext of await enabledExtensions(env.DB, extensions)) {
+    for (const [name, tool] of Object.entries(ext.tools)) out.set(`ext__${ext.id}__${name}`, { ext, tool });
+  }
+  return out;
+}
+
+/**
+ * 社員が今使えるツールの名前を並べる。役のツールに、入れている拡張のツールを足す
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param extensions 読み込んだ拡張
+ * @returns ゲートウェイでのツールの名前
+ */
+export async function staffTools(env: Bindings, staffId: StaffId, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<string[]> {
+  return [...ROLE_TOOLS[staffId], ...(await extensionTools(env, extensions)).keys()];
+}
+
 /**
  * 社員のツールを 1 回動かす。`POST /ws/v1/tools/{toolName}` が作業トークンと判断を確かめた後に呼ぶ
  * @param env バインディング
  * @param forge GitHub を呼ぶ口
  * @param call 呼び出し
+ * @param extensions 読み込んだ拡張
  * @returns 社員に返す答え。中身は JSON の文字列
- * @throws not_found その社員の役では使えないツールの時
+ * @throws not_found その社員の役では使えないツールの時、入れていない拡張のツールの時
  * @throws validation_failed 入力がツールの形に合わない時
  * @throws conflict 今のタスクが無いなど、今の状態では動かせない時
  */
-export async function runTool(env: Bindings, forge: Forge, call: ToolCall): Promise<ToolResult> {
+export async function runTool(env: Bindings, forge: Forge, call: ToolCall, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<ToolResult> {
+  if (EXT_TOOL_NAME.test(call.tool)) return runExtensionTool(env, call, extensions);
   const tool = ROLE_TOOLS[call.staffId].includes(call.tool) ? TOOLS[call.tool] : undefined;
   if (!tool) throw new AppError("not_found", "この社員の役では使えないツール");
   const input = tool.schema.safeParse(call.input);
@@ -346,5 +379,25 @@ export async function runTool(env: Bindings, forge: Forge, call: ToolCall): Prom
   // 入力は上でツールごとのスキーマに通した物なので、そのツールの中身に渡せる
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const result = await tool.run(env, forge, call, input.data as never);
+  return { content: JSON.stringify(result), isError: false };
+}
+
+/**
+ * 入れている拡張のツールを動かす。拡張には時刻とその拡張の置き場だけを渡す
+ * @param env バインディング
+ * @param call 呼び出し
+ * @param extensions 読み込んだ拡張
+ * @returns 社員に返す答え
+ * @throws not_found 入れていない拡張のツールの時
+ * @throws validation_failed 入力がツールの形に合わない時
+ */
+async function runExtensionTool(env: Bindings, call: ToolCall, extensions: readonly ExtensionDefinition[]): Promise<ToolResult> {
+  const found = (await extensionTools(env, extensions)).get(call.tool);
+  if (!found) throw new AppError("not_found", "入れていない拡張のツール");
+  const input = found.tool.schema.safeParse(call.input);
+  if (!input.success) throw new AppError("validation_failed", "ツールの入力の形が違う");
+  // 入力は上でツールのスキーマに通した物なので、そのツールの中身に渡せる
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  const result = await found.tool.run({ now: call.now, store: extensionStore(env.FILES, found.ext.id) }, input.data as never);
   return { content: JSON.stringify(result), isError: false };
 }

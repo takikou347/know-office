@@ -5,6 +5,8 @@ import { createMiddleware } from "hono/factory";
 import { createApp } from "./app.ts";
 import { bodyShape } from "./body.ts";
 import type { Bindings, GateEnv } from "./env.ts";
+import type { ExtensionDefinition } from "./extensions/define.ts";
+import { INSTALLED } from "./extensions/installed.ts";
 import { staffOf } from "./guard/actions.ts";
 import type { GuardDeps } from "./guard/deps.ts";
 import { problems } from "./openapi.ts";
@@ -30,6 +32,8 @@ export type EgressOptions = {
   guard: GuardDeps;
   /** 外への fetch。テストは代わりの Claude API に回す */
   fetch?: Fetcher;
+  /** 差し込む拡張。無ければ extensions/ から読み込んだ物 */
+  extensions?: readonly ExtensionDefinition[];
 };
 
 const heartbeatRoute = createRoute({
@@ -116,7 +120,7 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     await staffOf(c.env, staffId).appendTranscript(nodeId, input, now).catch(rethrowRpc);
     return noContent(c);
   });
-  decisionRoutes(app, caller);
+  decisionRoutes(app, caller, options.extensions ?? INSTALLED);
   app.all("*", (c) => {
     const host = new URL(c.req.url).hostname;
     // GitHub のプロキシ (tasks.md の 8.4) をつなぐまでは、作業トークンを確かめた後に断る

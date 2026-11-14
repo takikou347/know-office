@@ -10,6 +10,7 @@ export const OPERATION_KINDS = [
   "agent.spawn",
   "owner_info.read",
   "office.tool",
+  "ext.tool",
   "secret.read",
   "guard.access",
   "staff.manage",
@@ -19,7 +20,7 @@ export const OPERATION_KINDS = [
 /** 操作の種類。`OPERATION_KINDS` の 1 つ */
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
-/** ルールで判断する操作。target は種類ごとの相手 (道、命令、URL、言葉、項目) で、入力に無ければ空 */
+/** ルールで判断する操作。target は種類ごとの相手 (道、命令、URL、言葉、項目、拡張のツールの `<拡張 ID>.<ツール>`) で、入力に無ければ空 */
 export type Operation = {
   /** 操作の種類 */
   kind: OperationKind;
@@ -36,6 +37,8 @@ import { pathsOf, shellSegments } from "./shell.ts";
 
 // 社員のツールは MCP の受け手 staff が出す。SDK には mcp__staff__<名前> で届く
 const STAFF_TOOL = /^mcp__staff__(\w+)$/;
+// 拡張のツールは同じ受け手が mcp__staff__ext__<拡張 ID>__<ツール> で出す。形は core の EXTENSION_ID と EXTENSION_TOOL と同じ
+const EXT_TOOL = /^mcp__staff__ext__([a-z][a-z\d]*(?:-[a-z\d]+)*)__([a-z][a-z\d]*(?:_[a-z\d]+)*)$/;
 const OFFICE_TOOLS = ["checkpoint", "report", "ask_boss"];
 
 // 鍵の形 (GitHub と Anthropic の鍵の頭、Bearer)、鍵の環境変数、環境変数を全部出す命令。鍵の頭は語の途中に埋めても当たるよう \b を付けない
@@ -144,6 +147,15 @@ export function toOperation(toolName: string, toolInput: unknown): Operation {
   const op = (kind: OperationKind, target: string, paths: string[] = []): Operation => ({ kind, tool: toolName, target, paths });
   // 鍵の置き場を指す読み出しは secret.read にし、自動停止の sensitive_access に渡す
   const read = (target: string, paths: string[]): Operation => op(paths.some(secretPath) ? "secret.read" : "file.read", target, paths);
+  const ext = EXT_TOOL.exec(toolName);
+  if (ext) {
+    const [, id = "", name = ""] = ext;
+    // 拡張のツールも、鍵、自動停止、社員に触れる名前は社員のツールと同じ種類にして断る
+    const hit = sensitive(name, "") ?? sensitive(id, "");
+    return op(hit ?? "ext.tool", `${id}.${name}`);
+  }
+  // 形の違う拡張のツールの名前は、社員のツールと取り違えないよう知らないツールにする
+  if (toolName.startsWith("mcp__staff__ext__")) return op("unknown", toolName);
   const staff = STAFF_TOOL.exec(toolName)?.[1];
   if (staff !== undefined) {
     const hit = sensitive(staff, "");

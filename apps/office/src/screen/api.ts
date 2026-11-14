@@ -4,7 +4,7 @@ import { createContext } from "react";
 import { z } from "zod";
 import type { Gate } from "../gate/index.ts";
 
-type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const ProblemCode = z.object({ code: z.string() }).loose();
 
