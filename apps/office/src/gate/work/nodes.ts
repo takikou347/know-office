@@ -116,16 +116,16 @@ export type NewNode = {
 };
 
 /**
- * 目的、目標、プロジェクト、タスクを 1 つ作り、出来事と監査ログを残す。受け付けのプロジェクトは親を持たずに作れる
+ * 作る物を確かめ、足す行を組み立てる。書くのは呼ぶ側
  * @param env バインディング
  * @param input 作る物
  * @param actor 誰がいつ
- * @returns 作った行
+ * @returns 足す行
  * @throws validation_failed タスクでない物に種類、担当、優先度を付けた時、タスクに種類が無い時
  * @throws not_found 親が無い時
  * @throws conflict 親の種類が階層に合わない時、レビューのタスクを作った社員と同じモデルか、作った社員の分からないレビューのタスクを割り振る時
  */
-export async function createNode(env: Bindings, input: NewNode, actor: Actor): Promise<NodeRow> {
+export async function newNodeRow(env: Bindings, input: NewNode, actor: Actor): Promise<NodeRow> {
   const isTask = input.kind === "task";
   if (!isTask && (input.taskKind !== undefined || input.assignee !== undefined || input.priority !== undefined)) {
     throw new AppError("validation_failed", "種類、担当、優先度を持てるのはタスクだけ");
@@ -155,9 +155,34 @@ export async function createNode(env: Bindings, input: NewNode, actor: Actor): P
     updatedAt: actor.now,
   };
   if (row.taskKind === "review" && row.assignee !== null) await checkModels(env.DB, row, row.assignee);
-  await drizzle(env.DB).insert(nodes).values(row);
+  return row;
+}
+
+/**
+ * 足した行の出来事と監査ログを残す
+ * @param env バインディング
+ * @param row 足した行
+ * @param actor 誰がいつ
+ */
+export async function recordCreated(env: Bindings, row: NodeRow, actor: Actor): Promise<void> {
   await appendNodeEvent(env, { nodeId: row.id, staffId: staffOrNull(actor.by), kind: "created", detail: { by: actor.by } }, actor);
   await auditFrom(env, { at: actor.now, actor: actor.by, action: "node.create", target: row.id, scope: row.scope, detail: { kind: row.kind, parentId: row.parentId }, traceId: actor.traceId });
+}
+
+/**
+ * 目的、目標、プロジェクト、タスクを 1 つ作り、出来事と監査ログを残す。受け付けのプロジェクトは親を持たずに作れる
+ * @param env バインディング
+ * @param input 作る物
+ * @param actor 誰がいつ
+ * @returns 作った行
+ * @throws validation_failed タスクでない物に種類、担当、優先度を付けた時、タスクに種類が無い時
+ * @throws not_found 親が無い時
+ * @throws conflict 親の種類が階層に合わない時、レビューのタスクを作った社員と同じモデルか、作った社員の分からないレビューのタスクを割り振る時
+ */
+export async function createNode(env: Bindings, input: NewNode, actor: Actor): Promise<NodeRow> {
+  const row = await newNodeRow(env, input, actor);
+  await drizzle(env.DB).insert(nodes).values(row);
+  await recordCreated(env, row, actor);
   return row;
 }
 

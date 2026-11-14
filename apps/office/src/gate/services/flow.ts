@@ -12,14 +12,16 @@ import {
   type ServiceStage,
 } from "@know-office/core";
 import { and, asc, desc, eq, gt, type SQL, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
-import { services, serviceEvents } from "../db/main.ts";
+import { nodes, services, serviceEvents } from "../db/main.ts";
 import { serviceMetrics } from "../db/records.ts";
+import { insertWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
 import { notifyStaff } from "../work/loop.ts";
-import { type Actor, createNode, intakeProject, recordsOf } from "../work/nodes.ts";
+import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated, recordsOf } from "../work/nodes.ts";
 
 /** services の行 */
 export type ServiceRow = typeof services.$inferSelect;
@@ -34,6 +36,9 @@ const iso = (at: number) => new Date(at).toISOString();
 
 // service_events の detail は JSON のカラムなので、形を確かめてから返す
 const EventDetail = z.record(z.string(), z.unknown());
+
+// batch の最後の更新が返した行
+const Moved = z.array(z.object({ id: z.string() }));
 
 /**
  * services の行を一覧の 1 件にする
@@ -58,26 +63,27 @@ export async function findService(db: D1Database, serviceId: string): Promise<Se
 }
 
 /**
- * 段階の出来事を足す文を作る。読んだ段階のままの時だけ足し、同時に移した 2 つの片方を書かない
- * @param db 今の状態の D1
- * @param input サービス、読んだ段階、移る先、誰、中身
+ * サービスが読んだ段階のままかを確かめる SQL の条件を作る
+ * @param serviceId サービス ID
+ * @param stage 読んだ段階
+ * @returns SQL の条件
+ */
+export function stillAt(serviceId: string, stage: ServiceStage): SQL {
+  return sql`EXISTS (SELECT 1 FROM ${services} WHERE ${services.id} = ${serviceId} AND ${services.stage} = ${stage})`;
+}
+
+/**
+ * 段階の出来事の行を作る
+ * @param input サービス、移る先、誰、中身
  * @param input.serviceId サービス ID
- * @param input.from 読んだ段階。null なら確かめない (足したばかりの案)
  * @param input.to 移る先
  * @param input.by `owner`、社員 ID、`system`
  * @param input.detail 理由などの中身
  * @param now 今の時刻
- * @returns D1 の batch に渡す文
+ * @returns service_events の行
  */
-export function stageEvent(db: D1Database, input: { serviceId: string; from: ServiceStage | null; to: ServiceStage; by: string; detail: Record<string, unknown> }, now: number) {
-  const values = { id: newId(clockAt(now)), at: now, serviceId: input.serviceId, kind: "stage" as const, by: input.by, detail: { ...input.detail, to: input.to } };
-  const orm = drizzle(db);
-  if (input.from === null) return orm.insert(serviceEvents).values(values);
-  return orm
-    .insert(serviceEvents)
-    .select(
-      sql`SELECT ${values.id}, ${values.at}, ${values.serviceId}, ${values.kind}, ${values.by}, ${JSON.stringify(values.detail)} WHERE EXISTS (SELECT 1 FROM ${services} WHERE ${services.id} = ${input.serviceId} AND ${services.stage} = ${input.from})`,
-    );
+function stageEvent(input: { serviceId: string; to: ServiceStage; by: string; detail: Record<string, unknown> }, now: number): typeof serviceEvents.$inferSelect {
+  return { id: newId(clockAt(now)), at: now, serviceId: input.serviceId, kind: "stage", by: input.by, detail: { ...input.detail, to: input.to } };
 }
 
 /**
@@ -105,25 +111,21 @@ export async function createIdea(env: Bindings, input: CreateIdeaInput, actor: A
     createdAt: actor.now,
   };
   const orm = drizzle(env.DB);
-  await orm.batch([orm.insert(services).values(row), stageEvent(env.DB, { serviceId: row.id, from: null, to: "idea", by: actor.by, detail: {} }, actor.now)]);
+  await orm.batch([orm.insert(services).values(row), orm.insert(serviceEvents).values(stageEvent({ serviceId: row.id, to: "idea", by: actor.by, detail: {} }, actor.now))]);
   return row;
 }
 
 /**
- * 社長に、案を調べるタスクを足す。アイデアの検討はどのサービスにも入らないので office の受け付けの下に置く
+ * 社長に案を調べさせるタスクの行を組み立てる。アイデアの検討はどのサービスにも入らないので office の受け付けの下に置く。書くのは段階の更新と同じ batch
  * @param env バインディング
- * @param row 検討に移したサービスの行
- * @param actor 移した人
+ * @param row 検討に移すサービスの行
+ * @param actor 移す人
+ * @returns nodes の行
  */
-async function addStudyTask(env: Bindings, row: ServiceRow, actor: Actor): Promise<void> {
+async function studyTask(env: Bindings, row: ServiceRow, actor: Actor): Promise<NodeRow> {
   const project = await intakeProject(env, "office", actor);
   const body = [`サービス ID: ${row.id}`, `狙い: ${row.aim ?? ""}`, `使う人: ${row.users ?? ""}`, `調べる事: ${STUDY_POINTS.join("、")}`, "調べた材料は study_submit で出す"].join("\n");
-  await createNode(
-    env,
-    { kind: "task", parentId: project.id, scope: "office", title: `調べる: ${row.name}`, body, taskKind: "plan", assignee: "president", source: `study:${row.id}` },
-    actor,
-  );
-  await notifyStaff(env, "president", actor.now, false);
+  return newNodeRow(env, { kind: "task", parentId: project.id, scope: "office", title: `調べる: ${row.name}`, body, taskKind: "plan", assignee: "president", source: `study:${row.id}` }, actor);
 }
 
 /**
@@ -143,45 +145,57 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
   if (input.to === "prototype" && input.staffId === undefined) {
     throw new AppError("validation_failed", "作ると決める時は担当の社員が要る", { errors: [{ pointer: "#/staffId", detail: "prototype に進める時に要る" }] });
   }
+  // TODO(#71): service に進める時は、サービスの deployWhen のチェックとレビュー担当の承認を GitHub から確かめる
   const change: Partial<ServiceRow> = { stage: input.to };
   if (input.to === "prototype") change.staffId = input.staffId ?? null;
   if (input.to === "dropped") change.droppedReason = input.reason;
   const orm = drizzle(env.DB);
-  // 出来事を先に足す。後の更新で段階が変わるので、出来事の条件は読んだ段階で見る
-  const [, moved] = await orm.batch([
-    stageEvent(env.DB, { serviceId, from: row.stage, to: input.to, by: actor.by, detail: { reason: input.reason } }, actor.now),
+  const task = input.to === "study" ? await studyTask(env, row, actor) : null;
+  const still = stillAt(serviceId, row.stage);
+  // 出来事と調べるタスクを先に足す。後の更新で段階が変わるので、どれも読んだ段階のままの時だけ書く。1 つでも失敗すれば全部を書かない
+  const statements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
+    insertWhen(env.DB, serviceEvents, stageEvent({ serviceId, to: input.to, by: actor.by, detail: { reason: input.reason } }, actor.now), still),
+    ...(task ? [insertWhen(env.DB, nodes, task, still)] : []),
     orm
       .update(services)
       .set(change)
       .where(and(eq(services.id, serviceId), eq(services.stage, row.stage)))
-      .returning(),
-  ]);
-  const [next] = moved;
-  if (!next) throw new AppError("conflict", "段階が変わった");
-  if (input.to === "study") await addStudyTask(env, next, actor);
-  return next;
+      .returning({ id: services.id }),
+  ];
+  const results: unknown[] = await orm.batch(statements);
+  if (Moved.parse(results.at(-1)).length === 0) throw new AppError("conflict", "段階が変わった");
+  if (task) {
+    await recordCreated(env, task, actor);
+    await notifyStaff(env, "president", actor.now, false);
+  }
+  return { ...row, ...change };
 }
 
 /**
- * 社長が調べた材料を R2 に置き、study_key で指す。検討の段階の案だけが受ける
+ * 社長が調べた材料を R2 に置き、study_key で指す。検討の段階の案だけが受ける。2 度目に出すと新しい材料に替わる。前の材料は R2 に残し、上書きしない
  * @param env バインディング
  * @param serviceId サービス ID
  * @param body 材料の Markdown
+ * @param now 今の時刻
  * @returns 置いた鍵
  * @throws not_found サービスが無い時
- * @throws conflict 検討の段階でない時
+ * @throws conflict 検討の段階でない時。置いている間に段階が変わった時は、置いた材料を消す
  */
-export async function submitStudy(env: Bindings, serviceId: string, body: string): Promise<string> {
+export async function submitStudy(env: Bindings, serviceId: string, body: string, now: number): Promise<string> {
   const row = await findService(env.DB, serviceId);
   if (row.stage !== "study") throw new AppError("conflict", "検討の段階でない");
-  const key = `${STUDY_PREFIX}${serviceId}.md`;
+  // 出すたびに鍵を変え、study_key を替えるまで前の材料を読めるままにする
+  const key = `${STUDY_PREFIX}${serviceId}/${newId(clockAt(now))}.md`;
   await env.FILES.put(key, body, { httpMetadata: { contentType: "text/markdown; charset=utf-8" } });
   const moved = await drizzle(env.DB)
     .update(services)
     .set({ studyKey: key })
     .where(and(eq(services.id, serviceId), eq(services.stage, "study")))
     .returning({ id: services.id });
-  if (moved.length === 0) throw new AppError("conflict", "検討の段階でない");
+  if (moved.length === 0) {
+    await env.FILES.delete(key);
+    throw new AppError("conflict", "検討の段階でない");
+  }
   return key;
 }
 
@@ -277,7 +291,7 @@ export async function loadService(env: Bindings, serviceId: string, now: number)
 }
 
 /**
- * 閉じる案の承認で、サービスを閉じる文を作る。承認がまだ決まっていない時だけ書く
+ * 閉じる案の承認で、サービスを閉じる文を作る。承認を書いた後に置き、この承認が承認済みで、サービスが読んだ段階のままの時だけ書く
  * @param db 今の状態の D1
  * @param input サービス、承認、理由
  * @param input.serviceId サービス ID
@@ -285,21 +299,17 @@ export async function loadService(env: Bindings, serviceId: string, now: number)
  * @param input.approvalId 承認の ID
  * @param input.reason 社員が出した理由
  * @param now 今の時刻
- * @param pending 承認がまだ決まっていない事を確かめる SQL の条件
+ * @param approved この承認を承認済みにした事を確かめる SQL の条件
  * @returns D1 の batch に渡す、出来事を足す文とサービスを閉じる文
  */
-export function closeStatements(db: D1Database, input: { serviceId: string; from: ServiceStage; approvalId: string; reason: string }, now: number, pending: SQL) {
-  const orm = drizzle(db);
-  const event = { id: newId(clockAt(now)), detail: JSON.stringify({ reason: input.reason, approvalId: input.approvalId, to: "closed" }) };
+export function closeStatements(db: D1Database, input: { serviceId: string; from: ServiceStage; approvalId: string; reason: string }, now: number, approved: SQL): BatchItem<"sqlite">[] {
+  const when = and(approved, stillAt(input.serviceId, input.from)) ?? approved;
+  const event = stageEvent({ serviceId: input.serviceId, to: "closed", by: "owner", detail: { reason: input.reason, approvalId: input.approvalId } }, now);
   return [
-    orm
-      .insert(serviceEvents)
-      .select(
-        sql`SELECT ${event.id}, ${now}, ${input.serviceId}, 'stage', 'owner', ${event.detail} WHERE ${pending} AND EXISTS (SELECT 1 FROM ${services} WHERE ${services.id} = ${input.serviceId} AND ${services.stage} = ${input.from})`,
-      ),
-    orm
+    insertWhen(db, serviceEvents, event, when),
+    drizzle(db)
       .update(services)
       .set({ stage: "closed" })
-      .where(and(eq(services.id, input.serviceId), eq(services.stage, input.from), pending)),
-  ] as const;
+      .where(and(eq(services.id, input.serviceId), eq(services.stage, input.from), approved)),
+  ];
 }

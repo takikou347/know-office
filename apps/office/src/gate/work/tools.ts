@@ -46,10 +46,11 @@ type Run = (env: Bindings, forge: Forge, call: ToolCall, input: never) => Promis
 type Tool = { schema: ZodType; run: Run };
 
 /** 役ごとに使えるツール。ここに無いツールは not_found で断る */
+// TODO(#72): idea_add、study_submit、service_close_request をルールの判断の操作 (core の rules/operation.ts) に足す
 const ROLE_TOOLS: Record<StaffId, readonly string[]> = {
   president: ["node_create", "node_assign", "staff_request", "study_submit", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
   builder: ["pr_open", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
-  reviewer: ["review_submit", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
+  reviewer: ["review_submit", "idea_add", "ask_boss", "ask_owner"],
 };
 
 /** レビューのタスクを割り振る社員 */
@@ -179,7 +180,7 @@ async function ideaAdd(env: Bindings, _forge: Forge, call: ToolCall, input: Idea
  * @returns 材料を置いた鍵
  */
 async function studySubmit(env: Bindings, _forge: Forge, call: ToolCall, input: StudySubmitTool): Promise<{ key: string }> {
-  const key = await submitStudy(env, input.serviceId, input.body);
+  const key = await submitStudy(env, input.serviceId, input.body, call.now);
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "service.study", target: input.serviceId, scope: "office", detail: { key }, traceId: call.traceId });
   return { key };
 }
