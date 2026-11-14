@@ -37,6 +37,9 @@ function sleep(ms: number): Promise<void> {
 
 /** ワークスペースのコンテナの DO。`idFromName(<社員 ID>)` で社員 1 人に 1 つ。社員 DO とゲートウェイだけが RPC で呼ぶ */
 export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceContainer {
+  /** この DO のコンテナを包む物。起こしている途中の物を呼び出しの間で分け合うので、1 つだけ作る */
+  #held: WorkspaceBox<Fetcher> | undefined;
+
   /**
    * コンテナを起こし、/v1/health が返るまで待つ
    * @param staffId 社員 ID
@@ -49,11 +52,11 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
   }
 
   /**
-   * コンテナを止める
+   * コンテナを止める。起こしている途中なら、起こし終えてから止める
    * @returns 無し
    */
   async stop(): Promise<null> {
-    if (this.ctx.container?.running) await this.ctx.container.destroy();
+    await this.#box(await this.#staffId()).stop();
     return null;
   }
 
@@ -96,7 +99,7 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
   }
 
   /**
-   * コンテナを包む
+   * コンテナを包む。初めの 1 回だけ作り、後は同じ物を返す
    * @param staffId 社員 ID
    * @returns WorkspaceBox
    * @throws internal コンテナが無い、社員 ID が違う時
@@ -105,6 +108,7 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
     const container = this.ctx.container;
     const parsed = StaffId.safeParse(staffId);
     if (!container || !parsed.success || this.ctx.id.name !== parsed.data) throw new AppError("internal", "ワークスペースのコンテナが無い");
+    if (this.#held) return this.#held;
     const caller: Caller = { staffId: parsed.data, workspaceId: this.ctx.id.toString() };
     // ctx.container は getTcpPort の Fetcher を返す。WorkspaceBox が使う fetch だけを持つ
     const like: ContainerLike<Fetcher> = container;
@@ -114,11 +118,12 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
       get: async () => z.string().optional().parse(await storage.get(WORKSPACE_KEY)),
       put: (key: string) => storage.put(WORKSPACE_KEY, key),
     };
-    return new WorkspaceBox(like, (props) => this.ctx.exports.WorkspaceEgress({ props }), caller, {
+    this.#held = new WorkspaceBox(like, (props) => this.ctx.exports.WorkspaceEgress({ props }), caller, {
       wait: sleep,
       keys,
       notifyDown: () => noticeWorkspaceDown(this.env.DB, parsed.data, systemClock.now()),
     });
+    return this.#held;
   }
 
   /**

@@ -1,17 +1,15 @@
 // ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替えを受ける (社員が考えるの 1.3)
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { AppError, health, PROBLEMS, RunInput, TicketInput } from "@know-office/core";
+import { AppError, health, log, PROBLEMS, RunInput, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
 import type { Runner } from "./run.ts";
 
 /** 受ける本文の上限 (1MB) */
 const MAX_BODY_BYTES = 1024 * 1024;
 
-/** ワークスペースの DO が起こす時に鍵を渡す環境変数の名前 */
-export const WORKSPACE_KEY_ENV = "WORKSPACE_KEY";
-
 /**
- * 起こした時の鍵を環境変数から取り出して消す。SDK と社員のコマンドは子のプロセスで動き、process.env を受け継ぐので、先に消す
+ * 起こした時の鍵を環境変数から取り出し、process.env から消す。SDK と社員のコマンドは子のプロセスで動き、process.env を受け継ぐので、先に消す
+ * 消しても /proc/<pid>/environ には残り、サーバーと同じ uid の社員はそこやメモリから鍵を読める。この鍵が防ぐのは、鍵を知らずに 8080 番を直に呼ぶ事と、子のプロセスへの受け継ぎだけ
  * @param env 環境変数。本番は process.env
  * @returns 鍵。無ければ空
  */
@@ -99,7 +97,11 @@ async function handle(runner: Runner, key: string, req: IncomingMessage, res: Se
     return;
   }
   // コンテナの中の社員からも 8080 番に届くので、ゲートウェイの鍵の無い要求は道を探す前に断る
-  if (!fromGateway(req, key)) throw new AppError("unauthenticated", "ゲートウェイの鍵が無いか違う");
+  if (!fromGateway(req, key)) {
+    // 中の社員が試した跡を残す。本文と Authorization は出さない
+    log("warn", "workspace_unauthenticated", { method: req.method ?? "", route: (req.url ?? "").split("?")[0] });
+    throw new AppError("unauthenticated", "ゲートウェイの鍵が無いか違う");
+  }
   if (route === "POST /v1/runs") {
     const input = RunInput.safeParse(await readJson(req));
     if (!input.success) throw new AppError("validation_failed", "タスクの形が違う");

@@ -2,7 +2,7 @@
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
-export { CONTAINER_CA } from "./container.ts";
+export { CONTAINER_CA, WORKSPACE_KEY_ENV } from "./container.ts";
 export { keyedId, newId } from "./id.ts";
 export { fromBase64, fromBase64url, toBase64, toBase64url } from "./encoding.ts";
 export { deriveKey, type KeyPurpose } from "./keys.ts";

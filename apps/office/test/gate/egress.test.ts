@@ -10,17 +10,18 @@ const w = useGuardWorld();
 /** 受け手の代わり。誰から来たかを持つ */
 type FakeEgress = { caller: Caller; fetch(): Promise<Response> };
 /** 代わりのコンテナが受けた事 */
-type Seen = { started: ContainerStartOptions[]; intercepts: [string, string, Caller][]; fetched: string[]; headers: Headers[] };
+type Seen = { started: ContainerStartOptions[]; intercepts: [string, string, Caller][]; fetched: string[]; headers: Headers[]; destroyed: number };
 type ContainerStartOptions = Parameters<ContainerLike["start"]>[0];
 
 /**
  * 起こし方と受け手の付け方を並べる、代わりのコンテナを作る
  * @param healthy /v1/health に答えるか
+ * @param runningAtFirst 初めから動いているか。DO が起き直した時の、前から動いているコンテナ
  * @returns コンテナと受けた事
  */
-function fakeContainer(healthy = true): { container: ContainerLike<FakeEgress>; seen: Seen } {
-  const seen: Seen = { started: [], intercepts: [], fetched: [], headers: [] };
-  let running = false;
+function fakeContainer(healthy = true, runningAtFirst = false): { container: ContainerLike<FakeEgress>; seen: Seen } {
+  const seen: Seen = { started: [], intercepts: [], fetched: [], headers: [], destroyed: 0 };
+  let running = runningAtFirst;
   const container: ContainerLike<FakeEgress> = {
     get running() {
       return running;
@@ -42,6 +43,7 @@ function fakeContainer(healthy = true): { container: ContainerLike<FakeEgress>; 
       },
     }),
     destroy: () => {
+      seen.destroyed += 1;
       running = false;
       return Promise.resolve();
     },
@@ -69,7 +71,11 @@ function fakeKeys(): FakeKeys {
   const keys: FakeKeys = {
     value: undefined,
     get: () => Promise.resolve(keys.value),
-    put: (key) => Promise.resolve(void (keys.value = key)),
+    // 記憶に書くのは待ちが入るので、1 回待ってから置く。同じ時に起こした時の食い違いを出す
+    put: async (key) => {
+      await Promise.resolve();
+      keys.value = key;
+    },
   };
   return keys;
 }
@@ -136,17 +142,6 @@ describe("鍵はゲートウェイだけが持つ", () => {
     }
   });
 
-  it("受け手は http の 80 番と https の 443 番だけを受け、ほかの番号は 403 で断る", async () => {
-    for (const url of ["http://gate.internal:8080/ws/v1/heartbeat", "http://gate.internal:443/ws/v1/heartbeat", "https://api.anthropic.com:8443/v1/messages", "https://api.github.com:80/repos/o/r"]) {
-      const res = await send(url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-      expect({ url, status: res.status }).toEqual({ url, status: 403 });
-    }
-    // 番号を書いても、決まった番号なら受ける
-    w.clock.advance(jst(9, 1) - w.clock.now());
-    const beat = await send("http://gate.internal:80/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(jst(9, 1)).toISOString() }) });
-    expect(beat.status).toBe(204);
-    expect((await send("https://api.anthropic.com:443/v1/messages", { method: "POST", body: "{}" })).status).toBe(401);
-  });
 });
 
 describe("ワークスペースの起こし方", () => {
@@ -176,22 +171,51 @@ describe("ワークスペースの起こし方", () => {
     await expect(new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, deps).start()).rejects.toMatchObject({ code: "unavailable" });
   });
 
-  it("起きなかった社員ごとに通知を 1 件出し、オーナーが読むまで重ねない", async () => {
-    await noticeWorkspaceDown(w.gate.env.DB, "builder", jst(9));
-    await noticeWorkspaceDown(w.gate.env.DB, "builder", jst(9, 5));
-    await noticeWorkspaceDown(w.gate.env.DB, "reviewer", jst(9, 5));
-    const notices = () => rows(w, "SELECT level, kind, title, scope, read_at FROM notices WHERE kind = 'workspace_down' ORDER BY at, title");
+});
+
+describe("ワークスペースのハートビート", () => {
+  it("ワークスペースが 4 回起きない", async () => {
+    /**
+     * 起きないコンテナを、通知を D1 に書く依り所で起こす
+     * @param staffId 社員 ID
+     * @param at 通知の時刻
+     */
+    const failToStart = async (staffId: "builder" | "reviewer", at: number) => {
+      const { container, seen } = fakeContainer(false);
+      const deps: BoxDeps = { ...boxDeps(), notifyDown: () => noticeWorkspaceDown(w.gate.env.DB, staffId, at) };
+      await expect(new WorkspaceBox(container, egressFor, { staffId, workspaceId: `ws-${staffId}` }, deps).start()).rejects.toMatchObject({ code: "unavailable" });
+      expect(seen.started).toHaveLength(4);
+    };
+    await failToStart("builder", jst(9));
+    await failToStart("builder", jst(9, 5));
+    await failToStart("reviewer", jst(9, 5));
+    const notices = () => rows(w, "SELECT level, kind, title, body, scope, read_at FROM notices WHERE kind = 'workspace_down' ORDER BY at, title");
+    const body = "4 回起こしても /v1/health が返らなかった。社員はワークスペースを待ち、ハートビートが届かない間は起こし直す";
+    // 同じ社員の通知は、オーナーが読むまで重ねない
     expect(await notices()).toEqual([
-      { level: "warn", kind: "workspace_down", title: "builder のワークスペースが起きない", scope: "office", read_at: null },
-      { level: "warn", kind: "workspace_down", title: "reviewer のワークスペースが起きない", scope: "office", read_at: null },
+      { level: "warn", kind: "workspace_down", title: "builder のワークスペースが起きない", body, scope: "office", read_at: null },
+      { level: "warn", kind: "workspace_down", title: "reviewer のワークスペースが起きない", body, scope: "office", read_at: null },
     ]);
     await w.gate.env.DB.prepare("UPDATE notices SET read_at = ? WHERE kind = 'workspace_down'").bind(jst(9, 10)).run();
-    await noticeWorkspaceDown(w.gate.env.DB, "builder", jst(10));
+    await failToStart("builder", jst(10));
     expect(await notices()).toHaveLength(3);
   });
 });
 
-describe("ワークスペースのサーバーはゲートウェイからだけ受ける", () => {
+describe("ワークスペースを分ける", () => {
+  it("許していない番号へ出る", async () => {
+    // 受け手は http の 80 番と https の 443 番だけを受ける
+    for (const url of ["http://gate.internal:8080/ws/v1/heartbeat", "http://gate.internal:443/ws/v1/heartbeat", "https://api.anthropic.com:8443/v1/messages", "https://api.github.com:80/repos/o/r"]) {
+      const res = await send(url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      expect({ url, status: res.status }).toEqual({ url, status: 403 });
+    }
+    // 番号を書いても、決まった番号なら受ける
+    w.clock.advance(jst(9, 1) - w.clock.now());
+    const beat = await send("http://gate.internal:80/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(jst(9, 1)).toISOString() }) });
+    expect(beat.status).toBe(204);
+    expect((await send("https://api.anthropic.com:443/v1/messages", { method: "POST", body: "{}" })).status).toBe(401);
+  });
+
   const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す" };
 
   it("起こすたびに新しい鍵を作ってコンテナに渡し、タスクの開始と作業トークンの差し替えに付ける", async () => {
@@ -213,10 +237,45 @@ describe("ワークスペースのサーバーはゲートウェイからだけ�
     expect(keys.value).toBe(second);
   });
 
-  it("鍵が無ければワークスペースを呼ばずに unavailable を返す", async () => {
+  it("動いているコンテナの鍵が記憶に無ければ、止めて起こし直してから呼ぶ", async () => {
+    // 前から動いているコンテナの鍵は分からないので、そのままでは呼べない
+    const { container, seen } = fakeContainer(true, true);
+    const keys = fakeKeys();
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps([], keys));
+    await box.run(RUN);
+    expect(seen.destroyed).toBe(1);
+    expect(seen.started).toHaveLength(1);
+    const key = seen.started[0]?.env?.WORKSPACE_KEY;
+    expect(keys.value).toBe(key);
+    expect(seen.headers.at(-1)?.get("authorization")).toBe(`Bearer ${String(key)}`);
+    // start() も同じく起こし直す
+    const again = fakeContainer(true, true);
+    await new WorkspaceBox(again.container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps()).start();
+    expect(again.seen.destroyed).toBe(1);
+    expect(again.seen.started).toHaveLength(1);
+  });
+
+  it("同じ時に起こしても 1 度だけ起こし、記憶とコンテナの鍵がそろう", async () => {
+    const { container, seen } = fakeContainer();
+    const keys = fakeKeys();
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps([], keys));
+    await Promise.all([box.start(), box.start(), box.run(RUN)]);
+    expect(seen.started).toHaveLength(1);
+    expect(keys.value).toBe(seen.started[0]?.env?.WORKSPACE_KEY);
+    expect(seen.headers.at(-1)?.get("authorization")).toBe(`Bearer ${String(keys.value)}`);
+    // 終わった後に起こせば、また起こす
+    await box.stop();
+    await box.start();
+    expect(seen.started).toHaveLength(2);
+  });
+
+  it("起こしている途中に止めたら、起こし終えてから止める", async () => {
     const { container, seen } = fakeContainer();
     const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps());
-    await expect(box.run(RUN)).rejects.toMatchObject({ code: "unavailable" });
-    expect(seen.fetched).toEqual([]);
+    const starting = box.start();
+    await box.stop();
+    await starting;
+    expect(seen.started).toHaveLength(1);
+    expect(container.running).toBe(false);
   });
 });

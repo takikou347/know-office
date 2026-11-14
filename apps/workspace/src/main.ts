@@ -12,6 +12,6 @@ const runner = new Runner(
   (error) => log("error", "run_failed", { error: error instanceof Error ? error.message : "unknown" }),
 );
 
-// SDK と社員のコマンドを動かす前に鍵を process.env から消す
+// SDK と社員のコマンドを動かす前に鍵を process.env から消し、子のプロセスに受け継がせない。/proc/<pid>/environ には残る
 const key = takeWorkspaceKey(process.env);
 createWorkspaceServer(runner, key).listen(PORT, "0.0.0.0");

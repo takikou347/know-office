@@ -1,6 +1,6 @@
 // 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを鍵を付けて呼ぶ。起きなければ知らせる (社員が考えるの 1.3、3.1)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, CONTAINER_CA, Health, log, newId, RunInput, type StaffId, TicketInput } from "@know-office/core";
+import { AppError, CONTAINER_CA, Health, log, newId, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -53,13 +53,10 @@ export async function noticeWorkspaceDown(db: D1Database, staffId: StaffId, now:
     level: "warn",
     kind: "workspace_down",
     title,
-    body: "30 秒おきに 4 回起こしても /v1/health が返らなかった。社員はワークスペースを待ち、ハートビートが届かない間は起こし直す",
+    body: "4 回起こしても /v1/health が返らなかった。社員はワークスペースを待ち、ハートビートが届かない間は起こし直す",
     scope: "office",
   });
 }
-
-/** ワークスペースのサーバーの鍵を渡す環境変数。apps/workspace の WORKSPACE_KEY_ENV と同じ */
-const WORKSPACE_KEY_ENV = "WORKSPACE_KEY";
 
 /**
  * ワークスペースのサーバーの鍵を作る
@@ -87,6 +84,9 @@ export type ContainerLike<F = unknown> = {
 
 /** 社員 1 人のワークスペースのコンテナ。WorkspaceDO が持ち、テストは代わりのコンテナで使う */
 export class WorkspaceBox<F = unknown> {
+  /** 起こしている途中の物。同じ時の start() はこれを待ち、鍵を作って置く順が食い違わないようにする */
+  #starting: Promise<void> | undefined;
+
   /**
    * 社員 1 人のコンテナを、送ったワークスペースを結んだ受け手と一緒に包む
    * @param container コンテナ
@@ -103,15 +103,33 @@ export class WorkspaceBox<F = unknown> {
 
   /**
    * 外向きの通信を切って起こし、/v1/health が返るまで 60 秒待つ。起きなければ 30 秒おきに 3 回やり直し、それでも起きなければオーナーに知らせる
+   * 起こしている途中に呼ばれたら、新しく起こさずに同じ物を待つ
+   * @returns 起き終わり
    * @throws unavailable 4 回とも起きなかった時
    */
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    this.#starting ??= this.#start().finally(() => {
+      this.#starting = undefined;
+    });
+    return this.#starting;
+  }
+
+  /**
+   * 起こす。start() だけが 1 本ずつ呼ぶ
+   * @throws unavailable 4 回とも起きなかった時
+   */
+  async #start(): Promise<void> {
     for (let attempt = 0; attempt <= START_RETRIES; attempt += 1) {
       if (attempt > 0) {
         await this.container.destroy();
         await this.deps.wait(START_RETRY_MS);
       }
       if (!this.container.running) await this.#boot();
+      else if ((await this.deps.keys.get()) === undefined) {
+        // 前から動いているコンテナの鍵が記憶に無ければ、呼べないので起こし直す
+        await this.container.destroy();
+        await this.#boot();
+      }
       if (await this.#healthy()) return;
       log("warn", "workspace_start_slow", { staffId: this.caller.staffId, attempt });
     }
@@ -122,9 +140,10 @@ export class WorkspaceBox<F = unknown> {
   }
 
   /**
-   * 止める
+   * 止める。起こしている途中なら、起こし終えてから止める。途中で止めると、やり直しで起こし直してしまう
    */
   async stop(): Promise<void> {
+    await this.#starting?.catch(() => undefined);
     if (this.container.running) await this.container.destroy();
   }
 
@@ -153,6 +172,7 @@ export class WorkspaceBox<F = unknown> {
   /**
    * 受け手を付けてからコンテナを起こす。受け手を付けない宛先には、外向きの通信を切るので出られない
    * ワークスペースのサーバーはコンテナの中の社員からも届くので、起こすたびに鍵を作って渡し、この鍵の無い要求を断らせる
+   * 社員はサーバーと同じ uid で動き、/proc とメモリから鍵を読めるので、防ぐのは鍵を知らずに 8080 番を直に呼ぶ事だけ
    */
   async #boot(): Promise<void> {
     const fetcher = this.egress(this.caller);
@@ -191,8 +211,12 @@ export class WorkspaceBox<F = unknown> {
    * @throws unavailable 鍵が無い、届かない、ほかのステータスの時
    */
   async #call(method: string, path: string, body: unknown, expected: number): Promise<void> {
-    const key = await this.deps.keys.get();
-    if (key === undefined) throw new AppError("unavailable", "ワークスペースの鍵が無い。起こし直す");
+    let key = await this.deps.keys.get();
+    if (key === undefined) {
+      await this.start();
+      key = await this.deps.keys.get();
+    }
+    if (key === undefined) throw new AppError("unavailable", "ワークスペースの鍵が無い");
     let res: Response;
     try {
       res = await this.container.getTcpPort(WORKSPACE_PORT).fetch(`http://workspace${path}`, {
