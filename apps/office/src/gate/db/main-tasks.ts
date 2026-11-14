@@ -24,6 +24,7 @@ export const nodes = sqliteTable(
     issueNumber: integer("issue_number"),
     source: text("source"),
     progress: json("progress"),
+    version: integer("version").notNull().default(1),
     createdBy: text("created_by").notNull(),
     createdAt: time("created_at").notNull(),
     updatedAt: time("updated_at").notNull(),

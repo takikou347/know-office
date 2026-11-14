@@ -61,6 +61,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   take(task: unknown, medianMs: number | null, now: number): Promise<{ taken: boolean }>;
   /** 今のタスクを離れる */
   finish(result: unknown, now: number): Promise<null>;
+  /** 勤務中で手が空いていれば、自分の山から次のタスクを取る */
+  pull(now: number): Promise<{ taken: boolean; nodeId: string | null }>;
   /** その日だけの指示を受ける */
   order(order: unknown, now: number): Promise<null>;
   /** 時間外に呼び出す */

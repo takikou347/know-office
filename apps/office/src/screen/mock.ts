@@ -77,23 +77,6 @@ export const messages: Record<string, { id: string; from: "self" | "other"; auth
   reviewer: [],
 };
 
-export const goals = [
-  {
-    id: "g1",
-    title: "AI の社員が自分で回る会社にする",
-    children: [
-      { id: "g1-1", title: "know-office を動かし始める", done: 3, total: 10, tasks: ["勤怠の表の画面を作る", "来週の目標を仕事に分ける"] },
-      { id: "g1-2", title: "knowidea-ui を管理の画面に足りる形にする", done: 2, total: 4, tasks: ["CodeEditor のページを足す", "AppShell の その他 を足す"] },
-    ],
-  },
-];
-
-export const roles = [
-  { id: "president", role: "社長", text: "目的を目標と仕事に分け、作る役と見る役に配る。オーナーへの相談の窓口", reports: ["builder", "reviewer"] },
-  { id: "builder", role: "作る役", text: "仕事を受けて作り、テストを通して見る役に渡す" },
-  { id: "reviewer", role: "見る役", text: "作る役と別のモデルで変更を読み、可か不可と直す所を返す" },
-];
-
 export type Stage = "アイデア" | "選んだ" | "作る" | "運用";
 export const stages: readonly Stage[] = ["アイデア", "選んだ", "作る", "運用"];
 

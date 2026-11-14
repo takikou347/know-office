@@ -5,6 +5,8 @@ import type { GuardDeps } from "./guard/deps.ts";
 import { registerComponents } from "./openapi.ts";
 import { attendanceRoutes } from "./routes/attendance.ts";
 import { guardRoutes } from "./routes/guard.ts";
+import { nodeRoutes } from "./routes/nodes.ts";
+import { orgRoutes } from "./routes/org.ts";
 import { passkeyRoutes } from "./routes/passkeys.ts";
 import { recordRoutes } from "./routes/records.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
@@ -19,7 +21,9 @@ import { system } from "./routes/system.ts";
  * @returns ゲートウェイ
  */
 export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps } = {}) {
-  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", attendanceRoutes);
+  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", attendanceRoutes)
+    .route("/", nodeRoutes)
+    .route("/", orgRoutes);
   registerComponents(app);
   return app;
 }

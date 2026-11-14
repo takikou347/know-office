@@ -54,6 +54,32 @@ export {
   VerdictInput,
 } from "./schemas/guard.ts";
 export {
+  Approval,
+  ApprovalKind,
+  ApprovalStatus,
+  CreateNodeInput,
+  DecisionInput,
+  Node,
+  NodeDetail,
+  NodeEvent,
+  NodeKind,
+  NodeStatus,
+  NodeTree,
+  OrgStaff,
+  PromptVersion,
+  TaskKind,
+  ToolResult,
+  UpdateNodeInput,
+  UpdatePromptInput,
+} from "./schemas/work.ts";
+export { AskBossTool } from "./schemas/tools/ask-boss.ts";
+export { AskOwnerTool } from "./schemas/tools/ask-owner.ts";
+export { NodeAssignTool } from "./schemas/tools/node-assign.ts";
+export { NodeCreateTool } from "./schemas/tools/node-create.ts";
+export { PrOpenTool } from "./schemas/tools/pr-open.ts";
+export { ReviewSubmitTool } from "./schemas/tools/review-submit.ts";
+export { StaffRequestTool } from "./schemas/tools/staff-request.ts";
+export {
   type Baseline,
   type Bucket,
   countOffice,

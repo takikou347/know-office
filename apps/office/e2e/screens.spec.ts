@@ -183,3 +183,15 @@ test("今いる画面のリンクを押しても、履歴は積まない", async
   await page.goBack();
   await expect(page).toHaveURL(/\/$/);
 });
+
+test("目的と組織図で、目的からタスクまでの木と進み具合、組織図と役目の説明文が出る", async ({ page }) => {
+  await page.goto("/goals");
+  await expect(page.getByRole("heading", { level: 2, name: "目的: AI の社員が自分で回る会社にする" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "目標: know-office を動かし始める" })).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "know-office を動かし始めるの進み具合" })).toHaveAttribute("aria-valuenow", "50");
+  await expect(page.getByText("タスク: 勤怠の訂正を出す")).toBeVisible();
+  const org = page.getByRole("main");
+  await expect(org.getByText("社長", { exact: true })).toBeVisible();
+  await org.getByRole("button", { name: "開発担当の説明文を直す" }).click();
+  await expect(org.getByRole("textbox", { name: "開発担当の役目の説明文" })).toHaveValue(/未確認/);
+});

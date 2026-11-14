@@ -1,4 +1,4 @@
-// 8 画面と「その他」の中身。勤怠の表のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
+// 8 画面と「その他」の中身。勤怠の表と目的と組織図のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
 import type { Health } from "@know-office/core";
 import {
   Alert,
@@ -13,7 +13,6 @@ import {
   Link,
   List,
   ListDetail,
-  Progress,
   Stack,
   Stat,
   Status,
@@ -30,14 +29,12 @@ import {
   type Task,
   extensions,
   flows,
-  goals,
   guardRules,
   ideas,
   lessons,
   messages,
   monthCost,
   notices,
-  roles,
   serviceLog,
   sessions,
   staff,
@@ -47,6 +44,7 @@ import {
   usage,
   workEntries,
 } from "./mock.ts";
+import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { StopButton } from "./pages/guard/StopButton.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
 import { type ScreenId, moreScreens } from "./routes.ts";
@@ -317,42 +315,7 @@ function StaffAndTasks({ pathname, query, navigate }: { pathname: string; query:
 function Goals() {
   return (
     <Section>
-      {goals.map((g) => (
-        <Part key={g.id} title={`目的: ${g.title}`}>
-          {g.children.map((c) => (
-            <Card key={c.id} title={`目標: ${c.title}`}>
-              <Stack gap={2}>
-                <Progress label={`${c.title}の進み具合`} value={c.done} max={c.total} />
-                <ul>
-                  {c.tasks.map((t) => (
-                    <li key={t}>仕事: {t}</li>
-                  ))}
-                </ul>
-              </Stack>
-            </Card>
-          ))}
-        </Part>
-      ))}
-      <Part title="組織図と役目">
-        <ul>
-          {roles
-            .filter((r) => r.reports)
-            .map((boss) => (
-              <li key={boss.id}>
-                <strong>{boss.role}</strong>: {boss.text}
-                <ul>
-                  {roles
-                    .filter((r) => boss.reports?.includes(r.id))
-                    .map((r) => (
-                      <li key={r.id}>
-                        <strong>{r.role}</strong>: {r.text}
-                      </li>
-                    ))}
-                </ul>
-              </li>
-            ))}
-        </ul>
-      </Part>
+      <GoalsPage />
     </Section>
   );
 }

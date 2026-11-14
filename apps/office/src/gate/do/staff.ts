@@ -4,6 +4,7 @@ import { AppError, StaffId, type StaffStatus, systemClock } from "@know-office/c
 import type { Bindings, Staff } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
 import { StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
+import { type Pulled, pullNext } from "../work/loop.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
 
 // ワークスペースのコンテナはまだ無い (tasks.md の 7.2 でつなぐ)。それまでは何もしない代わりを渡し、勤怠だけを付ける
@@ -26,7 +27,9 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   override async alarm(): Promise<void> {
-    await this.wake(systemClock.now());
+    const now = systemClock.now();
+    await this.wake(now);
+    await this.pull(now);
   }
 
   /**
@@ -86,6 +89,15 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    */
   finish(result: unknown, now: number): Promise<null> {
     return this.#run((book) => book.finish(result, now));
+  }
+
+  /**
+   * 勤務中で手が空いていれば、自分の山から優先度の順に次のタスクを取る。山が空なら上司に次を求める
+   * @param now 今の時刻
+   * @returns 取ったか。nodeId は取ったか、もう持っていたタスク
+   */
+  pull(now: number): Promise<Pulled> {
+    return this.#serial((book) => pullNext(this.env, book, now));
   }
 
   /**
