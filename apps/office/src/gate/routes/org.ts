@@ -1,13 +1,16 @@
 // 組織: 組織図、役目の説明文、オーナーの承認 (ルートの一覧の 1.8、タスクとレビューの 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, Approval, ApprovalStatus, DecisionInput, newId, OrgStaff, PromptVersion, StaffId, UpdatePromptInput } from "@know-office/core";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import type { D1Database } from "@cloudflare/workers-types";
+import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { approvals, staff, staffPrompts } from "../db/main.ts";
 import { createRouter } from "../app.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, ok } from "../respond.ts";
+import { closableService, closeStatements } from "../services/flow.ts";
 import { clockAt } from "../work/attendance.ts";
 import { notifyStaff } from "../work/loop.ts";
 import { appendNodeEvent, findNode, moveNode } from "../work/nodes.ts";
@@ -62,6 +65,38 @@ const Waiting = z.object({ nodeId: z.uuid() }).loose();
 
 /** approvals の行 */
 type ApprovalRow = typeof approvals.$inferSelect;
+
+const CloseRequest = z.object({ reason: z.string().min(1) }).loose();
+const Decided = z.array(z.object({ id: z.string() }));
+
+/**
+ * 承認で動く中身を、承認と同じ batch に入れる文にする。役の変更は社員を、閉じる案はサービスを変える
+ * @param db 今の状態の D1
+ * @param row approvals の行
+ * @param now 今の時刻
+ * @param pending 承認がまだ決まっていない事を確かめる SQL の条件
+ * @returns batch に入れる文
+ * @throws validation_failed 役の変更か閉じる案の中身の形が違う時
+ * @throws conflict 閉じる案のサービスが閉じられる段階にない時
+ */
+async function approvedEffects(db: D1Database, row: ApprovalRow, now: number, pending: SQL): Promise<BatchItem<"sqlite">[]> {
+  const orm = drizzle(db);
+  if (row.kind === "service_close") {
+    const close = CloseRequest.safeParse(row.payload);
+    if (!close.success) throw new AppError("validation_failed", "閉じる案の中身の形が違う");
+    const service = await closableService(db, row.target);
+    return [...closeStatements(db, { serviceId: service.id, from: service.stage, approvalId: row.id, reason: close.data.reason }, now, pending)];
+  }
+  // 形の違う役の変更は、承認の更新も社員の更新も書かずに断る
+  const change = RoleChange.safeParse(row.payload);
+  if (!change.success) throw new AppError("validation_failed", "役の変更の中身の形が違う");
+  return [
+    orm
+      .update(staff)
+      .set({ role: change.data.role, bossId: change.data.bossId })
+      .where(and(eq(staff.id, change.data.target), pending)),
+  ];
+}
 
 /**
  * 承認の行を返す形にする
@@ -135,29 +170,25 @@ export const orgRoutes = router
     const [row] = await orm.select().from(approvals).where(eq(approvals.id, approvalId)).limit(1);
     if (!row) throw new AppError("not_found", "承認の項目が無い");
     if (row.status !== "pending") throw new AppError("conflict", "もう決めた");
-    // TODO(#53): 役の変更のほかの種類の承認の中身を作る。作るまでは承認を断り、承認を待ったままにする
-    if (decision === "approve" && row.kind !== "role_change") throw new AppError("conflict", "この種類の承認はまだ扱えない");
-    // 形の違う役の変更は、承認の更新も社員の更新も書かずに断る
-    const change = decision === "approve" ? RoleChange.safeParse(row.payload) : undefined;
-    if (change && !change.success) throw new AppError("validation_failed", "役の変更の中身の形が違う");
+    // TODO(#53): 役の変更と閉じる案のほかの種類の承認の中身を作る。作るまでは承認を断り、承認を待ったままにする
+    if (decision === "approve" && row.kind !== "role_change" && row.kind !== "service_close") throw new AppError("conflict", "この種類の承認はまだ扱えない");
     const status = decision === "approve" ? "approved" : "rejected";
     const decide = orm
       .update(approvals)
       .set({ status, decidedAt: now, reason })
       .where(and(eq(approvals.id, approvalId), eq(approvals.status, "pending")))
       .returning({ id: approvals.id });
-    // 役の変更は承認と同じ 1 回で書く。まだ決めていない時だけ社員を変え、同時に決めた 2 つの片方を断る
-    const decided = change?.success
-      ? (
-          await orm.batch([
-            orm
-              .update(staff)
-              .set({ role: change.data.role, bossId: change.data.bossId })
-              .where(and(eq(staff.id, change.data.target), sql`EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${approvalId} AND ${approvals.status} = 'pending')`)),
-            decide,
-          ])
-        )[1]
-      : await decide;
+    // 承認の中身は承認と同じ 1 回で書く。まだ決めていない時だけ書き、同時に決めた 2 つの片方を断る
+    const pending = sql`EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${approvalId} AND ${approvals.status} = 'pending')`;
+    const [first, ...rest] = decision === "approve" ? await approvedEffects(c.env.DB, row, now, pending) : [];
+    let decided: { id: string }[];
+    if (first) {
+      const batch: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [first, ...rest, decide];
+      const results: unknown[] = await orm.batch(batch);
+      decided = Decided.parse(results.at(-1));
+    } else {
+      decided = await decide;
+    }
     if (decided.length === 0) throw new AppError("conflict", "もう決めた");
     // 答えを待っていたタスクは、承認でも差し戻しでも todo に戻し、社員が理由を読んで続ける
     const waiting = Waiting.safeParse(row.payload);

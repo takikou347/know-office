@@ -3,13 +3,16 @@ import {
   AppError,
   AskBossTool,
   AskOwnerTool,
+  IdeaAddTool,
   newId,
   NodeAssignTool,
   NodeCreateTool,
   PrOpenTool,
   ReviewSubmitTool,
+  ServiceCloseRequestTool,
   type StaffId,
   StaffRequestTool,
+  StudySubmitTool,
   type ToolResult,
 } from "@know-office/core";
 import { and, eq, ne } from "drizzle-orm";
@@ -18,6 +21,7 @@ import type { ZodType } from "zod";
 import { approvals, nodes, reviews } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { auditFrom } from "../ledger/record.ts";
+import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, revertNode, updateNode } from "./nodes.ts";
@@ -43,9 +47,9 @@ type Tool = { schema: ZodType; run: Run };
 
 /** 役ごとに使えるツール。ここに無いツールは not_found で断る */
 const ROLE_TOOLS: Record<StaffId, readonly string[]> = {
-  president: ["node_create", "node_assign", "staff_request", "ask_boss", "ask_owner"],
-  builder: ["pr_open", "ask_boss", "ask_owner"],
-  reviewer: ["review_submit", "ask_boss", "ask_owner"],
+  president: ["node_create", "node_assign", "staff_request", "study_submit", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
+  builder: ["pr_open", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
+  reviewer: ["review_submit", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
 };
 
 /** レビューのタスクを割り振る社員 */
@@ -84,7 +88,7 @@ async function currentTask(env: Bindings, call: ToolCall): Promise<NodeRow> {
  * @returns 承認の ID
  * @throws conflict 今のタスクが無い時、読んだ後にタスクが変わった時
  */
-async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff_add" | "role_change" | "external_integration" | "cost_increase"; target: string; payload: Record<string, unknown> }): Promise<{ approvalId: string }> {
+async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff_add" | "role_change" | "external_integration" | "cost_increase" | "service_close"; target: string; payload: Record<string, unknown> }): Promise<{ approvalId: string }> {
   const task = await currentTask(env, call);
   if (!(await moveNode(env.DB, task, "waiting_owner", call.now))) throw new AppError("conflict", "タスクが変わった");
   const id = newId(clockAt(call.now));
@@ -150,6 +154,48 @@ function staffRequest(env: Bindings, _forge: Forge, call: ToolCall, input: Staff
  */
 function askOwner(env: Bindings, _forge: Forge, call: ToolCall, input: AskOwnerTool): Promise<{ approvalId: string }> {
   return waitOwner(env, call, { kind: input.kind, target: input.target, payload: { reason: input.reason } });
+}
+
+/**
+ * 社員が案を足す。オーナーの案と同じくアイデアの段階に並ぶ
+ * @param env バインディング
+ * @param _forge 使わない
+ * @param call 呼び出し
+ * @param input IdeaAddTool
+ * @returns 足したサービスの ID
+ */
+async function ideaAdd(env: Bindings, _forge: Forge, call: ToolCall, input: IdeaAddTool): Promise<{ id: string }> {
+  const row = await createIdea(env, input, actorOf(call));
+  await auditFrom(env, { at: call.now, actor: call.staffId, action: "service.create", target: row.id, scope: "office", detail: { name: row.name, kind: row.kind }, traceId: call.traceId });
+  return { id: row.id };
+}
+
+/**
+ * 社長が検討の段階の案を調べた材料を出す。オーナーはサービスの詳細で読んで決める
+ * @param env バインディング
+ * @param _forge 使わない
+ * @param call 呼び出し
+ * @param input StudySubmitTool
+ * @returns 材料を置いた鍵
+ */
+async function studySubmit(env: Bindings, _forge: Forge, call: ToolCall, input: StudySubmitTool): Promise<{ key: string }> {
+  const key = await submitStudy(env, input.serviceId, input.body);
+  await auditFrom(env, { at: call.now, actor: call.staffId, action: "service.study", target: input.serviceId, scope: "office", detail: { key }, traceId: call.traceId });
+  return { key };
+}
+
+/**
+ * 社員がサービスを閉じる案をオーナーに出す。オーナーが承認するまでサービスは閉じない
+ * @param env バインディング
+ * @param _forge 使わない
+ * @param call 呼び出し
+ * @param input ServiceCloseRequestTool
+ * @returns 承認の ID
+ * @throws conflict サービスか運用の段階でない時
+ */
+async function serviceCloseRequest(env: Bindings, _forge: Forge, call: ToolCall, input: ServiceCloseRequestTool): Promise<{ approvalId: string }> {
+  await closableService(env.DB, input.serviceId);
+  return waitOwner(env, call, { kind: "service_close", target: input.serviceId, payload: { reason: input.reason } });
 }
 
 /**
@@ -276,6 +322,9 @@ const TOOLS: Record<string, Tool> = {
   ask_owner: { schema: AskOwnerTool, run: askOwner },
   pr_open: { schema: PrOpenTool, run: prOpen },
   review_submit: { schema: ReviewSubmitTool, run: reviewSubmit },
+  idea_add: { schema: IdeaAddTool, run: ideaAdd },
+  study_submit: { schema: StudySubmitTool, run: studySubmit },
+  service_close_request: { schema: ServiceCloseRequestTool, run: serviceCloseRequest },
 };
 
 /**

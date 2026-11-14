@@ -9,6 +9,7 @@ import { nodeRoutes } from "./routes/nodes.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { passkeyRoutes } from "./routes/passkeys.ts";
 import { recordRoutes } from "./routes/records.ts";
+import { serviceRoutes } from "./routes/services.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { settingRoutes } from "./routes/settings.ts";
 import { system } from "./routes/system.ts";
@@ -25,6 +26,7 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
   const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", attendanceRoutes)
     .route("/", nodeRoutes)
     .route("/", orgRoutes)
+    .route("/", serviceRoutes)
     .route("/", settingRoutes);
   registerComponents(app);
   return app;
