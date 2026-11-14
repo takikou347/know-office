@@ -39,6 +39,10 @@ describe("止める仕組みの DO", () => {
     const winner = claims[0] === true ? "s1" : "s2";
     const releases = await Promise.all([worker.guard("releaseStop", winner), worker.guard("releaseStop", winner)]);
     expect(releases.filter((r) => r === true)).toHaveLength(1);
+    // 再開が途中で失敗して権利を返すと、止めたままに戻り、もう一度再開できる
+    await worker.guard("restoreStop", "staff", "builder", winner);
+    expect(await worker.guard("claimStop", "staff", "builder", "s3")).toBe(false);
+    expect(await worker.guard("releaseStop", winner)).toBe(true);
     // 再開の後は、同じ相手をまた止められる
     expect(await worker.guard("claimStop", "staff", "builder", "s3")).toBe(true);
   });

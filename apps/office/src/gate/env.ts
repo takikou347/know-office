@@ -41,6 +41,8 @@ export interface Guard extends Rpc.DurableObjectBranded {
   claimStop(scope: string, target: string, stopId: string): Promise<boolean>;
   /** 止めた記録を再開する権利を取る */
   releaseStop(stopId: string): Promise<boolean>;
+  /** 再開が途中で失敗した時に、再開する権利を返す */
+  restoreStop(scope: string, target: string, stopId: string): Promise<null>;
   /** 記録を残せなかった時に、止める権利を返す */
   dropClaim(stopId: string): Promise<null>;
 }

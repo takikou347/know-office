@@ -291,33 +291,41 @@ export async function recordNear(env: Bindings, input: Omit<StopInput, "by" | "r
  * @param now 今の時刻
  * @param traceId 要求のトレース ID
  * @returns 再開したか。同じ記録の再開が同時に来た時の 2 つ目は false
+ * @throws 再開の動きか resumed の行の追加が失敗した時は、再開する権利を返してから、同じ物を投げる
  */
 export async function resumeStop(env: Bindings, stop: StopRowData, by: "reviewer" | "owner", reason: string | null, now: number, traceId?: string): Promise<boolean> {
   // 再開する権利は GuardDO の中で 1 つずつ渡すので、resumed の行は 1 つだけになる
   if (!(await guardDo(env).releaseStop(stop.id))) return false;
   const orm = drizzle(env.DB);
-  switch (stop.scope) {
-    case "task": {
-      const progress = NodeProgress.safeParse(stop.nodeProgress);
-      const staffId = progress.success ? progress.data.staffId : null;
-      await orm
-        .update(nodes)
-        .set({ status: "todo", ...(staffId ? { assignee: staffId } : {}), updatedAt: now })
-        .where(eq(nodes.id, stop.target));
-      if (staffId) await staffOf(env, staffId).resumeTask(stop.target);
-      break;
+  try {
+    switch (stop.scope) {
+      case "task": {
+        const progress = NodeProgress.safeParse(stop.nodeProgress);
+        const staffId = progress.success ? progress.data.staffId : null;
+        await orm
+          .update(nodes)
+          .set({ status: "todo", ...(staffId ? { assignee: staffId } : {}), updatedAt: now })
+          .where(eq(nodes.id, stop.target));
+        if (staffId) await staffOf(env, staffId).resumeTask(stop.target);
+        break;
+      }
+      case "staff":
+        await staffOf(env, StaffId.parse(stop.target)).resume(now);
+        break;
+      case "office":
+        for (const id of ALL_STAFF) await staffOf(env, id).resume(now);
+        break;
+      default:
+        // サービスは止めた記録が開いている間だけ公開を断るので、記録を閉じれば戻る
+        break;
     }
-    case "staff":
-      await staffOf(env, StaffId.parse(stop.target)).resume(now);
-      break;
-    case "office":
-      for (const id of ALL_STAFF) await staffOf(env, id).resume(now);
-      break;
-    default:
-      // サービスは止めた記録が開いている間だけ公開を断るので、記録を閉じれば戻る
-      break;
+    // resumed の行は、再開の動きがすべて効いた後に最後に足す
+    await orm.insert(stopUpdates).values({ id: newId(clockAt(now)), stopId: stop.id, at: now, kind: "resumed", by, reason });
+  } catch (error) {
+    // 権利を取ったまま失敗すると、D1 に resumed が無いのに再開できなくなるので、権利を返してから投げる
+    await guardDo(env).restoreStop(stop.scope, stop.target, stop.id);
+    throw error;
   }
-  await orm.insert(stopUpdates).values({ id: newId(clockAt(now)), stopId: stop.id, at: now, kind: "resumed", by, reason });
   await record(env, { at: now, actor: by === "owner" ? "owner" : "system", action: "guard.resume", target: stop.id, detail: { scope: stop.scope, target: stop.target, by, reason }, traceId });
   return true;
 }

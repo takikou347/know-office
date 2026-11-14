@@ -156,6 +156,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     claimStop: office.claimStop.bind(office),
     releaseStop: office.releaseStop.bind(office),
     dropClaim: office.dropClaim.bind(office),
+    restoreStop: office.restoreStop.bind(office),
   };
   // StaffDO は勤務の本と数え方の本を持つ。名前ごとに別の代わりを返す
   const staffDo = (id: StaffId) => {

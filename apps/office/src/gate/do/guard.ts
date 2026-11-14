@@ -73,6 +73,17 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
   }
 
   /**
+   * 再開が途中で失敗した時に、再開する権利を返す
+   * @param scope 範囲
+   * @param target 相手
+   * @param stopId 止めた記録の ID
+   * @returns 無し
+   */
+  restoreStop(scope: string, target: string, stopId: string): Promise<null> {
+    return this.#office.restoreStop(scope, target, stopId);
+  }
+
+  /**
    * 記録を残せなかった時に、止める権利を返す
    * @param stopId 止めた記録の ID
    * @returns 無し

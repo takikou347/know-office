@@ -127,6 +127,25 @@ describe("再開", () => {
     expect(await rows(w, "SELECT kind FROM stop_updates")).toEqual([{ kind: "resumed" }]);
   });
 
+  it("再開が途中で失敗しても、もう一度再開できる", async () => {
+    await startWork(w, "builder");
+    const headers = await signIn();
+    const created = await call("POST", "/api/v1/guard/stops", headers, { scope: "staff", target: "builder", reason: "確かめ" });
+    const { stopId } = z.object({ stopId: z.string() }).parse(await data(created));
+    const { book } = w.gate.staff.builder;
+    const resume = book.resume.bind(book);
+    book.resume = () => Promise.reject(new Error("社員 DO に届かない"));
+    const path = `/api/v1/guard/stops/${stopId}/resume`;
+    expect((await call("POST", path, headers)).status).toBe(500);
+    expect(await rows(w, "SELECT kind FROM stop_updates")).toEqual([]);
+    book.resume = resume;
+    expect((await call("POST", path, headers)).status).toBe(200);
+    expect(await rows(w, "SELECT kind FROM stop_updates")).toEqual([{ kind: "resumed" }]);
+    expect((await w.gate.staff.builder.book.status(w.clock.now())).state).toBe("working");
+    // 再開の後は、同じ社員をまた止められる
+    expect((await call("POST", "/api/v1/guard/stops", headers, { scope: "staff", target: "builder", reason: "もう一度" })).status).toBe(201);
+  });
+
   it("サービスの再開にもパスキーが要り、タスクの再開には要らない", async () => {
     await addService(w, "shop", "library");
     await startWork(w, "builder");

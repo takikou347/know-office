@@ -104,6 +104,22 @@ export class OfficeGuard {
   }
 
   /**
+   * 再開する権利を、再開が途中で失敗した時に返す。止めたままに戻し、もう一度再開できるようにする
+   * @param scope 範囲
+   * @param target 相手
+   * @param stopId 止めた記録の ID
+   * @returns 無し
+   */
+  restoreStop(scope: string, target: string, stopId: string): Promise<null> {
+    return this.#serial(async () => {
+      const released = await this.#released();
+      await this.storage.put("released_stops", released.filter((id) => id !== stopId));
+      await this.storage.put("open_stops", { ...(await this.#open()), [`${scope}|${target}`]: stopId });
+      return null;
+    });
+  }
+
+  /**
    * 止めた記録を取った権利を、記録を残せなかった時に返す
    * @param stopId 止めた記録の ID
    * @returns 無し
