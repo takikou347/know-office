@@ -5,7 +5,7 @@ AI 社員を管理するアプリ。組織の決まりは takikou347/knowidea �
 ## 作り方
 
 - 仕様は OpenSpec(openspec/)。始め方と終え方はスキル `spec-change`(archive と design.md は使わない)
-- 設計書は非公開の takikou347/knowidea の services/know-office/ に置く。作る物は docs/detail/ の詳細設計、書き方は docs/conventions.md のコード規約に従う。形が変わったら、仕様はコードと同じ PR で、設計書は同じ時に knowidea の PR で直す
+- 設計書は非公開の takikou347/knowidea の services/know-office/ に置く。作る物は docs/04-detail/ の詳細設計、書き方は docs/05-conventions.md のコード規約に従う。形が変わったら、仕様はコードと同じ PR で、設計書は同じ時に knowidea の PR で直す
 - tasks.md の 1 項目はスキル `build-scene` で、要件の場面ごとに落ちるテストから作る
 - 画面の部品は knowidea-ui を使う。足りない物は knowidea-ui に足して版を上げてから入れる
 

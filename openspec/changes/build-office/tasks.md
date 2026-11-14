@@ -22,8 +22,8 @@
 
 ## 4. 土台
 
-- [x] 4.0 knowidea の services/know-office/docs/detail/ に全段の詳細設計を、コード規約を conventions.md に書く。各段を作る直前に、前の段で分かった事と合わせて読み直す
-- [ ] 4.1 Containers で外向きの通信を入口だけに絞れるかを確かめる。絞れなければ予備の形 (knowidea の services/know-office/docs/architecture.md の 3.2「社員の動かし方」) に切り替え、設計書を直す。費用か外部連携が変わる時はオーナーに聞く
+- [x] 4.0 knowidea の services/know-office/docs/04-detail/ に全段の詳細設計を、コード規約を 05-conventions.md に書く。各段を作る直前に、前の段で分かった事と合わせて読み直す
+- [ ] 4.1 Containers で外向きの通信を入口だけに絞れるかを確かめる。絞れなければ予備の形 (knowidea の services/know-office/docs/02-architecture.md の 3.2「社員の動かし方」) に切り替え、設計書を直す。費用か外部連携が変わる時はオーナーに聞く
 - [ ] 4.2 オーナーに Cloudflare の申し込み、Google のログイン用の鍵、パスキーの登録を頼む
 - [ ] 4.3 ログインの証明、セッション、パスキーの確認のテストを先に書く
 - [ ] 4.4 ログインの確認、セッション、パスキーの確認を作る

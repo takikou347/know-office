@@ -3,7 +3,7 @@ name: build-scene
 description: know-office の tasks.md の 1 項目を、要件の場面ごとに落ちるテストから作り、main に入れるまでの手順
 ---
 
-1. 読む: この CLAUDE.md、knowidea の `services/know-office/docs/conventions.md`、作る段の `services/know-office/docs/detail/<番号>-<名前>.md`、その段が指す `openspec/changes/<名前>/specs/` の要件
+1. 読む: この CLAUDE.md、knowidea の `services/know-office/docs/05-conventions.md`、作る段の `services/know-office/docs/04-detail/<番号>-<名前>.md`、その段が指す `openspec/changes/<名前>/specs/` の要件
 2. 枝を切る。名前は中身の分かる英語 (例: `stage1-access-login`)。1 つの枝に 1 つのタスクの番号
 3. 要件の場面を 1 つ選び、詳細設計の 4 章「試験」が指す置き場に、場面の名前をそのまま `it()` の名前にした試験を書く。走らせて、思った理由で落ちる事を確かめる
 4. 詳細設計の 1 章から 3 章の受け口、データの形、動きのとおりに作り、その試験を通す。場面が残っていれば 3 に戻る

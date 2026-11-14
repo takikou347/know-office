@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  // コード規約の検査で守れる所。決まりの全量は knowidea の services/know-office/docs/conventions.md
+  // コード規約の検査で守れる所。決まりの全量は knowidea の services/know-office/docs/05-conventions.md
   "plugins": ["typescript", "react", "import", "vitest", "unicorn"],
   "categories": {
     "correctness": "error",
