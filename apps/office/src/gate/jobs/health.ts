@@ -1,9 +1,11 @@
-// 5 分ごとの定期ジョブ。いまは D1 の使った量を見て、上限に近い置き場を知らせる (ログインと記録の 3.5)
+// 5 分ごとの定期ジョブ。D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止める (ログインと記録の 3.5、自動停止の 3.1)
 import { type Clock, newId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
+import { UNCONNECTED_DEPS } from "../guard/deps.ts";
+import { checkOverruns } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import { STORAGE_LIMIT_BYTES, storageUses } from "../ledger/storage.ts";
 
@@ -59,5 +61,9 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
 export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }, clock: Clock): void {
   ctx.waitUntil(
     checkStorage(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "storage_check_failed", error }, clock)),
+  );
+  // 1 つのタスクの最長時間は 5 分ごとに見る。最長の 4 時間に比べて十分に細かい
+  ctx.waitUntil(
+    checkOverruns(env, clock.now(), UNCONNECTED_DEPS).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "overrun_check_failed", error }, clock)),
   );
 }

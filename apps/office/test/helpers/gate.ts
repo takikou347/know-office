@@ -1,9 +1,13 @@
 // ゲートウェイをテストで起こす。D1 は手元の本物、Access は代わりの物、DO はゲートウェイから見た境目の代わりを渡す
-import type { AuditInput, Clock, Fetcher } from "@know-office/core";
+import type { AuditInput, Clock, Fetcher, StaffId } from "@know-office/core";
 import { createFakeAccess, type FakeAccess } from "../../dev/access.ts";
 import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts";
 import type { Bindings } from "../../src/gate/env.ts";
+import type { GuardDeps, ReviewAnswer } from "../../src/gate/guard/deps.ts";
+import { OfficeGuard } from "../../src/gate/guard/office-guard.ts";
+import { StaffGuard } from "../../src/gate/guard/staff-guard.ts";
 import { createGate } from "../../src/gate/index.ts";
+import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/work/staff-book.ts";
 import type { TestD1 } from "./d1.ts";
 
 const FAKES = "http://localhost:5199";
@@ -28,11 +32,63 @@ export type TestGate = {
   storage: Record<string, number>;
   /** ロックアウトと challenge の数え方。GuardDO と同じ物 */
   guard: GuardBook;
+  /** 全体とサービスの数え方。GuardDO と同じ物 */
+  office: OfficeGuard;
+  /** 社員ごとの、勤務と数え方の代わり。StaffDO と同じ物 */
+  staff: Record<StaffId, TestStaff>;
+  /** 自動停止が外へ頼む口の代わり。戻したサービスと、レビュー担当の答え */
+  deps: GuardDeps & { rollbacks: string[]; answer: ReviewAnswer | null };
   /** 要求を出す */
   request(path: string, init?: RequestInit): Promise<Response>;
   /** ログインセッションを作り、以降の要求に付けるヘッダーを返す */
   signIn(): Promise<Record<string, string>>;
 };
+
+/** 社員 1 人の代わり。StaffDO と同じ本を持ち、ワークスペースへの呼び出しを並べる */
+export type TestStaff = {
+  /** 勤務の本 */
+  book: StaffBook;
+  /** 数え方と作業トークンの本 */
+  guard: StaffGuard;
+  /** ワークスペースへの呼び出し */
+  workspace: string[];
+};
+
+/**
+ * alarm も持つ、手元の入れ物を作る
+ * @returns Map で持つ入れ物
+ */
+function staffStorage(): StaffStorage {
+  const map = new Map<string, unknown>();
+  return {
+    get: (key) => Promise.resolve(structuredClone(map.get(key))),
+    put: (key, value) => {
+      map.set(key, structuredClone(value));
+      return Promise.resolve();
+    },
+    setAlarm: () => Promise.resolve(),
+    deleteAlarm: () => Promise.resolve(),
+  };
+}
+
+/**
+ * 社員 1 人の代わりを作る
+ * @param staffId 社員 ID
+ * @param d1 手元の D1
+ * @returns 社員の代わり
+ */
+function testStaff(staffId: StaffId, d1: TestD1): TestStaff {
+  const calls: string[] = [];
+  const workspace: Workspace = {
+    start: () => Promise.resolve(void calls.push("start")),
+    stop: () => Promise.resolve(void calls.push("stop")),
+    wrapUp: () => Promise.resolve(void calls.push("wrapUp")),
+    restart: () => Promise.resolve(void calls.push("restart")),
+  };
+  const storage = staffStorage();
+  const book = new StaffBook(staffId, storage, d1.DB, workspace);
+  return { book, guard: new StaffGuard(staffId, storage, d1.DB, book), workspace: calls };
+}
 
 /**
  * DO の ctx.storage と同じ形の、手元の入れ物を作る
@@ -79,12 +135,51 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
   const audits: AuditInput[] = [];
   const storage: Record<string, number> = { DB: 1024, REC_2026: 2048, REC_2027: 1024 };
   const guard = new GuardBook(memoryStorage(), () => Promise.resolve());
+  const office = new OfficeGuard(memoryStorage());
+  const staff: Record<StaffId, TestStaff> = { president: testStaff("president", options.d1), builder: testStaff("builder", options.d1), reviewer: testStaff("reviewer", options.d1) };
+  const deps: TestGate["deps"] = {
+    rollbacks: [],
+    answer: null,
+    rollback: (serviceId) => Promise.resolve(void deps.rollbacks.push(serviceId)),
+    review: () => Promise.resolve(deps.answer),
+  };
+  // GuardDO はロックアウトと数え方の 2 つの本を持つ
+  const guardDo = {
+    admit: guard.admit.bind(guard),
+    fail: guard.fail.bind(guard),
+    putChallenge: guard.putChallenge.bind(guard),
+    takeChallenge: guard.takeChallenge.bind(guard),
+    observe: office.observe.bind(office),
+    holdKeys: office.holdKeys.bind(office),
+    keysHeld: office.keysHeld.bind(office),
+    releaseKeys: office.releaseKeys.bind(office),
+  };
+  // StaffDO は勤務の本と数え方の本を持つ。名前ごとに別の代わりを返す
+  const staffDo = (id: StaffId) => {
+    const { book, guard: g } = staff[id];
+    return {
+      status: book.status.bind(book),
+      stop: book.stop.bind(book),
+      resume: book.resume.bind(book),
+      observe: g.observe.bind(g),
+      dropTask: g.dropTask.bind(g),
+      halt: g.halt.bind(g),
+      resumeTask: g.resumeTask.bind(g),
+      taskClock: g.taskClock.bind(g),
+      issueToken: g.issueToken.bind(g),
+      checkToken: g.checkToken.bind(g),
+    };
+  };
   const recorder = {
     append: (input: AuditInput) => {
       audits.push(input);
       return Promise.resolve({ id: String(audits.length), hash: "0".repeat(64) });
     },
     size: () => Promise.resolve(Object.entries(storage).map(([binding, bytes]) => ({ binding, bytes }))),
+    find: (_at: number, action: string, target: string) => {
+      const found = audits.find((a) => a.action === action && a.target === target);
+      return Promise.resolve(found ? { detail: JSON.stringify(found.detail ?? null) } : null);
+    },
   };
   // DO はゲートウェイの外の境目なので、同じ数え方を手元で持つ代わりを渡す。DO そのものは test/do/ で本物の workerd で確かめる
   // 代わりの DO は名前空間の一部 (idFromName と get) だけを持つので、Bindings として渡す
@@ -93,7 +188,8 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     DB: options.d1.DB,
     REC_2026: options.d1.REC_2026,
     REC_2027: options.d1.REC_2027,
-    GUARD: namespace(guard),
+    GUARD: namespace(guardDo),
+    STAFF: { idFromName: (name: StaffId) => name, get: (id: StaffId) => staffDo(id) },
     RECORDER: namespace(recorder),
     ENVIRONMENT: "development",
     DEV_FAKES_URL: FAKES,
@@ -102,7 +198,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     OWNER_EMAIL: OWNER,
     MASTER_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
   } as unknown as Bindings;
-  const app = createGate({ clock: options.clock, fetch: fetcher });
+  const app = createGate({ clock: options.clock, fetch: fetcher, guard: deps });
   const request = (path: string, init: RequestInit = {}) => Promise.resolve(app.request(path, init, env));
   return {
     app,
@@ -112,6 +208,9 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     audits,
     storage,
     guard,
+    office,
+    staff,
+    deps,
     request,
     signIn: async () => {
       const proof = await access.sign();

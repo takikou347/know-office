@@ -9,6 +9,7 @@ import { cookieHeader, IDLE_MS, issueSession, isActive, signingKey, toSession, t
 import { vaultKey } from "../auth/vault.ts";
 import { notices, passkeys, sessions } from "../db/main.ts";
 import type { GateEnv } from "../env.ts";
+import { observe } from "../guard/observe.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, noContent, ok } from "../respond.ts";
@@ -82,7 +83,7 @@ export async function sessionKey(c: Context<GateEnv>): Promise<CryptoKey> {
 }
 
 /**
- * 新しい国か深夜のログインなら、オーナーに通知を出す。ログインと記録の 3.2
+ * ログインを自動停止の数え方に渡し、新しい国か深夜のログインなら、オーナーに通知を出す。ログインと記録の 3.2、自動停止の 1.2
  * @param c 要求の文脈
  * @param row 作ったログインセッション
  */
@@ -96,9 +97,9 @@ async function noticeUnusualLogin(c: Context<GateEnv>, row: SessionRow): Promise
     .where(and(gt(sessions.createdAt, since), ne(sessions.id, row.id)));
   const newCountry = countries.length > 0 && !countries.some((seen) => seen.country === row.country);
   const hour = Number(jstClock(row.createdAt).slice(0, 2));
+  await observe(c.env, { type: "login", country: row.country ?? "XX", newCountry }, row.createdAt, c.var.guard, c.var.traceId);
   const reasons = [...(newCountry ? [`新しい国 (${row.country ?? "不明"}) からのログイン`] : []), ...(hour < 6 ? ["日本時間の 0 時から 6 時のログイン"] : [])];
   if (reasons.length === 0) return;
-  // 自動停止 (tasks.md の 6 章) ができたら、同じ時に guard.observe へ login を渡す
   await orm.insert(notices).values({
     id: newId(c.var.clock),
     at: row.createdAt,

@@ -3,6 +3,8 @@ import type { D1Database, DurableObjectNamespace, Rpc } from "@cloudflare/worker
 import type { Clock, Fetcher, StaffStatus } from "@know-office/core";
 import type { Admission, Challenge, RateBucket } from "./auth/guard-book.ts";
 import type { SessionRow } from "./auth/session.ts";
+import type { GuardDeps, Observed } from "./guard/deps.ts";
+import type { TicketCheck } from "./guard/staff-guard.ts";
 import type { ChainCheck } from "./ledger/audit.ts";
 
 /** 記録 DO の RPC。画面の型から DO のコードを読まないよう、ここに形だけを置く */
@@ -13,6 +15,8 @@ export interface Recorder extends Rpc.DurableObjectBranded {
   verify(year: number): Promise<ChainCheck>;
   /** バインドした D1 ごとの使った量 */
   size(): Promise<{ binding: string; bytes: number }[]>;
+  /** その時刻の年の監査ログから、操作と対象の合う行の detail を JSON の文字列で読む */
+  find(at: number, action: string, target: string): Promise<{ detail: string | null } | null>;
 }
 
 /** 全体のセキュリティ DO の RPC。時刻は呼ぶ側の Clock で渡す */
@@ -25,6 +29,14 @@ export interface Guard extends Rpc.DurableObjectBranded {
   putChallenge(sessionId: string, challenge: Challenge, now: number): Promise<null>;
   /** challenge を取り出して消す */
   takeChallenge(sessionId: string, now: number): Promise<Challenge | null>;
+  /** 全体とサービスの出来事を数える */
+  observe(event: unknown, now: number, thresholds: unknown): Promise<Observed>;
+  /** 外の鍵を入れ直すまで使えない印を付ける */
+  holdKeys(): Promise<null>;
+  /** 外の鍵が使えない印が付いているか */
+  keysHeld(): Promise<boolean>;
+  /** 外の鍵の印を外す */
+  releaseKeys(): Promise<null>;
 }
 
 /** 社員 DO の RPC。時刻は呼ぶ側の Clock で渡す。入力は DO の中で Zod で確かめる (社員と勤怠の 1.3) */
@@ -55,6 +67,20 @@ export interface Staff extends Rpc.DurableObjectBranded {
   resume(now: number): Promise<null>;
   /** 勤怠の行を訂正する */
   correct(originalId: string, input: unknown, now: number): Promise<{ id: string }>;
+  /** 社員とタスクの出来事を数える */
+  observe(event: unknown, now: number, thresholds: unknown): Promise<Observed>;
+  /** 止めたタスクを離れ、その作業トークンを失効させる */
+  dropTask(nodeId: string, now: number): Promise<null>;
+  /** 社員を止め、作業トークンをすべて失効させ、ワークスペースを作り直す */
+  halt(now: number): Promise<null>;
+  /** 再開したタスクの数を 0 に戻す */
+  resumeTask(nodeId: string): Promise<null>;
+  /** 今のタスクの働いた時間 */
+  taskClock(now: number): Promise<{ nodeId: string; activeMs: number } | null>;
+  /** タスクの作業トークンを発行する */
+  issueToken(nodeId: string, workspaceId: string, now: number): Promise<{ jti: string }>;
+  /** 作業トークンが使えるかを確かめる */
+  checkToken(jti: string, workspaceId: string, now: number): Promise<TicketCheck>;
 }
 
 /** 記録を年ごとに置く D1 のバインディングの名前。04-detail.md の 3.5 */
@@ -103,5 +129,7 @@ export type GateEnv = {
     session: SessionRow | undefined;
     /** 外への fetch。テストは代わりの物を渡す */
     fetch: Fetcher;
+    /** 自動停止が外へ頼む口。テストは代わりの物を渡す */
+    guard: GuardDeps;
   };
 };

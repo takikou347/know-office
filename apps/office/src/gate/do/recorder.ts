@@ -48,6 +48,18 @@ export class RecorderDO extends DurableObject<Bindings> implements Recorder {
   }
 
   /**
+   * その時刻の年の監査ログから、操作と対象の合う最初の行の detail を読む。止めた記録の直前の出来事を読むのに使う
+   * @param at 書いた時刻
+   * @param action 操作
+   * @param target 対象
+   * @returns detail の JSON の文字列。行が無ければ null
+   */
+  async find(at: number, action: string, target: string): Promise<{ detail: string | null } | null> {
+    const row = await this.#binding(jstYear(at)).prepare("SELECT detail FROM audit_log WHERE action = ? AND target = ? ORDER BY id LIMIT 1").bind(action, target).first<{ detail: string | null }>();
+    return row ? { detail: row.detail } : null;
+  }
+
+  /**
    * バインドした D1 ごとの使った量を測る。5 分ごとの定期ジョブとストレージの一覧が呼ぶ
    * @returns DB と REC_<年> のうちバインドした物の、名前とバイト数
    */

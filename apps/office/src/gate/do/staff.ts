@@ -2,6 +2,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { AppError, StaffId, type StaffStatus, systemClock } from "@know-office/core";
 import type { Bindings, Staff } from "../env.ts";
+import type { Observed } from "../guard/deps.ts";
+import { StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
 
 // ワークスペースのコンテナはまだ無い (tasks.md の 7.2 でつなぐ)。それまでは何もしない代わりを渡し、勤怠だけを付ける
@@ -15,6 +17,7 @@ const IDLE_WORKSPACE: Workspace = {
 /** 社員 DO。`idFromName(<社員 ID>)` で社員 1 人に 1 つ。ゲートウェイだけが RPC で呼び、時刻は呼ぶ側の Clock で渡す */
 export class StaffDO extends DurableObject<Bindings> implements Staff {
   #book: StaffBook | undefined;
+  #guard: StaffGuard | undefined;
   /** 操作を 1 つずつ流す鎖。前の操作が断られても次へ進む */
   #chain: Promise<unknown> = Promise.resolve();
 
@@ -153,6 +156,87 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    */
   correct(originalId: string, input: unknown, now: number): Promise<{ id: string }> {
     return this.#serial((book) => book.correct(originalId, input, now));
+  }
+
+  /**
+   * 社員とタスクの出来事を数える。ゲートウェイだけが呼び、社員からは読めない
+   * @param event GuardEvent
+   * @param now 今の時刻
+   * @param thresholds 今の基準
+   * @returns 答えと直前の出来事
+   * @throws validation_failed 形が違うか、ほかの社員の出来事の時
+   */
+  observe(event: unknown, now: number, thresholds: unknown): Promise<Observed> {
+    return this.#serial(() => this.#guardOf().then((g) => g.observe(event, now, thresholds)));
+  }
+
+  /**
+   * 止めたタスクを離れ、その作業トークンを失効させ、タスクの数を消す
+   * @param nodeId タスク ID
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  dropTask(nodeId: string, now: number): Promise<null> {
+    return this.#serial(() => this.#guardOf().then((g) => g.dropTask(nodeId, now)));
+  }
+
+  /**
+   * 社員を止め、作業トークンをすべて失効させ、ワークスペースを作り直す
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  halt(now: number): Promise<null> {
+    return this.#serial(() => this.#guardOf().then((g) => g.halt(now)));
+  }
+
+  /**
+   * 再開したタスクの数を 0 に戻す
+   * @param nodeId タスク ID
+   * @returns 無し
+   */
+  resumeTask(nodeId: string): Promise<null> {
+    return this.#serial(() => this.#guardOf().then((g) => g.resumeTask(nodeId)));
+  }
+
+  /**
+   * 今のタスクの働いた時間を返す
+   * @param now 今の時刻
+   * @returns タスク ID と働いた時間。無ければ null
+   */
+  taskClock(now: number): Promise<{ nodeId: string; activeMs: number } | null> {
+    return this.#serial((book) => book.taskClock(now));
+  }
+
+  /**
+   * タスクの作業トークンを発行する
+   * @param nodeId タスク ID
+   * @param workspaceId 渡すワークスペースの ID
+   * @param now 今の時刻
+   * @returns 作業トークン ID
+   */
+  issueToken(nodeId: string, workspaceId: string, now: number): Promise<{ jti: string }> {
+    return this.#serial(() => this.#guardOf().then((g) => g.issueToken(nodeId, workspaceId, now)));
+  }
+
+  /**
+   * 作業トークンが使えるかを確かめる
+   * @param jti 作業トークン ID
+   * @param workspaceId 使ったワークスペースの ID
+   * @param now 今の時刻
+   * @returns ok、失効した、期限切れ、発行した先と違う
+   */
+  checkToken(jti: string, workspaceId: string, now: number): Promise<TicketCheck> {
+    return this.#serial(() => this.#guardOf().then((g) => g.checkToken(jti, workspaceId, now)));
+  }
+
+  /**
+   * 数え方の本を作る。勤務の本と同じ記憶を使う
+   * @returns StaffGuard
+   */
+  async #guardOf(): Promise<StaffGuard> {
+    const book = await this.#open();
+    this.#guard ??= new StaffGuard(book.staffId, this.ctx.storage, this.env.DB, book);
+    return this.#guard;
   }
 
   /**

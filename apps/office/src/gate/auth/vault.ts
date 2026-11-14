@@ -43,3 +43,28 @@ export async function vaultKey(db: D1Database, name: VaultName, master: string, 
   if (!iv || !ciphertext) throw new AppError("internal", "vault の鍵の形が違う");
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext));
 }
+
+/**
+ * vault のまだ使える鍵をすべて新しいバージョンに取り替え、古いバージョンに revoked_at を入れる。全体を止めた時に呼ぶ (自動停止の 3.5)
+ * @param db 今の状態の D1
+ * @param master MASTER_KEY
+ * @param now 今の時刻
+ * @returns 取り替えた鍵の名前
+ */
+export async function rotateVaultKeys(db: D1Database, master: string, now: number): Promise<string[]> {
+  const orm = drizzle(db);
+  const key = await deriveKey(master, "vault");
+  const live = await orm.select().from(vault).where(isNull(vault.revokedAt));
+  const statements = [];
+  for (const old of live) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, crypto.getRandomValues(new Uint8Array(32)));
+    statements.push(
+      orm.insert(vault).values({ name: old.name, ciphertext: toBase64(ciphertext), iv: toBase64(iv), version: old.version + 1, createdAt: now }),
+      orm.update(vault).set({ revokedAt: now }).where(and(eq(vault.name, old.name), eq(vault.version, old.version))),
+    );
+  }
+  const [first, ...rest] = statements;
+  if (first) await orm.batch([first, ...rest]);
+  return live.map((row) => row.name);
+}

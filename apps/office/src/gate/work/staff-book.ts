@@ -57,7 +57,7 @@ export class StaffBook {
    * @param workspace ワークスペースを動かす口
    */
   constructor(
-    private readonly staffId: StaffId,
+    readonly staffId: StaffId,
     private readonly storage: StaffStorage,
     private readonly db: D1Database,
     private readonly workspace: Workspace,
@@ -255,6 +255,42 @@ export class StaffBook {
     await this.#process(s, now);
     if (s.m.state === "stopped") s.resume(now);
     await this.#save(s, now);
+  }
+
+  /**
+   * 自動停止で社員を止め、ワークスペースを止めて作り直す。持っているタスクは止めた間も持ったまま
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  async halt(now: number): Promise<void> {
+    await this.stop(now);
+    if ((await this.#load()).m.state === "stopped") await this.workspace.restart();
+  }
+
+  /**
+   * 自動停止で止めたタスクを離れ、した仕事を結果 stopped で残す。社員は止まらず、次のタスクを取れる
+   * @param nodeId 止めたタスクの ID
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  async drop(nodeId: string, now: number): Promise<void> {
+    const s = await this.#load();
+    // 時刻で決まる出来事は次の alarm に任せる。ここでは止めたタスクを離れる事だけを行う
+    if (s.m.task?.nodeId !== nodeId) return;
+    s.closeTask(now, "stopped");
+    await this.#save(s, now);
+  }
+
+  /**
+   * 今のタスクの働いた時間を返す。止められていた間と待っていた間を入れない。記憶を変えない
+   * @param now 今の時刻
+   * @returns タスク ID と働いた時間。タスクを持っていなければ null
+   */
+  async taskClock(now: number): Promise<{ nodeId: string; activeMs: number } | null> {
+    const task = (await this.#load()).m.task;
+    if (!task) return null;
+    const paused = task.pausedMs + (task.pausedAt === null ? 0 : now - task.pausedAt);
+    return { nodeId: task.nodeId, activeMs: Math.max(0, now - task.startedAt - paused) };
   }
 
   /**

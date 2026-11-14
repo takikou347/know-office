@@ -7,6 +7,7 @@ import { accessProof, admission, loginSession, sameOrigin } from "./auth/middlew
 import { bodyShape } from "./body.ts";
 import { securityHeaders } from "./headers.ts";
 import type { GateEnv } from "./env.ts";
+import { type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
 import { trace } from "./trace.ts";
 
@@ -54,9 +55,10 @@ export function createRouter() {
  * @param options テストは決まった時刻と、外への fetch の代わりを渡す
  * @param options.clock 今の時刻
  * @param options.fetch 外への fetch
+ * @param options.guard 自動停止が外へ頼む口
  * @returns ルートを足す前のゲートウェイ
  */
-export function createApp(options: { clock?: Clock; fetch?: Fetcher } = {}) {
+export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps } = {}) {
   const clock = options.clock ?? systemClock;
   // Workers の fetch は this を持たずに呼ぶと落ちるので、包んで渡す
   const fetcher: Fetcher = options.fetch ?? ((input, init) => fetch(input, init));
@@ -64,6 +66,7 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher } = {}) {
   app.use("*", async (c, next) => {
     c.set("clock", clock);
     c.set("fetch", fetcher);
+    c.set("guard", options.guard ?? UNCONNECTED_DEPS);
     await next();
   });
   app.use("*", trace);

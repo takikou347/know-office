@@ -1,4 +1,4 @@
-// 8 画面と「その他」の中身。値はモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない
+// 8 画面と「その他」の中身。値はモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
 import type { Health } from "@know-office/core";
 import {
   Alert,
@@ -48,6 +48,7 @@ import {
   usage,
   workEntries,
 } from "./mock.ts";
+import { StopButton } from "./pages/guard/StopButton.tsx";
 import { type ScreenId, moreScreens } from "./routes.ts";
 
 export type Navigate = (to: string, opts?: { replace?: boolean }) => void;
@@ -547,9 +548,7 @@ function Guard() {
         <List label="蒸留した学び" items={lessons.map((l) => ({ id: l.id, title: l.text }))} />
       </Part>
       <Stack direction="row" gap={2}>
-        <Button variant="danger" onClick={() => setDone("すべての社員を止めました")}>
-          すべての社員を止める
-        </Button>
+        <StopButton scope="office" target="office" label="すべての社員を止める" />
       </Stack>
     </Section>
   );

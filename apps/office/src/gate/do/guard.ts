@@ -3,6 +3,8 @@ import { DurableObject } from "cloudflare:workers";
 import { newId, systemClock } from "@know-office/core";
 import { type Admission, type Challenge, GuardBook, type RateBucket } from "../auth/guard-book.ts";
 import type { Bindings, Guard } from "../env.ts";
+import type { Observed } from "../guard/deps.ts";
+import { OfficeGuard } from "../guard/office-guard.ts";
 
 /** 全体のセキュリティ DO。ゲートウェイだけが RPC で呼ぶ。時刻は呼ぶ側の Clock で渡す */
 export class GuardDO extends DurableObject<Bindings> implements Guard {
@@ -11,6 +13,44 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
       .bind(newId(systemClock), at, "ログインの失敗が続いたため送信元を 15 分止めた", `送信元 ${ip} が 10 分に 5 回失敗した`)
       .run();
   });
+
+  #office = new OfficeGuard(this.ctx.storage);
+
+  /**
+   * 全体とサービスの出来事を数える
+   * @param event GuardEvent
+   * @param now 今の時刻
+   * @param thresholds 今の基準
+   * @returns 答えと直前の出来事
+   * @throws validation_failed 形が違うか、社員の出来事の時
+   */
+  observe(event: unknown, now: number, thresholds: unknown): Promise<Observed> {
+    return this.#office.observe(event, now, thresholds);
+  }
+
+  /**
+   * 外の鍵を入れ直すまで使えない印を付ける
+   * @returns 無し
+   */
+  holdKeys(): Promise<null> {
+    return this.#office.holdKeys();
+  }
+
+  /**
+   * 外の鍵が使えない印が付いているかを返す
+   * @returns 印が付いているか
+   */
+  keysHeld(): Promise<boolean> {
+    return this.#office.keysHeld();
+  }
+
+  /**
+   * 外の鍵の印を外す
+   * @returns 無し
+   */
+  releaseKeys(): Promise<null> {
+    return this.#office.releaseKeys();
+  }
 
   /**
    * 入口で通すかを決める
