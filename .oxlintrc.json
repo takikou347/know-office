@@ -35,7 +35,7 @@
   },
   "overrides": [
     {
-      // 仮のデータのモック。作る順の段 5 で画面ごとのファイル (screen/pages/<画面>/) に作り直す時にこの例外を消す
+      // 仮のデータのモック。tasks.md の 8.8 で画面ごとのファイル (screen/pages/<画面>/) に分ける時にこの例外を消す
       "files": ["apps/office/src/screen/pages.tsx"],
       "rules": { "max-lines": "off" }
     },
