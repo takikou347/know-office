@@ -47,20 +47,32 @@ export const bottomItems: NavItem[] = [
 export const moreScreens: readonly Screen[] = screens.filter((s) => !bottomIds.includes(s.id));
 
 
-/** 道の頭から画面を決める。知らない道はダッシュボード */
+/**
+ * パスの頭から画面を決める。知らないパスはダッシュボードにする
+ * @param pathname URL のパス
+ * @returns 開く画面
+ */
 export function screenOf(pathname: string): Screen {
   const head = `/${pathname.split("/")[1] ?? ""}`;
   return screens.find((s) => s.path === head) ?? dashboardScreen;
 }
 
-/** 下の切り替えで印を付ける id。下に無い画面と「その他」は more */
+/**
+ * 下の切り替えで印を付ける id を決める。下に無い画面と「その他」は more にする
+ * @param pathname URL のパス
+ * @returns 印を付ける id
+ */
 export function bottomCurrentOf(pathname: string): string {
   if (pathname === morePath) return "more";
   const s = screenOf(pathname);
   return bottomIds.includes(s.id) ? s.id : "more";
 }
 
-/** ブラウザの題 */
+/**
+ * ブラウザの題を作る
+ * @param pathname URL のパス
+ * @returns 「画面の名前 - know-office」の題
+ */
 export function titleOf(pathname: string): string {
   const label = pathname === morePath ? "その他" : screenOf(pathname).label;
   return `${label} - know-office`;

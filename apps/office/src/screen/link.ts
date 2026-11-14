@@ -10,7 +10,12 @@ export interface ClickLike {
   link: { href: string; attr: (name: string) => string | null };
 }
 
-/** 横取りする時は移る先 (道、問い、印) を、ブラウザに任せる時は null を返す */
+/**
+ * リンクを押した時に、画面の中で移るかを決める
+ * @param e 押した出来事と押したリンク
+ * @param here 今の URL の源、パス、クエリ
+ * @returns 画面の中で移る時は移る先 (パス、クエリ、ハッシュ)、ブラウザに任せる時は null
+ */
 export function routeOfClick(e: ClickLike, here: { origin: string; pathname: string; search: string }): string | null {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
   const { link } = e;

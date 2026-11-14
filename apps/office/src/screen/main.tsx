@@ -27,7 +27,10 @@ function announce() {
   }
 }
 
-/** 同じ所の画面へのリンクは読み込み直さず、道だけを変える */
+/**
+ * 同じ源の画面へのリンクは読み込み直さず、パスだけを変える
+ * @returns 今の URL と、移る関数
+ */
 function useRoute() {
   const [url, setUrl] = useState(urlNow);
   const navigate = useCallback((to: string, opts?: { replace?: boolean }) => {

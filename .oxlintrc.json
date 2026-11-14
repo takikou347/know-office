@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   // コード規約のチェックで守れる所。決まりの全量は knowidea の services/know-office/docs/05-conventions.md
-  "plugins": ["typescript", "react", "import", "vitest", "unicorn"],
+  "plugins": ["typescript", "react", "import", "vitest", "unicorn", "jsdoc"],
   "categories": {
     "correctness": "error",
     "suspicious": "error"
@@ -30,6 +30,17 @@
     "max-lines": ["error", { "max": 300, "skipBlankLines": true, "skipComments": true }],
     "unicorn/filename-case": ["error", { "case": "kebabCase" }],
     "unicorn/no-nested-ternary": "error",
+    // 条件は肯定の形で書く。否定は早く返す時だけ
+    "unicorn/no-negated-condition": "error",
+    "typescript/no-unnecessary-boolean-literal-compare": "error",
+    // JSDoc を書いた関数は、引数と返す物の説明をそろえる
+    "jsdoc/require-param": "error",
+    "jsdoc/require-param-name": "error",
+    "jsdoc/require-param-description": "error",
+    "jsdoc/require-returns": "error",
+    "jsdoc/require-returns-description": "error",
+    "jsdoc/check-tag-names": "error",
+    "jsdoc/empty-tags": "error",
     "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
     "react/react-in-jsx-scope": "off"
   },
@@ -45,9 +56,13 @@
       "rules": { "typescript/no-unsafe-assignment": "off" }
     },
     {
-      // React のコンポーネントのファイルはコンポーネントの名前と同じ PascalCase
+      // React のコンポーネントのファイルはコンポーネントの名前と同じ PascalCase。コンポーネントは引数の代わりに props の型の項目に JSDoc を書く
       "files": ["**/*.tsx"],
-      "rules": { "unicorn/filename-case": ["error", { "cases": { "pascalCase": true, "kebabCase": true } }] }
+      "rules": {
+        "unicorn/filename-case": ["error", { "cases": { "pascalCase": true, "kebabCase": true } }],
+        "jsdoc/require-param": "off",
+        "jsdoc/require-returns": "off"
+      }
     },
     {
       // 共通パッケージは Workers と Node の両方で動く物だけにする

@@ -1,0 +1,5605 @@
+# know-office の API の正本。knowidea の services/know-office/docs/04-detail/1-api.md の決まりで書く
+openapi: 3.1.0
+info:
+  title: know-office API
+  version: 1.0.0
+  description: know-office のゲートウェイ、ワークスペースとの間の API。決まりは knowidea の services/know-office/docs/04-detail/1-api.md。成功は {data, meta}、失敗は RFC 9457 の application/problem+json で返す。
+servers:
+- url: /
+  description: know-office の Worker (画面と同じ源)
+tags:
+- name: system
+  description: 動いているか、量、つないだ記録、この文書
+- name: auth
+  description: ログイン、セッション、パスキー
+- name: staff
+  description: 社員の状態と勤怠
+- name: records
+  description: 記録、集計、見つけて直す仕組み
+- name: guard
+  description: 自動停止と蒸留
+- name: conversation
+  description: 会話と配信
+- name: nodes
+  description: 目的からタスクまでの木
+- name: org
+  description: 組織図、役目、オーナーの承認
+- name: reviews
+  description: know-office の中のレビュー
+- name: github
+  description: GitHub App の連携
+- name: services
+  description: サービスの流れ
+- name: settings
+  description: office とサービスの設定
+- name: notices
+  description: 画面の通知
+- name: extensions
+  description: 管理の拡張
+- name: workspace-gate
+  description: ワークスペースからゲートウェイへ
+- name: workspace
+  description: 社員 DO からワークスペースへ
+security:
+- accessJwt: []
+  session: []
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      tags:
+      - system
+      summary: ゲートウェイが動いているか
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Health'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/sessions:
+    post:
+      operationId: createSession
+      tags:
+      - auth
+      summary: セッションを始める
+      description: ログインの証明から ko_session のクッキーを付ける。セッションの確かめを通らない唯一のルート。
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Session'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: &id001
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listSessions
+      tags:
+      - auth
+      summary: セッションの一覧
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: deleteOtherSessions
+      tags:
+      - auth
+      summary: 今のセッションのほかを全部切る
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/sessions/{sessionId}:
+    delete:
+      operationId: deleteSession
+      tags:
+      - auth
+      summary: 1 つのセッションを切る
+      parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema: &id004
+          type: string
+          format: uuid
+          description: UUID v7
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/me:
+    get:
+      operationId: getMe
+      tags:
+      - auth
+      summary: ログインしている人とセッション
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Me'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/me/step-up:
+    post:
+      operationId: stepUp
+      tags:
+      - auth
+      summary: パスキーで確かめ直す
+      description: 15 分の間、パスキーの確認が要るルートを通す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnResponse'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/StepUp'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/passkeys/options:
+    post:
+      operationId: createPasskeyOptions
+      tags:
+      - auth
+      summary: WebAuthn の options を作る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyOptionsInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PasskeyOptions'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/passkeys:
+    post:
+      operationId: registerPasskey
+      tags:
+      - auth
+      summary: パスキーを登録する
+      description: 登録済みのパスキーがある時だけ、パスキーの確認が 15 分のうちに要る。
+      x-step-up: conditional
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnResponse'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Passkey'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags:
+      - system
+      summary: つないだ記録の一覧
+      description: パスキーの確認が 15 分のうちに要る。
+      x-step-up: true
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema: &id002
+          type: string
+          format: date
+          description: 日本時間の日 YYYY-MM-DD
+      - name: to
+        in: query
+        required: false
+        schema: *id002
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditRow'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/audit-logs/verify:
+    post:
+      operationId: verifyAuditLogs
+      tags:
+      - system
+      summary: 1 年分の記録のつなぎを確かめる
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyAuditInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AuditVerification'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/storage:
+    get:
+      operationId: listStorage
+      tags:
+      - system
+      summary: D1 ごとの使った量
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StorageUse'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/docs:
+    get:
+      operationId: getApiDocs
+      tags:
+      - system
+      summary: Swagger UI
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: Swagger UI の HTML
+          content:
+            text/html:
+              schema: *id001
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/openapi.yaml:
+    get:
+      operationId: getOpenApi
+      tags:
+      - system
+      summary: この OpenAPI 文書
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: OpenAPI 3.1 の文書
+          content:
+            application/yaml:
+              schema: *id001
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/staff:
+    get:
+      operationId: listStaff
+      tags:
+      - staff
+      summary: 社員の今の状態
+      description: 3 人の状態、今のタスク、今日の働いた時間。
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StaffStatus'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/staff/{staffId}/attendance:
+    get:
+      operationId: getDayAttendance
+      tags:
+      - staff
+      summary: 1 日の勤怠
+      description: 勤怠の表の上の 1 行と、タスク 1 件 1 行の表。
+      parameters:
+      - name: staffId
+        in: path
+        required: true
+        schema: &id003
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役で固定
+      - name: day
+        in: query
+        required: true
+        schema: *id002
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DayAttendance'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/staff/{staffId}/orders:
+    post:
+      operationId: createOrder
+      tags:
+      - staff
+      summary: その日だけの指示を出す
+      description: 延長、早い退勤、休み。
+      parameters:
+      - name: staffId
+        in: path
+        required: true
+        schema: *id003
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Order'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/staff/{staffId}/orders/{orderId}:
+    delete:
+      operationId: cancelOrder
+      tags:
+      - staff
+      summary: 指示を取り消す
+      description: 取り消しの行を足し、取り消した指示を返す。
+      parameters:
+      - name: staffId
+        in: path
+        required: true
+        schema: *id003
+      - name: orderId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Order'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/records/attendance:
+    get:
+      operationId: listAttendance
+      tags:
+      - records
+      summary: 勤怠の記録
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema: *id002
+      - name: to
+        in: query
+        required: false
+        schema: *id002
+      - name: staffId
+        in: query
+        required: false
+        schema: *id003
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DaySummary'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/attendance/{attendanceId}/corrections:
+    post:
+      operationId: correctAttendance
+      tags:
+      - records
+      summary: 勤怠を訂正する
+      description: 訂正の行を足す。パスキーの確認が 15 分のうちに要る。
+      x-step-up: true
+      parameters:
+      - name: attendanceId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectAttendanceInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AttendanceRow'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/state:
+    get:
+      operationId: getGuardState
+      tags:
+      - guard
+      summary: 止まっている物
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GuardState'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/stops:
+    get:
+      operationId: listStops
+      tags:
+      - guard
+      summary: 止めた記録と近かった記録
+      parameters:
+      - name: kind
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - stop
+          - near
+      - name: scope
+        in: query
+        required: false
+        schema: &id012
+          type: string
+          enum:
+          - task
+          - staff
+          - service
+          - office
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StopRow'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: createStop
+      tags:
+      - guard
+      summary: 手で止める
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStopInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Stop'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/stops/{stopId}:
+    get:
+      operationId: getStop
+      tags:
+      - guard
+      summary: 止めた記録の 1 件
+      description: 直前の 20 件の操作と経過を含む。
+      parameters:
+      - name: stopId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/StopDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/stops/{stopId}/verdict:
+    post:
+      operationId: judgeStop
+      tags:
+      - guard
+      summary: 止めた判断に判定を付ける
+      parameters:
+      - name: stopId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerdictInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/StopUpdate'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/stops/{stopId}/resume:
+    post:
+      operationId: resumeStop
+      tags:
+      - guard
+      summary: 再開する
+      description: 止めた範囲がサービスか全体の時だけ、パスキーの確認が 15 分のうちに要る。
+      x-step-up: conditional
+      parameters:
+      - name: stopId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Resumption'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/stop-previews:
+    post:
+      operationId: previewStop
+      tags:
+      - guard
+      summary: 手で止める前に止まる範囲を見る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopTargetInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/StopPreview'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/thresholds:
+    get:
+      operationId: getThresholds
+      tags:
+      - guard
+      summary: 今の基準
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Thresholds'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: updateThresholds
+      tags:
+      - guard
+      summary: 基準を変える
+      description: パスキーの確認が 15 分のうちに要る。
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateThresholdsInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Thresholds'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/effect:
+    get:
+      operationId: getGuardEffect
+      tags:
+      - guard
+      summary: 止める仕組みの効き目
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema: *id002
+      - name: to
+        in: query
+        required: false
+        schema: *id002
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GuardEffect'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/staff/{staffId}/messages:
+    get:
+      operationId: listMessages
+      tags:
+      - conversation
+      summary: 社員との会話
+      parameters:
+      - name: staffId
+        in: path
+        required: true
+        schema: *id003
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: createMessage
+      tags:
+      - conversation
+      summary: 社員に話す
+      description: 時間外なら呼び出しになる。
+      parameters:
+      - name: staffId
+        in: path
+        required: true
+        schema: *id003
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMessageInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Message'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/live/tickets:
+    post:
+      operationId: createLiveTicket
+      tags:
+      - conversation
+      summary: 配信用の 60 秒の作業トークン
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/LiveTicket'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/live:
+    get:
+      operationId: openLive
+      tags:
+      - conversation
+      summary: 発言、状態、止まり、通知を流す
+      description: Origin と作業トークンを確かめる。
+      parameters:
+      - name: ticket
+        in: query
+        required: true
+        schema: *id001
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '101':
+          description: WebSocket に切り替えた
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/nodes:
+    get:
+      operationId: listNodes
+      tags:
+      - nodes
+      summary: 目的からタスクまでの木
+      parameters:
+      - name: rootId
+        in: query
+        required: false
+        schema: *id004
+      - name: status
+        in: query
+        required: false
+        schema: *id001
+      - name: scope
+        in: query
+        required: false
+        schema: &id011
+          type: string
+          description: '`office` かサービスの ID'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeTree'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: createNode
+      tags:
+      - nodes
+      summary: 目的、目標、タスクを置く
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNodeInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Node'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/nodes/{nodeId}:
+    get:
+      operationId: getNode
+      tags:
+      - nodes
+      summary: タスクの 1 件
+      description: 上の階層と出来事の流れを含む。
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/NodeDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      operationId: updateNode
+      tags:
+      - nodes
+      summary: 分け方、割り振り、見送りを直す
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNodeInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Node'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/org:
+    get:
+      operationId: listOrg
+      tags:
+      - org
+      summary: 組織図
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrgStaff'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/staff/{staffId}/prompt:
+    put:
+      operationId: updatePrompt
+      tags:
+      - org
+      summary: 役目の説明文を直す
+      description: 次のタスクから効く。
+      parameters:
+      - name: staffId
+        in: path
+        required: true
+        schema: *id003
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePromptInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PromptVersion'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/approvals:
+    get:
+      operationId: listApprovals
+      tags:
+      - org
+      summary: オーナーの承認を待つ物
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - pending
+          - approved
+          - rejected
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Approval'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/approvals/{approvalId}/decision:
+    post:
+      operationId: decideApproval
+      tags:
+      - org
+      summary: 承認か差し戻しを出す
+      parameters:
+      - name: approvalId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Approval'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reviews/{nodeId}:
+    get:
+      operationId: getReview
+      tags:
+      - reviews
+      summary: レビューの頭
+      description: レビュー担当の要点、チェックの結果、変えたファイルの木。
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ReviewHead'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reviews/{nodeId}/diff:
+    get:
+      operationId: getReviewDiff
+      tags:
+      - reviews
+      summary: 1 ファイルの変更
+      description: since で前に見た所からの差。
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      - name: path
+        in: query
+        required: true
+        schema: *id001
+      - name: since
+        in: query
+        required: false
+        schema: *id001
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FileDiff'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reviews/{nodeId}/file:
+    get:
+      operationId: getReviewFile
+      tags:
+      - reviews
+      summary: 変更の前か後の中身
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      - name: path
+        in: query
+        required: true
+        schema: *id001
+      - name: ref
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - base
+          - head
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FileContent'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reviews/{nodeId}/seen:
+    put:
+      operationId: markReviewSeen
+      tags:
+      - reviews
+      summary: ここまで見た印
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SeenInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reviews/{nodeId}/notes:
+    post:
+      operationId: createReviewNote
+      tags:
+      - reviews
+      summary: 行への指摘
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNoteInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ReviewNote'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reviews/{nodeId}/verdict:
+    post:
+      operationId: submitReviewVerdict
+      tags:
+      - reviews
+      summary: 承認か差し戻し
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewVerdictInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ReviewVerdict'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reviews/{nodeId}/commits:
+    post:
+      operationId: createReviewCommit
+      tags:
+      - reviews
+      summary: その場で直してコミットする
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommitInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Commit'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+  /api/v1/reviews/{nodeId}/lsp:
+    get:
+      operationId: openReviewLsp
+      tags:
+      - reviews
+      summary: 補完と定義への移動
+      parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '101':
+          description: WebSocket に切り替えた。ワークスペースを起こす
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/v1/github/connect:
+    post:
+      operationId: connectGitHub
+      tags:
+      - github
+      summary: GitHub App の作り方を返す
+      description: 画面がこの manifest を GitHub に送る。
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GitHubManifest'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/github/callback:
+    get:
+      operationId: receiveGitHubApp
+      tags:
+      - github
+      summary: App の鍵を受け取る
+      parameters:
+      - name: code
+        in: query
+        required: true
+        schema: *id001
+      - name: state
+        in: query
+        required: true
+        schema: *id001
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '302':
+          description: App を入れる GitHub の画面に移す
+          headers:
+            Location:
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+  /api/v1/github/installed:
+    get:
+      operationId: receiveGitHubInstall
+      tags:
+      - github
+      summary: App を入れた事を記録する
+      description: クエリの名前は GitHub が決めた形のまま。
+      parameters:
+      - name: installation_id
+        in: query
+        required: true
+        schema: &id007
+          type: integer
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '302':
+          description: 設定の画面に戻す
+          headers:
+            Location:
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/github/repos:
+    get:
+      operationId: listGitHubRepos
+      tags:
+      - github
+      summary: 選んだリポジトリ
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Repo'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/github/rules:
+    get:
+      operationId: getGitHubRules
+      tags:
+      - github
+      summary: GitHub のルール
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GitHubRules'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: updateGitHubRules
+      tags:
+      - github
+      summary: GitHub のルールを変える
+      description: パスキーの確認が 15 分のうちに要る。
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGitHubRulesInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GitHubRules'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /hooks/v1/github:
+    post:
+      operationId: receiveGitHubWebhook
+      tags:
+      - github
+      summary: GitHub の通知を受ける
+      description: 署名、時刻、配信の番号を確かめる。本文は GitHub の形。
+      security: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/services:
+    get:
+      operationId: listServices
+      tags:
+      - services
+      summary: サービスの一覧
+      parameters:
+      - name: stage
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - idea
+          - study
+          - prototype
+          - service
+          - operation
+          - dropped
+          - closed
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceCard'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: createIdea
+      tags:
+      - services
+      summary: 案を足す
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIdeaInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '201':
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceCard'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+          headers:
+            Location:
+              description: 作った物の URL
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/services/{serviceId}:
+    get:
+      operationId: getService
+      tags:
+      - services
+      summary: サービスの様子
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/services/{serviceId}/advance:
+    post:
+      operationId: advanceService
+      tags:
+      - services
+      summary: 段階を進める、見送る、閉じる
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvanceInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceCard'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/services/{serviceId}/rollback:
+    post:
+      operationId: rollbackService
+      tags:
+      - services
+      summary: 前のバージョンに戻す
+      description: パスキーの確認が 15 分のうちに要る。
+      x-step-up: true
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '202':
+          description: 受け付けた。後で終わる
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Deployment'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+  /api/v1/services/{serviceId}/settings:
+    get:
+      operationId: listServiceSettings
+      tags:
+      - settings
+      summary: サービスの設定
+      description: 初期値に従っているかを inherited で返す。
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema: *id004
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Setting'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/services/{serviceId}/settings/{key}:
+    put:
+      operationId: updateServiceSetting
+      tags:
+      - settings
+      summary: サービスの設定を変える
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema: *id004
+      - name: key
+        in: path
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSettingInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Setting'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/settings:
+    get:
+      operationId: listSettings
+      tags:
+      - settings
+      summary: office の設定とサービスの初期値
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Setting'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/settings/{key}:
+    put:
+      operationId: updateSetting
+      tags:
+      - settings
+      summary: office の設定を変える
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSettingInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Setting'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/dashboard:
+    get:
+      operationId: getDashboard
+      tags:
+      - records
+      summary: ダッシュボード
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Dashboard'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/records/summary:
+    get:
+      operationId: getRecordSummary
+      tags:
+      - records
+      summary: 記録のまとめ
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema: *id002
+      - name: to
+        in: query
+        required: false
+        schema: *id002
+      - name: group
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - service
+          - staff
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RecordSummary'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/records/summary/export:
+    get:
+      operationId: exportRecordSummary
+      tags:
+      - records
+      summary: 記録のまとめを CSV で
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema: *id002
+      - name: to
+        in: query
+        required: false
+        schema: *id002
+      - name: group
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - service
+          - staff
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: CSV
+          content:
+            text/csv:
+              schema: *id001
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/records/uptime:
+    get:
+      operationId: getUptime
+      tags:
+      - records
+      summary: 月の稼働率
+      parameters:
+      - name: month
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: ^\d{4}-\d{2}$
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Uptime'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/notices:
+    get:
+      operationId: listNotices
+      tags:
+      - notices
+      summary: 通知
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notice'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/notices/{noticeId}/read:
+    put:
+      operationId: markNoticeRead
+      tags:
+      - notices
+      summary: 通知を読んだ印
+      parameters:
+      - name: noticeId
+        in: path
+        required: true
+        schema: *id004
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/lessons:
+    get:
+      operationId: listLessons
+      tags:
+      - guard
+      summary: 蒸留の案
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Lesson'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/lessons/{lessonId}/decision:
+    post:
+      operationId: decideLesson
+      tags:
+      - guard
+      summary: 蒸留の案を承認か差し戻し
+      parameters:
+      - name: lessonId
+        in: path
+        required: true
+        schema: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Lesson'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/findings:
+    get:
+      operationId: listFindings
+      tags:
+      - records
+      summary: 見つけて直す仕組みの Issue
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - open
+          - fixed
+          - verified
+          - reverted
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Finding'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/extensions:
+    get:
+      operationId: listExtensions
+      tags:
+      - extensions
+      summary: 拡張の一覧
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Extension'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/extensions/{extensionId}:
+    put:
+      operationId: toggleExtension
+      tags:
+      - extensions
+      summary: 拡張を入れる、切る
+      parameters:
+      - name: extensionId
+        in: path
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToggleExtensionInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Extension'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /ws/v1/heartbeat:
+    post:
+      operationId: sendHeartbeat
+      tags:
+      - workspace-gate
+      summary: 30 秒ごとのハートビート
+      description: 受け手がどの社員のワークスペースかを知っているので作業トークンは要らない。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatInput'
+      security: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: &id005
+    - url: http://gate.internal
+      description: ワークスペースの外向きの通信の受け手
+  /ws/v1/checkpoints:
+    post:
+      operationId: sendCheckpoint
+      tags:
+      - workspace-gate
+      summary: チェックポイントに届いた
+      description: nodeId が社員 DO の今のタスクと合う時だけ受ける。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckpointInput'
+      security: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id005
+  /ws/v1/decisions:
+    post:
+      operationId: decideTool
+      tags:
+      - workspace-gate
+      summary: ツールを使ってよいかを聞く
+      description: フックが 5 秒で切れる形で呼ぶ。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideInput'
+      security:
+      - workToken: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Decision'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id005
+  /ws/v1/events:
+    post:
+      operationId: sendAgentEvents
+      tags:
+      - workspace-gate
+      summary: 発言、ツールの結果、チェックポイント、終わり
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentEventsInput'
+      security:
+      - workToken: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id005
+  /ws/v1/transcript-parts:
+    post:
+      operationId: sendTranscriptPart
+      tags:
+      - workspace-gate
+      summary: 会話の記録の続き
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscriptPartInput'
+      security:
+      - workToken: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id005
+  /ws/v1/tools/{toolName}:
+    post:
+      operationId: callStaffTool
+      tags:
+      - workspace-gate
+      summary: 社員のツール。入力はツールごとの Zod スキーマ
+      description: toolInput の形はツールごとに決め、ゲートウェイが確かめる。
+      parameters:
+      - name: toolName
+        in: path
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolCallInput'
+      security:
+      - workToken: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ToolResult'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id005
+  /v1/health:
+    get:
+      operationId: getWorkspaceHealth
+      tags:
+      - workspace
+      summary: ワークスペースが起きたか
+      security: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Health'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: &id006
+    - url: http://workspace:8080
+      description: ワークスペースの Node のサーバー。社員 DO だけが呼ぶ
+  /v1/restore:
+    post:
+      operationId: restoreTranscript
+      tags:
+      - workspace
+      summary: 会話の記録を戻す
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreInput'
+      security: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id006
+  /v1/runs:
+    post:
+      operationId: startRun
+      tags:
+      - workspace
+      summary: タスク 1 件の SDK の呼び出しを始める
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunInput'
+      security: []
+      responses:
+        '202':
+          description: 受け付けた。進みは /ws/v1/events で届く
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id006
+  /v1/messages:
+    post:
+      operationId: addRunMessage
+      tags:
+      - workspace
+      summary: 走っている呼び出しにオーナーの発言を足す
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceMessageInput'
+      security: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id006
+  /v1/ticket:
+    put:
+      operationId: replaceTicket
+      tags:
+      - workspace
+      summary: 新しい作業トークンに替える
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketInput'
+      security: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id006
+  /v1/abort:
+    post:
+      operationId: abortRun
+      tags:
+      - workspace
+      summary: 今の呼び出しを切る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonInput'
+      security: []
+      responses:
+        '204':
+          description: 成功。本文は無い
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    servers: *id006
+components:
+  securitySchemes:
+    accessJwt:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access (Google) のログインの証明
+    session:
+      type: apiKey
+      in: cookie
+      name: ko_session
+      description: HMAC で署名したセッション
+    workToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: タスクごとの 1 時間の作業トークン (HS256)
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: *id001
+      description: 前の返事の meta.next
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+  responses:
+    BadRequest:
+      description: 要求を読めない (JSON でない、知らないクエリ)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: ログインの証明かセッションが無い、作業トークンが無効、パスキーの確認が切れた
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: オーナーでない、ロックアウト中、送信元が違う、ルールの外
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: ルートか対象が無い
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: 前提の版が変わった、止まっている範囲への操作
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnsupportedMediaType:
+      description: application/json でない
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableContent:
+      description: 形は読めたが入力の確かめに落ちた。errors に項目ごとの理由
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TooManyRequests:
+      description: レート制限。Retry-After に秒
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+      headers:
+        Retry-After:
+          description: 待つ秒
+          schema: *id007
+    InternalError:
+      description: 想定外。中身は返さず記録にだけ残す
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    BadGateway:
+      description: GitHub か Anthropic が失敗を返した
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unavailable:
+      description: ワークスペースが起きていない。Retry-After に秒
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+      headers:
+        Retry-After:
+          description: 待つ秒
+          schema: *id007
+  schemas:
+    Meta:
+      type: object
+      properties:
+        traceId:
+          type: string
+          description: 要求ごとの追跡 ID。記録の trace_id と同じ
+      required:
+      - traceId
+      additionalProperties: false
+    ListMeta:
+      type: object
+      properties:
+        traceId: *id001
+        next:
+          type:
+          - string
+          - 'null'
+          description: 次のページのカーソル。無ければ null
+      required:
+      - traceId
+      - next
+      additionalProperties: false
+    Problem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: urn:know-office:problem:<code>
+        title: *id001
+        status: *id007
+        detail: *id001
+        instance:
+          type: string
+          description: 要求のパス
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        traceId: *id001
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              pointer:
+                type: string
+                description: 'JSON Pointer。クエリは #/query/<名前>'
+              detail: *id001
+            required:
+            - pointer
+            - detail
+            additionalProperties: false
+      required:
+      - type
+      - title
+      - status
+      - code
+      - traceId
+      description: RFC 9457 の Problem Details
+      additionalProperties: false
+    ErrorCode:
+      type: string
+      enum:
+      - malformed_request
+      - unauthenticated
+      - step_up_required
+      - forbidden
+      - locked_out
+      - origin_mismatch
+      - rule_denied
+      - not_found
+      - method_not_allowed
+      - conflict
+      - stopped
+      - unsupported_media_type
+      - validation_failed
+      - rate_limited
+      - internal
+      - upstream_failed
+      - unavailable
+      - upstream_timeout
+    Health:
+      type: object
+      properties:
+        ok: &id009
+          type: boolean
+        part:
+          type: string
+          enum:
+          - gate
+          - screen
+          - workspace
+      required:
+      - ok
+      - part
+      additionalProperties: false
+    Session:
+      type: object
+      properties:
+        id: *id004
+        createdAt: &id008
+          type: string
+          format: date-time
+        expiresAt: *id008
+        endedAt: &id010
+          type:
+          - string
+          - 'null'
+          format: date-time
+        current: *id009
+        ip: *id001
+        country: *id001
+        userAgent: *id001
+      required:
+      - id
+      - createdAt
+      - expiresAt
+      - endedAt
+      - current
+      - ip
+      - country
+      - userAgent
+      additionalProperties: false
+    Me:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        sessionId: *id004
+        stepUpUntil: *id010
+        hasPasskey: *id009
+      required:
+      - email
+      - sessionId
+      - stepUpUntil
+      - hasPasskey
+      additionalProperties: false
+    PasskeyOptionsInput:
+      type: object
+      properties:
+        purpose:
+          type: string
+          enum:
+          - register
+          - step_up
+      required:
+      - purpose
+      additionalProperties: false
+    PasskeyOptions:
+      type: object
+      description: WebAuthn の PublicKeyCredentialCreationOptions か RequestOptions の JSON
+      additionalProperties: true
+    WebAuthnResponse:
+      type: object
+      description: ブラウザの WebAuthn の返事 (RegistrationResponseJSON か AuthenticationResponseJSON)
+      additionalProperties: true
+    Passkey:
+      type: object
+      properties:
+        id: *id004
+        createdAt: *id008
+      required:
+      - id
+      - createdAt
+      additionalProperties: false
+    StepUp:
+      type: object
+      properties:
+        stepUpUntil: *id008
+      required:
+      - stepUpUntil
+      additionalProperties: false
+    AuditRow:
+      type: object
+      properties:
+        id: *id004
+        at: *id008
+        actor: *id001
+        action: *id001
+        target: *id001
+        scope: *id011
+        detail:
+          type: object
+          additionalProperties: true
+        prevHash: *id001
+        hash: *id001
+        traceId: *id001
+      required:
+      - id
+      - at
+      - actor
+      - action
+      - target
+      - scope
+      - detail
+      - prevHash
+      - hash
+      - traceId
+      additionalProperties: false
+    VerifyAuditInput:
+      type: object
+      properties:
+        year:
+          type: integer
+          minimum: 2026
+      required:
+      - year
+      additionalProperties: false
+    AuditVerification:
+      type: object
+      properties:
+        ok: *id009
+        brokenAt:
+          type:
+          - string
+          - 'null'
+          description: 最初に合わなかった行の ID
+      required:
+      - ok
+      - brokenAt
+      additionalProperties: false
+    StorageUse:
+      type: object
+      properties:
+        binding: *id001
+        bytes: *id007
+        ratio:
+          type: number
+          minimum: 0
+          maximum: 1
+      required:
+      - binding
+      - bytes
+      - ratio
+      additionalProperties: false
+    StaffStatus:
+      type: object
+      properties:
+        id: *id003
+        state:
+          type: string
+          enum:
+          - 'off'
+          - working
+          - wrapping
+          - called
+          - stopped
+          - waiting
+        nodeId:
+          type:
+          - string
+          - 'null'
+        nodeTitle:
+          type:
+          - string
+          - 'null'
+        workedMsToday: *id007
+      required:
+      - id
+      - state
+      - nodeId
+      - nodeTitle
+      - workedMsToday
+      additionalProperties: false
+    DaySummary:
+      type: object
+      properties:
+        staffId: *id003
+        day: *id002
+        clockIn: *id010
+        clockOut: *id010
+        workedMs: *id007
+        extensionMs: *id007
+        callMs: *id007
+        stoppedMs: *id007
+        waitingMs: *id007
+        reasons:
+          type: array
+          items: *id001
+      required:
+      - staffId
+      - day
+      - clockIn
+      - clockOut
+      - workedMs
+      - extensionMs
+      - callMs
+      - stoppedMs
+      - waitingMs
+      - reasons
+      additionalProperties: false
+    WorkEntry:
+      type: object
+      properties:
+        id: *id004
+        nodeId: *id004
+        scope: *id011
+        title: *id001
+        startedAt: *id008
+        endedAt: *id008
+        activeMs: *id007
+        result:
+          type: string
+          enum:
+          - done
+          - handed_back
+          - stopped
+          - continued
+      required:
+      - id
+      - nodeId
+      - scope
+      - title
+      - startedAt
+      - endedAt
+      - activeMs
+      - result
+      additionalProperties: false
+    DayAttendance:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/DaySummary'
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkEntry'
+      required:
+      - summary
+      - entries
+      additionalProperties: false
+    CreateOrderInput:
+      type: object
+      properties:
+        day: *id002
+        kind:
+          type: string
+          enum:
+          - extend
+          - leave_early
+          - 'off'
+        until:
+          type: string
+          pattern: ^\d{2}:\d{2}$
+          description: extend と leave_early で要る
+      required:
+      - day
+      - kind
+      additionalProperties: false
+    Order:
+      type: object
+      properties:
+        id: *id004
+        staffId: *id003
+        day: *id002
+        kind:
+          type: string
+          enum:
+          - extend
+          - leave_early
+          - 'off'
+        until:
+          type:
+          - string
+          - 'null'
+        source:
+          type: string
+          enum:
+          - button
+          - chat
+        cancelledAt: *id010
+        createdAt: *id008
+      required:
+      - id
+      - staffId
+      - day
+      - kind
+      - until
+      - source
+      - cancelledAt
+      - createdAt
+      additionalProperties: false
+    CorrectAttendanceInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - scheduled
+          - extension
+          - call
+          - stopped
+          - waiting
+        startedAt: *id008
+        endedAt: *id008
+        reason: *id001
+        note: *id001
+      required:
+      - kind
+      - startedAt
+      - endedAt
+      - reason
+      - note
+      additionalProperties: false
+    AttendanceRow:
+      type: object
+      properties:
+        id: *id004
+        staffId: *id003
+        day: *id002
+        kind: *id001
+        startedAt: *id008
+        endedAt: *id008
+        reason: *id001
+        corrects:
+          type:
+          - string
+          - 'null'
+        note: *id001
+        createdAt: *id008
+      required:
+      - id
+      - staffId
+      - day
+      - kind
+      - startedAt
+      - endedAt
+      - reason
+      - corrects
+      - note
+      - createdAt
+      additionalProperties: false
+    Message:
+      type: object
+      properties:
+        id: *id004
+        at: *id008
+        staffId: *id003
+        nodeId:
+          type:
+          - string
+          - 'null'
+        sender:
+          type: string
+          enum:
+          - owner
+          - staff
+        body: *id001
+      required:
+      - id
+      - at
+      - staffId
+      - nodeId
+      - sender
+      - body
+      additionalProperties: false
+    CreateMessageInput:
+      type: object
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        nodeId: *id004
+      required:
+      - body
+      additionalProperties: false
+    LiveTicket:
+      type: object
+      properties:
+        ticket: *id001
+        expiresAt: *id008
+      required:
+      - ticket
+      - expiresAt
+      additionalProperties: false
+    GuardState:
+      type: object
+      properties:
+        stopped:
+          type: array
+          items:
+            type: object
+            properties:
+              scope: *id012
+              target: *id001
+              stopId: *id004
+              since: *id008
+            required:
+            - scope
+            - target
+            - stopId
+            - since
+            additionalProperties: false
+      required:
+      - stopped
+      additionalProperties: false
+    StopRow:
+      type: object
+      properties:
+        id: *id004
+        at: *id008
+        kind:
+          type: string
+          enum:
+          - stop
+          - near
+        scope: *id012
+        target: *id001
+        signal: *id001
+        measured: &id013
+          type: number
+        threshold: *id013
+        by:
+          type: string
+          enum:
+          - system
+          - owner
+        resumedAt: *id010
+        verdict:
+          type:
+          - string
+          - 'null'
+          enum:
+          - correct
+          - 'false'
+          - unknown
+          - null
+      required:
+      - id
+      - at
+      - kind
+      - scope
+      - target
+      - signal
+      - measured
+      - threshold
+      - by
+      - resumedAt
+      - verdict
+      additionalProperties: false
+    StopDetail:
+      allOf:
+      - $ref: '#/components/schemas/StopRow'
+      - type: object
+        properties:
+          recentOps:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          updates:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          rulesVersion: *id007
+          model: *id001
+          externalSources:
+            type: array
+            items: *id001
+        required:
+        - recentOps
+        - updates
+        - rulesVersion
+        - model
+        - externalSources
+        additionalProperties: false
+    VerdictInput:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum:
+          - correct
+          - 'false'
+          - unknown
+        reason: *id001
+      required:
+      - verdict
+      - reason
+      additionalProperties: false
+    StopUpdate:
+      type: object
+      properties:
+        id: *id004
+        stopId: *id004
+        at: *id008
+        kind:
+          type: string
+          enum:
+          - resumed
+          - verdict
+          - measure
+        by:
+          type: string
+          enum:
+          - system
+          - reviewer
+          - owner
+      required:
+      - id
+      - stopId
+      - at
+      - kind
+      - by
+      additionalProperties: false
+    StopTargetInput:
+      type: object
+      properties:
+        scope: *id012
+        target: *id001
+      required:
+      - scope
+      - target
+      additionalProperties: false
+    StopPreview:
+      type: object
+      properties:
+        staff:
+          type: array
+          items: *id003
+        nodes: *id007
+      required:
+      - staff
+      - nodes
+      additionalProperties: false
+    CreateStopInput:
+      type: object
+      properties:
+        scope: *id012
+        target: *id001
+        reason: *id001
+      required:
+      - scope
+      - target
+      - reason
+      additionalProperties: false
+    Stop:
+      type: object
+      properties:
+        stopId: *id004
+      required:
+      - stopId
+      additionalProperties: false
+    Resumption:
+      type: object
+      properties:
+        resumedAt: *id008
+      required:
+      - resumedAt
+      additionalProperties: false
+    Thresholds:
+      type: object
+      properties:
+        version: *id007
+        values:
+          type: object
+          additionalProperties: *id013
+      required:
+      - version
+      - values
+      additionalProperties: false
+    UpdateThresholdsInput:
+      type: object
+      properties:
+        version:
+          type: integer
+          description: 読んだ時の版。違えば 409 conflict
+        values:
+          type: object
+          additionalProperties: *id013
+        reason: *id001
+      required:
+      - version
+      - values
+      - reason
+      additionalProperties: false
+    GuardEffect:
+      type: object
+      properties:
+        stops: *id007
+        falseRatio: *id013
+        topCauses:
+          type: array
+          items:
+            type: object
+            properties:
+              signal: *id001
+              count: *id007
+            required:
+            - signal
+            - count
+            additionalProperties: false
+        measures:
+          type: array
+          items:
+            type: object
+            properties:
+              lessonId: *id004
+              before: *id007
+              after: *id007
+            required:
+            - lessonId
+            - before
+            - after
+            additionalProperties: false
+      required:
+      - stops
+      - falseRatio
+      - topCauses
+      - measures
+      additionalProperties: false
+    Lesson:
+      type: object
+      properties:
+        id: *id004
+        createdAt: *id008
+        kind:
+          type: string
+          enum:
+          - prompt_rule
+          - threshold
+          - rule_tool
+        cause: *id001
+        proposal: *id001
+        stopIds:
+          type: array
+          items: *id004
+        status:
+          type: string
+          enum:
+          - proposed
+          - approved
+          - rejected
+          - applied
+      required:
+      - id
+      - createdAt
+      - kind
+      - cause
+      - proposal
+      - stopIds
+      - status
+      additionalProperties: false
+    DecisionInput:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum:
+          - approve
+          - reject
+        reason: *id001
+      required:
+      - decision
+      - reason
+      additionalProperties: false
+    Node:
+      type: object
+      properties:
+        id: *id004
+        kind:
+          type: string
+          enum:
+          - purpose
+          - goal
+          - project
+          - task
+        parentId:
+          type:
+          - string
+          - 'null'
+        scope: *id011
+        title: *id001
+        body: *id001
+        taskKind:
+          type:
+          - string
+          - 'null'
+          enum:
+          - build
+          - content
+          - fix
+          - plan
+          - review
+          - null
+        assignee:
+          type:
+          - string
+          - 'null'
+        status:
+          type: string
+          enum:
+          - todo
+          - doing
+          - review
+          - done
+          - stopped
+          - waiting_owner
+          - dropped
+        priority: *id007
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        createdAt: *id008
+        updatedAt: *id008
+      required:
+      - id
+      - kind
+      - parentId
+      - scope
+      - title
+      - body
+      - taskKind
+      - assignee
+      - status
+      - priority
+      - progress
+      - createdAt
+      - updatedAt
+      additionalProperties: false
+    NodeTree:
+      allOf:
+      - $ref: '#/components/schemas/Node'
+      - type: object
+        properties:
+          children:
+            type: array
+            items:
+              $ref: '#/components/schemas/NodeTree'
+        required:
+        - children
+        additionalProperties: false
+    NodeDetail:
+      allOf:
+      - $ref: '#/components/schemas/Node'
+      - type: object
+        properties:
+          ancestors:
+            type: array
+            items:
+              $ref: '#/components/schemas/Node'
+          events:
+            type: array
+            items:
+              type: object
+              properties:
+                at: *id008
+                staffId:
+                  type:
+                  - string
+                  - 'null'
+                kind: *id001
+                detail:
+                  type: object
+                  additionalProperties: true
+              required:
+              - at
+              - staffId
+              - kind
+              - detail
+              additionalProperties: false
+        required:
+        - ancestors
+        - events
+        additionalProperties: false
+    CreateNodeInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - purpose
+          - goal
+          - project
+          - task
+        parentId: *id004
+        scope: *id011
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        body: *id001
+      required:
+      - kind
+      - scope
+      - title
+      additionalProperties: false
+    UpdateNodeInput:
+      type: object
+      properties:
+        parentId: *id004
+        title: *id001
+        body: *id001
+        assignee: *id003
+        priority: *id007
+        status:
+          type: string
+          enum:
+          - todo
+          - dropped
+      required: []
+      additionalProperties: false
+    OrgStaff:
+      type: object
+      properties:
+        id: *id003
+        role: *id001
+        bossId:
+          type:
+          - string
+          - 'null'
+        promptVersion: *id007
+      required:
+      - id
+      - role
+      - bossId
+      - promptVersion
+      additionalProperties: false
+    UpdatePromptInput:
+      type: object
+      properties:
+        body: *id001
+      required:
+      - body
+      additionalProperties: false
+    PromptVersion:
+      type: object
+      properties:
+        version: *id007
+      required:
+      - version
+      additionalProperties: false
+    Approval:
+      type: object
+      properties:
+        id: *id004
+        kind:
+          type: string
+          enum:
+          - staff_add
+          - role_change
+          - prompt_rule
+          - external_integration
+          - cost_increase
+          - merge
+          - deploy
+          - service_close
+          - guard_change
+        target: *id001
+        payload:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum:
+          - pending
+          - approved
+          - rejected
+        requestedBy: *id001
+        requestedAt: *id008
+        decidedAt: *id010
+        reason:
+          type:
+          - string
+          - 'null'
+      required:
+      - id
+      - kind
+      - target
+      - payload
+      - status
+      - requestedBy
+      - requestedAt
+      - decidedAt
+      - reason
+      additionalProperties: false
+    ReviewHead:
+      type: object
+      properties:
+        nodeId: *id004
+        repo: *id001
+        prNumber: *id007
+        branch: *id001
+        baseSha: *id001
+        headSha: *id001
+        lastSeenSha:
+          type:
+          - string
+          - 'null'
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name: *id001
+              ok: *id009
+            required:
+            - name
+            - ok
+            additionalProperties: false
+        reviewerSummary: *id001
+        reviewerVerdict:
+          type:
+          - string
+          - 'null'
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              path: *id001
+              status:
+                type: string
+                enum:
+                - added
+                - modified
+                - removed
+                - renamed
+              seen: *id009
+            required:
+            - path
+            - status
+            - seen
+            additionalProperties: false
+      required:
+      - nodeId
+      - repo
+      - prNumber
+      - branch
+      - baseSha
+      - headSha
+      - lastSeenSha
+      - checks
+      - reviewerSummary
+      - reviewerVerdict
+      - files
+      additionalProperties: false
+    FileDiff:
+      type: object
+      properties:
+        path: *id001
+        language: *id001
+        hunks:
+          type: array
+          items:
+            type: object
+            properties:
+              oldStart: *id007
+              newStart: *id007
+              lines:
+                type: array
+                items: *id001
+            required:
+            - oldStart
+            - newStart
+            - lines
+            additionalProperties: false
+      required:
+      - path
+      - language
+      - hunks
+      additionalProperties: false
+    FileContent:
+      type: object
+      properties:
+        path: *id001
+        ref: *id001
+        content: *id001
+      required:
+      - path
+      - ref
+      - content
+      additionalProperties: false
+    SeenInput:
+      type: object
+      properties:
+        sha: *id001
+      required:
+      - sha
+      additionalProperties: false
+    CreateNoteInput:
+      type: object
+      properties:
+        path: *id001
+        line: *id007
+        side:
+          type: string
+          enum:
+          - old
+          - new
+        body: *id001
+      required:
+      - path
+      - line
+      - side
+      - body
+      additionalProperties: false
+    ReviewNote:
+      type: object
+      properties:
+        id: *id004
+        at: *id008
+        by: *id001
+        path: *id001
+        line: *id007
+        side:
+          type: string
+          enum:
+          - old
+          - new
+        body: *id001
+      required:
+      - id
+      - at
+      - by
+      - path
+      - line
+      - side
+      - body
+      additionalProperties: false
+    ReviewVerdictInput:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum:
+          - approve
+          - request_changes
+        body: *id001
+      required:
+      - verdict
+      - body
+      additionalProperties: false
+    ReviewVerdict:
+      type: object
+      properties:
+        nodeId: *id004
+        ownerVerdict:
+          type: string
+          enum:
+          - approve
+          - request_changes
+      required:
+      - nodeId
+      - ownerVerdict
+      additionalProperties: false
+    CreateCommitInput:
+      type: object
+      properties:
+        path: *id001
+        content: *id001
+        baseSha: *id001
+        message: *id001
+      required:
+      - path
+      - content
+      - baseSha
+      - message
+      additionalProperties: false
+    Commit:
+      type: object
+      properties:
+        sha: *id001
+      required:
+      - sha
+      additionalProperties: false
+    GitHubManifest:
+      type: object
+      properties:
+        action:
+          type: string
+          format: uri
+        manifest:
+          type: object
+          additionalProperties: true
+        state: *id001
+      required:
+      - action
+      - manifest
+      - state
+      additionalProperties: false
+    Repo:
+      type: object
+      properties:
+        fullName: *id001
+        private: *id009
+      required:
+      - fullName
+      - private
+      additionalProperties: false
+    GitHubRules:
+      type: object
+      properties:
+        version: *id007
+        protectedPaths:
+          type: array
+          items: *id001
+        requiredChecks:
+          type: array
+          items: *id001
+        mergeBy:
+          type: string
+          enum:
+          - owner
+          - reviewer
+      required:
+      - version
+      - protectedPaths
+      - requiredChecks
+      - mergeBy
+      additionalProperties: false
+    UpdateGitHubRulesInput:
+      type: object
+      properties:
+        version: *id007
+        protectedPaths:
+          type: array
+          items: *id001
+        requiredChecks:
+          type: array
+          items: *id001
+        mergeBy:
+          type: string
+          enum:
+          - owner
+          - reviewer
+        reason: *id001
+      required:
+      - version
+      - protectedPaths
+      - requiredChecks
+      - mergeBy
+      - reason
+      additionalProperties: false
+    ServiceCard:
+      type: object
+      properties:
+        id: *id004
+        name: *id001
+        kind:
+          type: string
+          enum:
+          - library
+          - web_app
+          - content
+        stage:
+          type: string
+          enum:
+          - idea
+          - study
+          - prototype
+          - service
+          - operation
+          - dropped
+          - closed
+        staffId:
+          type:
+          - string
+          - 'null'
+        repo:
+          type:
+          - string
+          - 'null'
+      required:
+      - id
+      - name
+      - kind
+      - stage
+      - staffId
+      - repo
+      additionalProperties: false
+    ServiceDetail:
+      allOf:
+      - $ref: '#/components/schemas/ServiceCard'
+      - type: object
+        properties:
+          aim: *id001
+          users: *id001
+          costEstimate: *id013
+          revenueEstimate: *id013
+          metrics:
+            type: object
+            additionalProperties: true
+          events:
+            type: array
+            items:
+              type: object
+              properties:
+                at: *id008
+                kind: *id001
+                by: *id001
+              required:
+              - at
+              - kind
+              - by
+              additionalProperties: false
+        required:
+        - aim
+        - users
+        - costEstimate
+        - revenueEstimate
+        - metrics
+        - events
+        additionalProperties: false
+    CreateIdeaInput:
+      type: object
+      properties:
+        title: *id001
+        aim: *id001
+        users: *id001
+        costEstimate: *id013
+        revenueEstimate: *id013
+      required:
+      - title
+      - aim
+      - users
+      - costEstimate
+      - revenueEstimate
+      additionalProperties: false
+    AdvanceInput:
+      type: object
+      properties:
+        to:
+          type: string
+          enum:
+          - study
+          - prototype
+          - service
+          - operation
+          - dropped
+          - closed
+        reason: *id001
+      required:
+      - to
+      - reason
+      additionalProperties: false
+    Setting:
+      type: object
+      properties:
+        key: *id001
+        value:
+          description: 設定ごとの Zod スキーマの形
+        inherited: *id009
+      required:
+      - key
+      - value
+      - inherited
+      additionalProperties: false
+    UpdateSettingInput:
+      type: object
+      properties:
+        value:
+          description: 設定ごとの形。サービスの設定は null で初期値に戻す
+        reason: *id001
+      required:
+      - value
+      - reason
+      additionalProperties: false
+    ReasonInput:
+      type: object
+      properties:
+        reason: *id001
+      required:
+      - reason
+      additionalProperties: false
+    Deployment:
+      type: object
+      properties:
+        id: *id004
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - done
+          - failed
+      required:
+      - id
+      - status
+      additionalProperties: false
+    Dashboard:
+      type: object
+      properties:
+        staff:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffStatus'
+        approvals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Approval'
+        todayTasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Node'
+        monthCostMicroUsd: *id007
+        notices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notice'
+      required:
+      - staff
+      - approvals
+      - todayTasks
+      - monthCostMicroUsd
+      - notices
+      additionalProperties: false
+    RecordSummary:
+      type: object
+      properties:
+        group:
+          type: string
+          enum:
+          - service
+          - staff
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              key: *id001
+              workedMs: *id007
+              tasks: *id007
+              costMicroUsd: *id007
+              tokens: *id007
+              deploys: *id007
+              failureRatio: *id013
+            required:
+            - key
+            - workedMs
+            - tasks
+            - costMicroUsd
+            - tokens
+            - deploys
+            - failureRatio
+            additionalProperties: false
+      required:
+      - group
+      - rows
+      additionalProperties: false
+    Uptime:
+      type: object
+      properties:
+        month: *id001
+        ratio: *id013
+        checks: *id007
+      required:
+      - month
+      - ratio
+      - checks
+      additionalProperties: false
+    Notice:
+      type: object
+      properties:
+        id: *id004
+        at: *id008
+        level:
+          type: string
+          enum:
+          - info
+          - warn
+          - stop
+        kind: *id001
+        title: *id001
+        body: *id001
+        scope: *id011
+        readAt: *id010
+      required:
+      - id
+      - at
+      - level
+      - kind
+      - title
+      - body
+      - scope
+      - readAt
+      additionalProperties: false
+    Finding:
+      type: object
+      properties:
+        id: *id004
+        repo: *id001
+        issueNumber: *id007
+        kind:
+          type: string
+          enum:
+          - error
+          - slow
+          - cost
+        count: *id007
+        firstAt: *id008
+        lastAt: *id008
+        status:
+          type: string
+          enum:
+          - open
+          - fixed
+          - verified
+          - reverted
+      required:
+      - id
+      - repo
+      - issueNumber
+      - kind
+      - count
+      - firstAt
+      - lastAt
+      - status
+      additionalProperties: false
+    Extension:
+      type: object
+      properties:
+        id: *id001
+        title: *id001
+        enabled: *id009
+        ownerData: *id009
+      required:
+      - id
+      - title
+      - enabled
+      - ownerData
+      additionalProperties: false
+    ToggleExtensionInput:
+      type: object
+      properties:
+        enabled: *id009
+      required:
+      - enabled
+      additionalProperties: false
+    HeartbeatInput:
+      type: object
+      properties:
+        at: *id008
+      required:
+      - at
+      additionalProperties: false
+    CheckpointInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - test_pass
+          - commit
+          - pr
+          - note
+        nodeId: *id004
+        note: *id001
+      required:
+      - kind
+      - nodeId
+      additionalProperties: false
+    DecideInput:
+      type: object
+      properties:
+        toolName: *id001
+        toolInput:
+          type: object
+          additionalProperties: true
+      required:
+      - toolName
+      - toolInput
+      additionalProperties: false
+    Decision:
+      type: object
+      properties:
+        allow: *id009
+        reason: *id001
+      required:
+      - allow
+      - reason
+      additionalProperties: false
+    AgentEventsInput:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+            required:
+            - kind
+            properties:
+              kind:
+                type: string
+                enum:
+                - message
+                - tool_result
+                - checkpoint
+                - result
+            additionalProperties: true
+      required:
+      - events
+      additionalProperties: false
+    TranscriptPartInput:
+      type: object
+      properties:
+        sessionId: *id001
+        seq: *id007
+        chunk:
+          type: string
+          contentEncoding: base64
+      required:
+      - sessionId
+      - seq
+      - chunk
+      additionalProperties: false
+    ToolCallInput:
+      type: object
+      properties:
+        toolInput:
+          type: object
+          additionalProperties: true
+          description: ツールごとの Zod スキーマの形。core の schemas/tools/<名前>.ts
+      required:
+      - toolInput
+      additionalProperties: false
+    ToolResult:
+      type: object
+      properties:
+        content: *id001
+        isError: *id009
+      required:
+      - content
+      - isError
+      additionalProperties: false
+    RestoreInput:
+      type: object
+      properties:
+        sessionId: *id001
+        transcript:
+          type: string
+          contentEncoding: base64
+      required:
+      - sessionId
+      - transcript
+      additionalProperties: false
+    RunInput:
+      type: object
+      properties:
+        nodeId: *id004
+        ticket: *id001
+        model: *id001
+        effort:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+        systemPrompt: *id001
+        prompt: *id001
+        resume: *id001
+      required:
+      - nodeId
+      - ticket
+      - model
+      - effort
+      - systemPrompt
+      - prompt
+      additionalProperties: false
+    WorkspaceMessageInput:
+      type: object
+      properties:
+        body: *id001
+      required:
+      - body
+      additionalProperties: false
+    TicketInput:
+      type: object
+      properties:
+        ticket: *id001
+      required:
+      - ticket
+      additionalProperties: false
