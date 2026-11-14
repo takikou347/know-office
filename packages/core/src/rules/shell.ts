@@ -12,16 +12,50 @@ const PUSH_ALL = ["--all", "--branches", "--mirror"];
 const CONFIG_READ = ["--get", "--get-all", "--get-regexp", "--list", "-l", "get", "list"];
 const MAIN = ["main", "master"];
 
+// 語を区切る字と、つなぎ (&&、||、;、|、&、括弧、改行) の字
+const BREAK = /[\s<>;|&()]/;
+const JOINT = /[;|&()\n]/;
+
 /**
- * 命令を、つなぎ (&&、||、;、|、&、括弧、改行) で切った語の並びに分ける。引用符は外す
+ * 命令を、つなぎで切った語の並びに分ける。語の全体を囲む引用符だけを外す
  * @param command シェルの命令
- * @returns つなぎごとの語の並び
+ * @returns つなぎごとの語の並び。語の途中の ' " \、" の中の \、行末の \、閉じない引用符があれば null
  */
-export function shellSegments(command: string): string[][] {
-  return command
-    .split(/&&|\|\||[;|&\n()]/)
-    .map((part) => part.replaceAll(/["']/g, " ").split(/[\s<>]+/).filter((w) => w !== ""))
-    .filter((words) => words.length > 0);
+export function shellSegments(command: string): string[][] | null {
+  // シェルは 'ma'in も ma\in も main と読む。読み方を真似ずに、判断できない形として断る側に倒す
+  const segments: string[][] = [];
+  let words: string[] = [];
+  let i = 0;
+  while (i < command.length) {
+    const c = command.charAt(i);
+    if (c === "\\") return null;
+    if (JOINT.test(c)) {
+      if (words.length > 0) segments.push(words);
+      words = [];
+      i += 1;
+    } else if (BREAK.test(c)) {
+      i += 1;
+    } else if (c === "'" || c === '"') {
+      const close = command.indexOf(c, i + 1);
+      if (close < 0) return null;
+      const body = command.slice(i + 1, close);
+      // ' の中の \ は字のまま。" の中の \ は読み替わるので断る
+      if (c === '"' && body.includes("\\")) return null;
+      if (close + 1 < command.length && !BREAK.test(command.charAt(close + 1))) return null;
+      words.push(body);
+      i = close + 1;
+    } else {
+      let j = i;
+      while (j < command.length && !BREAK.test(command.charAt(j))) {
+        if (`'"\\`.includes(command.charAt(j))) return null;
+        j += 1;
+      }
+      words.push(command.slice(i, j));
+      i = j;
+    }
+  }
+  if (words.length > 0) segments.push(words);
+  return segments;
 }
 
 /**
@@ -109,10 +143,11 @@ function wordsRefusal(words: string[], workRoot: string, protectedPaths: readonl
  * @returns 断る理由。通すなら null
  */
 export function shellRefusal(command: string, workRoot: string, protectedPaths: readonly string[]): string | null {
-  if (OPAQUE.some((p) => p.test(command))) return "中身を判断できない命令は断る";
+  const segments = shellSegments(command);
+  if (segments === null || OPAQUE.some((p) => p.test(command))) return "中身を判断できない命令は断る";
   if (/\s--force\b/.test(command)) return "--force は断る";
   if (protectedPaths.some((p) => command.includes(p.replace(/^\/+|\/+$/g, "")))) return "ルールで触れない所には書けない";
-  for (const words of shellSegments(command)) {
+  for (const words of segments) {
     const refusal = wordsRefusal(words, workRoot, protectedPaths);
     if (refusal !== null) return refusal;
     const paths = words.flatMap(pathsOf);

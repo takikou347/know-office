@@ -48,6 +48,8 @@ const CASES: Record<OperationKind, { allow: Case[]; deny: Case[] }> = {
       { name: "-u で明示したブランチへ push する", tool: "Bash", input: { command: "git push -u origin fix-typo" } },
       { name: "-C の後の push を明示したブランチへ", tool: "Bash", input: { command: "git -C /work/repo push origin HEAD:fix-typo" } },
       { name: "/work の下の道に書く", tool: "Bash", input: { command: "echo x > /work/repo/notes.md 2>/dev/null" } },
+      { name: "語の全体を囲む引用符は外して読む", tool: "Bash", input: { command: "git push origin 'fix-typo' && git commit -m \"fix: a; b\"" } },
+      { name: "' の中の \\ はそのまま読む", tool: "Bash", input: { command: "rg 'a\\.b' src" } },
     ],
     deny: [
       { name: "main へ push する", tool: "Bash", input: { command: "git push origin main" } },
@@ -57,6 +59,14 @@ const CASES: Record<OperationKind, { allow: Case[]; deny: Case[] }> = {
       { name: "git config を書き換える", tool: "Bash", input: { command: "git config core.hooksPath /tmp/hooks" } },
       { name: "/work の外を触る", tool: "Bash", input: { command: "cat /opt/workspace/hooks.js" } },
       { name: "家の置き場を触る", tool: "Bash", input: { command: "ls ~/notes" } },
+      // 引用符と \ で main を隠す。語の途中の ' " \ と行末の \ は中身を判断できないので断る
+      { name: "語の途中の ' で main を隠す", tool: "Bash", input: { command: "git push origin 'ma'in" } },
+      { name: "語の途中の \" で main を隠す", tool: "Bash", input: { command: 'git push origin "ma""in"' } },
+      { name: "refspec の \\ で main を隠す", tool: "Bash", input: { command: "git push origin feat:ma\\in" } },
+      { name: "\\ で main を隠す", tool: "Bash", input: { command: "git push origin ma\\in" } },
+      { name: "行末の \\ で継ぎ足す", tool: "Bash", input: { command: "git push origin \\\nmain" } },
+      { name: "閉じない引用符", tool: "Bash", input: { command: "git push origin 'main" } },
+      { name: "\" の中の \\", tool: "Bash", input: { command: 'git push origin "ma\\in"' } },
       // git の見分け: 行の頭でなくても、前置きの引数を挟んでも push を見つける
       { name: "-C を挟んで main へ push する", tool: "Bash", input: { command: "git -C /work/x push origin main" } },
       { name: "-c を挟んで main へ push する", tool: "Bash", input: { command: "git -c a=b push origin main" } },

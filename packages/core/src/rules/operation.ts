@@ -120,7 +120,7 @@ export function toOperation(toolName: string, toolInput: unknown): Operation {
       return op("file.write", text(input, "notebook_path"), [text(input, "notebook_path")]);
     case "Bash": {
       const command = text(input, "command");
-      const words = shellSegments(command).flat();
+      const words = (shellSegments(command) ?? []).flat();
       const secret = words.some((w) => secretPath(w) || pathsOf(w).some(secretPath));
       return op(secret ? "secret.read" : (sensitive("", command) ?? "shell.run"), command);
     }
