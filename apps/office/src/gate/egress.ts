@@ -8,6 +8,7 @@ import type { Bindings, GateEnv } from "./env.ts";
 import { staffOf } from "./guard/actions.ts";
 import type { GuardDeps } from "./guard/deps.ts";
 import { noContent } from "./respond.ts";
+import { rethrowRpc } from "./rpc.ts";
 import { authenticateTicket, type Caller, renewTicket } from "./work/ticket.ts";
 
 export type { Caller } from "./work/ticket.ts";
@@ -76,13 +77,14 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
   // 本文の形はゲートウェイのルートだけで確かめる。Claude への本文は 1MB を超えうるので、プロキシ (tasks.md の 7.6) が決める
   app.use("/ws/*", bodyShape);
   app.openapi(heartbeatRoute, async (c) => {
-    await staffOf(c.env, caller.staffId).heartbeat(c.var.clock.now());
+    await staffOf(c.env, caller.staffId).heartbeat(c.var.clock.now()).catch(rethrowRpc);
     return noContent(c);
   });
   app.openapi(checkpointRoute, async (c) => {
     const input = c.req.valid("json");
     const now = c.var.clock.now();
-    await staffOf(c.env, caller.staffId).checkpoint(input, now);
+    // DO の RPC を越えると AppError のクラスが消えるので、断った code を戻す
+    await staffOf(c.env, caller.staffId).checkpoint(input, now).catch(rethrowRpc);
     await renewTicket(c.env, caller.staffId, input.nodeId, now);
     return noContent(c);
   });

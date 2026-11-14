@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { rotateVaultKeys, vaultKey } from "../../src/gate/auth/vault.ts";
 import { routeEgress, type Caller } from "../../src/gate/egress.ts";
 import { authenticateTicket, issueTicket, TICKET_TYP, workspaceIdOf } from "../../src/gate/work/ticket.ts";
-import { jst, MINUTE, NODE, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
+import { jst, MINUTE, NODE, NODE2, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
 
 const w = useGuardWorld();
 
@@ -148,6 +148,18 @@ describe("1 時間を超えるタスク", () => {
     w.clock.advance(jst(9, 51) - w.clock.now());
     expect((await checkpoint()).status).toBe(204);
     expect(await authenticateTicket(w.gate.env, token, builder(), jst(9, 52), w.gate.deps)).toMatchObject({ nodeId: NODE });
+  });
+});
+
+describe("チェックポイントの受け方", () => {
+  it("今のタスクと違うチェックポイントは 409 を返し、作業トークンを渡さない", async () => {
+    await startWork(w, "builder");
+    await issueTicket(w.gate.env, "builder", NODE, jst(9));
+    w.clock.advance(jst(9, 51) - w.clock.now());
+    const res = await fromWorkspace("/ws/v1/checkpoints", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "commit", nodeId: NODE2 }) });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "conflict" });
+    expect(w.gate.workspaces.builder.tickets).toEqual([]);
   });
 });
 
