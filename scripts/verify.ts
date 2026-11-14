@@ -72,6 +72,11 @@ export function stepsFor(root: string, argv: readonly string[], env: Readonly<Re
     existsSync(check)
       ? { name: "check.py", cmd: `python3 ${JSON.stringify(check)} ${JSON.stringify(root)}`, cwd: dirname(knowidea) }
       : { name: "check.py", cmd: `echo "knowidea が ${knowidea} に無い。KNOWIDEA_DIR で置き場を渡す" && exit 1`, cwd: root },
+    {
+      name: "routes",
+      cmd: `python3 ${JSON.stringify(join(knowidea, "tools", "routes_md.py"))} --check ${JSON.stringify(join(root, "apps", "office", "openapi", "v1.yaml"))}`,
+      cwd: root,
+    },
   ];
   if (argv.includes("--e2e")) {
     steps.push({ name: "e2e", cmd: "pnpm e2e", cwd: root });

@@ -39,6 +39,11 @@ void describe("走らせる手順を並べる", () => {
     assert.equal(stepsFor("/repo/know-office", ["--e2e"], env).at(-1)?.name, "e2e");
   });
 
+  void it("2-routes.md が v1.yaml と合うかを knowidea の道具で比べる", () => {
+    const step = stepsFor("/repo/know-office", [], { KNOWIDEA_DIR: "/repo/knowidea" }).find((s) => s.name === "routes");
+    assert.equal(step?.cmd, 'python3 "/repo/knowidea/tools/routes_md.py" --check "/repo/know-office/apps/office/openapi/v1.yaml"');
+  });
+
   void it("knowidea が無い時は check.py の手順が落ちて置き場の渡し方を出す", () => {
     const step = stepsFor("/repo/know-office", [], { KNOWIDEA_DIR: "/none" }).find((s) => s.name === "check.py");
     assert.match(step?.cmd ?? "", /\/none に無い。KNOWIDEA_DIR で置き場を渡す" && exit 1$/);

@@ -2,7 +2,8 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { Health, health } from "@know-office/core";
 import v1 from "../../../openapi/v1.yaml?raw";
-import { createApp } from "../app.ts";
+import { createRouter } from "../app.ts";
+import { CONTENT_SECURITY_POLICY } from "../headers.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
 
@@ -36,10 +37,11 @@ const DOCS_HTML = `<!doctype html>
 <body><div id="swagger"></div><script src="/swagger/swagger-ui-bundle.js"></script><script src="/swagger/swagger-init.js"></script></body>
 </html>`;
 
-export const system = createApp()
+export const system = createRouter()
   .openapi(getHealth, (c) => ok(c, health("gate")))
   .openapi(getApiDocs, (c) => {
-    c.header("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'");
+    // Swagger UI は style 属性を使うので、このルートだけ style-src に unsafe-inline を足す。API の決まりの 3.5
+    c.header("Content-Security-Policy", CONTENT_SECURITY_POLICY.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"));
     return c.html(DOCS_HTML, 200);
   })
   .openapi(getOpenApi, (c) => c.body(v1, 200, { "Content-Type": "application/yaml; charset=utf-8" }));

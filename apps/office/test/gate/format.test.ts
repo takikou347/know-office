@@ -4,6 +4,7 @@ import { Meta, Problem } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../src/gate/app.ts";
 import gate from "../../src/gate/index.ts";
+import { MAX_BODY_BYTES } from "../../src/gate/body.ts";
 import { ok } from "../../src/gate/respond.ts";
 
 /**
@@ -63,7 +64,7 @@ describe("入力の失敗", () => {
   const echo = createRoute({
     method: "post",
     path: "/api/v1/echo",
-    request: { body: { content: { "application/json": { schema: z.object({ title: z.string().max(5) }).strict() } } }, query: z.object({ limit: z.coerce.number().int().max(100).optional() }) },
+    request: { body: { content: { "application/json": { schema: z.object({ title: z.string().max(5) }).strict() } } }, query: z.object({ limit: z.coerce.number().int().max(100).optional() }).strict() },
     responses: { 200: { description: "成功", content: { "application/json": { schema: z.object({ data: z.object({ title: z.string() }), meta: z.object({ traceId: z.string() }) }) } } } },
   });
   const app = createApp().openapi(echo, (c) => ok(c, c.req.valid("json")));
@@ -84,6 +85,12 @@ describe("入力の失敗", () => {
     expect(body.errors?.map((e) => e.pointer)).toEqual(["#/query/limit"]);
   });
 
+  it("知らないクエリパラメーターは 400 malformed_request", async () => {
+    const res = await post(JSON.stringify({ title: "a" }), undefined, "?limit=1&unknown=1");
+    expect(res.status).toBe(400);
+    expect((await problem(res)).code).toBe("malformed_request");
+  });
+
   it("JSON として不正なら 400 malformed_request", async () => {
     const res = await post("{");
     expect(res.status).toBe(400);
@@ -101,6 +108,37 @@ describe("入力の失敗", () => {
     expect(res.status).toBe(413);
     expect((await problem(res)).code).toBe("payload_too_large");
   });
+
+  it("Content-Length が 1MB を超えれば、本文を読む前に 413", async () => {
+    const untouchable = new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error("本文を読んだ");
+      },
+    });
+    const res = await app.request("/api/v1/echo", {
+      method: "POST",
+      body: untouchable,
+      headers: { "Content-Type": "application/json", "Content-Length": String(MAX_BODY_BYTES + 1) },
+      duplex: "half",
+    } as RequestInit);
+    expect(res.status).toBe(413);
+  });
+
+  it("Content-Length が無ければ、1MB を超えた所で読むのを止めて 413", async () => {
+    const chunk = new Uint8Array(64 * 1024).fill(0x20);
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+    });
+    const res = await app.request("/api/v1/echo", {
+      method: "POST",
+      body: endless,
+      headers: { "Content-Type": "application/json" },
+      duplex: "half",
+    } as RequestInit);
+    expect(res.status).toBe(413);
+  }, 5000);
 
   it("想定外の失敗は 500 で、detail に中身を入れない", async () => {
     const boom = createApp();
