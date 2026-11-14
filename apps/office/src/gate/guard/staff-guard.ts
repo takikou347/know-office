@@ -128,6 +128,15 @@ export class StaffGuard {
   }
 
   /**
+   * タスクが読んだ外部の文章の出所を返す。空でなければ、そのタスクに外部の文章の印が付いている。記憶を変えない
+   * @param nodeId タスク ID
+   * @returns 読んだ順の出所
+   */
+  async externalSources(nodeId: string): Promise<string[]> {
+    return (await this.#counts()).tasks[nodeId]?.external ?? [];
+  }
+
+  /**
    * 今のタスクの働いた時間を返す
    * @param now 今の時刻
    * @returns タスク ID と働いた時間。タスクを持っていなければ null

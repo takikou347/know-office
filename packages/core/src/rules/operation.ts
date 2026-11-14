@@ -51,6 +51,15 @@ const GUARD_TEXT = /\/(?:api|ws)\/v\d+\/(?:guard|stops)\b/;
 const STAFF_TEXT = /\/(?:api|ws)\/v\d+\/staff\b/;
 
 /**
+ * 文の中の鍵の形を伏せる。記録と自動停止の出来事に入れる前に通す
+ * @param body 命令、URL、言葉、道
+ * @returns 鍵の形を *** に置き換えた文
+ */
+export function maskSecrets(body: string): string {
+  return SECRET_TEXT.reduce((out, pattern) => out.replace(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`), "***"), body);
+}
+
+/**
  * 入力から文字列の項目を取り出す
  * @param input ツールの入力
  * @param key 項目の名前

@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_RULES, decide, OPERATION_KINDS, toOperation, type OperationKind, type RuleContext } from "../src/index.ts";
+import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, toOperation, type OperationKind, type RuleContext } from "../src/index.ts";
 
 /** ツールの名前と入力、判断の前提の 1 組 */
 type Case = { name: string; tool: string; input: Record<string, unknown>; ctx?: Partial<RuleContext> };
@@ -291,5 +291,13 @@ describe("サービスの鍵", () => {
     const { op, decision } = judge({ name: "", tool: "mcp__staff__secret_read", input: { service: "know-office", name: "STRIPE_KEY" } });
     expect(op.kind).toBe("secret.read");
     expect(decision.allow).toBe(false);
+  });
+});
+
+describe("記録に鍵を残さない", () => {
+  it("鍵の形を伏せ、ほかの文は残す", () => {
+    expect(maskSecrets("curl -H 'authorization: Bearer abc.def' -d sk-ant-api03-xyz https://example.com")).toBe("curl -H 'authorization: ***' -d *** https://example.com");
+    expect(maskSecrets("echo $GITHUB_TOKEN ghp_abc123 && ls")).toBe("echo *** *** && ls");
+    expect(maskSecrets("cat /work/.env")).toBe("cat /work/.env");
   });
 });

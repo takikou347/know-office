@@ -122,6 +122,21 @@ async function verified(env: Bindings, token: string, now: number): Promise<Work
 }
 
 /**
+ * 受け手が確かめ終えた作業トークンから、社員とタスクを読む。署名と送ったワークスペースだけを見直し、StaffDO は呼ばない
+ * @param env バインディング
+ * @param token 作業トークン
+ * @param caller 送ったワークスペース
+ * @param now 今の時刻
+ * @returns 社員 ID とタスク ID
+ * @throws unauthenticated 署名か形が違う、送ったワークスペースと違う時
+ */
+export async function ticketTask(env: Bindings, token: string, caller: Caller, now: number): Promise<{ staffId: StaffId; nodeId: string }> {
+  const claims = await verified(env, token, now);
+  if (claims.ws !== caller.workspaceId || claims.sub !== caller.staffId) throw new AppError("unauthenticated", "作業トークンが使えない");
+  return { staffId: claims.sub, nodeId: claims.node };
+}
+
+/**
  * 作業トークンを確かめる。署名、発行した先、期限、StaffDO の有効な一覧の順に見る
  * 署名の合う作業トークンが発行した先と違うワークスペースから来たら、期限が切れていても横取りとして全体を止める
  * @param env バインディング

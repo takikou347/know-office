@@ -204,6 +204,15 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
+   * タスクが読んだ外部の文章の出所を返す。ルールの判断が外部の文章の印を見るのに使う
+   * @param nodeId タスク ID
+   * @returns 読んだ順の出所
+   */
+  externalSources(nodeId: string): Promise<string[]> {
+    return this.#serial(() => this.#guardOf().then((g) => g.externalSources(nodeId)));
+  }
+
+  /**
    * 今のタスクの働いた時間を返す
    * @param now 今の時刻
    * @returns タスク ID と働いた時間。無ければ null

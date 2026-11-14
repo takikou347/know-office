@@ -41,7 +41,7 @@ const Detail = z.record(z.string(), z.unknown());
  * @returns REC_<年>
  * @throws internal その年の記録の D1 が無い時
  */
-function recordsOf(env: Bindings, at: number): D1Database {
+export function recordsOf(env: Bindings, at: number): D1Database {
   const name = RECORD_BINDINGS.find((b) => b === `REC_${String(jstYear(at))}`);
   const db = name ? env[name] : undefined;
   if (!db) throw new AppError("internal", "その年の記録の D1 が無い");

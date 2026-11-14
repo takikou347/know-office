@@ -87,6 +87,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   resumeTask(nodeId: string): Promise<null>;
   /** 今のタスクの働いた時間 */
   taskClock(now: number): Promise<{ nodeId: string; activeMs: number } | null>;
+  /** タスクが読んだ外部の文章の出所 */
+  externalSources(nodeId: string): Promise<string[]>;
   /** タスクの作業トークンを発行する */
   issueToken(nodeId: string, workspaceId: string, now: number): Promise<IssuedTicket>;
   /** 残りが 10 分を切った作業トークンを発行し直す */

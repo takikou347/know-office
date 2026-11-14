@@ -9,6 +9,7 @@ import { staffOf } from "./guard/actions.ts";
 import type { GuardDeps } from "./guard/deps.ts";
 import { noContent } from "./respond.ts";
 import { rethrowRpc } from "./rpc.ts";
+import { decisionRoutes } from "./work/decisions.ts";
 import { authenticateTicket, type Caller, renewTicket } from "./work/ticket.ts";
 
 export type { Caller } from "./work/ticket.ts";
@@ -93,6 +94,7 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     await renewTicket(c.env, caller.staffId, input.nodeId, now);
     return noContent(c);
   });
+  decisionRoutes(app, caller);
   app.all("*", (c) => {
     const host = new URL(c.req.url).hostname;
     // Claude のプロキシ (tasks.md の 7.6) と GitHub のプロキシ (8.4) をつなぐまでは、作業トークンを確かめた後に断る

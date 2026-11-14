@@ -221,6 +221,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
       halt: g.halt.bind(g),
       resumeTask: g.resumeTask.bind(g),
       taskClock: g.taskClock.bind(g),
+      externalSources: g.externalSources.bind(g),
       issueToken: g.issueToken.bind(g),
       checkToken: g.checkToken.bind(g),
       correct: overRpc(book.correct.bind(book)),
