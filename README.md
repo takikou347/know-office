@@ -8,6 +8,7 @@ KNOW IDEA の社内の管理アプリ。AI 社員が自分でタスクを見つ�
 | `packages/core/` | ゲートウェイ、ワークスペース、画面が共に使う型と判断 |
 | `apps/office/` | 画面(Vite と React)とゲートウェイ(Hono)。1 つの Worker にまとめて配る |
 | `apps/workspace/` | ワークスペース。Node.js で動くコンテナの中身 |
+| `apps/office/openapi/v1.yaml` | API の正本 (OpenAPI 3.1)。[Swagger UI](https://takikou347.github.io/know-office/) で読める |
 
 確かめは `pnpm install`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm e2e`。`pnpm e2e` は画面を Chrome と Safari の 3 つの幅(360、820、1440)で開き、横にはみ出さない事とゲートウェイとつながる事を見る。初めての時は `pnpm --filter @know-office/office exec playwright install chromium webkit` でブラウザを入れる。
 

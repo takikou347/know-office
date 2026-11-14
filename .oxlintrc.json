@@ -51,6 +51,11 @@
       "rules": { "max-lines": "off" }
     },
     {
+      // GitHub Pages の Swagger UI の初期化。ブラウザが先に読んだ swagger-ui-bundle.js の大域の関数を呼ぶ
+      "files": ["apps/office/openapi/pages/*.js"],
+      "rules": { "typescript/no-unsafe-assignment": "off", "typescript/no-unsafe-call": "off" }
+    },
+    {
       // 型の食い違いを @ts-expect-error で確かめるファイル。わざと誤った値を置く
       "files": ["**/*.types.ts"],
       "rules": { "typescript/no-unsafe-assignment": "off" }

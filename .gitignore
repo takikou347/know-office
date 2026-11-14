@@ -6,3 +6,4 @@ dist
 .claude/commands/opsx
 test-results
 playwright-report
+dist-api-docs

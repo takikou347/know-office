@@ -7,7 +7,8 @@
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "api-docs": "node --experimental-strip-types scripts/api-docs.ts"
   },
   "dependencies": {
     "@know-office/core": "workspace:*",
@@ -25,6 +26,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
+    "swagger-ui-dist": "5.34.1",
     "typescript": "7.0.2",
     "vite": "8.3.7",
     "vitest": "5.1.0",
