@@ -6,6 +6,8 @@
   // Cloudflare が自動で付ける、Access を通らない URL は切る
   "workers_dev": false,
   "preview_urls": false,
+  // 開発環境は .dev.vars で development に替える。無い時は本物の宛先を使う
+  "vars": { "ENVIRONMENT": "production" },
   "assets": {
     // /api の下だけ入口が受け、ほかは画面のファイルを返す
     "not_found_handling": "single-page-application",

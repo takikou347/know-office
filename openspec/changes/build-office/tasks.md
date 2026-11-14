@@ -31,7 +31,7 @@
 ## 4. 土台
 
 - [x] 4.0 knowidea の services/know-office/docs/04-detail/ に全機能の詳細設計を、コード規約を 05-conventions.md に書く。各機能を作る直前に、作り終えた所で分かった事と合わせて読み直す
-- [ ] 4.0a 開発環境で動かす土台のテストを先に書き、作る。テスト用の鍵で署名したログインの証明、仮想の認証器によるパスキー、決まった返事を返す偽物の Claude API と GitHub API を置き、画面から一通り操作できる事を e2e で確かめる
+- [x] 4.0a 開発環境で動かす土台のテストを先に書き、作る。テスト用の鍵で署名したログインの証明、仮想の認証器によるパスキー、決まった返事を返す偽物の Claude API と GitHub API を置き、開発の実行と e2e から使える事を確かめる。画面から一通り操作する e2e は、各機能を作る時にこの土台の上で足す
 - [ ] 4.1 Containers で外向きの通信をゲートウェイだけに絞れるかを確かめる。絞れなければフォールバック構成 (knowidea の services/know-office/docs/02-architecture.md の 3.2「社員の動かし方」) に切り替え、設計書を直す。費用か外部連携が変わる時はオーナーに聞く
 - [ ] 4.2 オーナーに Cloudflare の申し込み、Google のログイン用の鍵、パスキーの登録を頼む
 - [x] 4.3 ゲートウェイを `@hono/zod-openapi` で組む。成功の `{ data, meta }` と失敗の problem+json の形、コードのルートとスキーマが `apps/office/openapi/v1.yaml` と合う事のテストを先に書き、`/api/v1/health` と Swagger UI (`/api/v1/docs`) を作る

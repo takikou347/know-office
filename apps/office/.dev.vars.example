@@ -1,0 +1,6 @@
+# 開発環境の変数。pnpm dev が無い時に .dev.vars へ写す。テスト用の値だけで、本物の鍵を置かない (ログインと記録の 3.9)
+ENVIRONMENT=development
+DEV_FAKES_URL=http://localhost:5199
+ACCESS_TEAM=dev
+ACCESS_AUD=dev-aud
+OWNER_EMAIL=owner@example.com

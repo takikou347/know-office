@@ -1,4 +1,5 @@
 // ゲートウェイ、社員 DO、ワークスペース、画面が共に使う型と判断を置く
+export { systemClock, type Clock } from "./clock.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 

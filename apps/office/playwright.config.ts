@@ -44,7 +44,7 @@ export default defineConfig({
     })),
   ),
   webServer: {
-    command: `vite --port ${port} --strictPort`,
+    command: `pnpm run dev --port ${port} --strictPort`,
     url: `http://localhost:${port}/api/v1/health`,
     reuseExistingServer: !process.env["CI"],
     timeout: 60_000,

@@ -9,3 +9,4 @@ playwright-report
 dist-api-docs
 apps/office/public/swagger/swagger-ui.css
 apps/office/public/swagger/swagger-ui-bundle.js
+.dev.vars
