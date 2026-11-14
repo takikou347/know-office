@@ -7,6 +7,7 @@ import { runScheduled } from "./jobs/health.ts";
 
 export { GuardDO } from "./do/guard.ts";
 export { RecorderDO } from "./do/recorder.ts";
+export { StaffDO } from "./do/staff.ts";
 
 export default {
   fetch: gate.fetch,

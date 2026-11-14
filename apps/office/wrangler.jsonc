@@ -23,10 +23,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "RECORDER", "class_name": "RecorderDO" },
-      { "name": "GUARD", "class_name": "GuardDO" }
+      { "name": "GUARD", "class_name": "GuardDO" },
+      { "name": "STAFF", "class_name": "StaffDO" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["StaffDO"] }
+  ],
   "assets": {
     // /api の下だけ入口が受け、ほかは画面のファイルを返す
     "not_found_handling": "single-page-application",

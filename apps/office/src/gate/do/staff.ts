@@ -1,0 +1,169 @@
+// 社員 DO。社員 1 人の勤務の時刻と勤怠を持つ。判断は StaffBook に置き、ここは alarm と記憶を包むだけ (社員と勤怠の 1.3)
+import { DurableObject } from "cloudflare:workers";
+import { AppError, StaffId, type StaffStatus, systemClock } from "@know-office/core";
+import type { Bindings, Staff } from "../env.ts";
+import { StaffBook, type Workspace } from "../work/staff-book.ts";
+
+// ワークスペースのコンテナはまだ無い (tasks.md の 7.2 でつなぐ)。それまでは何もしない代わりを渡し、勤怠だけを付ける
+const IDLE_WORKSPACE: Workspace = {
+  start: () => Promise.resolve(),
+  stop: () => Promise.resolve(),
+  wrapUp: () => Promise.resolve(),
+  restart: () => Promise.resolve(),
+};
+
+/** 社員 DO。`idFromName(<社員 ID>)` で社員 1 人に 1 つ。ゲートウェイだけが RPC で呼び、時刻は呼ぶ側の Clock で渡す */
+export class StaffDO extends DurableObject<Bindings> implements Staff {
+  #book: StaffBook | undefined;
+
+  /**
+   * 次の出来事を処理し、次の alarm を掛ける。alarm は本物の時刻で鳴る
+   * @returns 無し
+   */
+  override async alarm(): Promise<void> {
+    await this.wake(systemClock.now());
+  }
+
+  /**
+   * その時刻までに来た出来事を処理する。alarm と、テストの時計から呼ぶ
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  wake(now: number): Promise<null> {
+    return this.#run((book) => book.wake(now));
+  }
+
+  /**
+   * 今の状態を返す
+   * @param now 今の時刻
+   * @returns 状態、今のタスク、今日の働いた時間
+   */
+  async status(now: number): Promise<StaffStatus> {
+    return (await this.#open()).status(now);
+  }
+
+  /**
+   * ワークスペースのハートビートを受ける
+   * @param at 受けた時刻
+   * @returns 無し
+   */
+  heartbeat(at: number): Promise<null> {
+    return this.#run((book) => book.heartbeat(at));
+  }
+
+  /**
+   * チェックポイントを受ける
+   * @param input CheckpointInput
+   * @param now 今の時刻
+   * @returns 無し
+   * @throws conflict 今のタスクと違う時
+   */
+  checkpoint(input: unknown, now: number): Promise<null> {
+    return this.#run((book) => book.checkpoint(input, now));
+  }
+
+  /**
+   * 新しいタスクを取るかを決め、取ればそのタスクを持つ
+   * @param task StaffTask
+   * @param medianMs 同じ種類のタスクがチェックポイントに届くまでの直前 7 日の中央値。無ければ null
+   * @param now 今の時刻
+   * @returns 取ったか
+   */
+  async take(task: unknown, medianMs: number | null, now: number): Promise<{ taken: boolean }> {
+    const book = await this.#open();
+    return this.ctx.blockConcurrencyWhile(() => book.take(task, medianMs, now));
+  }
+
+  /**
+   * 今のタスクを離れる
+   * @param result WorkResult
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  finish(result: unknown, now: number): Promise<null> {
+    return this.#run((book) => book.finish(result, now));
+  }
+
+  /**
+   * その日だけの指示を受け、今日の予定を作り直す。指示は先に day_orders に足しておく
+   * @param order day_orders の行
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  order(order: unknown, now: number): Promise<null> {
+    return this.#run((book) => book.order(order, now));
+  }
+
+  /**
+   * 時間外に呼び出す
+   * @param task StaffTask
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  call(task: unknown, now: number): Promise<null> {
+    return this.#run((book) => book.call(task, now));
+  }
+
+  /**
+   * API の上限で待ち始める。Claude のプロキシが呼ぶ
+   * @param reason rate_limit
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  waitStart(reason: unknown, now: number): Promise<null> {
+    return this.#run((book) => book.waitStart(reason, now));
+  }
+
+  /**
+   * API の上限の待ちを解く
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  waitEnd(now: number): Promise<null> {
+    return this.#run((book) => book.waitEnd(now));
+  }
+
+  /**
+   * 自動停止で止める
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  stop(now: number): Promise<null> {
+    return this.#run((book) => book.stop(now));
+  }
+
+  /**
+   * 止めていたのを再開する
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  resume(now: number): Promise<null> {
+    return this.#run((book) => book.resume(now));
+  }
+
+  /**
+   * 判断を 1 つずつ順に流す。D1 を待つ間に alarm やほかの呼び出しが割り込むと、開いている区分が割れる
+   * @param step StaffBook の操作
+   * @returns 無し
+   */
+  async #run(step: (book: StaffBook) => Promise<void>): Promise<null> {
+    const book = await this.#open();
+    await this.ctx.blockConcurrencyWhile(() => step(book));
+    return null;
+  }
+
+  /**
+   * 社員 ID を確かめて StaffBook を作る。社員 ID は idFromName の名前で、alarm で起きた時のために記憶にも置く
+   * @returns StaffBook
+   * @throws internal 社員 ID が分からない時
+   */
+  async #open(): Promise<StaffBook> {
+    if (this.#book) return this.#book;
+    const named = this.ctx.id.name;
+    if (named !== undefined) await this.ctx.storage.put("staffId", named);
+    const parsed = StaffId.safeParse(named ?? (await this.ctx.storage.get("staffId")));
+    if (!parsed.success) throw new AppError("internal", "社員 DO の社員 ID が分からない");
+    this.#book = new StaffBook(parsed.data, this.ctx.storage, this.env.DB, IDLE_WORKSPACE);
+    return this.#book;
+  }
+}

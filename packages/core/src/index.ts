@@ -15,6 +15,20 @@ export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/comm
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
 export { DEFAULT_RULES, decide, type RuleContext, type RuleDecision } from "./rules/decide.ts";
 export { OPERATION_KINDS, toOperation, type Operation, type OperationKind } from "./rules/operation.ts";
+export {
+  AttendanceKind,
+  AttendanceReason,
+  CheckpointInput,
+  DEFAULT_SCHEDULE,
+  OrderKind,
+  StaffId,
+  StaffState,
+  StaffStatus,
+  StaffTask,
+  WORKED_KINDS,
+  WorkResult,
+  WorkSchedule,
+} from "./schemas/workday.ts";
 
 /**
  * 部分ごとの稼働確認の返事を作る

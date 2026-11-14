@@ -2,9 +2,10 @@
 import { z } from "zod";
 import { GuardDO } from "../../src/gate/do/guard.ts";
 import { RecorderDO } from "../../src/gate/do/recorder.ts";
+import { StaffDO } from "../../src/gate/do/staff.ts";
 import type { Bindings } from "../../src/gate/env.ts";
 
-export { GuardDO, RecorderDO };
+export { GuardDO, RecorderDO, StaffDO };
 
 const Binding = z.enum(["DB", "REC_2026", "REC_2027"]);
 const Migrate = z.object({ binding: Binding, statements: z.array(z.string()) });
@@ -12,6 +13,11 @@ const Query = z.object({ binding: Binding, sql: z.string() });
 const AdmitMany = z.object({ times: z.number().int().positive(), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) });
 const AppendMany = z.object({ entries: z.array(z.unknown()) });
 const Call = z.object({ method: z.enum(["append", "verify", "size"]), args: z.array(z.unknown()) });
+const StaffCall = z.object({
+  staffId: z.enum(["president", "builder", "reviewer"]),
+  method: z.enum(["wake", "status", "heartbeat", "checkpoint", "take", "finish", "order", "call", "waitStart", "waitEnd", "stop", "resume"]),
+  args: z.array(z.unknown()),
+});
 const GuardCall = z.discriminatedUnion("method", [
   z.object({ method: z.literal("admit"), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) }),
   z.object({ method: z.literal("fail"), args: z.tuple([z.string(), z.number()]) }),
@@ -57,6 +63,20 @@ export default {
       const answers = [];
       for (let n = 0; n < times; n += 1) answers.push(await guard.admit(...args));
       return Response.json(answers);
+    }
+    if (path === "/staff") {
+      const { staffId, method, args } = StaffCall.parse(body);
+      const stub = env.STAFF.get(env.STAFF.idFromName(staffId));
+      const num = (i: number) => z.number().parse(args[i]);
+      try {
+        if (method === "status") return Response.json(await stub.status(num(0)));
+        if (method === "take") return Response.json(await stub.take(args[0], z.number().nullable().parse(args[1]), num(2)));
+        if (method === "wake" || method === "heartbeat" || method === "waitEnd" || method === "stop" || method === "resume") return Response.json(await stub[method](num(0)));
+        return Response.json(await stub[method](args[0], num(1)));
+      } catch (error) {
+        // RPC を越えた AppError は code を失うので、中身の文を返してテストで比べる
+        return new Response(String(error), { status: 409 });
+      }
     }
     if (path === "/guard") {
       const call = GuardCall.parse(body);

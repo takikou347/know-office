@@ -14,6 +14,8 @@ export type TestWorker = {
   admitMany(times: number, ...args: [string, "api" | "auth", number]): Promise<unknown[]>;
   /** 全体のセキュリティ DO のメソッドを呼ぶ */
   guard(method: string, ...args: unknown[]): Promise<unknown>;
+  /** 社員 DO のメソッドを呼ぶ */
+  staff(staffId: string, method: string, ...args: unknown[]): Promise<unknown>;
   /** D1 に SQL を流して行を返す */
   query(binding: string, sql: string): Promise<unknown[]>;
   /** 止める */
@@ -67,6 +69,7 @@ export async function startTestWorker(): Promise<TestWorker> {
     },
     admitMany: async (times, ...args) => z.array(z.unknown()).parse(await post("/admit-many", { times, args })),
     guard: (method, ...args) => post("/guard", { method, args }),
+    staff: (staffId, method, ...args) => post("/staff", { staffId, method, args }),
     query: async (binding, sql) => z.array(z.unknown()).parse(await post("/query", { binding, sql })),
     dispose: () => worker.dispose(),
   };
