@@ -122,18 +122,20 @@ D1 の表は次のとおり。追記だけの表は、更新と削除をトリ�
 | 境目 | 使う物 | 型の正本 |
 | --- | --- | --- |
 | D1 | Drizzle ORM (`drizzle-orm/d1`)。作り替えは drizzle-kit で SQL に起こし、wrangler で当てる | Drizzle の表の定義。行の型は `$inferSelect` と `$inferInsert` から取る |
-| API の入出力 | Zod。入口は `@hono/zod-validator` で確かめ、画面は Hono の RPC で同じ型を受ける | Zod の形。TypeScript の型は `z.infer` から取る |
+| API | 入力は Zod と `@hono/zod-validator` で確かめる。出力は型だけで持ち、画面は Hono の RPC で同じ型を受ける | 入力は Zod の形 (型は `z.infer`)、出力は入口の返す値の型 |
 | 作業場との受け渡し、設定、外からの通知 | Zod | 共通の部品 (`@know-office/core`) の Zod の形 |
 
 - 外から来る物 (画面の入力、GitHub の通知、作業場の返事、D1 の JSON の列) は、使う前に必ず Zod で確かめる
-- 追記だけの表は、Drizzle の上に追記の関数だけを出し、書き換えと消す関数を作らない
-- Drizzle は D1 の作り替えの SQL も作るので、表の定義と作り替えがずれない。素の SQL より型が強く、Prisma より Workers の上で軽い
+- 追記だけの表は 2 重に守る。1 つ目は Drizzle の上に追記の関数だけを出し、書き換えと消す関数を作らない事。2 つ目は更新と削除を断るトリガーで、drizzle-kit は作らないので手書きの作り替え (`drizzle-kit generate --custom`) で足し、落ちるテストで在る事を確かめる
+- `audit_log` の追記の関数は記録係の Durable Object の中だけに置き、入口と社員の状態は記録係を呼ぶ
+- D1 は BEGIN と COMMIT の取引を使えないので、まとめて書く時は `db.batch()` を使う。`audit_log` の「最後の行を読んで次の行を書く」は記録係の中で 1 件ずつ順に行う
+- Drizzle を選ぶのは、表の定義から行の型と作り替えの SQL が 1 か所で出るから。素の SQL では型と表がずれやすい
 
 ### 画面は Vite と React
 
 画面は Vite、React、knowidea-ui で作り、事前に作った物を入口と同じ Worker から配る。画面ごとにコードを分け、3D とエディタは開いた時だけ読み込む。Next.js は、サーバー側の機能を使わない形になり、入口の Hono と役目が重なるので使わない。
 
-Vite、Vitest、oxlint は VoidZero の道具で、すでに使っている。VoidZero の公開の仕組み Void (2026 年 10 月に公開) は D1 を扱うが、Durable Objects と Containers を扱う記述が無く、社員の状態と作業場を載せられないので今は使わない。扱えるようになったら入口と画面から移す。
+Vite、Vitest、oxlint は VoidZero の道具で、すでに使っている。VoidZero の公開の仕組み Void は、Durable Objects と Containers が使えると確かめられず、社員の状態と作業場を載せられないので今は使わない。使えると分かったら、入口と画面を移せるか見直す。
 
 ### エディタは CodeMirror 6
 
