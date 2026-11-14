@@ -26,6 +26,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 出来事を 3 つ流して成功で終える SDK の代わり
+ * @yields 始まり、返事、成功の result
+ */
+const threeEvents: QueryFn = async function* () {
+  yield { type: "system", subtype: "init", session_id: "session-1" };
+  yield { type: "assistant", session_id: "session-1" };
+  yield { type: "result", subtype: "success", session_id: "session-1" };
+};
+
+/**
  * SDK が失敗で終える代わり
  * @yields 失敗の result
  */
@@ -179,13 +189,8 @@ describe("ワークスペースの Claude Agent SDK", () => {
   });
 
   it("SDK の出来事を 1 つ読むたびに知らせる", async () => {
-    const run: QueryFn = async function* () {
-      yield { type: "system", subtype: "init", session_id: "session-1" };
-      yield { type: "assistant", session_id: "session-1" };
-      yield { type: "result", subtype: "success", session_id: "session-1" };
-    };
     let events = 0;
-    await sdkAgent(run)({ ...task(gate(true, []), []), onEvent: () => void (events += 1) });
+    await sdkAgent(threeEvents)({ ...task(gate(true, []), []), onEvent: () => void (events += 1) });
     expect(events).toBe(3);
   });
 

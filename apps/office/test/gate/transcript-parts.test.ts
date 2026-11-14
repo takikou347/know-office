@@ -79,7 +79,9 @@ describe("会話の記録の続きを送る", () => {
       get: (target, prop, receiver) => {
         if (prop === "get") reads += 1;
         const value: unknown = Reflect.get(target, prop, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
+        if (typeof value !== "function") return value;
+        const bound: unknown = value.bind(target);
+        return bound;
       },
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
