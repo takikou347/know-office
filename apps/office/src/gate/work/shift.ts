@@ -260,14 +260,16 @@ export class Shift {
   }
 
   /**
-   * stopped と waiting の上限を返す。呼び出しなら呼び出しの期限、ほかは終わりの時刻から 30 分
+   * stopped と waiting の上限を返す。呼び出しなら呼び出しの期限、ほかは終わりの時刻から 30 分。延長中に止められた時は、ずらした後の期限の方が遅ければそちら
    * @returns 時刻。stopped と waiting でなければ null
    */
   pauseLimit(): number | null {
     const m = this.m;
     if (m.state !== "stopped" && m.state !== "waiting") return null;
     if (m.back?.state === "called") return m.deadline;
-    return m.plan ? m.plan.end + WRAP_MS : null;
+    const limit = m.plan ? m.plan.end + WRAP_MS : null;
+    if (m.deadline === null) return limit;
+    return limit === null ? m.deadline : Math.max(limit, m.deadline);
   }
 
   /**

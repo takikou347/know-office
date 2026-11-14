@@ -68,6 +68,29 @@ describe("勤怠は実際の動きから付ける", () => {
     ]);
   });
 
+  it("延長中に 2 度止められても、ずらした期限より前に退勤しない", async () => {
+    const s = hire();
+    await startDay(s);
+    await run(s, jst(17, 10));
+    await s.book.stop(jst(17, 10));
+    await s.book.resume(jst(17, 20));
+    s.at = jst(17, 20);
+    await run(s, jst(17, 35));
+    // 期限は 17 時 40 分にずれている。2 度目に止められた時の上限もそこにする
+    await s.book.stop(jst(17, 35));
+    expect(s.storage.alarm).toBe(jst(17, 40));
+    await run(s, jst(17, 39), false);
+    expect((await s.book.status(jst(17, 39))).state).toBe("stopped");
+    await run(s, jst(17, 40), false);
+    expect((await s.book.status(jst(17, 40))).state).toBe("off");
+    expect((await segments()).slice(1)).toEqual([
+      { kind: "extension", started_at: jst(17), ended_at: jst(17, 10), reason: "checkpoint_wait", day: DAY },
+      { kind: "stopped", started_at: jst(17, 10), ended_at: jst(17, 20), reason: "guard_stop", day: DAY },
+      { kind: "extension", started_at: jst(17, 20), ended_at: jst(17, 35), reason: "checkpoint_wait", day: DAY },
+      { kind: "stopped", started_at: jst(17, 35), ended_at: jst(17, 40), reason: "guard_stop", day: DAY },
+    ]);
+  });
+
   it("待っている間に止められると止められていた時間に切り替わり、再開した後に途切れればまた待つ", async () => {
     const s = hire();
     await startDay(s);
