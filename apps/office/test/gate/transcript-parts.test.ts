@@ -56,6 +56,19 @@ describe("会話の記録の続きを送る", () => {
     expect(await rows(w, "SELECT seq FROM transcript_parts")).toEqual([]);
   });
 
+  it("返事が届かずに同じ部分を送り直したら 204 で受け直して行を増やさず、中身が違えば 409 で断る", async () => {
+    await startWork(w, "builder");
+    const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9));
+    expect((await sendPart(token, { sessionId: SESSION, seq: 0, chunk: b64("1 行目\n") })).status).toBe(204);
+    expect((await sendPart(token, { sessionId: SESSION, seq: 0, chunk: b64("1 行目\n") })).status).toBe(204);
+    const changed = await sendPart(token, { sessionId: SESSION, seq: 0, chunk: b64("別の 1 行目\n") });
+    expect(changed.status).toBe(409);
+    expect(await changed.json()).toMatchObject({ code: "conflict" });
+    expect((await sendPart(token, { sessionId: SESSION, seq: 1, chunk: b64("2 行目\n") })).status).toBe(204);
+    expect(await rows(w, "SELECT seq FROM transcript_parts ORDER BY seq")).toEqual([{ seq: 0 }, { seq: 1 }]);
+    expect(await loadTranscript({ db: w.d1.DB, files: w.d1.FILES, master: w.gate.env.MASTER_KEY }, "builder", NODE)).toMatchObject({ transcript: b64("1 行目\n2 行目\n"), nextSeq: 2 });
+  });
+
   it("作業トークンが無ければ 401、形の違う入力は 422 で断る", async () => {
     await startWork(w, "builder");
     const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9));

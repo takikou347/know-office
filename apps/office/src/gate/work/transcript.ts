@@ -79,6 +79,22 @@ async function unseal(master: string, nodeId: string, path: string, stored: Uint
 }
 
 /**
+ * 置いた部分を復号し、送られた中身と同じかを比べる
+ * @param store 置き場
+ * @param nodeId タスク ID
+ * @param path 置き場の道
+ * @param plain 送られた中身
+ * @returns 同じなら true。置いた物が無ければ false
+ * @throws internal 置いた物を戻せない時
+ */
+async function sameAs(store: TranscriptStore, nodeId: string, path: string, plain: Uint8Array): Promise<boolean> {
+  const object = await store.files.get(path);
+  if (!object) return false;
+  const stored = await unseal(store.master, nodeId, path, new Uint8Array(await object.arrayBuffer()));
+  return stored.byteLength === plain.byteLength && stored.every((byte, i) => byte === plain[i]);
+}
+
+/**
  * 会話の記録の続きを、タスクごとの鍵で暗号にして R2 に置き、transcript_parts に 1 行足す。社員 DO の鎖の中で呼び、同じ session の部分を 1 つずつ足す
  * @param store 置き場
  * @param staffId 社員 ID
@@ -86,7 +102,7 @@ async function unseal(master: string, nodeId: string, path: string, stored: Uint
  * @param input TranscriptPartInput
  * @param now 今の時刻
  * @throws validation_failed 形が違う時
- * @throws conflict 通し番号が前回の続きでない時
+ * @throws conflict 通し番号が前回の続きでない時と、前回と同じ通し番号で中身が違う時
  */
 export async function appendTranscript(store: TranscriptStore, staffId: StaffId, nodeId: string, input: unknown, now: number): Promise<void> {
   const parsed = TranscriptPartInput.safeParse(input);
@@ -94,14 +110,16 @@ export async function appendTranscript(store: TranscriptStore, staffId: StaffId,
   const { sessionId, seq, chunk } = parsed.data;
   const orm = drizzle(store.db);
   const [last] = await orm
-    .select({ seq: transcriptParts.seq })
+    .select({ seq: transcriptParts.seq, key: transcriptParts.key })
     .from(transcriptParts)
     .where(and(eq(transcriptParts.staffId, staffId), eq(transcriptParts.nodeId, nodeId), eq(transcriptParts.sessionId, sessionId)))
     .orderBy(desc(transcriptParts.seq))
     .limit(1);
-  if (seq !== (last ? last.seq + 1 : 0)) throw new AppError("conflict", "会話の記録の通し番号が前回の続きでない");
   const plain = fromBase64(chunk);
   if (!plain) throw new AppError("validation_failed", "会話の記録の形が違う");
+  // 返事が届かずに同じ部分を送り直した時は、置いた物と同じ中身なら受け直したとみなし、何も足さない
+  if (last && seq === last.seq && (await sameAs(store, nodeId, last.key, plain))) return;
+  if (seq !== (last ? last.seq + 1 : 0)) throw new AppError("conflict", "会話の記録の通し番号が前回の続きでない");
   const path = transcriptPath(staffId, nodeId, sessionId, seq);
   const body = await seal(store.master, nodeId, path, plain);
   // R2 に置いた後に D1 に書けずに落ちても、同じ通し番号で送り直すと同じ道に置き直すだけで済む
