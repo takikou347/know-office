@@ -5,7 +5,7 @@ import { bottomCurrentOf, bottomItems, morePath, screenOf, sideItems } from "./r
 
 export interface AppProps {
   health?: Health;
-  /** 今の道と問い。例 /staff/maker?tab=tasks */
+  /** 今の道と問い。例 /staff/builder?tab=tasks */
   url?: string;
   /** 道を変える。無ければ何もしない (サーバーで描く時) */
   navigate?: Navigate;

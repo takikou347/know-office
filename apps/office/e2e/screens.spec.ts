@@ -64,10 +64,12 @@ test("画面が手元の入口とつながる", async ({ page }) => {
 });
 
 // 一番幅の出る所も、3 つの幅で横にはみ出さない
-for (const path of ["/staff/maker?tab=attendance", "/staff/maker/tasks/t2"]) {
+for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", "/staff/builder/tasks/t2"]) {
   test(`${path} が横にはみ出さない`, async ({ page }) => {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1, name: "社員と仕事" })).toBeVisible();
+    // 勤怠の表は記録を読み終えてから幅を測る
+    if (path.includes("attendance")) await expect(page.getByText(/出勤 9:00/)).toBeVisible();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -76,7 +78,7 @@ for (const path of ["/staff/maker?tab=attendance", "/staff/maker/tasks/t2"]) {
 }
 
 test("スマートフォンの勤怠の表は 3 列を出し、行を開くと残りが出る", async ({ page }) => {
-  await page.goto("/staff/maker?tab=attendance");
+  await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
   const table = page.getByRole("region", { name: "作る役の勤怠" }).getByRole("table");
   await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
   const phone = (page.viewportSize()?.width ?? 0) < 600;
@@ -88,12 +90,19 @@ test("スマートフォンの勤怠の表は 3 列を出し、行を開くと�
 });
 
 test("勤怠の上の 1 行は、出勤から止められていた時間までを出す", async ({ page }) => {
-  await page.goto("/staff/maker?tab=attendance");
-  await expect(page.getByText(/出勤 9:00、退勤 17:10、働いた 7 時間 55 分、延長 10 分 \(区切りを待った\)、止められていた 0 分/)).toBeVisible();
+  // records.setup.ts が手元の D1 に置いた記録を、入口から読んで出す
+  await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
+  await expect(
+    page.getByText("11/13 (金) 出勤 9:00、退勤 17:10、働いた 7 時間 55 分、延長 10 分 (チェックポイントを待った)、止められていた 15 分 (自動停止)"),
+  ).toBeVisible();
+  const table = page.getByRole("region", { name: "作る役の勤怠" }).getByRole("table");
+  await expect(table.getByRole("row")).toHaveCount(4);
+  await expect(table.getByRole("row").nth(1)).toContainText("DiffView の行番号を直す");
+  await expect(table.getByRole("row").nth(3)).toContainText("勤怠の表の画面を作る");
 });
 
 test("レビューから戻ると、仕事の山のタブに戻る", async ({ page }) => {
-  await page.goto("/staff/maker/tasks/t2");
+  await page.goto("/staff/builder/tasks/t2");
   await page.getByRole("link", { name: "仕事の山に戻る" }).click();
   await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
 });
@@ -111,13 +120,13 @@ test("スマートフォンで社員、仕事と進み、戻るで 1 つ前の�
 });
 
 test("その日だけの指示を出せる", async ({ page }) => {
-  await page.goto("/staff/maker");
+  await page.goto("/staff/builder");
   await page.getByRole("button", { name: "延長する" }).click();
   await expect(page.getByText("作る役に延長を伝えました")).toBeVisible();
 });
 
 test("レビューで可を出すと、出した事が分かる", async ({ page }) => {
-  await page.goto("/staff/maker/tasks/t2");
+  await page.goto("/staff/builder/tasks/t2");
   await expect(page.getByRole("list").getByText("見る役とオーナーに可を頼んだ")).toBeVisible();
   await page.getByRole("button", { name: "可", exact: true }).click();
   await expect(page.getByText("可を出しました")).toBeVisible();

@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { SESSION_STATE } from "./e2e/helpers/session.ts";
 
 // 画面を本物のブラウザで開いて確かめる。手元の入口 (workerd) を起こし、Chrome と Safari の 3 つの幅で見る
 const port = 5174;
@@ -37,12 +38,17 @@ export default defineConfig({
   forbidOnly: Boolean(process.env["CI"]),
   reporter: process.env["CI"] ? "github" : "list",
   use: { baseURL: `http://localhost:${port}`, trace: "off" },
-  projects: chosen.flatMap((b) =>
-    widths.map((w) => ({
-      name: `${b.name}-${w.name}`,
-      use: { ...b.use, viewport: w.viewport },
-    })),
-  ),
+  projects: [
+    // 記録とログインセッションを先に 1 度だけ置く
+    { name: "setup", testMatch: /records\.setup\.ts/, use: chosen[0]?.use ?? {} },
+    ...chosen.flatMap((b) =>
+      widths.map((w) => ({
+        name: `${b.name}-${w.name}`,
+        dependencies: ["setup"],
+        use: { ...b.use, viewport: w.viewport, storageState: SESSION_STATE },
+      })),
+    ),
+  ],
   webServer: {
     command: `pnpm run dev --port ${port} --strictPort`,
     url: `http://localhost:${port}/api/v1/health`,

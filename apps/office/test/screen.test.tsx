@@ -21,7 +21,7 @@ describe("画面", () => {
   });
 
   it("社員と仕事は、道の問いで開くタブを決め、知らない値は会話にする", () => {
-    expect(renderToString(<App url="/staff/maker?tab=attendance" />)).toContain("出勤 9:00");
-    expect(renderToString(<App url="/staff/maker?tab=nope" />)).toContain("作る役との会話");
+    expect(renderToString(<App url="/staff/builder?tab=attendance" />)).toContain("勤怠を読んでいます");
+    expect(renderToString(<App url="/staff/builder?tab=nope" />)).toContain("作る役との会話");
   });
 });

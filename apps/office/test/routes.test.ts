@@ -30,13 +30,13 @@ describe("画面の一覧", () => {
 
   it("道から画面を決め、知らない道はダッシュボードにする", () => {
     expect(screenOf("/records").label).toBe("記録");
-    expect(screenOf("/staff/maker").label).toBe("社員と仕事");
+    expect(screenOf("/staff/builder").label).toBe("社員と仕事");
     expect(screenOf("/nowhere").label).toBe("ダッシュボード");
   });
 
   it("下の切り替えの印は、下に無い画面とその他で「その他」に付く", () => {
     expect(bottomCurrentOf("/guard")).toBe("guard");
-    expect(bottomCurrentOf("/staff/maker")).toBe("staff");
+    expect(bottomCurrentOf("/staff/builder")).toBe("staff");
     expect(bottomCurrentOf("/records")).toBe("more");
     expect(bottomCurrentOf("/more")).toBe("more");
   });

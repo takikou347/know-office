@@ -5,7 +5,7 @@ import type { Health } from "@know-office/core";
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
-import { createApi } from "./api.ts";
+import { ApiContext, createApi } from "./api.ts";
 import { routeOfClick } from "./link.ts";
 import { titleOf } from "./routes.ts";
 
@@ -95,7 +95,11 @@ function Root() {
       .then(setHealth)
       .catch(() => setHealth(undefined));
   }, []);
-  return <App health={health} url={url} navigate={navigate} />;
+  return (
+    <ApiContext value={api}>
+      <App health={health} url={url} navigate={navigate} />
+    </ApiContext>
+  );
 }
 
 const root = document.getElementById("root");

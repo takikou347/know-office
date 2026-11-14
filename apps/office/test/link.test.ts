@@ -15,7 +15,7 @@ const click = (href: string, more: Partial<ClickLike> = {}, attrs: Record<string
 
 describe("リンクの横取り", () => {
   it("同じ所の画面へのリンクは、道と問いと印を残して横取りする", () => {
-    expect(routeOfClick(click("/staff/maker?tab=tasks#a"), here)).toBe("/staff/maker?tab=tasks#a");
+    expect(routeOfClick(click("/staff/builder?tab=tasks#a"), here)).toBe("/staff/builder?tab=tasks#a");
   });
 
   it("キーを押しながら、中ボタン、既に止められた押しは横取りしない", () => {

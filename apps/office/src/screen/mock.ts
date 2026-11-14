@@ -27,7 +27,7 @@ export interface WorkEntry {
 
 export const staff: Staff[] = [
   { id: "president", role: "社長", model: "Opus 5.5", state: "working", now: "来週の目標を仕事に分けている" },
-  { id: "maker", role: "作る役", model: "Sonnet 5.5", state: "working", now: "勤怠の表の画面を作っている" },
+  { id: "builder", role: "作る役", model: "Sonnet 5.5", state: "working", now: "勤怠の表の画面を作っている" },
   { id: "reviewer", role: "見る役", model: "Opus 5.5", state: "paused", now: "見る物を待っている" },
 ];
 
@@ -46,16 +46,16 @@ const editorDiff = `diff --git a/apps/docs/src/demos/code-editor.tsx b/apps/docs
 `;
 
 export const tasks: Task[] = [
-  { id: "t1", staffId: "maker", title: "勤怠の表の画面を作る", service: "office", state: "今" },
-  { id: "t2", staffId: "maker", title: "CodeEditor のページを足す", service: "knowidea-ui", state: "可待ち", diff: editorDiff },
-  { id: "t3", staffId: "maker", title: "DiffView の行番号を直す", service: "knowidea-ui", state: "済" },
-  { id: "t4", staffId: "maker", title: "AppShell の その他 を足す", service: "knowidea-ui", state: "次" },
+  { id: "t1", staffId: "builder", title: "勤怠の表の画面を作る", service: "office", state: "今" },
+  { id: "t2", staffId: "builder", title: "CodeEditor のページを足す", service: "knowidea-ui", state: "可待ち", diff: editorDiff },
+  { id: "t3", staffId: "builder", title: "DiffView の行番号を直す", service: "knowidea-ui", state: "済" },
+  { id: "t4", staffId: "builder", title: "AppShell の その他 を足す", service: "knowidea-ui", state: "次" },
   { id: "t5", staffId: "president", title: "来週の目標を仕事に分ける", service: "office", state: "今" },
   { id: "t6", staffId: "reviewer", title: "CodeEditor のページを見る", service: "knowidea-ui", state: "次" },
 ];
 
 export const workEntries: Record<string, WorkEntry[]> = {
-  maker: [
+  builder: [
     { start: "9:00", end: "10:40", task: "DiffView の行番号を直す", minutes: 100, service: "knowidea-ui", result: "PR を出した" },
     { start: "10:45", end: "13:20", task: "CodeEditor のページを足す", minutes: 155, service: "knowidea-ui", result: "可待ち" },
     { start: "13:30", end: "17:10", task: "勤怠の表の画面を作る", minutes: 220, service: "office", result: "経過を残した" },
@@ -68,25 +68,8 @@ export const workEntries: Record<string, WorkEntry[]> = {
   ],
 };
 
-export interface DaySummary {
-  date: string;
-  in: string;
-  out: string;
-  workedMinutes: number;
-  overtimeMinutes: number;
-  overtimeReason?: string;
-  stoppedMinutes: number;
-  stoppedReason?: string;
-}
-
-export const daySummary: Record<string, DaySummary> = {
-  maker: { date: "11/14 (金)", in: "9:00", out: "17:10", workedMinutes: 475, overtimeMinutes: 10, overtimeReason: "区切りを待った", stoppedMinutes: 0 },
-  president: { date: "11/14 (金)", in: "9:00", out: "17:00", workedMinutes: 480, overtimeMinutes: 0, stoppedMinutes: 0 },
-  reviewer: { date: "11/14 (金)", in: "9:00", out: "17:00", workedMinutes: 460, overtimeMinutes: 0, stoppedMinutes: 20, stoppedReason: "自動の守り" },
-};
-
 export const messages: Record<string, { id: string; from: "self" | "other"; author: string; time: string; body: string }[]> = {
-  maker: [
+  builder: [
     { id: "m1", from: "self", author: "オーナー", time: "2026-11-14T00:05:00Z", body: "勤怠は表で見たい。始めた時刻、終えた時刻、仕事の名前があればいい" },
     { id: "m2", from: "other", author: "作る役", time: "2026-11-14T00:06:00Z", body: "分かりました。仕事 1 件を 1 行にした表にします。掛かった時間とサービスは行を開くと出します" },
   ],
@@ -106,8 +89,8 @@ export const goals = [
 ];
 
 export const roles = [
-  { id: "president", role: "社長", text: "目的を目標と仕事に分け、作る役と見る役に配る。オーナーへの相談の窓口", reports: ["maker", "reviewer"] },
-  { id: "maker", role: "作る役", text: "仕事を受けて作り、テストを通して見る役に渡す" },
+  { id: "president", role: "社長", text: "目的を目標と仕事に分け、作る役と見る役に配る。オーナーへの相談の窓口", reports: ["builder", "reviewer"] },
+  { id: "builder", role: "作る役", text: "仕事を受けて作り、テストを通して見る役に渡す" },
   { id: "reviewer", role: "見る役", text: "作る役と別のモデルで変更を読み、可か不可と直す所を返す" },
 ];
 
@@ -147,7 +130,7 @@ export const lessons = [
 
 export const usage = [
   { id: "president", who: "社長", tokens: 412_000, cost: 1.9 },
-  { id: "maker", who: "作る役", tokens: 1_830_000, cost: 6.2 },
+  { id: "builder", who: "作る役", tokens: 1_830_000, cost: 6.2 },
   { id: "reviewer", who: "見る役", tokens: 960_000, cost: 3.3 },
 ];
 

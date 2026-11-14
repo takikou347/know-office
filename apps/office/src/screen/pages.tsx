@@ -1,4 +1,4 @@
-// 8 画面と「その他」の中身。値はモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
+// 8 画面と「その他」の中身。勤怠の表のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
 import type { Health } from "@know-office/core";
 import {
   Alert,
@@ -24,11 +24,10 @@ import {
   parseUnifiedDiff,
 } from "knowidea-ui";
 import { type ReactNode, Suspense, lazy, useState } from "react";
-import { daySummaryText, duration, jstTime } from "./format.ts";
+import { duration, jstTime } from "./format.ts";
 import {
   type Staff,
   type Task,
-  daySummary,
   extensions,
   flows,
   goals,
@@ -49,6 +48,7 @@ import {
   workEntries,
 } from "./mock.ts";
 import { StopButton } from "./pages/guard/StopButton.tsx";
+import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
 import { type ScreenId, moreScreens } from "./routes.ts";
 
 export type Navigate = (to: string, opts?: { replace?: boolean }) => void;
@@ -195,47 +195,6 @@ function TaskReview({ task }: { task: Task }) {
   );
 }
 
-function AttendanceTable({ s }: { s: Staff }) {
-  const entries = workEntries[s.id] ?? [];
-  const summary = daySummary[s.id];
-  return (
-    <Stack gap={3}>
-      {summary ? <p>{daySummaryText(summary)}</p> : null}
-      <div className="ko-attendance">
-        <Table
-          label={`${s.role}の勤怠`}
-          rowKey={(r) => `${r.start}-${r.task}`}
-          rows={entries.map((e) => ({ ...e }))}
-          columns={[
-            { key: "start", header: "始めた", numeric: true },
-            { key: "end", header: "終えた", numeric: true },
-            {
-              key: "task",
-              header: "仕事",
-              wrap: true,
-              render: (r) => (
-                <>
-                  <span className="ko-wide">{r.task}</span>
-                  <details className="ko-narrow">
-                    <summary>{r.task}</summary>
-                    <p>
-                      掛かった {duration(r.minutes)}、{r.service}、{r.result}
-                    </p>
-                  </details>
-                </>
-              ),
-            },
-            { key: "minutes", header: "掛かった", numeric: true, render: (r) => duration(r.minutes) },
-            { key: "service", header: "サービス" },
-            { key: "result", header: "結果", wrap: true },
-          ]}
-          emptyText="今日の仕事はまだ無い"
-        />
-      </div>
-    </Stack>
-  );
-}
-
 function DayOrders({ s }: { s: Staff }) {
   const [done, setDone] = useState<string>();
   return (
@@ -260,7 +219,7 @@ const staffTabs = ["talk", "tasks", "attendance"] as const;
 type StaffTab = (typeof staffTabs)[number];
 const isStaffTab = (v: string | null): v is StaffTab => staffTabs.some((t) => t === v);
 
-function StaffDetail({ s, tab, navigate }: { s: Staff; tab: StaffTab; navigate: Navigate }) {
+function StaffDetail({ s, tab, day, navigate }: { s: Staff; tab: StaffTab; day: string | null; navigate: Navigate }) {
   const mine = tasks.filter((t) => t.staffId === s.id);
   return (
     <Stack gap={4}>
@@ -306,7 +265,7 @@ function StaffDetail({ s, tab, navigate }: { s: Staff; tab: StaffTab; navigate: 
               />
             ),
           },
-          { value: "attendance", label: "勤怠", content: <AttendanceTable s={s} /> },
+          { value: "attendance", label: "勤怠", content: <AttendanceTable staffId={s.id} role={s.role} day={day} /> },
         ]}
       />
     </Stack>
@@ -346,7 +305,7 @@ function StaffAndTasks({ pathname, query, navigate }: { pathname: string; query:
           task ? (
             <TaskReview key={task.id} task={task} />
           ) : (
-            <StaffDetail s={selected} tab={tab} navigate={navigate} />
+            <StaffDetail s={selected} tab={tab} day={query.get("day")} navigate={navigate} />
           )
         ) : undefined
       }
