@@ -15,6 +15,25 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 履歴に人の名前とメールアドレスを残さない
+        env:
+          REV: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        # 中身は knowidea の tools/check.py の check_authors と同じ。メールアドレスそのものは出さない
+        run: |
+          set -eu
+          git rev-parse -q --verify "$REV^{commit}" > /dev/null
+          ok='noreply@(knowidea\.invalid|anthropic\.com|github\.com|example\.com)|[0-9]+\+[^@ ]+\[bot\]@users\.noreply\.github\.com'
+          legacy='c5b05eb8131c86cf61819b49278b747fb71322e3|e51e8e2ab6ad0fb1e450b210f1addb37f55f45b3'
+          old=$(git log --format='%H %ae %ce' "$REV" | { grep -vE "^[0-9a-f]+ ($ok) ($ok)$" || true; } | { grep -vE "^($legacy) " || true; } | cut -c1-7 | head -10)
+          if [ -n "$old" ]; then echo "noreply でないメールアドレスのコミットがある:" $old; exit 1; fi
+          # 元の頭が分からない時(初めての push、置き換えた後)は、頭の 1 件だけを見る
+          if git rev-parse -q --verify "$BASE^{commit}" > /dev/null; then range="$BASE..$REV"; else range="-1 $REV"; fi
+          new=$(git log --format='%h %an <%ae> %cn <%ce>' $range | { grep -vxE '[0-9a-f]+ KNOW IDEA <noreply@knowidea\.invalid> KNOW IDEA <noreply@knowidea\.invalid>' || true; } | cut -d' ' -f1 | head -10)
+          if [ -n "$new" ]; then echo "作者か入れた者が KNOW IDEA でないコミットがある:" $new; exit 1; fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -10,11 +10,11 @@ AI 社員を管理するアプリ。組織の決まりは takikou347/knowidea �
 
 ## 直し方
 
-- main を直に触らず、ブランチで直して PR にし、作った者と別のモデルの見る役が可を出してから入れる
+- main で直さず、枝で直して PR にし、作った者と別のモデルの見る役が可を出したら、その枝を main へ fast-forward で push して入れる。main が進んでいたら rebase し、検査を通し直す。GitHub の画面や API では入れない
 - push の前に、テストと `npx @fission-ai/openspec@1.16.0 validate --all --strict` と `python3 knowidea/tools/check.py know-office` を通す
 - 要件の残りとこの後の仕事は GitHub Issues に 1 つ 1 件で置く
 
 ## 書き方
 
-- 公開リポジトリなので、作者は `KNOW IDEA (<モデル>)`、メールは `noreply@knowidea.invalid`
+- 公開リポジトリなので、作者も入れた者も `KNOW IDEA <noreply@knowidea.invalid>`。オーナーのメールアドレスを残さず、名前(GitHub のログイン名)は URL、LICENSE、検査の LEGACY に挙げた 2 件のコミットにだけ残す
 - コミットと PR に AI の署名や帰属の行を付けない
