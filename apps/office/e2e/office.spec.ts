@@ -9,7 +9,8 @@ test.describe("8 の画面", () => {
     let enabled = false;
     const toggles: unknown[] = [];
     const row = () => ({ id: "sample-notes", title: "メモ", enabled, ownerData: false });
-    await page.route("**/api/v1/extensions", (route) => route.fulfill({ json: { data: [row()], meta: { ...META, next: null } } }));
+    // 一覧は問い (?limit=100) を付けて読むので、パスで合わせる
+    await page.route((url) => url.pathname === "/api/v1/extensions", (route) => route.fulfill({ json: { data: [row()], meta: { ...META, next: null } } }));
     await page.route("**/api/v1/extensions/sample-notes", async (route) => {
       toggles.push(route.request().postDataJSON());
       enabled = true;
@@ -28,7 +29,7 @@ test.describe("8 の画面", () => {
     if (await side.isVisible()) {
       await side.click();
     } else {
-      await page.goto("/more");
+      await page.getByRole("navigation").getByRole("link", { name: "その他" }).click();
       await page.getByRole("main").getByRole("link", { name: "メモ" }).click();
     }
     await expect(page.getByRole("heading", { level: 1, name: "メモ" })).toBeVisible();
