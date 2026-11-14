@@ -1,11 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "typescript",
-    "react",
-    "import",
-    "vitest"
-  ],
+  // コード規約の検査で守れる所。決まりの全量は knowidea の services/know-office/docs/conventions.md
+  "plugins": ["typescript", "react", "import", "vitest", "unicorn"],
   "categories": {
     "correctness": "error",
     "suspicious": "error"
@@ -13,15 +9,56 @@
   "rules": {
     "typescript/switch-exhaustiveness-check": "error",
     "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/only-throw-error": "error",
     "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-namespace": "error",
     "typescript/consistent-type-imports": "error",
+    "eqeqeq": "error",
+    "prefer-const": "error",
+    "no-var": "error",
+    "no-param-reassign": "error",
     "no-console": "error",
+    "max-lines": ["error", { "max": 300, "skipBlankLines": true, "skipComments": true }],
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }],
+    "unicorn/no-nested-ternary": "error",
     "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
     "react/react-in-jsx-scope": "off"
   },
-  "ignorePatterns": [
-    "**/dist/**",
-    "**/.wrangler/**",
-    "**/node_modules/**"
-  ]
+  "overrides": [
+    {
+      // 仮のデータのモック。作る順の段 5 で画面ごとのファイル (screen/pages/<画面>/) に作り直す時にこの例外を消す
+      "files": ["apps/office/src/screen/pages.tsx"],
+      "rules": { "max-lines": "off" }
+    },
+    {
+      // 型の食い違いを @ts-expect-error で確かめるファイル。わざと誤った値を置く
+      "files": ["**/*.types.ts"],
+      "rules": { "typescript/no-unsafe-assignment": "off" }
+    },
+    {
+      // React の部品のファイルは部品の名前と同じ PascalCase
+      "files": ["**/*.tsx"],
+      "rules": { "unicorn/filename-case": ["error", { "cases": { "pascalCase": true, "kebabCase": true } }] }
+    },
+    {
+      // 共通の部品は Workers と Node の両方で動く物だけにする
+      "files": ["packages/core/src/**"],
+      "rules": { "no-restricted-imports": ["error", { "patterns": [{ "group": ["node:*", "cloudflare:*", "drizzle-orm", "drizzle-orm/*", "hono", "hono/*"], "message": "core は Workers と Node の両方で動く物だけを読む" }] }] }
+    },
+    {
+      // 画面は入口の型だけを読み、表や鍵の扱いを読まない
+      "files": ["apps/office/src/screen/**"],
+      "rules": { "no-restricted-imports": ["error", { "patterns": [{ "group": ["drizzle-orm", "drizzle-orm/*", "cloudflare:*", "**/gate/db/*", "**/gate/do/*"], "message": "画面は入口の型を Hono の RPC で受ける" }] }] }
+    }
+  ],
+  "ignorePatterns": ["**/dist/**", "**/.wrangler/**", "**/node_modules/**"]
 }
