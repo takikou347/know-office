@@ -4,6 +4,7 @@ KNOW IDEA の社内の管理アプリ。AI 社員が自分で仕事を見つけ�
 
 | 置き場 | 中身 |
 | --- | --- |
+| `docs/` | 設計書。全量は `docs/README.md` |
 | `openspec/` | 仕様(OpenSpec)。要件はここが正本 |
 | `packages/core/` | 入口、作業場、画面が共に使う型と判断 |
 | `apps/office/` | 画面(Vite と React)と入口(Hono)。1 つの Worker にまとめて配る |
