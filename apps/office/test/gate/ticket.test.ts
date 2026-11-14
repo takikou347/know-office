@@ -116,7 +116,34 @@ describe("作業トークンの署名", () => {
     expect((await fromWorkspace("/ws/v1/decisions", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(401);
     expect((await fromWorkspace("/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(jst(9)).toISOString() }) })).status).toBe(204);
   });
+
+  it("作業トークンの要らないハートビートとチェックポイントは、ワークスペースごとに 1 分 60 回までにする", async () => {
+    await startWork(w, "builder");
+    await startWork(w, "reviewer");
+    w.clock.advance(jst(9, 1) - w.clock.now());
+    for (let i = 0; i < 30; i += 1) expect((await beat()).status).toBe(204);
+    for (let i = 0; i < 30; i += 1) expect((await checkpoint()).status).not.toBe(429);
+    const over = await beat();
+    expect(over.status).toBe(429);
+    expect(await over.json()).toMatchObject({ code: "rate_limited" });
+    expect(over.headers.get("Retry-After")).toBe("60");
+    expect((await checkpoint()).status).toBe(429);
+    // ほかのワークスペースの数には入らない
+    expect((await beat({ staffId: "reviewer", workspaceId: workspaceIdOf(w.gate.env, "reviewer") })).status).toBe(204);
+    // 次の分には戻る
+    w.clock.advance(MINUTE);
+    expect((await beat()).status).toBe(204);
+  });
 });
+
+/**
+ * ハートビートを送る
+ * @param caller 送ったワークスペース
+ * @returns 受け手の返事
+ */
+function beat(caller?: Caller): Promise<Response> {
+  return fromWorkspace("/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(jst(9, 1)).toISOString() }) }, caller);
+}
 
 /**
  * チェックポイントを送る

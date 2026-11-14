@@ -66,7 +66,12 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     "*",
     createMiddleware<GateEnv>(async (c, next) => {
       const host = new URL(c.req.url).hostname;
-      if (!(host === "gate.internal" && OPEN_PATHS.has(c.req.path))) {
+      if (host === "gate.internal" && OPEN_PATHS.has(c.req.path)) {
+        // 作業トークンが無くても社員 DO まで届くので、コンテナの中から叩き続けられないよう、ワークスペースごとに数える
+        const guard = c.env.GUARD.get(c.env.GUARD.idFromName("guard"));
+        const { retryAfter } = await guard.admit(`workspace:${caller.workspaceId}`, "workspace", c.var.clock.now());
+        if (retryAfter !== null) throw new AppError("rate_limited", "要求が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
+      } else {
         const token = ticketOf(c.req.raw.headers, host);
         if (token === "") throw new AppError("unauthenticated", "作業トークンが無い");
         await authenticateTicket(c.env, token, caller, c.var.clock.now(), c.var.guard);

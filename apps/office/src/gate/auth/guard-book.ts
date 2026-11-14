@@ -8,8 +8,8 @@ export type GuardStorage = {
   delete(key: string): Promise<boolean>;
 };
 
-/** レート制限の種類。auth はログインセッションの開始とパスキー */
-export type RateBucket = "api" | "auth";
+/** レート制限の種類。auth はログインセッションの開始とパスキー、workspace はワークスペースの作業トークンの要らないルート */
+export type RateBucket = "api" | "auth" | "workspace";
 
 /** 入口で通すかの答え。locked ならロックアウト中、retryAfter が数ならレート制限を超えた */
 export type Admission = { locked: boolean; retryAfter: number | null };
@@ -24,8 +24,8 @@ export type Challenge = z.infer<typeof Challenge>;
 const StoredChallenge = Challenge.extend({ expiresAt: z.number() });
 
 const MINUTE = 60_000;
-/** 1 分に通す数。API の決まりの 1.2 の 3 と 3.6 の 2 */
-export const RATE_LIMITS: Record<RateBucket, number> = { api: 300, auth: 10 };
+/** 1 分に通す数。API の決まりの 1.2 の 3 と 3.6 の 2。workspace はハートビート (30 秒ごと) とチェックポイントの合わせた数 */
+export const RATE_LIMITS: Record<RateBucket, number> = { api: 300, auth: 10, workspace: 60 };
 /** この間に LOCK_AFTER 回失敗するとロックアウトする */
 const FAIL_WINDOW_MS = 10 * MINUTE;
 const LOCK_AFTER = 5;
