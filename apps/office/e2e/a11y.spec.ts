@@ -48,54 +48,76 @@ async function focusProblem(page: Page): Promise<string | null> {
 }
 
 /**
+ * 今 focus のある物が、Tab で止まる物の最初か最後かを返す。tabindex を正の数にした物は無いので、DOM の順を Tab の順とする
+ * @param page 確かめるページ
+ * @returns 最初なら "first"、最後なら "last"、どちらでもなければ null
+ */
+async function tabEdge(page: Page): Promise<"first" | "last" | null> {
+  return page.evaluate(() => {
+    const selector = "a[href], button, input, select, textarea, summary, [tabindex]";
+    const stops = [...document.querySelectorAll<HTMLElement>(selector)].filter(
+      (el) => el.tabIndex >= 0 && !el.matches(":disabled") && el.getClientRects().length > 0,
+    );
+    const el = document.activeElement;
+    if (el === stops[0]) return "first";
+    if (el === stops.at(-1)) return "last";
+    return null;
+  });
+}
+
+/**
  * Tab だけで目当ての物まで進む。止まった所ごとに、focus の輪が見える事を確かめる
  * @param page 操作するページ
  * @param target 進む先
+ * @param webkit Safari で動かしているか
  * @param max Tab を押す上限
  */
-async function tabTo(page: Page, target: Locator, max = 60): Promise<void> {
-  let leftPage = false;
+async function tabTo(page: Page, target: Locator, webkit: boolean, max = 60): Promise<void> {
   for (let n = 0; n < max; n++) {
+    const edge = await tabEdge(page);
     await page.keyboard.press("Tab");
     const problem = await focusProblem(page);
-    // 最後の物から Tab を押すと、Safari は focus をページの外 (アドレス欄など) へ出し、次の Tab で先頭に戻る。1 度だけは許す
-    if (problem === BODY && !leftPage) {
-      leftPage = true;
-      continue;
+    // Safari は最後の物から Tab を押すと focus をページの外 (アドレス欄など) へ出す。その時だけ許し、次の Tab で最初の物に戻る事を確かめる
+    if (webkit && edge === "last" && problem === BODY) {
+      await page.keyboard.press("Tab");
+      expect(await tabEdge(page)).toBe("first");
+      expect(await focusProblem(page)).toBeNull();
+    } else {
+      expect(problem).toBeNull();
     }
-    expect(problem).toBeNull();
     if (await target.evaluate((el) => el === document.activeElement)) return;
   }
   throw new Error(`Tab を ${max} 回押しても届かない: ${target.toString()}`);
 }
 
 test.describe("使いやすさ", () => {
-  test("キーボードで操作する", async ({ page }) => {
+  test("キーボードで操作する", async ({ page, browserName }) => {
+    const webkit = browserName === "webkit";
     const h1 = (name: string) => page.getByRole("heading", { level: 1, name });
     const main = page.getByRole("main");
     await page.goto("/");
     await expect(h1("ダッシュボード")).toBeVisible();
 
     // 切り替えから社員と仕事へ移る。今いる所に印が付く
-    await tabTo(page, page.locator("nav:visible").getByRole("link", { name: "社員と仕事" }));
+    await tabTo(page, page.locator("nav:visible").getByRole("link", { name: "社員と仕事" }), webkit);
     await page.keyboard.press("Enter");
     await expect(h1("社員と仕事")).toBeVisible();
     await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/社員と仕事/);
 
     // 社員を選び、仕事の山のタブを矢印で選ぶ
-    await tabTo(page, main.getByRole("link", { name: /作る役/ }));
+    await tabTo(page, main.getByRole("link", { name: /作る役/ }), webkit);
     await page.keyboard.press("Enter");
-    await tabTo(page, page.getByRole("tab", { name: "会話" }));
+    await tabTo(page, page.getByRole("tab", { name: "会話" }), webkit);
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
     await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
     expect(await focusProblem(page)).toBeNull();
 
     // 変更のある仕事を開き、可を出す
-    await tabTo(page, page.getByRole("link", { name: /CodeEditor のページを足す/ }));
+    await tabTo(page, page.getByRole("link", { name: /CodeEditor のページを足す/ }), webkit);
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "CodeEditor のページを足す" })).toBeVisible();
-    await tabTo(page, page.getByRole("button", { name: "可", exact: true }));
+    await tabTo(page, page.getByRole("button", { name: "可", exact: true }), webkit);
     await page.keyboard.press("Enter");
     await expect(page.getByText("可を出しました")).toBeVisible();
   });
