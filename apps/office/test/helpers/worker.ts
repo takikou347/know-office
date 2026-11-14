@@ -1,5 +1,6 @@
-// DO のテストの入口を本物の workerd で起こし、マイグレーションを流す
-import { readdirSync, readFileSync } from "node:fs";
+// DO のテストの入口と、本物の wrangler.jsonc の Worker を本物の workerd で起こす
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unstable_startWorker } from "wrangler";
 import { z } from "zod";
@@ -72,5 +73,48 @@ export async function startTestWorker(): Promise<TestWorker> {
     staff: (staffId, method, ...args) => post("/staff", { staffId, method, args }),
     query: async (binding, sql) => z.array(z.unknown()).parse(await post("/query", { binding, sql })),
     dispose: () => worker.dispose(),
+  };
+}
+
+/** 本物の wrangler.jsonc で起こした Worker */
+export type OfficeWorker = {
+  /** GET の要求を出す。path は / から始める */
+  request(path: string, headers?: Record<string, string>): Promise<Response>;
+  /** 止めて、画面のファイルの置き場を消す */
+  dispose(): Promise<void>;
+};
+
+/**
+ * apps/office/wrangler.jsonc の Worker を画面のファイルと一緒に起こし、入口と画面の分かれ方 (assets の run_worker_first) を確かめられるようにする
+ * @returns 要求を出す request と dispose
+ */
+export async function startOfficeWorker(): Promise<OfficeWorker> {
+  // 作った画面は vite build の後にしか無く、テストは build の前に走るので、元の index.html だけを画面のファイルとして置く
+  const assets = mkdtempSync(join(tmpdir(), "know-office-assets-"));
+  let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
+  try {
+    copyFileSync(join(import.meta.dirname, "../../index.html"), join(assets, "index.html"));
+    worker = await unstable_startWorker({
+      config: join(import.meta.dirname, "../../wrangler.jsonc"),
+      assets,
+      // vite の ?raw の代わりに、wrangler の組み立てでも OpenAPI の文書を文字列として読む
+      build: { moduleRules: [{ type: "Text", globs: ["**/*.yaml?raw"] }] },
+      dev: { server: { port: 0 }, inspector: false, persist: false, logLevel: "error" },
+    });
+  } catch (error) {
+    // 起こせない時も一時の置き場を残さない
+    rmSync(assets, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    request: async (path, headers = {}) => {
+      // miniflare の Response を、テストの型と同じ Node の Response に移す
+      const res = await worker.fetch(`http://test${path}`, { headers });
+      return new Response(await res.text(), { status: res.status, headers: Object.fromEntries(res.headers) });
+    },
+    dispose: async () => {
+      await worker.dispose();
+      rmSync(assets, { recursive: true, force: true });
+    },
   };
 }
