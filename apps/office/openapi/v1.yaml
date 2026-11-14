@@ -4339,7 +4339,7 @@ paths:
 
         - 401 `step_up_required`: 守りを弱める変更で、パスキーの確認がない
 
-        - 409 `conflict`: バージョンが異なる
+        - 409 `conflict`: バージョンが異なる、または初期値に戻す間に office の初期値が変わった
 
         - 422 `validation_failed`: 値が項目の形に合わない、または初期値を持たない項目に `null` を送った'
       x-steps:
@@ -4350,7 +4350,7 @@ paths:
       x-errors:
       - '404 `not_found`: サービスが存在しない、設定項目が存在しない、またはリポジトリを変えようとした (触れるリポジトリから選ぶので、GitHub と連携するまで変えられない)'
       - '401 `step_up_required`: 守りを弱める変更で、パスキーの確認がない'
-      - '409 `conflict`: バージョンが異なる'
+      - '409 `conflict`: バージョンが異なる、または初期値に戻す間に office の初期値が変わった'
       - '422 `validation_failed`: 値が項目の形に合わない、または初期値を持たない項目に `null` を送った'
       x-step-up: conditional
       parameters:

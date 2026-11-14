@@ -158,7 +158,7 @@ export async function serviceRules(db: D1Database, serviceId: string): Promise<S
  * @throws not_found サービスか項目が無い時、リポジトリを変えようとした時
  * @throws validation_failed 値が項目の形に合わない時、初期値を持たない項目を null にした時
  * @throws step_up_required 守りを弱める変更で、パスキーの確認が無い時 (stepUp が投げる)
- * @throws conflict 版が違う時
+ * @throws conflict 版が違う時、初期値に戻す間に office の初期値が変わった時
  */
 export async function updateServiceSetting(
   db: D1Database,
@@ -173,35 +173,15 @@ export async function updateServiceSetting(
   if (key === "staffId") value = checkValue(OWN_SETTINGS.staffId, input.value);
   else if (input.value !== null) value = checkValue(INHERITED_SETTINGS[key], input.value);
   const current = (await loadServiceSettings(db, serviceId)).find((s) => s.key === key);
+  let defaultVersion: number | null = null;
   if (isInheritedKey(key)) {
     // 初期値に戻す時は、受け継いだ後の実効値で比べる
-    const after = value === null ? (await loadOfficeDefaults(db))[key].value : value;
-    if (weakens(key, current?.value, after)) stepUp();
+    const office = (await loadOfficeDefaults(db))[key];
+    if (value === null) defaultVersion = office.version;
+    if (weakens(key, current?.value, value === null ? office.value : value)) stepUp();
   }
   if (current?.version !== version) throw new AppError("conflict", "バージョンが違う");
-  const id = newId(clockAt(now));
-  const next = version + 1;
-  const orm = drizzle(db);
-  const json = value === null ? null : JSON.stringify(value);
-  const insert = orm
-    .insert(serviceSettings)
-    .select(
-      sql`SELECT ${id}, ${serviceId}, ${key}, ${json}, ${next}, 'owner', ${now} WHERE NOT EXISTS (SELECT 1 FROM ${serviceSettings} WHERE ${serviceSettings.serviceId} = ${serviceId} AND ${serviceSettings.key} = ${key} AND ${serviceSettings.version} >= ${next})`,
-    )
-    .returning({ id: serviceSettings.id });
-  if (key === "staffId") {
-    // 一覧の担当も同じ時に直す。行を書けた時だけ直す
-    const [written] = await orm.batch([
-      insert,
-      orm
-        .update(services)
-        .set({ staffId: OWN_SETTINGS.staffId.parse(value) })
-        .where(and(eq(services.id, serviceId), sql`EXISTS (SELECT 1 FROM ${serviceSettings} WHERE ${serviceSettings.id} = ${id})`)),
-    ]);
-    if (written.length === 0) throw new AppError("conflict", "バージョンが違う");
-  } else if ((await insert).length === 0) {
-    throw new AppError("conflict", "バージョンが違う");
-  }
+  await appendServiceSetting(db, { serviceId, key, value, version, defaultVersion, now });
   const after = (await loadServiceSettings(db, serviceId)).find((s) => s.key === key);
   if (!after) throw new AppError("internal", "書いた設定が読めない");
   return after;
@@ -245,4 +225,51 @@ export async function updateOfficeDefault(
     .returning({ id: settings.id });
   if (written.length === 0) throw new AppError("conflict", "バージョンが違う");
   return { key, value, inherited: false, version: next };
+}
+
+/**
+ * サービスの設定の行を 1 行足す。読んだ版より新しい行が無い時だけ書く 1 文で、同時に変えた 2 つの片方を断る
+ * @param db 今の状態の D1
+ * @param row 足す行
+ * @param row.serviceId サービス ID
+ * @param row.key 項目の名前
+ * @param row.value 確かめた値。null は初期値に戻す
+ * @param row.version 読んだ版
+ * @param row.defaultVersion 初期値に戻す時に読んだ office の初期値の版。戻さない時は null
+ * @param row.now 今の時刻
+ * @throws conflict 版が違う時、初期値に戻す間に office の初期値が変わった時
+ */
+export async function appendServiceSetting(
+  db: D1Database,
+  row: { serviceId: string; key: string; value: unknown; version: number; defaultVersion: number | null; now: number },
+): Promise<void> {
+  const { serviceId, key, value, version, now } = row;
+  const id = newId(clockAt(now));
+  const next = version + 1;
+  const orm = drizzle(db);
+  const json = value === null ? null : JSON.stringify(value);
+  // 初期値に戻す時は、弱めるかを比べた office の初期値のままの時だけ書く。間に弱まった初期値へパスキー無しで戻さない
+  const sameDefault =
+    row.defaultVersion === null
+      ? sql``
+      : sql` AND COALESCE((SELECT MAX(${settings.version}) FROM ${settings} WHERE ${settings.key} = ${`${DEFAULT_PREFIX}${key}`} AND ${settings.scope} = 'office'), 0) = ${row.defaultVersion}`;
+  const insert = orm
+    .insert(serviceSettings)
+    .select(
+      sql`SELECT ${id}, ${serviceId}, ${key}, ${json}, ${next}, 'owner', ${now} WHERE NOT EXISTS (SELECT 1 FROM ${serviceSettings} WHERE ${serviceSettings.serviceId} = ${serviceId} AND ${serviceSettings.key} = ${key} AND ${serviceSettings.version} >= ${next})${sameDefault}`,
+    )
+    .returning({ id: serviceSettings.id });
+  if (key === "staffId") {
+    // 一覧の担当も同じ時に直す。行を書けた時だけ直す
+    const [written] = await orm.batch([
+      insert,
+      orm
+        .update(services)
+        .set({ staffId: OWN_SETTINGS.staffId.parse(value) })
+        .where(and(eq(services.id, serviceId), sql`EXISTS (SELECT 1 FROM ${serviceSettings} WHERE ${serviceSettings.id} = ${id})`)),
+    ]);
+    if (written.length === 0) throw new AppError("conflict", "バージョンが違う");
+  } else if ((await insert).length === 0) {
+    throw new AppError("conflict", "バージョンが違う");
+  }
 }

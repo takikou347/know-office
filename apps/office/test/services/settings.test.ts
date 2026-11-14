@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { services } from "../../src/gate/db/main.ts";
-import { serviceRules } from "../../src/gate/services/settings.ts";
+import { appendServiceSetting, serviceRules } from "../../src/gate/services/settings.ts";
 import { api, MINUTE, type WorkWorld, useWork } from "../helpers/work.ts";
 
 const world = useWork();
@@ -201,5 +201,53 @@ describe("弱める変更だけパスキーを求める", () => {
     expect(await api(world, "PUT", "/api/v1/settings/service.mergeWhen", { version: 0, value: ["checks", "reviewer", "owner"], reason: "強める" })).toMatchObject({ version: 1 });
     await stepUp(world);
     expect(await api(world, "PUT", "/api/v1/settings/service.protectedPaths", { version: 0, value: [], reason: "弱める" })).toMatchObject({ version: 1 });
+  });
+});
+
+/**
+ * 表の行を数える
+ * @param w テストの物
+ * @param sql 数える SQL
+ * @returns 行の数
+ */
+async function count(w: WorkWorld, sql: string): Promise<number> {
+  return z.object({ n: z.number() }).parse(await w.d1.DB.prepare(sql).first()).n;
+}
+
+describe("同時に変えた時の版", () => {
+  it("同じ版でサービスの設定を同時に変えると、片方だけが入る", async () => {
+    const ui = await service(world, "knowidea-ui", "example/knowidea-ui");
+    const send = (value: string[]) => world.gate.request(`/api/v1/services/${ui}/settings/mergeWhen`, {
+      method: "PUT",
+      headers: { ...world.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ version: 0, value, reason: "同時に変える" }),
+    });
+    const res = await Promise.all([send(["checks", "reviewer", "owner"]), send(["checks", "reviewer"])]);
+    expect(res.map((r) => r.status).toSorted((a, b) => a - b)).toEqual([200, 409]);
+    expect(await count(world, "SELECT COUNT(*) AS n FROM service_settings")).toBe(1);
+  });
+
+  it("同じ版で office の初期値を同時に変えると、片方だけが入る", async () => {
+    const send = (value: string[]) => world.gate.request("/api/v1/settings/service.mergeWhen", {
+      method: "PUT",
+      headers: { ...world.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ version: 0, value, reason: "同時に変える" }),
+    });
+    const res = await Promise.all([send(["checks", "reviewer", "owner"]), send(["checks", "reviewer"])]);
+    expect(res.map((r) => r.status).toSorted((a, b) => a - b)).toEqual([200, 409]);
+    expect(await count(world, "SELECT COUNT(*) AS n FROM settings WHERE key = 'service.mergeWhen'")).toBe(1);
+  });
+
+  it("初期値に戻す間に office の初期値が変わると、戻さずに断る", async () => {
+    const ui = await service(world, "knowidea-ui", "example/knowidea-ui");
+    await api(world, "PUT", `/api/v1/services/${ui}/settings/paused`, { version: 0, value: true, reason: "止める" });
+    // 戻す前に office の初期値 (版 0 の false) を読んだ後、初期値が変わった事にする
+    await api(world, "PUT", "/api/v1/settings/service.paused", { version: 0, value: true, reason: "全部止める" });
+    const write = (defaultVersion: number) =>
+      appendServiceSetting(world.d1.DB, { serviceId: ui, key: "paused", value: null, version: 1, defaultVersion, now: world.clock.now() });
+    await expect(write(0)).rejects.toMatchObject({ code: "conflict" });
+    expect(await count(world, "SELECT COUNT(*) AS n FROM service_settings")).toBe(1);
+    await expect(write(1)).resolves.toBeUndefined();
+    expect(await count(world, "SELECT COUNT(*) AS n FROM service_settings")).toBe(2);
   });
 });
