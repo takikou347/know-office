@@ -14,7 +14,7 @@ paths:
 - パスは小文字の kebab-case の名詞の複数形 (`/api/v1/audit-logs`)。1 つしかない物は単数 (`/me`、`/guard/state`)。名詞で表せない操作だけ末尾に動詞 1 語を置いて `POST`。全部の置き換えは `PUT`、一部は `PATCH`
 - パスの変数は `{<物>Id}`、`operationId` は `<動詞><物>` の camelCase (`listStops`)、`tags` は物のまとまりごと。`components/schemas` の名前と Zod スキーマの名前を同じにする
 - キー、クエリ、パスの変数は camelCase。GitHub が決めたクエリ (`installation_id`) だけはそのまま。種類の値は snake_case
-- ルートは `@hono/zod-openapi` の `createRoute` で書き、入力と返す形は `core` の Zod スキーマを使う。ハンドラーの中で入力を確かめ直さない
+- ルートは `@hono/zod-openapi` の `createRoute` で書き、入力と返す形は `core` の Zod スキーマを使う。ハンドラーの中で入力を確かめ直さない。query のスキーマにも `.strict()` を付け、知らないクエリを 400 にする
 - 成功は `ok(c, data)`、`list(c, items, next)`、`created(c, data, location)`、`noContent(c)` で返し、`c.json()` を直に呼ばない。本文は `data` と `meta` だけ。`meta` は `traceId` を持ち、一覧の `meta` は `next` (次のカーソル、無ければ `null`) も持つ
 - 失敗は `AppError` を投げ、`app.onError` が RFC 9457 の problem+json (`type`、`title`、`status`、`detail`、`instance`、`code`、`traceId`、422 だけ `errors`) に直す。ハンドラーの中で組まない
 - `code` は `core` の `ErrorCode` に並べる。500 は `detail` に中身を入れない
