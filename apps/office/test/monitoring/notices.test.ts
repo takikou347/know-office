@@ -140,6 +140,24 @@ describe("Claude の失敗の通知", () => {
     ]);
   });
 
+  it("同時に 4 件の失敗が来ても、通知は 1 件", async () => {
+    const work = await startTask(at(14));
+    for (let i = 0; i < 4; i += 1) w.gate.claude.pushError(500, "api_error");
+    const answers = await Promise.all([0, 1, 2, 3].map(() => callClaude(work, at(14, 10))));
+    expect(answers.map((r) => r.status)).toEqual([500, 500, 500, 500]);
+    expect(await rows(w, "SELECT kind FROM notices WHERE kind = 'claude_failing'")).toEqual([{ kind: "claude_failing" }]);
+  });
+
+  it("500 が続いても、通知は claude_failing の 1 件だけ", async () => {
+    const work = await startTask(at(15));
+    for (let i = 0; i < 5; i += 1) {
+      w.gate.claude.pushError(500, "api_error");
+      await callClaude(work, at(15, 10 + i / 2));
+    }
+    // 同じ原因のエラーの続きの通知 (error_burst) と重ねて出さない
+    expect(await rows(w, "SELECT kind FROM notices")).toEqual([{ kind: "claude_failing" }]);
+  });
+
   it("429 と 529 は上限の待ちで、失敗に数えない", async () => {
     const work = await startTask(at(12));
     for (const [i, status] of ([429, 529, 429] as const).entries()) {
@@ -174,6 +192,14 @@ describe("通知のルート", () => {
     const rest = await readNotices(`?limit=2&cursor=${first.meta.next ?? ""}`);
     expect(rest.data.map((n) => n.id)).toEqual(["0190f4a8-0000-7000-8000-000000000001"]);
     expect(rest.meta.next).toBeNull();
+  });
+
+  it("カーソルが通知 ID の形でなければ 400 で断る", async () => {
+    w.clock.advance(at(13) - w.clock.now());
+    const headers = await w.gate.signIn();
+    const res = await w.gate.request("/api/v1/notices?cursor=nope", { headers });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "malformed_request" });
   });
 
   it("既読にでき、既読なら何もせず、無い通知は 404", async () => {

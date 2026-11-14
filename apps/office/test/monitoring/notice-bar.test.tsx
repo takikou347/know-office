@@ -1,8 +1,9 @@
 // 画面の通知: 上部の帯とダッシュボードの一覧に、入口から読んだ通知を出す (サービスと拡張の 3.5)
 import type { Notice } from "@know-office/core";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { NOTICE_POLL_MS, NoticeBar, NoticeList } from "../../src/screen/parts/notices.tsx";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type Api, createApi } from "../../src/screen/api.ts";
+import { fetchNotices, NOTICE_POLL_MS, NoticeBar, NoticeList, watchNotices } from "../../src/screen/parts/notices.tsx";
 
 /**
  * 通知を作る
@@ -42,8 +43,75 @@ describe("画面の通知", () => {
     expect(html).toContain("通知 1");
     expect(html).toContain("9:00");
   });
+});
 
-  it("5 分以内に出るよう、5 分より短い間で読み直す", () => {
+/** タブの見え方の代わり。visibilitychange を出せる */
+class FakeView extends EventTarget {
+  hidden = false;
+
+  /**
+   * 見え方を変え、visibilitychange を出す
+   * @param hidden 隠れているか
+   */
+  show(hidden: boolean): void {
+    this.hidden = hidden;
+    this.dispatchEvent(new Event("visibilitychange"));
+  }
+}
+
+/**
+ * 通知の一覧を読んだ回数を数える、入口の代わり
+ * @returns 入口を呼ぶ口と、一覧を読んだ回数
+ */
+function fakeGate(): { api: Api; reads: () => number } {
+  let count = 0;
+  const api = createApi("http://localhost", (input) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.pathname === "/api/v1/notices") count += 1;
+    return Promise.resolve(Response.json({ data: [], meta: { traceId: "0".repeat(32), next: null } }));
+  });
+  return { api, reads: () => count };
+}
+
+describe("通知を読み直す", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("5 分以内に出るよう、5 分より短い間で読み直し、止めるとタイマーも止まる", async () => {
     expect(NOTICE_POLL_MS).toBeLessThan(5 * 60_000);
+    const { api, reads } = fakeGate();
+    const stop = watchNotices(() => void fetchNotices(api), new FakeView());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(NOTICE_POLL_MS);
+    expect(reads()).toBe(2);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(NOTICE_POLL_MS * 3);
+    expect(reads()).toBe(2);
+  });
+
+  it("タブが見えない間は読まず、見えた時に 1 回読む", async () => {
+    const { api, reads } = fakeGate();
+    const view = new FakeView();
+    const stop = watchNotices(() => void fetchNotices(api), view);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(1);
+    view.show(true);
+    await vi.advanceTimersByTimeAsync(NOTICE_POLL_MS * 3);
+    expect(reads()).toBe(1);
+    view.show(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(2);
+    stop();
+    // 止めた後は見えても読まない
+    view.show(true);
+    view.show(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(2);
   });
 });

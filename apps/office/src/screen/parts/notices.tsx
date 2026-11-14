@@ -31,10 +31,32 @@ type Loaded = Pick<NoticesState, "notices" | "state">;
  * @param api 入口を呼ぶ口
  * @returns 通知。読めなければ null
  */
-async function fetchNotices(api: Api): Promise<Notice[] | null> {
+export async function fetchNotices(api: Api): Promise<Notice[] | null> {
   const res = await api.api.v1.notices.$get({ query: { limit: String(NOTICE_LIMIT) } }).catch(() => null);
   if (!res?.ok) return null;
   return (await res.json()).data;
+}
+
+/** タブの見え方。画面では document */
+export type NoticeView = Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
+
+/**
+ * 今読み、その後は NOTICE_POLL_MS ごとに読む。タブが見えない間は読まず、見えた時に 1 回読む
+ * @param pull 読む関数
+ * @param view タブの見え方。無ければ見えている事にする
+ * @returns 読むのを止める関数
+ */
+export function watchNotices(pull: () => void, view: NoticeView | null): () => void {
+  const tick = () => {
+    if (!view?.hidden) pull();
+  };
+  tick();
+  const timer = setInterval(tick, NOTICE_POLL_MS);
+  view?.addEventListener("visibilitychange", tick);
+  return () => {
+    clearInterval(timer);
+    view?.removeEventListener("visibilitychange", tick);
+  };
 }
 
 const NoticesContext = createContext<NoticesState>({ notices: [], state: "loading", markRead: () => {} });
@@ -60,11 +82,10 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
         if (live) setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
       });
     };
-    pull();
-    const timer = setInterval(pull, NOTICE_POLL_MS);
+    const stop = watchNotices(pull, typeof document === "undefined" ? null : document);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, [api]);
   const markRead = useCallback(

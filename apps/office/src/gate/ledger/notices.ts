@@ -3,16 +3,15 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, type Clock, newId, type Notice } from "@know-office/core";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { recordsOf } from "../work/nodes.ts";
+import { CLAUDE_FAILED } from "./errors.ts";
 
 /** Claude の API の失敗を数える窓と、通知を出す回数。サービスと拡張の 3.5 */
 export const CLAUDE_FAILURE_WINDOW_MS = 5 * 60_000;
 export const CLAUDE_FAILURE_LIMIT = 3;
-
-/** Claude の API の失敗をエラーログに残す時の code */
-export const CLAUDE_FAILED = "claude_failed";
 
 /**
  * 行を返す形に直す
@@ -33,14 +32,26 @@ function toNotice(row: typeof notices.$inferSelect): Notice {
 }
 
 /**
+ * カーソルを通知 ID として確かめる
+ * @param cursor 前の返事の meta.next
+ * @throws malformed_request 通知 ID (UUID) でない時
+ */
+function parseCursor(cursor: string): void {
+  // 読めないカーソルを先頭や末尾に読み替えず、要求の誤りとして断る
+  if (!z.uuid().safeParse(cursor).success) throw new AppError("malformed_request", "カーソルが通知 ID でない");
+}
+
+/**
  * 通知を新しい順に読む。ID は UUID v7 で作った順に並ぶので、カーソルは前のページの最後の ID
  * @param db 主の D1
  * @param page 前のページの最後の ID と件数
  * @param page.cursor 前のページの最後の ID
  * @param page.limit 件数
  * @returns 通知と次のカーソル
+ * @throws malformed_request カーソルが通知 ID でない時
  */
 export async function listNotices(db: D1Database, page: { cursor?: string | undefined; limit: number }): Promise<{ items: Notice[]; next: string | null }> {
+  if (page.cursor !== undefined) parseCursor(page.cursor);
   const rows = await drizzle(db)
     .select()
     .from(notices)
@@ -80,20 +91,10 @@ export async function noticeClaudeFailures(env: Bindings, clock: Clock, last: st
     .first<{ n: number }>();
   const count = recent?.n ?? 0;
   if (count < CLAUDE_FAILURE_LIMIT) return;
-  const orm = drizzle(env.DB);
-  const [open] = await orm
-    .select({ id: notices.id })
-    .from(notices)
-    .where(and(eq(notices.kind, "claude_failing"), isNull(notices.readAt)))
-    .limit(1);
-  if (open) return;
-  await orm.insert(notices).values({
-    id: newId(clock),
-    at,
-    level: "warn",
-    kind: "claude_failing",
-    title: "Claude の API の失敗が続いている",
-    body: `5 分に ${String(count)} 回失敗した。最後は ${last}`,
-    scope: "office",
-  });
+  // 未読の同じ通知が無い時だけ 1 文で足す。同時に届いた失敗が、どれも無いと読んでから足すと重なるため
+  await env.DB.prepare(
+    "INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'claude_failing', ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = 'claude_failing' AND read_at IS NULL)",
+  )
+    .bind(newId(clock), at, "Claude の API の失敗が続いている", `5 分に ${String(count)} 回失敗した。最後は ${last}`)
+    .run();
 }

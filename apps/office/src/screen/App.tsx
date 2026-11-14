@@ -2,13 +2,7 @@ import type { Health } from "@know-office/core";
 import { AppBar, AppShell } from "knowidea-ui";
 import { type Navigate, Page } from "./pages.tsx";
 import { LiveNoticeBar, NoticeProvider } from "./parts/notices.tsx";
-import {
-  bottomCurrentOf,
-  bottomItems,
-  morePath,
-  screenOf,
-  sideItems,
-} from "./routes.ts";
+import { bottomCurrentOf, bottomItems, morePath, screenOf, sideItems } from "./routes.ts";
 
 export interface AppProps {
   health?: Health;

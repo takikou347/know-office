@@ -14,7 +14,7 @@ const listNoticesRoute = createRoute({
   operationId: "listNotices",
   tags: ["notices"],
   request: { query: listQuery(router) },
-  responses: { 200: listResponse(Notice), ...problems(401, 403, 429, 500) },
+  responses: { 200: listResponse(Notice), ...problems(400, 401, 403, 422, 429, 500) },
 });
 
 const markNoticeReadRoute = createRoute({

@@ -20,6 +20,12 @@ export type ErrorRecord = {
   traceId?: string;
 };
 
+/** Claude の API の失敗をエラーログに残す時の code。続いた時は notices.ts が claude_failing を出す */
+export const CLAUDE_FAILED = "claude_failed";
+
+/** 自分の通知を持つので、同じエラーの続き (error_burst) の通知を出さない code */
+const OWN_NOTICE_CODES: ReadonlySet<string> = new Set([CLAUDE_FAILED]);
+
 const BURST_LIMIT = 3;
 const BURST_WINDOW_MS = 5 * 60 * 1000;
 
@@ -46,7 +52,7 @@ function fingerprintOf(record: ErrorRecord): Promise<string> {
 }
 
 /**
- * エラーを error_events に 1 行足す。同じ原因が 5 分に 3 回を超えたら知らせを出す。書けない時は log にだけ残し、投げない
+ * エラーを error_events に 1 行足す。同じ原因が 5 分に 3 回を超えたら知らせを出す。自分の通知を持つ code は除く。書けない時は log にだけ残し、投げない
  * @param env バインディング
  * @param record 残すエラー
  * @param clock 時刻
@@ -62,6 +68,7 @@ export async function recordError(env: Bindings, record: ErrorRecord, clock: Clo
       .prepare("INSERT INTO error_events (id, at, source, level, code, message, route, status, fingerprint, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(newId(clock), at, record.source, record.level, record.code, messageOf(record.error), record.route ?? null, record.status ?? null, fingerprint, record.traceId ?? null)
       .run();
+    if (OWN_NOTICE_CODES.has(record.code)) return;
     const recent = await db
       .prepare("SELECT count(*) AS n FROM error_events WHERE fingerprint = ? AND at > ?")
       .bind(fingerprint, at - BURST_WINDOW_MS)
