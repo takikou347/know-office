@@ -1,5 +1,5 @@
 // Claude Agent SDK に渡す呼び出しの形と、設定を読ませずにフックを関数で渡す options を作る (社員が考えるの 3.1、3.2)
-import { CONTAINER_CA } from "@know-office/core";
+import { CONTAINER_CA, type RunInput } from "@know-office/core";
 import type { PreToolUseOutput } from "./hooks.ts";
 
 /** 社員が書ける唯一の置き場。タスクのリポジトリを置く */
@@ -18,7 +18,7 @@ export type AgentOptions = {
   /** モデル */
   model: string;
   /** 考える深さ */
-  effort: "low" | "medium" | "high";
+  effort: RunInput["effort"];
   /** 役目の説明文と組織の決まり */
   systemPrompt: string;
   /** 読む設定の置き場。空にしてリポジトリと利用者の .claude/ を読まない */
@@ -65,7 +65,7 @@ export type Agent = (call: AgentCall) => Promise<void>;
 export function agentOptions(input: {
   ticket: string;
   model: string;
-  effort: "low" | "medium" | "high";
+  effort: RunInput["effort"];
   systemPrompt: string;
   hook: (input: unknown) => Promise<PreToolUseOutput>;
   abortController: AbortController;
