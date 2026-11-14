@@ -1,0 +1,15 @@
+schema: spec-driven
+
+context: |
+  Language: ja
+  All artifacts must be written in ja.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+  know-office は KNOW IDEA の社内の管理アプリ。AI 社員が自分で仕事を進めるのを、オーナーがスマホ、iPad、PC で眺め、おかしな時だけ一言かける。
+  オーナーが決めるのは、お金が増えることと外部連携だけ。
+
+rules:
+  proposal:
+    - 結論から書き、作る物と実現する事を書く。作らない物は書かない
+    - お金が増えることか外部連携に当たる時は、そう書く
+  tasks:
+    - 落ちるテストを先に書くタスクを、作るタスクの前に置く
