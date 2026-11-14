@@ -186,6 +186,18 @@ export class StaffGuard {
   }
 
   /**
+   * タスクの作業トークンを、残す 1 本のほかすべて失効させる。落ちたワークスペースに渡していた物を、続きを渡した後に使えなくする
+   * @param nodeId タスク ID
+   * @param keepJti 残す作業トークン ID
+   * @returns 失効させた作業トークン ID
+   */
+  async revokeOthers(nodeId: string, keepJti: string): Promise<string[]> {
+    const others = (await this.#tickets()).filter((t) => t.nodeId === nodeId && t.jti !== keepJti).map((t) => t.jti);
+    await this.#revoke((t) => others.includes(t.jti));
+    return others;
+  }
+
+  /**
    * 作業トークンが使えるかを確かめる。ゲートウェイはプロキシのたびに呼ぶ
    * @param jti 作業トークン ID
    * @param workspaceId 使ったワークスペースの ID

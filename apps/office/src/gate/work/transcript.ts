@@ -7,7 +7,7 @@ import { nodes, staff, staffPrompts, transcriptParts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import { clockAt } from "./attendance.ts";
-import { issueTicket } from "./ticket.ts";
+import { issueTicket, retireOtherTickets } from "./ticket.ts";
 
 /** 会話の記録の置き場。社員 DO だけが持つ */
 export type TranscriptStore = {
@@ -193,5 +193,7 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
     await staffDo.revokeTokens([jti]);
     throw error;
   }
+  // 落ちたワークスペースに渡していた作業トークンは、続きを渡した後に使えなくする
+  await retireOtherTickets(env, staffId, nodeId, jti, now);
   return true;
 }

@@ -2,6 +2,7 @@
 import { deriveKey, fromBase64, toBase64 } from "@know-office/core";
 import { decodeJwt } from "jose";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { jst, TASK } from "../helpers/staff.ts";
 import { startTestWorker, type TestWorker } from "../helpers/worker.ts";
 
@@ -34,6 +35,14 @@ async function calls(worker: TestWorker, count: number): Promise<{ method: strin
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return worker.workspace("builder");
+}
+
+/**
+ * 待たずに頼んだ後の動きが済むまで待つ
+ * @param done 済んだか
+ */
+async function until(done: () => Promise<boolean>): Promise<void> {
+  for (let n = 0; n < 50 && !(await done()); n += 1) await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
 /**
@@ -77,6 +86,9 @@ describe("経過の記憶", () => {
   }
 
   it("落ちた後に再開する", async () => {
+    // 落ちる前のワークスペースに渡していた作業トークン
+    const old = z.object({ jti: z.string() }).parse(await worker.staff("builder", "issueToken", TASK.nodeId, "ws-before", jst(9, 1)));
+    expect(await worker.staff("builder", "checkToken", old.jti, "ws-before", jst(9, 2))).toBe("ok");
     await sendTwo();
     // ハートビートが 90 秒届かず、社員 DO がワークスペースを作り直す
     await worker.staff("builder", "wake", jst(9, 5));
@@ -87,7 +99,15 @@ describe("経過の記憶", () => {
     expect(run).toMatchObject({ nodeId: TASK.nodeId, resume: SESSION, model: "claude-sonnet-5-5", effort: "medium", systemPrompt: BUILDER_PROMPT });
     // 続きは、このタスクだけに使える新しい作業トークンで呼ぶ
     const ticket = typeof run === "object" && run !== null && "ticket" in run ? String(run.ticket) : "";
-    expect(decodeJwt(ticket)).toMatchObject({ sub: "builder", node: TASK.nodeId });
+    const claims = z.object({ sub: z.string(), node: z.string(), ws: z.string(), jti: z.string() }).parse(decodeJwt(ticket));
+    expect(claims).toMatchObject({ sub: "builder", node: TASK.nodeId });
+    // 続きを渡した後は、そのタスクの前の作業トークンを失効させ、監査ログに残す
+    await until(async () => (await worker.staff("builder", "checkToken", old.jti, "ws-before", jst(9, 6))) === "revoked");
+    expect(await worker.staff("builder", "checkToken", old.jti, "ws-before", jst(9, 6))).toBe("revoked");
+    expect(await worker.staff("builder", "checkToken", claims.jti, claims.ws, jst(9, 6))).toBe("ok");
+    await until(async () => (await worker.query("REC_2030", "SELECT target FROM audit_log WHERE action = 'ticket.revoke'")).length > 0);
+    const revoked = z.array(z.object({ target: z.string(), detail: z.string() })).parse(await worker.query("REC_2030", "SELECT target, detail FROM audit_log WHERE action = 'ticket.revoke'"));
+    expect(revoked.map((r) => [r.target, JSON.parse(r.detail) as unknown])).toEqual([[old.jti, { staffId: "builder", nodeId: TASK.nodeId, reason: "resumed" }]]);
   });
 
   it("会話の記録は R2 にタスクごとの鍵で暗号にして置き、D1 に部分ごとの行を足す", async () => {

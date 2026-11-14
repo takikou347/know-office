@@ -169,6 +169,21 @@ export async function authenticateTicket(env: Bindings, token: string, caller: C
 }
 
 /**
+ * タスクの作業トークンを、続きに渡した 1 本のほかすべて失効させ、監査ログに残す。落ちたワークスペースに渡していた物を使えなくする
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param nodeId タスク ID
+ * @param keepJti 続きに渡した作業トークン ID
+ * @param now 今の時刻
+ * @returns 失効させた作業トークン ID
+ */
+export async function retireOtherTickets(env: Bindings, staffId: StaffId, nodeId: string, keepJti: string, now: number): Promise<string[]> {
+  const revoked = await staffOf(env, staffId).revokeOthers(nodeId, keepJti);
+  for (const jti of revoked) await record(env, now, "ticket.revoke", staffId, jti, { nodeId, reason: "resumed" });
+  return revoked;
+}
+
+/**
  * チェックポイントで、残りが 10 分を切った作業トークンを発行し直してワークスペースに渡す。渡し終えたら前の作業トークンを失効させる
  * 渡せない時は前の作業トークンを残し、次のチェックポイントでもう一度渡す
  * @param env バインディング

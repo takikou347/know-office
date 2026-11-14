@@ -95,6 +95,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   renewToken(nodeId: string, workspaceId: string, now: number): Promise<RenewedTicket | null>;
   /** 作業トークンを ID で失効させる */
   revokeTokens(jtis: string[]): Promise<null>;
+  /** タスクの作業トークンを、残す 1 本のほかすべて失効させる */
+  revokeOthers(nodeId: string, keepJti: string): Promise<string[]>;
   /** 作業トークンが使えるかを確かめる */
   checkToken(jti: string, workspaceId: string, now: number): Promise<TicketCheck>;
   /** 1 日の集計を作り直す */

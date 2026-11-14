@@ -245,6 +245,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
       }),
       renewToken: g.renewToken.bind(g),
       revokeTokens: g.revokeTokens.bind(g),
+      revokeOthers: g.revokeOthers.bind(g),
       // 社員 DO は会話の記録を鎖の中で 1 つずつ足す。テストは呼び出しを重ねないので鎖を省く
       appendTranscript: overRpc(async (nodeId: string, input: unknown, now: number) => {
         await appendTranscript(transcripts, id, nodeId, input, now);
