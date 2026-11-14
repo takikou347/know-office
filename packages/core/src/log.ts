@@ -1,7 +1,15 @@
 // 1 行の JSON のログ。Workers Logs に残る。鍵や作業トークンは伏せる (ログインと記録の 3.8)
 const SECRET_KEY = /authorization|cookie|token|secret|key|password/i;
-// 文の中に混じった鍵らしい物。名前=値、名前: 値、よく知られた鍵の頭
-const SECRET_TEXT = [/\b(authorization|cookie|token|secret|key|password)\b\s*[:=]\s*\S+/gi, /\b(gh[pousr]_|sk-ant-|Bearer\s+)[\w.-]+/g];
+// 文の中に混じった鍵らしい物。上から順に置き換える。値だけを伏せ、何を伏せたかは名前で分かるようにする
+const SECRET_TEXT: [RegExp, string][] = [
+  // ヘッダーの行は値に空白や ; を含むので、行の終わりまで伏せる
+  [/\b(authorization|proxy-authorization|cookie|set-cookie)("?\s*[:=]\s*)[^\n]*/gi, "$1$2[伏せた]"],
+  [/\bBearer\s+[\w.~+/=-]+/gi, "Bearer [伏せた]"],
+  // GitHub と Anthropic の鍵の頭。名前が付いていなくても形で分かる
+  [/\b(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/g, "[伏せた]"],
+  // 名前=値、名前: 値、JSON の "名前":"値"
+  [/(\b[\w-]*(?:token|secret|key|password)[\w-]*"?\s*[:=]\s*"?)(?!\[伏せた\])[^\s",;&}]+/gi, "$1[伏せた]"],
+];
 
 /**
  * 文の中の鍵らしい所を伏せる
@@ -9,7 +17,7 @@ const SECRET_TEXT = [/\b(authorization|cookie|token|secret|key|password)\b\s*[:=
  * @returns 伏せた文
  */
 export function redactText(text: string): string {
-  return SECRET_TEXT.reduce((out, pattern) => out.replace(pattern, (m: string) => `${m.split(/[:=\s]/)[0] ?? ""}[伏せた]`), text);
+  return SECRET_TEXT.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), text);
 }
 
 /**

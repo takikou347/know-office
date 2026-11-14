@@ -1,7 +1,7 @@
 // ゲートウェイの Hono の型。バインディングと、要求ごとの値を Variables に置く
 import type { D1Database, DurableObjectNamespace, Rpc } from "@cloudflare/workers-types";
 import type { Clock } from "@know-office/core";
-import type { ChainCheck } from "./records/audit.ts";
+import type { ChainCheck } from "./ledger/audit.ts";
 
 /** 記録 DO の RPC。画面の型から DO のコードを読まないよう、ここに形だけを置く */
 export interface Recorder extends Rpc.DurableObjectBranded {

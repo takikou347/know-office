@@ -1,13 +1,14 @@
 // 記録 DO を本物の workerd で確かめる。ログインと記録の 3.4、3.5
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { startTestWorker, type TestWorker } from "../helpers/worker.ts";
 
+// テストごとに workerd と D1 を作り直し、前のテストが書いた行に頼らない
 let worker: TestWorker;
-beforeAll(async () => {
+beforeEach(async () => {
   worker = await startTestWorker();
 }, 30_000);
-afterAll(() => worker.dispose());
+afterEach(() => worker.dispose());
 
 const at2026 = Date.UTC(2026, 10, 14, 3, 0, 0);
 const at2027 = Date.UTC(2026, 11, 31, 15, 0, 0);
@@ -21,6 +22,7 @@ describe("監査ログ", () => {
   });
 
   it("年をまたぐと前の年を readonly にし、前の年の最後のハッシュから続ける", async () => {
+    await worker.call("append", entry(at2026, 0));
     const [last] = z.array(z.object({ hash: z.string() })).parse(await worker.query("REC_2026", "SELECT hash FROM audit_log ORDER BY rowid DESC LIMIT 1"));
     await worker.call("append", entry(at2027, 0));
     expect(await worker.query("REC_2027", "SELECT prev_hash FROM audit_log")).toEqual([{ prev_hash: last?.hash }]);
@@ -29,5 +31,18 @@ describe("監査ログ", () => {
       { year: 2027, binding: "REC_2027", state: "writing", last_hash: null },
     ]);
     expect(await worker.call("verify", 2027)).toMatchObject({ ok: true });
+  });
+
+  it("readonly にした年には書けず、年をまたぐチェーンが割れない", async () => {
+    await worker.call("append", entry(at2026, 0));
+    await worker.call("append", entry(at2027, 0));
+    await expect(worker.call("append", entry(at2026, 1))).rejects.toThrow(/2026 年の記録は readonly/);
+    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 1 }]);
+    expect(await worker.call("verify", 2027)).toMatchObject({ ok: true });
+  });
+
+  it("形の違う入力は書かずに断る", async () => {
+    await expect(worker.call("append", { at: at2026, actor: "system" })).rejects.toThrow(/監査ログの形が違う/);
+    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 0 }]);
   });
 });

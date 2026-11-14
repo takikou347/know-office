@@ -1,15 +1,16 @@
 // 想定外の失敗をエラーログに残す事を確かめる。ログインと記録の 3.8
 import { Problem } from "@know-office/core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/gate/app.ts";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
 
+// テストごとに空の D1 を作り、前のテストが書いた行に頼らない
 let d1: TestD1;
-beforeAll(async () => {
+beforeEach(async () => {
   d1 = await createTestD1();
 });
-afterAll(() => d1.dispose());
+afterEach(() => d1.dispose());
 
 const clock = fixedClock(Date.UTC(2026, 10, 14, 3, 0, 0));
 
@@ -41,14 +42,20 @@ describe("エラーログ", () => {
   });
 
   it("同じ原因は同じ fingerprint にまとまる", async () => {
-    await failing("同じ失敗").request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
+    await failing("1 回目").request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
+    await failing("2 回目").request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
     const all = await rows();
-    expect(all.at(-1)?.["fingerprint"]).toBe(all[0]?.["fingerprint"]);
+    expect(all).toHaveLength(2);
+    expect(all[1]?.["fingerprint"]).toBe(all[0]?.["fingerprint"]);
   });
 
   it("同じ原因が 5 分に 3 回を超えると知らせを出す", async () => {
-    await failing("また").request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
-    await failing("また").request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
+    const app = failing("また");
+    for (let n = 1; n <= 3; n += 1) await app.request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
+    expect((await d1.DB.prepare("SELECT kind FROM notices").all()).results).toEqual([]);
+    // 4 回目で 1 つ、5 回目では増えない
+    await app.request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
+    await app.request("/api/v1/boom", {}, { DB: d1.DB, REC_2026: d1.REC_2026 });
     const notices = await d1.DB.prepare("SELECT level, kind FROM notices").all();
     expect(notices.results).toEqual([{ level: "warn", kind: "error_burst" }]);
   });

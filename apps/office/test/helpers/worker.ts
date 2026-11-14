@@ -16,10 +16,10 @@ export type TestWorker = {
 
 /**
  * マイグレーションのフォルダの文を並べる
- * @param folder main か records
+ * @param folder main か ledger
  * @returns SQL の文
  */
-function statements(folder: "main" | "records"): string[] {
+function statements(folder: "main" | "ledger"): string[] {
   const dir = join(import.meta.dirname, "../../migrations", folder);
   return readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
@@ -52,8 +52,8 @@ export async function startTestWorker(): Promise<TestWorker> {
     return json;
   };
   await post("/migrate", { binding: "DB", statements: statements("main") });
-  await post("/migrate", { binding: "REC_2026", statements: statements("records") });
-  await post("/migrate", { binding: "REC_2027", statements: statements("records") });
+  await post("/migrate", { binding: "REC_2026", statements: statements("ledger") });
+  await post("/migrate", { binding: "REC_2027", statements: statements("ledger") });
   return {
     call: (method, ...args) => post("/rpc", { method, args }),
     query: async (binding, sql) => z.array(z.unknown()).parse(await post("/query", { binding, sql })),

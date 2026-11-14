@@ -11,12 +11,12 @@
   // D1 の置き場。database_id は Cloudflare に作った時 (tasks.md の 4.8) に本物に替える。手元では名前だけで動く
   "d1_databases": [
     { "binding": "DB", "database_name": "know-office", "database_id": "local-db", "migrations_dir": "migrations/main" },
-    { "binding": "REC_2026", "database_name": "know-office-rec-2026", "database_id": "local-rec-2026", "migrations_dir": "migrations/records" },
-    { "binding": "REC_2027", "database_name": "know-office-rec-2027", "database_id": "local-rec-2027", "migrations_dir": "migrations/records" },
-    { "binding": "REC_2028", "database_name": "know-office-rec-2028", "database_id": "local-rec-2028", "migrations_dir": "migrations/records" },
-    { "binding": "REC_2029", "database_name": "know-office-rec-2029", "database_id": "local-rec-2029", "migrations_dir": "migrations/records" },
-    { "binding": "REC_2030", "database_name": "know-office-rec-2030", "database_id": "local-rec-2030", "migrations_dir": "migrations/records" },
-    { "binding": "REC_2031", "database_name": "know-office-rec-2031", "database_id": "local-rec-2031", "migrations_dir": "migrations/records" }
+    { "binding": "REC_2026", "database_name": "know-office-rec-2026", "database_id": "local-rec-2026", "migrations_dir": "migrations/ledger" },
+    { "binding": "REC_2027", "database_name": "know-office-rec-2027", "database_id": "local-rec-2027", "migrations_dir": "migrations/ledger" },
+    { "binding": "REC_2028", "database_name": "know-office-rec-2028", "database_id": "local-rec-2028", "migrations_dir": "migrations/ledger" },
+    { "binding": "REC_2029", "database_name": "know-office-rec-2029", "database_id": "local-rec-2029", "migrations_dir": "migrations/ledger" },
+    { "binding": "REC_2030", "database_name": "know-office-rec-2030", "database_id": "local-rec-2030", "migrations_dir": "migrations/ledger" },
+    { "binding": "REC_2031", "database_name": "know-office-rec-2031", "database_id": "local-rec-2031", "migrations_dir": "migrations/ledger" }
   ],
   "durable_objects": { "bindings": [{ "name": "RECORDER", "class_name": "RecorderDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO"] }],

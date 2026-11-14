@@ -75,6 +75,7 @@ export async function verifyChain(db: D1Database, startHash: string): Promise<Ch
   const { results } = await db.prepare("SELECT id, at, actor, action, target, scope, detail, prev_hash, hash FROM audit_log ORDER BY rowid").all<StoredRow>();
   let prev = startHash;
   for (const row of results) {
+    // detail は書いた時の canonicalJson の文なので、読み直して同じ形で計算し直すと書き換えが分かる
     const expected = await auditHash(prev, { id: row.id, at: row.at, actor: row.actor, action: row.action, target: row.target, scope: row.scope, detail: JSON.parse(row.detail) as unknown });
     if (row.prev_hash !== prev || row.hash !== expected) return { ok: false, brokenAt: row.id, lastHash: prev };
     prev = row.hash;

@@ -2,7 +2,7 @@
 import { AppError, type ErrorCode, type FieldError, log, PROBLEMS, type Problem, systemClock } from "@know-office/core";
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import type { GateEnv } from "./env.ts";
-import { recordError } from "./records/errors.ts";
+import { recordError } from "./ledger/errors.ts";
 
 /**
  * problem+json の本文を作る

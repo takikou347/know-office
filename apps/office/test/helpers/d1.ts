@@ -21,9 +21,9 @@ export type TestD1 = {
 /**
  * マイグレーションのフォルダの SQL を順に流す
  * @param db 流す先
- * @param folder main か records
+ * @param folder main か ledger
  */
-export async function migrate(db: D1Database, folder: "main" | "records"): Promise<void> {
+export async function migrate(db: D1Database, folder: "main" | "ledger"): Promise<void> {
   const dir = join(MIGRATIONS, folder);
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).toSorted()) {
     for (const statement of readFileSync(join(dir, file), "utf8").split("--> statement-breakpoint")) {
@@ -38,7 +38,7 @@ export async function migrate(db: D1Database, folder: "main" | "records"): Promi
 }
 
 /**
- * マイグレーションを流した空の D1 を作る。テストのファイルごとに 1 つ作る
+ * マイグレーションを流した空の D1 を作る。テストごとに 1 つ作る
  * @returns DB と REC_<年> と dispose
  */
 export async function createTestD1(): Promise<TestD1> {
@@ -48,7 +48,7 @@ export async function createTestD1(): Promise<TestD1> {
   });
   const { DB, REC_2026, REC_2027 } = proxy.env;
   await migrate(DB, "main");
-  await migrate(REC_2026, "records");
-  await migrate(REC_2027, "records");
+  await migrate(REC_2026, "ledger");
+  await migrate(REC_2027, "ledger");
   return { DB, REC_2026, REC_2027, dispose: () => proxy.dispose() };
 }

@@ -18,14 +18,14 @@ function filesMatching(pattern: RegExp): string[] {
 }
 
 describe("監査ログ", () => {
-  it("監査ログを書く SQL は records/audit.ts だけにあり、それを呼ぶのは記録 DO だけ", () => {
-    expect(filesMatching(/INSERT INTO audit_log/)).toEqual(["gate/records/audit.ts"]);
-    expect(filesMatching(/import \{[^}]*\bappendAudit\b/)).toEqual(["gate/do/recorder.ts"]);
+  it("監査ログを書く SQL は ledger/audit.ts だけにあり、それを呼ぶのは記録 DO だけ", () => {
+    expect(filesMatching(/INSERT INTO audit_log/)).toEqual(["gate/ledger/audit.ts"]);
+    expect(filesMatching(/import\s*\{[^}]*\bappendAudit\b/)).toEqual(["gate/do/recorder.ts"]);
   });
 });
 
 describe("エラーログ", () => {
-  it("エラーログを書く SQL は records/errors.ts の recordError だけにある", () => {
-    expect(filesMatching(/INSERT INTO error_events/)).toEqual(["gate/records/errors.ts"]);
+  it("エラーログを書く SQL は ledger/errors.ts の recordError だけにある", () => {
+    expect(filesMatching(/INSERT INTO error_events/)).toEqual(["gate/ledger/errors.ts"]);
   });
 });

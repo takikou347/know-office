@@ -40,6 +40,7 @@ function messageOf(error: unknown): string {
  */
 function fingerprintOf(record: ErrorRecord): Promise<string> {
   const name = record.error instanceof Error ? record.error.name : "unknown";
+  // 文は鍵や ID で毎回変わるので使わず、投げた場所 (スタックの 1 行目の呼び出し元) で同じ原因をまとめる
   const top = record.error instanceof Error ? (record.error.stack?.split("\n")[1]?.trim() ?? "") : "";
   return sha256Hex([record.source, record.code, record.route ?? "", name, top].join("|"));
 }
