@@ -70,7 +70,8 @@ export function stepsFor(
 ): ShellStep[] {
   // test は代わりの外部 (5199)、e2e は画面 (5174) の決まったポートを使う。並べて作る別の作業ツリーと
   // 同時に走るとポートを取り合い、別の作業ツリーの dev サーバーを使い回して違うコードを確かめてしまうので、
-  // 機械に 1 つの錠で順番に走らせる。flock の無い機械 (macOS) ではそのまま走らせる
+  // 機械に 1 つの錠で順番に走らせる。flock の無い機械 (macOS) ではそのまま走らせる。
+  // 錠の道は二重引用符で包むだけなので、`$` や `` ` `` を含まない置き場 (tmpdir) を前提にする
   const lock = JSON.stringify(join(lockDir, "know-office-ports.lock"));
   const locked = (cmd: string) => `if command -v flock >/dev/null; then flock ${lock} ${cmd}; else ${cmd}; fi`;
   const knowidea = resolve(env.KNOWIDEA_DIR ?? join(root, "..", "knowidea"));

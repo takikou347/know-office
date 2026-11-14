@@ -1,6 +1,10 @@
 // verify.ts の、手順を順に走らせて結果を短くまとめる所を確かめる
 // node:test の describe と it は Promise を返すが、node:test が待つので void で示す
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runSteps, stepsFor, summarize, type Step } from "./verify.ts";
 
@@ -49,10 +53,21 @@ void describe("走らせる手順を並べる", () => {
     assert.match(step?.cmd ?? "", /\/none に無い。KNOWIDEA_DIR で置き場を渡す" && exit 1$/);
   });
 
-  void it("決まったポートを使う test と e2e は、同じ機械のほかの作業ツリーと順番に走らせる", () => {
+  void it("決まったポートを使う test と e2e は、同じ機械のほかの作業ツリーと同じ錠で順番に走らせる", () => {
     const steps = stepsFor("/repo/know-office", ["--e2e"], { KNOWIDEA_DIR: "/none" }, "/tmp");
     const locked = steps.filter((step) => step.cmd.includes("flock"));
     assert.deepEqual(locked.map((step) => step.name), ["test", "e2e"]);
-    assert.match(locked[0]?.cmd ?? "", /^if command -v flock >\/dev\/null; then flock "\/tmp\/know-office-ports.lock" pnpm test; else pnpm test; fi$/);
+    for (const step of locked) {
+      assert.match(step.cmd, /^if command -v flock >\/dev\/null; then flock "\/tmp\/know-office-ports.lock" pnpm (test|e2e); else pnpm \1; fi$/);
+    }
+  });
+
+  void it("錠の有る無しどちらでも、手順の終わりのコードをそのまま返す", () => {
+    const lockDir = mkdtempSync(join(tmpdir(), "verify-lock-"));
+    const step = stepsFor("/repo/know-office", [], { KNOWIDEA_DIR: "/none" }, lockDir).find((s) => s.name === "test");
+    const cmd = (step?.cmd ?? "").replaceAll("pnpm test", "/bin/sh -c 'exit 3'");
+    assert.equal(spawnSync(cmd, { shell: true }).status, 3);
+    const noFlock = spawnSync(cmd, { shell: true, env: { PATH: "/nonexistent" } });
+    assert.equal(noFlock.status, 3);
   });
 });
