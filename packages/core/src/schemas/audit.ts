@@ -16,3 +16,23 @@ export const AuditInput = z
 
 /** 監査ログに頼む 1 件の型 */
 export type AuditInput = z.infer<typeof AuditInput>;
+
+/** 監査ログの 1 行の返す形。時刻は RFC 3339 の協定世界時 */
+export const AuditRow = z
+  .object({
+    id: z.uuid(),
+    at: z.iso.datetime(),
+    actor: z.string(),
+    action: z.string(),
+    target: z.string().nullable(),
+    scope: z.string(),
+    detail: z.unknown(),
+    prevHash: z.string(),
+    hash: z.string(),
+    traceId: z.string().nullable(),
+  })
+  .strict()
+  .meta({ id: "AuditRow" });
+
+/** 監査ログの 1 行の型 */
+export type AuditRow = z.infer<typeof AuditRow>;

@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.0.1
+  version: 1.0.2
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -549,11 +549,22 @@ paths:
 
         2. `audit_log` を新しい順に取得する
 
-        3. 監査ログを閲覧したことを監査ログに記録する'
+        3. 監査ログを閲覧したことを監査ログに記録する
+
+
+        このルート固有のエラー:
+
+
+        - 401 `step_up_required`: パスキーの確認がない
+
+        - 422 `validation_failed`: `from` が `to` より後'
       x-steps:
       - 指定期間に対応するデータベースを `record_years` から選ぶ
       - '`audit_log` を新しい順に取得する'
       - 監査ログを閲覧したことを監査ログに記録する
+      x-errors:
+      - '401 `step_up_required`: パスキーの確認がない'
+      - '422 `validation_failed`: `from` が `to` より後'
       x-step-up: true
       parameters:
       - name: from
@@ -6024,19 +6035,22 @@ components:
         action:
           type: string
         target:
-          type: string
+          type:
+          - string
+          - 'null'
         scope:
           type: string
           description: '`office` またはサービスの ID'
         detail:
-          type: object
-          additionalProperties: true
+          description: 操作ごとの中身。無ければ null
         prevHash:
           type: string
         hash:
           type: string
         traceId:
-          type: string
+          type:
+          - string
+          - 'null'
       required:
       - id
       - at
@@ -6044,7 +6058,6 @@ components:
       - action
       - target
       - scope
-      - detail
       - prevHash
       - hash
       - traceId

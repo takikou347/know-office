@@ -48,6 +48,23 @@ export class RecorderDO extends DurableObject<Bindings> implements Recorder {
   }
 
   /**
+   * バインドした D1 ごとの使った量を測る。5 分ごとの定期ジョブとストレージの一覧が呼ぶ
+   * @returns DB と REC_<年> のうちバインドした物の、名前とバイト数
+   */
+  async size(): Promise<{ binding: string; bytes: number }[]> {
+    const uses: { binding: string; bytes: number }[] = [];
+    for (const binding of ["DB", ...RECORD_BINDINGS] as const) {
+      const db = this.env[binding];
+      // 先の年の置き場は作ってからバインドするので、まだ無い物は飛ばす
+      if (!db) continue;
+      // D1 はどの問い合わせの返事にも、その後の大きさを meta.size_after で返す
+      const { meta } = await db.prepare("SELECT 1").run();
+      uses.push({ binding, bytes: meta.size_after });
+    }
+    return uses;
+  }
+
+  /**
    * 書く年の置き場を開く。初めての年なら前の年を readonly にし、前の年の最後のハッシュから続ける
    * @param year 年
    * @returns 置き場と、その年の最初の行の prev_hash

@@ -9,7 +9,7 @@ export { GuardDO, RecorderDO };
 const Binding = z.enum(["DB", "REC_2026", "REC_2027"]);
 const Migrate = z.object({ binding: Binding, statements: z.array(z.string()) });
 const Query = z.object({ binding: Binding, sql: z.string() });
-const Call = z.object({ method: z.enum(["append", "verify"]), args: z.array(z.unknown()) });
+const Call = z.object({ method: z.enum(["append", "verify", "size"]), args: z.array(z.unknown()) });
 const GuardCall = z.discriminatedUnion("method", [
   z.object({ method: z.literal("admit"), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) }),
   z.object({ method: z.literal("fail"), args: z.tuple([z.string(), z.number()]) }),
@@ -53,6 +53,7 @@ export default {
     const { method, args } = Call.parse(body);
     const stub = env.RECORDER.get(env.RECORDER.idFromName("recorder"));
     if (method === "append") return Response.json(await stub.append(args[0]));
+    if (method === "size") return Response.json(await stub.size());
     return Response.json(await stub.verify(z.number().parse(args[0])));
   },
 };

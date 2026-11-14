@@ -3,6 +3,7 @@ import type { Clock, Fetcher } from "@know-office/core";
 import { createApp } from "./app.ts";
 import { registerComponents } from "./openapi.ts";
 import { passkeyRoutes } from "./routes/passkeys.ts";
+import { recordRoutes } from "./routes/records.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { system } from "./routes/system.ts";
 
@@ -14,7 +15,7 @@ import { system } from "./routes/system.ts";
  * @returns ゲートウェイ
  */
 export function createGate(options: { clock?: Clock; fetch?: Fetcher } = {}) {
-  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes);
+  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes);
   registerComponents(app);
   return app;
 }

@@ -2,6 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "know-office",
   "main": "src/gate/worker.ts",
+  // 5 分ごとの定期ジョブ。D1 の使った量を見る (ログインと記録の 3.5)
+  "triggers": { "crons": ["*/5 * * * *"] },
   "compatibility_date": "2026-11-01",
   // Cloudflare が自動で付ける、Access を通らない URL は切る
   "workers_dev": false,

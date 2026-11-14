@@ -24,6 +24,8 @@ export type TestGate = {
   certs: { calls: number; answer: "ok" | "down" | "malformed" };
   /** 記録 DO に頼んだ監査ログ */
   audits: AuditInput[];
+  /** 記録 DO の size() が返す、置き場ごとのバイト数 */
+  storage: Record<string, number>;
   /** ロックアウトと challenge の数え方。GuardDO と同じ物 */
   guard: GuardBook;
   /** 要求を出す */
@@ -75,12 +77,14 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     return Promise.resolve(access.app.request(url.slice(`${FAKES}/access`.length)));
   };
   const audits: AuditInput[] = [];
+  const storage: Record<string, number> = { DB: 1024, REC_2026: 2048, REC_2027: 1024 };
   const guard = new GuardBook(memoryStorage(), () => Promise.resolve());
   const recorder = {
     append: (input: AuditInput) => {
       audits.push(input);
       return Promise.resolve({ id: String(audits.length), hash: "0".repeat(64) });
     },
+    size: () => Promise.resolve(Object.entries(storage).map(([binding, bytes]) => ({ binding, bytes }))),
   };
   // DO はゲートウェイの外の境目なので、同じ数え方を手元で持つ代わりを渡す。DO そのものは test/do/ で本物の workerd で確かめる
   // 代わりの DO は名前空間の一部 (idFromName と get) だけを持つので、Bindings として渡す
@@ -106,6 +110,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     access,
     certs,
     audits,
+    storage,
     guard,
     request,
     signIn: async () => {

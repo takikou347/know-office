@@ -6,9 +6,10 @@ export { newId } from "./id.ts";
 export { fromBase64, fromBase64url, toBase64, toBase64url } from "./encoding.ts";
 export { deriveKey, type KeyPurpose } from "./keys.ts";
 export { log, redact, redactText } from "./log.ts";
-export { jstClock, jstDay, jstYear } from "./time.ts";
+export { jstClock, jstDay, jstDayStart, jstYear } from "./time.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
-export { AuditInput } from "./schemas/audit.ts";
+export { AuditInput, AuditRow } from "./schemas/audit.ts";
+export { StorageUse } from "./schemas/storage.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 

@@ -11,6 +11,8 @@ export interface Recorder extends Rpc.DurableObjectBranded {
   append(input: unknown): Promise<{ id: string; hash: string }>;
   /** その年のハッシュチェーンを確かめる */
   verify(year: number): Promise<ChainCheck>;
+  /** バインドした D1 ごとの使った量 */
+  size(): Promise<{ binding: string; bytes: number }[]>;
 }
 
 /** 全体のセキュリティ DO の RPC。時刻は呼ぶ側の Clock で渡す */
