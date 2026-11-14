@@ -1,5 +1,5 @@
 // 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを呼ぶ (社員が考えるの 1.3、3.1)
-import { AppError, Health, log, RunInput, TicketInput } from "@know-office/core";
+import { AppError, CONTAINER_CA, Health, log, RunInput, TicketInput } from "@know-office/core";
 import { z } from "zod";
 import { WORKSPACE_EGRESS, type Caller } from "../egress.ts";
 
@@ -7,15 +7,13 @@ import { WORKSPACE_EGRESS, type Caller } from "../egress.ts";
 export const WORKSPACE_PORT = 8080;
 /** 起きるのを待つ長さ (60 秒)。1 秒おきに /v1/health を見る */
 export const START_WAIT_MS = 60_000;
-/** 起きなかった時のやり直しの間 (30 秒) と回数 (3 回) */
+/** 起きなかった時のやり直しの間 (30 秒) */
 export const START_RETRY_MS = 30_000;
+/** 起きなかった時のやり直しの回数 (3 回)。初めの 1 回と合わせて 4 回起こす */
 export const START_RETRIES = 3;
 /** Node のサーバーを呼ぶ時の待ち (10 秒) */
 const CALL_TIMEOUT_MS = 10_000;
 const POLL_MS = 1000;
-
-/** Cloudflare の Containers が入れる、外向きの HTTPS を受け手に回すための CA */
-export const CONTAINER_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 
 const HealthAnswer = z.object({ data: Health }).loose();
 
@@ -38,6 +36,7 @@ export type ContainerLike<F = unknown> = {
 /** 社員 1 人のワークスペースのコンテナ。WorkspaceDO が持ち、テストは代わりのコンテナで使う */
 export class WorkspaceBox<F = unknown> {
   /**
+   * 社員 1 人のコンテナを、送ったワークスペースを結んだ受け手と一緒に包む
    * @param container コンテナ
    * @param egress 送ったワークスペースを結んだ、ゲートウェイの受け手を作る
    * @param caller このワークスペース

@@ -39,6 +39,7 @@ export class Runner {
   readonly #hookBase: HookBase;
 
   /**
+   * タスクを持つ入れ物を、SDK を呼ぶ関数と失敗の知らせ先と一緒に作る
    * @param agent SDK を 1 回呼ぶ関数
    * @param onFailure SDK の呼び出しが失敗した時に知らせる先
    * @param hookBase フックの依り所。省くとゲートウェイを fetch で呼ぶ

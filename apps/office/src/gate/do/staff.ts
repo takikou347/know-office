@@ -307,16 +307,17 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
 
   /**
    * ワークスペースのコンテナを動かす口を作る。起きるまで最長 4 分ほど掛かるので、勤務の鎖を止めないよう待たずに頼む
-   * 起きなかった時は、ハートビートが届かない事から StaffBook が workspace_down で待ち、作り直す
+   * 失敗は log に残し、ハートビートが届かない事から StaffBook が workspace_down で拾い、作り直す
    * @param staffId 社員 ID
    * @returns StaffBook に渡す口
    */
   #workspace(staffId: StaffId): Workspace {
     const request = (name: string, step: (stub: DurableObjectStub<WorkspaceContainer>) => Promise<null>): Promise<void> => {
-      const pending = (async () => step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId))))().catch((error: unknown) => {
+      // 待たずに頼む。DO は呼び出しの後も動いているので、頼んだ物は最後まで走る
+      void (async () => step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId))))().catch((error: unknown) => {
+        // TODO(#52): 起きなかった時にオーナーへ通知を出す
         log("error", "workspace_call_failed", { staffId, call: name, error: error instanceof Error ? error.message : "unknown" });
       });
-      this.ctx.waitUntil(pending);
       return Promise.resolve();
     };
     return {

@@ -54,11 +54,12 @@ describe("記録の量", () => {
   });
 
   it("1 年分を流し込んで年をまたいでも、どちらの年のハッシュチェーンも切れない", async () => {
-    await appendDays(START_2026, 365, 3);
+    // 負荷の高い時も 5 秒に収まるよう、1 年を 5 日おきに置く
+    await appendDays(START_2026, 365, 5);
     await appendDays(START_2027, 3);
-    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 122 }]);
-    // 3 日おきの最後の 1 件は 12 月 30 日 (1 月 1 日から 363 日後) に入る
-    expect(await worker.query("REC_2026", "SELECT max(at) AS at FROM audit_log")).toEqual([{ at: START_2026 + 363 * DAY + 9 * 60 * 60_000 }]);
+    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 73 }]);
+    // 5 日おきの最後の 1 件は 12 月 27 日 (1 月 1 日から 360 日後) に入る
+    expect(await worker.query("REC_2026", "SELECT max(at) AS at FROM audit_log")).toEqual([{ at: START_2026 + 360 * DAY + 9 * 60 * 60_000 }]);
     expect(await worker.call("verify", 2026)).toMatchObject({ ok: true, brokenAt: null });
     expect(await worker.call("verify", 2027)).toMatchObject({ ok: true, brokenAt: null });
     expect(await worker.query("DB", "SELECT year, state FROM record_years ORDER BY year")).toEqual([

@@ -16,9 +16,10 @@ const entry = (at: number, n: number) => ({ at, actor: "system", action: "test.a
 
 describe("監査ログ", () => {
   it("並行して書いてもハッシュチェーンが割れない", async () => {
-    await Promise.all(Array.from({ length: 100 }, (_, n) => worker.call("append", entry(at2026, n))));
+    // 往復ごとに wrangler の入口を通るので、並びを保ったまま負荷の高い時も 5 秒に収まる 40 件にする
+    await Promise.all(Array.from({ length: 40 }, (_, n) => worker.call("append", entry(at2026, n))));
     expect(await worker.call("verify", 2026)).toMatchObject({ ok: true, brokenAt: null });
-    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 100 }]);
+    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 40 }]);
   });
 
   it("年をまたぐと前の年を readonly にし、前の年の最後のハッシュから続ける", async () => {

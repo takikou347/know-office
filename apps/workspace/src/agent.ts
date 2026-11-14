@@ -1,11 +1,9 @@
 // Claude Agent SDK に渡す呼び出しの形と、設定を読ませずにフックを関数で渡す options を作る (社員が考えるの 3.1、3.2)
+import { CONTAINER_CA } from "@know-office/core";
 import type { PreToolUseOutput } from "./hooks.ts";
 
 /** 社員が書ける唯一の置き場。タスクのリポジトリを置く */
 export const WORK_ROOT = "/work";
-
-/** Containers が入れる、外向きの HTTPS を受け手に回すための CA */
-const CONTAINER_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 
 /** SDK の query() に渡す options のうち、ワークスペースが決める所 */
 export type AgentOptions = {
