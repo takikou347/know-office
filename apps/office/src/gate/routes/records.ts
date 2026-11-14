@@ -9,7 +9,7 @@ import { requireStepUp } from "../auth/passkey.ts";
 import { recordYears } from "../db/main.ts";
 import { auditLog } from "../db/records.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
-import { storageUses } from "../jobs/health.ts";
+import { storageUses } from "../ledger/storage.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, problems } from "../openapi.ts";
 import { list } from "../respond.ts";

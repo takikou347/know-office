@@ -1,7 +1,8 @@
 // 記録の量: 置き場ごとの使った量を返し、上限の 8 割に届いたら通知を出す (ログインと記録の 3.5、monitoring の「記録の量」)
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { checkStorage, STORAGE_LIMIT_BYTES } from "../../src/gate/jobs/health.ts";
+import { checkStorage, runScheduled } from "../../src/gate/jobs/health.ts";
+import { STORAGE_LIMIT_BYTES } from "../../src/gate/ledger/storage.ts";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
 import { createTestGate, type TestGate } from "../helpers/gate.ts";
@@ -47,6 +48,16 @@ describe("記録の量", () => {
     await checkStorage(gate.env, clock);
     await checkStorage(gate.env, clock);
     expect(await notices()).toHaveLength(1);
+  });
+
+  it("定期ジョブが失敗したら、投げずにエラーログに残す", async () => {
+    const env = { ...gate.env, RECORDER: { idFromName: () => "id", get: () => ({ size: () => Promise.reject(new Error("記録 DO が応答しない")) }) } };
+    const waits: Promise<unknown>[] = [];
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    runScheduled(env as unknown as typeof gate.env, { waitUntil: (p: Promise<unknown>) => waits.push(p) }, clock);
+    await Promise.all(waits);
+    const { results } = await d1.REC_2026.prepare("SELECT source, level, code FROM error_events").all();
+    expect(results).toEqual([{ source: "job", level: "error", code: "storage_check_failed" }]);
   });
 
   it("使った量の一覧は置き場の名前の順に limit ごとにページを送る", async () => {

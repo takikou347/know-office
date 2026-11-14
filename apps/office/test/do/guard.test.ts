@@ -32,8 +32,9 @@ describe("総当たりと怪しい動き", () => {
   });
 
   it("送信元ごとに 1 分 300 回を超えると、次の分までの秒数を返す", async () => {
-    for (let n = 0; n < 300; n += 1) expect(await worker.guard("admit", "203.0.113.1", "api", start + 1000)).toEqual({ locked: false, retryAfter: null });
-    expect(await worker.guard("admit", "203.0.113.1", "api", start + 1000)).toEqual({ locked: false, retryAfter: 59 });
+    const answers = await worker.admitMany(301, "203.0.113.1", "api", start + 1000);
+    expect(answers.slice(0, 300)).toEqual(Array.from({ length: 300 }, () => ({ locked: false, retryAfter: null })));
+    expect(answers[300]).toEqual({ locked: false, retryAfter: 59 });
     expect(await worker.guard("admit", "203.0.113.1", "api", start + MINUTE)).toEqual({ locked: false, retryAfter: null });
   });
 

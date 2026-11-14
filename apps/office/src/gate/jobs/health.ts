@@ -1,26 +1,24 @@
-// 5 分ごとの定期ジョブのうち、D1 の使った量を見る所 (ログインと記録の 3.5)
-import { type Clock, newId, type StorageUse } from "@know-office/core";
+// 5 分ごとの定期ジョブ。いまは D1 の使った量を見て、上限に近い置き場を知らせる (ログインと記録の 3.5)
+import { type Clock, newId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
+import { recordError } from "../ledger/errors.ts";
+import { STORAGE_LIMIT_BYTES, storageUses } from "../ledger/storage.ts";
 
-/** D1 の 1 つのデータベースの上限 (10GB) */
-export const STORAGE_LIMIT_BYTES = 10 * 1000 ** 3;
-/** この割合に届いたら通知を出す */
+/** 上限に対してこの割合に届いたら通知を出す */
 const WARN_RATIO = 0.8;
+const GB = 1000 ** 3;
 
 /**
- * 置き場ごとの使った量を、上限に対する割合と一緒に読む
- * @param env バインディング
- * @returns 置き場の名前の順に並べた使った量
+ * 置き場の通知の題を作る
+ * @param binding 置き場の名前
+ * @returns 通知の題
  */
-export async function storageUses(env: Bindings): Promise<StorageUse[]> {
-  const recorder = env.RECORDER.get(env.RECORDER.idFromName("recorder"));
-  const uses = await recorder.size();
-  return uses
-    .map(({ binding, bytes }) => ({ binding, bytes, ratio: Math.min(1, bytes / STORAGE_LIMIT_BYTES) }))
-    .toSorted((a, b) => a.binding.localeCompare(b.binding));
+function storageTitle(binding: string): string {
+  // 題は、同じ置き場の通知を重ねないための鍵も兼ねる。文を変える時はここだけを変える
+  return `記録の置き場 ${binding} が上限の ${String(Math.round(WARN_RATIO * 10))} 割に届いた`;
 }
 
 /**
@@ -32,7 +30,7 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
   const orm = drizzle(env.DB);
   for (const use of await storageUses(env)) {
     if (use.ratio < WARN_RATIO) continue;
-    const title = `記録の置き場 ${use.binding} が上限の 8 割に届いた`;
+    const title = storageTitle(use.binding);
     const [open] = await orm
       .select({ id: notices.id })
       .from(notices)
@@ -45,8 +43,21 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
       level: "warn",
       kind: "storage",
       title,
-      body: `${(use.bytes / 1000 ** 3).toFixed(1)}GB / 10GB を使っている`,
+      body: `${(use.bytes / GB).toFixed(1)}GB / ${String(STORAGE_LIMIT_BYTES / GB)}GB を使っている`,
       scope: "office",
     });
   }
+}
+
+/**
+ * 定期ジョブを走らせる。失敗は投げずにエラーログに残し、次の 5 分でまた試す
+ * @param env バインディング
+ * @param ctx 返事の後も処理を続けさせる waitUntil
+ * @param ctx.waitUntil 待たせる Promise を渡す
+ * @param clock 時刻
+ */
+export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }, clock: Clock): void {
+  ctx.waitUntil(
+    checkStorage(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "storage_check_failed", error }, clock)),
+  );
 }

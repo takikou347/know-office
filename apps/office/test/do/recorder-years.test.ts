@@ -17,15 +17,21 @@ const START_2027 = START_2026 + 365 * DAY;
 const StorageUse = z.array(z.object({ binding: z.string(), bytes: z.number().int().positive() }));
 
 /**
- * 1 日 1 件の記録を足す。記録 DO が 1 件ずつ順に書くので、頼むのはまとめて出してよい
+ * 何日かおきに 1 件の記録を足す。HTTP の往復を 1 回にし、入口の中で記録 DO に順に頼む
  * @param from 最初の日の時刻
  * @param days 日数
+ * @param every 何日おきに足すか。1 年を通して置きつつ、1 テスト 5 秒に収める
  */
-async function appendDays(from: number, days: number): Promise<void> {
-  await Promise.all(
-    Array.from({ length: days }, (_, n) =>
-      worker.call("append", { at: from + n * DAY + 9 * 60 * 60_000, actor: "system", action: "test.append", target: String(n), scope: "office", detail: { day: n, note: "x".repeat(200) } }),
-    ),
+async function appendDays(from: number, days: number, every = 1): Promise<void> {
+  await worker.appendMany(
+    Array.from({ length: Math.ceil(days / every) }, (_, n) => ({
+      at: from + n * every * DAY + 9 * 60 * 60_000,
+      actor: "system",
+      action: "test.append",
+      target: String(n),
+      scope: "office",
+      detail: { day: n * every, note: "x".repeat(200) },
+    })),
   );
 }
 
@@ -48,9 +54,11 @@ describe("記録の量", () => {
   });
 
   it("1 年分を流し込んで年をまたいでも、どちらの年のハッシュチェーンも切れない", async () => {
-    await appendDays(START_2026, 365);
+    await appendDays(START_2026, 365, 3);
     await appendDays(START_2027, 3);
-    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 365 }]);
+    expect(await worker.query("REC_2026", "SELECT count(*) AS n FROM audit_log")).toEqual([{ n: 122 }]);
+    // 3 日おきの最後の 1 件は 12 月 30 日 (1 月 1 日から 363 日後) に入る
+    expect(await worker.query("REC_2026", "SELECT max(at) AS at FROM audit_log")).toEqual([{ at: START_2026 + 363 * DAY + 9 * 60 * 60_000 }]);
     expect(await worker.call("verify", 2026)).toMatchObject({ ok: true, brokenAt: null });
     expect(await worker.call("verify", 2027)).toMatchObject({ ok: true, brokenAt: null });
     expect(await worker.query("DB", "SELECT year, state FROM record_years ORDER BY year")).toEqual([

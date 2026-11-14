@@ -9,6 +9,8 @@ export { GuardDO, RecorderDO };
 const Binding = z.enum(["DB", "REC_2026", "REC_2027"]);
 const Migrate = z.object({ binding: Binding, statements: z.array(z.string()) });
 const Query = z.object({ binding: Binding, sql: z.string() });
+const AdmitMany = z.object({ times: z.number().int().positive(), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) });
+const AppendMany = z.object({ entries: z.array(z.unknown()) });
 const Call = z.object({ method: z.enum(["append", "verify", "size"]), args: z.array(z.unknown()) });
 const GuardCall = z.discriminatedUnion("method", [
   z.object({ method: z.literal("admit"), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) }),
@@ -41,6 +43,20 @@ export default {
     if (path === "/query") {
       const { binding, sql } = Query.parse(body);
       return Response.json((await d1(env, binding).prepare(sql).all()).results);
+    }
+    if (path === "/append-many") {
+      // 多くの記録を流し込むテストのために、往復を 1 回にして入口の中で順に足す
+      const stub = env.RECORDER.get(env.RECORDER.idFromName("recorder"));
+      for (const entry of AppendMany.parse(body).entries) await stub.append(entry);
+      return new Response(null, { status: 204 });
+    }
+    if (path === "/admit-many") {
+      // レート制限の上限まで呼ぶテストのために、往復を 1 回にして入口の中で順に呼び、答えを並べて返す
+      const { times, args } = AdmitMany.parse(body);
+      const guard = env.GUARD.get(env.GUARD.idFromName("guard"));
+      const answers = [];
+      for (let n = 0; n < times; n += 1) answers.push(await guard.admit(...args));
+      return Response.json(answers);
     }
     if (path === "/guard") {
       const call = GuardCall.parse(body);

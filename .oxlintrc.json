@@ -85,5 +85,5 @@
       "rules": { "no-restricted-imports": ["error", { "patterns": [{ "group": ["drizzle-orm", "drizzle-orm/*", "cloudflare:*", "**/gate/db/*", "**/gate/do/*"], "message": "画面はゲートウェイの型を Hono の RPC で受ける" }] }] }
     }
   ],
-  "ignorePatterns": ["**/dist/**", "**/.wrangler/**", "**/node_modules/**", "apps/office/public/swagger/swagger-ui-bundle.js"]
+  "ignorePatterns": [".claude/worktrees/**", "**/dist/**", "**/.wrangler/**", "**/node_modules/**", "apps/office/public/swagger/swagger-ui-bundle.js"]
 }

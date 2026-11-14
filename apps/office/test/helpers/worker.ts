@@ -8,6 +8,10 @@ import { z } from "zod";
 export type TestWorker = {
   /** 記録 DO のメソッドを呼ぶ */
   call(method: string, ...args: unknown[]): Promise<unknown>;
+  /** 記録 DO に多くの記録を、入口の中で順に足す */
+  appendMany(entries: unknown[]): Promise<void>;
+  /** 全体のセキュリティ DO の admit を、入口の中で何度も呼んで答えを並べる */
+  admitMany(times: number, ...args: [string, "api" | "auth", number]): Promise<unknown[]>;
   /** 全体のセキュリティ DO のメソッドを呼ぶ */
   guard(method: string, ...args: unknown[]): Promise<unknown>;
   /** D1 に SQL を流して行を返す */
@@ -58,6 +62,10 @@ export async function startTestWorker(): Promise<TestWorker> {
   await post("/migrate", { binding: "REC_2027", statements: statements("ledger") });
   return {
     call: (method, ...args) => post("/rpc", { method, args }),
+    appendMany: async (entries) => {
+      await post("/append-many", { entries });
+    },
+    admitMany: async (times, ...args) => z.array(z.unknown()).parse(await post("/admit-many", { times, args })),
     guard: (method, ...args) => post("/guard", { method, args }),
     query: async (binding, sql) => z.array(z.unknown()).parse(await post("/query", { binding, sql })),
     dispose: () => worker.dispose(),

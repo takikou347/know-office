@@ -3,7 +3,7 @@ import type { ExecutionContext, ScheduledController } from "@cloudflare/workers-
 import { systemClock } from "@know-office/core";
 import type { Bindings } from "./env.ts";
 import gate from "./index.ts";
-import { checkStorage } from "./jobs/health.ts";
+import { runScheduled } from "./jobs/health.ts";
 
 export { GuardDO } from "./do/guard.ts";
 export { RecorderDO } from "./do/recorder.ts";
@@ -12,6 +12,6 @@ export default {
   fetch: gate.fetch,
   // wrangler.jsonc の triggers.crons で 5 分ごとに呼ばれる
   scheduled: (_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) => {
-    ctx.waitUntil(checkStorage(env, systemClock));
+    runScheduled(env, ctx, systemClock);
   },
 };
