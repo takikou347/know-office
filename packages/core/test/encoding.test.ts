@@ -12,6 +12,11 @@ describe("base64 の変換", () => {
     expect(fromBase64url(toBase64url(bytes))).toEqual(bytes);
   });
 
+  it("会話の記録ほどの大きなバイト列も base64 にでき、戻せる", () => {
+    const big = Uint8Array.from({ length: 4 * 1024 * 1024 }, (_, i) => i % 251);
+    expect(fromBase64(toBase64(big))).toEqual(big);
+  });
+
   it.each(["a", "!!", "AAH6+/z9", "A=A="])("壊れた base64url %s は null", (text) => {
     expect(fromBase64url(text)).toBeNull();
   });

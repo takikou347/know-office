@@ -16,7 +16,7 @@ export { StorageUse } from "./schemas/storage.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
-export { HeartbeatInput, RunInput, TicketInput, WorkTicketClaims } from "./schemas/workspace.ts";
+export { HeartbeatInput, RestoreInput, RunInput, TicketInput, TRANSCRIPT_PART_BYTES, TranscriptPartInput, WorkTicketClaims } from "./schemas/workspace.ts";
 export { DEFAULT_RULES, decide, type RuleContext, type RuleDecision } from "./rules/decide.ts";
 export { MAX_RECORDED, maskSecrets, OPERATION_KINDS, recordedText, toOperation, type Operation, type OperationKind } from "./rules/operation.ts";
 export {

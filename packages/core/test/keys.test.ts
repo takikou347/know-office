@@ -26,6 +26,13 @@ describe("鍵", () => {
     expect(await roundTrip(await deriveKey(master, "vault"), await deriveKey(master, "transcript"))).toBe(false);
   });
 
+  it("同じ用途でも、タスクごとに違う鍵を作る", async () => {
+    const a = await deriveKey(master, "transcript", "0190f4a8-0000-7000-8000-000000000101");
+    expect(await roundTrip(a, await deriveKey(master, "transcript", "0190f4a8-0000-7000-8000-000000000101"))).toBe(true);
+    expect(await roundTrip(a, await deriveKey(master, "transcript", "0190f4a8-0000-7000-8000-000000000102"))).toBe(false);
+    expect(await roundTrip(a, await deriveKey(master, "transcript"))).toBe(false);
+  });
+
   it("MASTER_KEY が 32 バイトでなければ断る", async () => {
     await expect(deriveKey(btoa("short"), "vault")).rejects.toThrow("32 バイト");
   });

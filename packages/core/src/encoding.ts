@@ -1,6 +1,9 @@
 // base64 と base64url の変換。外から来た文字列は壊れていても投げず null を返し、呼ぶ側が断る
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// 組を繰り返す形は、長い文字列で正規表現の戻りが積もって投げるので、長さは別に 4 の倍数かを見る
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const BASE64URL = /^[A-Za-z0-9_-]*$/;
+/** toBase64 が 1 度に文字にするバイトの数 */
+const BASE64_SLICE = 0x8000;
 
 /**
  * バイト列を base64 にする
@@ -8,7 +11,11 @@ const BASE64URL = /^[A-Za-z0-9_-]*$/;
  * @returns パディングの付いた base64
  */
 export function toBase64(data: ArrayBuffer | Uint8Array): string {
-  return btoa(String.fromCharCode(...new Uint8Array(data)));
+  const bytes = new Uint8Array(data);
+  // 引数に広げられる数には上限があるので、会話の記録のような大きな物は区切って文字にする
+  let text = "";
+  for (let at = 0; at < bytes.length; at += BASE64_SLICE) text += String.fromCharCode(...bytes.subarray(at, at + BASE64_SLICE));
+  return btoa(text);
 }
 
 /**
@@ -18,7 +25,7 @@ export function toBase64(data: ArrayBuffer | Uint8Array): string {
  */
 export function fromBase64(text: string): Uint8Array<ArrayBuffer> | null {
   // atob は形が違うと同期で投げるので、先に形を確かめる
-  if (!BASE64.test(text)) return null;
+  if (text.length % 4 !== 0 || !BASE64.test(text)) return null;
   return Uint8Array.from(atob(text), (ch) => ch.charCodeAt(0));
 }
 

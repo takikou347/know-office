@@ -1,4 +1,5 @@
 // ワークスペースとゲートウェイ、社員 DO の間でやり取りする形と、作業トークンの中身 (社員が考えるの 1.2、1.3、2 章)
+import { fromBase64 } from "../encoding.ts";
 import { StaffId } from "./workday.ts";
 import { z } from "./zod.ts";
 
@@ -24,6 +25,44 @@ export const RunInput = z
 
 /** タスク 1 件分の SDK の呼び出しの型 */
 export type RunInput = z.infer<typeof RunInput>;
+
+/** 会話の記録の 1 つの部分の元の長さの上限 (512KiB)。ゲートウェイの本文の上限 1MB に base64 で収める */
+export const TRANSCRIPT_PART_BYTES = 512 * 1024;
+
+/** base64 の文字列。長い物も正規表現の戻りで投げないよう、fromBase64 で確かめる */
+const Base64Text = z
+  .string()
+  .refine((text) => fromBase64(text) !== null, { message: "base64 でない" })
+  .meta({ contentEncoding: "base64" });
+
+/** SDK の会話の session。R2 の置き場とワークスペースのファイルの名前に入るので、UUID だけを受ける */
+const SessionId = z.uuid();
+
+/** POST /ws/v1/transcript-parts の入力。会話の記録 (JSONL) の増えた分 */
+export const TranscriptPartInput = z
+  .object({
+    sessionId: SessionId,
+    seq: z.int().nonnegative(),
+    chunk: Base64Text.min(1).max(Math.ceil(TRANSCRIPT_PART_BYTES / 3) * 4),
+  })
+  .strict()
+  .meta({ id: "TranscriptPartInput" });
+
+/** 会話の記録の部分の型 */
+export type TranscriptPartInput = z.infer<typeof TranscriptPartInput>;
+
+/** POST /v1/restore の入力。復号した会話の記録の全部と、次に送る部分の通し番号 */
+export const RestoreInput = z
+  .object({
+    sessionId: SessionId,
+    transcript: Base64Text,
+    nextSeq: z.int().nonnegative(),
+  })
+  .strict()
+  .meta({ id: "RestoreInput" });
+
+/** 会話の記録の復元の型 */
+export type RestoreInput = z.infer<typeof RestoreInput>;
 
 /** PUT /v1/ticket の入力。差し替える作業トークン */
 export const TicketInput = z.object({ ticket: z.string().min(1) }).strict().meta({ id: "TicketInput" });

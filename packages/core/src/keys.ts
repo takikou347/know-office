@@ -9,15 +9,16 @@ export type KeyPurpose = "vault" | "transcript" | "owner-data";
  * MASTER_KEY から用途の AES-GCM の鍵を HKDF-SHA256 で作る
  * @param master MASTER_KEY。32 バイトを base64 で
  * @param purpose 用途。HKDF の info に入れる
+ * @param subject 用途の中で鍵を分ける相手 (会話の記録はタスク ID)。HKDF の info の後ろに足す
  * @returns AES-GCM の 256 ビットの鍵
  * @throws internal MASTER_KEY が 32 バイトの base64 でない時
  */
-export async function deriveKey(master: string, purpose: KeyPurpose): Promise<CryptoKey> {
+export async function deriveKey(master: string, purpose: KeyPurpose, subject?: string): Promise<CryptoKey> {
   const raw = fromBase64(master);
   if (raw?.length !== 32) throw new AppError("internal", "MASTER_KEY が 32 バイトの base64 でない");
   const base = await crypto.subtle.importKey("raw", raw, "HKDF", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: new TextEncoder().encode(`know-office:${purpose}`) },
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: new TextEncoder().encode(subject === undefined ? `know-office:${purpose}` : `know-office:${purpose}:${subject}`) },
     base,
     { name: "AES-GCM", length: 256 },
     false,
