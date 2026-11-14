@@ -18,6 +18,16 @@ if (process.env["CI"] && (chromiumPath !== undefined || only !== undefined)) {
   throw new Error("CI では PW_CHROMIUM_PATH と E2E_BROWSERS を使わない");
 }
 
+/**
+ * プロジェクトごとの送信元の IP を返す。手元の入口には CF-Connecting-IP が無く、全部の要求が 1 つの送信元として
+ * 1 分 300 回のレート制限に数えられ、Chrome と Safari を並べて流すと 429 で画面が空になったため、ブラウザーと幅ごとに分ける
+ * @param index プロジェクトの番号
+ * @returns 文書用の範囲 (RFC 5737 の 192.0.2.0/24) の IP
+ */
+function sourceIp(index: number): string {
+  return `192.0.2.${index + 1}`;
+}
+
 const browsers = [
   {
     name: "chrome",
@@ -42,11 +52,11 @@ export default defineConfig({
     // 記録は 1 度だけ置き、ログインセッションはブラウザーごとに作る。クッキーの扱いがブラウザーで違うため
     { name: "records", testMatch: /records\.setup\.ts/ },
     ...chosen.map((b) => ({ name: `${LOGIN_PROJECT}${b.name}`, testMatch: /login\.setup\.ts/, dependencies: ["records"], use: b.use })),
-    ...chosen.flatMap((b) =>
-      widths.map((w) => ({
+    ...chosen.flatMap((b, i) =>
+      widths.map((w, j) => ({
         name: `${b.name}-${w.name}`,
         dependencies: [`${LOGIN_PROJECT}${b.name}`],
-        use: { ...b.use, viewport: w.viewport, storageState: sessionState(b.name) },
+        use: { ...b.use, viewport: w.viewport, storageState: sessionState(b.name), extraHTTPHeaders: { "CF-Connecting-IP": sourceIp(i * widths.length + j) } },
       })),
     ),
   ],
