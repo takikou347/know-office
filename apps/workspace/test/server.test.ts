@@ -1,9 +1,13 @@
-// ワークスペースの Node のサーバーが、社員 DO からの起動確認、タスクの開始、作業トークンの差し替えを受ける事を確かめる (社員が考えるの 1.3)
+// ワークスペースの Node のサーバーが、社員 DO からの起動確認、タスクの開始、作業トークンの差し替え、会話の記録の復元を受ける事を確かめる (社員が考えるの 1.3、3.6)
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { health, WORKSPACE_KEY_ENV } from "@know-office/core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentCall } from "../src/agent.ts";
 import { Runner } from "../src/run.ts";
 import { createWorkspaceServer, takeWorkspaceKey } from "../src/server.ts";
+import { sessionFile, TranscriptShipper } from "../src/transcript.ts";
 
 const NODE = "0190f4a8-0000-7000-8000-000000000101";
 const KEY = "a".repeat(64);
@@ -117,6 +121,73 @@ describe("ワークスペースの鍵", () => {
     try {
       const res = await fetch(`http://127.0.0.1:${address.port}/v1/ticket`, { method: "PUT", headers: { "content-type": "application/json", authorization: "Bearer " }, body: JSON.stringify({ ticket: "t" }) });
       expect(res.status).toBe(401);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+});
+
+describe("落ちた後に会話の記録を戻す", () => {
+  const SESSION = "0190f4a8-0000-7000-8000-00000000c001";
+  const restore = { sessionId: SESSION, transcript: Buffer.from('{"n":1}\n').toString("base64"), nextSeq: 1 };
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * 止めるまで終わらない SDK の代わりと、空のホームでサーバーを起こす
+   * @returns 宛先、ホーム、サーバー
+   */
+  async function serve() {
+    const home = mkdtempSync(join(tmpdir(), "ko-restore-"));
+    dirs.push(home);
+    const runner = new Runner(
+      (call) =>
+        new Promise((_resolve, reject) => {
+          call.options.abortController.signal.addEventListener("abort", () => reject(call.options.abortController.signal.reason));
+        }),
+      () => {},
+      undefined,
+      new TranscriptShipper({ fetcher: () => Promise.resolve(new Response(null, { status: 204 })), home, cwd: "/work" }),
+    );
+    const server = createWorkspaceServer(runner, KEY);
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("ワークスペースの番号が取れない");
+    return { base: `http://127.0.0.1:${address.port}`, home, server };
+  }
+
+  it("復号した記録を SDK の置き場に書き、走っている間は 409 で断る", async () => {
+    const { base, home, server } = await serve();
+    const post = (path: string, body: unknown, key: string | null = KEY) =>
+      fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...(key === null ? {} : { authorization: `Bearer ${key}` }) }, body: JSON.stringify(body) });
+    try {
+      expect((await post("/v1/restore", restore)).status).toBe(204);
+      expect(readFileSync(sessionFile(home, "/work", SESSION), "utf8")).toBe('{"n":1}\n');
+      // session はファイルの名前に入るので、UUID のほかは書かない
+      expect((await post("/v1/restore", { ...restore, sessionId: "../../etc/x" })).status).toBe(422);
+      expect((await post("/v1/restore", restore, null)).status).toBe(401);
+      expect((await post("/v1/runs", { ...RUN, resume: SESSION })).status).toBe(202);
+      const busy = await post("/v1/restore", restore);
+      expect(busy.status).toBe(409);
+      expect(await busy.json()).toMatchObject({ code: "conflict" });
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+
+  it("会話の記録の全部は 1MB を超えても受ける", async () => {
+    const { base, home, server } = await serve();
+    const big = `${"a".repeat(1023)}\n`.repeat(3 * 1024);
+    try {
+      const res = await fetch(`${base}/v1/restore`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
+        body: JSON.stringify({ ...restore, transcript: Buffer.from(big).toString("base64") }),
+      });
+      expect(res.status).toBe(204);
+      expect(readFileSync(sessionFile(home, "/work", SESSION), "utf8")).toBe(big);
     } finally {
       await new Promise<void>((done) => server.close(() => done()));
     }

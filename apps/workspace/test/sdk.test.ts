@@ -1,5 +1,5 @@
 // ワークスペースが Claude Agent SDK を、設定を読ませず、作業トークンを鍵に、フックを関数で渡して呼ぶ事を確かめる (社員が考えるの 3.1、3.2)
-import { mkdtempSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentOptions, type AgentCall } from "../src/agent.ts";
 import { preToolUse } from "../src/hooks.ts";
 import { type QueryFn, sdkAgent, sdkOptions } from "../src/sdk.ts";
+import { sessionFile, TranscriptShipper } from "../src/transcript.ts";
 
 /** 代わりの Claude API に積む返事。text か tool_use のブロック */
 type Block = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
@@ -103,11 +104,12 @@ function tempDir(): string {
  * 本物の SDK を、宛先だけを代わりの Claude API に、置き場とホームを手元の空の所に替えて呼ぶ。コンテナでは宛先を変えず、受け手がプロキシに回す
  * @param baseUrl 代わりの Claude API
  * @param work 動く置き場
+ * @param home ホーム。SDK は会話の記録をこの下に書く。省くと動く置き場と同じ
  * @returns SDK を呼ぶ関数
  */
-async function localQuery(baseUrl: string, work: string): Promise<QueryFn> {
+async function localQuery(baseUrl: string, work: string, home = work): Promise<QueryFn> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  return (params) => query({ ...params, options: { ...params.options, cwd: work, env: { ...params.options.env, ANTHROPIC_BASE_URL: baseUrl, HOME: work } } });
+  return (params) => query({ ...params, options: { ...params.options, cwd: work, env: { ...params.options.env, ANTHROPIC_BASE_URL: baseUrl, HOME: home } } });
 }
 
 /**
@@ -197,6 +199,30 @@ describe("ワークスペースの Claude Agent SDK", () => {
     expect(asked).toEqual(["Bash"]);
     expect(existsSync(join(work, "made.txt"))).toBe(true);
     expect(toolResults(claude.received)).toEqual([expect.objectContaining({ tool_use_id: "toolu_1" })]);
+  });
+
+  it("本物の SDK の会話の記録を作り直したワークスペースに戻すと、同じ session の続きを呼ぶ", async () => {
+    const work = tempDir();
+    const claude = await fakeClaude([[{ type: "text", text: "半分まで直した" }]]);
+    const sessions: string[] = [];
+    // 落ちる前のワークスペース。SDK が会話の記録をホームの下に書く
+    const before = tempDir();
+    await sdkAgent(await localQuery(claude.url, work, before))(task(gate(true, []), sessions));
+    const sessionId = sessions[0] ?? "";
+    const written = readFileSync(sessionFile(before, work, sessionId));
+    expect(written.toString("utf8")).toContain("ログインを直す");
+    // 作り直したワークスペースは空のホームから始め、社員 DO が戻した記録を書く
+    const after = tempDir();
+    const shipper = new TranscriptShipper({ fetcher: () => Promise.resolve(new Response(null, { status: 204 })), home: after, cwd: work });
+    await shipper.restore({ sessionId, transcript: written.toString("base64"), nextSeq: 1 });
+    claude.received.length = 0;
+    const call = task(gate(true, []), []);
+    await sdkAgent(await localQuery(claude.url, work, after))({ ...call, prompt: "続きから進める", options: { ...call.options, resume: sessionId } });
+    const main = claude.received.find((r) => r.body["model"] === "claude-sonnet-5-5");
+    // 前の指示と返事が、続きの呼び出しの会話に入っている
+    expect(JSON.stringify(main?.body["messages"])).toContain("ログインを直す");
+    expect(JSON.stringify(main?.body["messages"])).toContain("半分まで直した");
+    expect(JSON.stringify(main?.body["messages"])).toContain("続きから進める");
   });
 
   it("本物の SDK はフックが断ったツールを動かさず、理由を返す", async () => {

@@ -1,5 +1,5 @@
-// タスク 1 件分の SDK の呼び出しを持ち、作業トークンが差し替わったら今の呼び出しを終えて続きから呼び直す (社員が考えるの 3.2)
-import { AppError, log, type RunInput, systemClock } from "@know-office/core";
+// タスク 1 件分の SDK の呼び出しを持ち、作業トークンが差し替わったら今の呼び出しを終えて続きから呼び直す。呼び直す前と終わった時に会話の記録の増えを送る (社員が考えるの 3.2、3.6)
+import { AppError, log, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
 import { type Agent, agentOptions } from "./agent.ts";
 import { type HookDeps, preToolUse } from "./hooks.ts";
 
@@ -21,6 +21,17 @@ const DEFAULT_HOOK: HookBase = {
   record: (call) => log("warn", "hook_denied", call),
 };
 
+/** 会話の記録を送り、戻す口。本物は transcript.ts の TranscriptShipper */
+export type Transcripts = {
+  /** session の記録の増えを、作業トークンを付けて送る */
+  flush(sessionId: string, ticket: string): Promise<void>;
+  /** 復号した記録を SDK の置き場に書く */
+  restore(input: RestoreInput): Promise<void>;
+};
+
+/** 会話の記録を送らない口 */
+const NO_TRANSCRIPTS: Transcripts = { flush: () => Promise.resolve(), restore: () => Promise.resolve() };
+
 /** 今のタスク */
 type Current = {
   input: RunInput;
@@ -37,17 +48,31 @@ export class Runner {
   readonly #agent: Agent;
   readonly #onFailure: (error: unknown) => void;
   readonly #hookBase: HookBase;
+  readonly #transcripts: Transcripts;
 
   /**
    * タスクを持つ入れ物を、SDK を呼ぶ関数と失敗の知らせ先と一緒に作る
    * @param agent SDK を 1 回呼ぶ関数
    * @param onFailure SDK の呼び出しが失敗した時に知らせる先
    * @param hookBase フックの依り所。省くとゲートウェイを fetch で呼ぶ
+   * @param transcripts 会話の記録を送り、戻す口。省くと送らない。本番は main.ts が TranscriptShipper を渡す
    */
-  constructor(agent: Agent, onFailure: (error: unknown) => void, hookBase: HookBase = DEFAULT_HOOK) {
+  constructor(agent: Agent, onFailure: (error: unknown) => void, hookBase: HookBase = DEFAULT_HOOK, transcripts: Transcripts = NO_TRANSCRIPTS) {
     this.#agent = agent;
     this.#onFailure = onFailure;
     this.#hookBase = hookBase;
+    this.#transcripts = transcripts;
+  }
+
+  /**
+   * 社員 DO が復号した会話の記録を SDK の置き場に戻す。続きは後の start() で resume を付けて呼ぶ
+   * @param input RestoreInput
+   * @returns 書き終わり
+   * @throws conflict 走っている時
+   */
+  async restore(input: RestoreInput): Promise<void> {
+    if (this.#current) throw new AppError("conflict", "実行中の処理がある");
+    await this.#transcripts.restore(input);
   }
 
   /**
@@ -110,8 +135,11 @@ export class Runner {
               if (current.renewPending && !controller.signal.aborted) controller.abort(new TicketRenewed("作業トークンを差し替えた"));
             },
           });
+          await this.#flush(current);
           return;
         } catch (error) {
+          // 落ちても、そこまでの記録は残す
+          await this.#flush(current);
           if (!(controller.signal.reason instanceof TicketRenewed)) throw error;
           current.controller = new AbortController();
           prompt = CONTINUE_PROMPT;
@@ -121,6 +149,19 @@ export class Runner {
       this.#onFailure(error);
     } finally {
       this.#current = undefined;
+    }
+  }
+
+  /**
+   * 会話の記録の増えを、その時の作業トークンで送る。送れなくても呼び出しは止めず、次に同じ所から送り直す
+   * @param current 今のタスク
+   */
+  async #flush(current: Current): Promise<void> {
+    if (current.sessionId === undefined) return;
+    try {
+      await this.#transcripts.flush(current.sessionId, current.ticket);
+    } catch (error) {
+      log("warn", "transcript_send_failed", { error: error instanceof Error ? error.message : "unknown" });
     }
   }
 }

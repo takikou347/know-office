@@ -5,6 +5,14 @@ import type { PreToolUseOutput } from "./hooks.ts";
 /** 社員が書ける唯一の置き場。タスクのリポジトリを置く */
 export const WORK_ROOT = "/work";
 
+/**
+ * SDK に渡すホームを返す。SDK は会話の記録をこの下に書く
+ * @returns ホーム
+ */
+export function staffHome(): string {
+  return process.env.HOME ?? "/home/staff";
+}
+
 /** SDK の query() に渡す options のうち、ワークスペースが決める所 */
 export type AgentOptions = {
   /** モデル */
@@ -67,7 +75,7 @@ export function agentOptions(input: {
     systemPrompt: input.systemPrompt,
     settingSources: [],
     cwd: WORK_ROOT,
-    env: { ANTHROPIC_API_KEY: input.ticket, HOME: process.env.HOME ?? "/home/staff", PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", NODE_EXTRA_CA_CERTS: CONTAINER_CA },
+    env: { ANTHROPIC_API_KEY: input.ticket, HOME: staffHome(), PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", NODE_EXTRA_CA_CERTS: CONTAINER_CA },
     hooks: { PreToolUse: [{ hooks: [input.hook] }] },
     abortController: input.abortController,
     ...(input.resume === undefined ? {} : { resume: input.resume }),

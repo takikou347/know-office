@@ -1,11 +1,13 @@
-// ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替えを受ける (社員が考えるの 1.3)
+// ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替え、会話の記録の復元を受ける (社員が考えるの 1.3、3.6)
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { AppError, health, log, PROBLEMS, RunInput, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
+import { AppError, health, log, PROBLEMS, RestoreInput, RunInput, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
 import type { Runner } from "./run.ts";
 
 /** 受ける本文の上限 (1MB) */
 const MAX_BODY_BYTES = 1024 * 1024;
+/** 会話の記録の復元で受ける本文の上限 (32MB)。社員 DO が記録の全部を 1 度に送る */
+const MAX_RESTORE_BYTES = 32 * 1024 * 1024;
 
 /**
  * 起こした時の鍵を環境変数から取り出し、process.env から消す。SDK と社員のコマンドは子のプロセスで動き、process.env を受け継ぐので、先に消す
@@ -59,17 +61,18 @@ function send(res: ServerResponse, status: number, body?: unknown): void {
 /**
  * 本文を JSON として読む
  * @param req 要求
+ * @param limit 受ける本文の上限
  * @returns 読んだ物
- * @throws payload_too_large 1MB を超える時
+ * @throws payload_too_large 上限を超える時
  * @throws malformed_request JSON でない時
  */
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
     total += buffer.byteLength;
-    if (total > MAX_BODY_BYTES) throw new AppError("payload_too_large", "本文が大きすぎる");
+    if (total > limit) throw new AppError("payload_too_large", "本文が大きすぎる");
     chunks.push(buffer);
   }
   try {
@@ -113,6 +116,15 @@ async function handle(runner: Runner, key: string, req: IncomingMessage, res: Se
     const input = TicketInput.safeParse(await readJson(req));
     if (!input.success) throw new AppError("validation_failed", "作業トークンの形が違う");
     runner.replaceTicket(input.data.ticket);
+    send(res, 204);
+    return;
+  }
+  if (route === "POST /v1/restore") {
+    // 走っている間は、本文を読む前に断る
+    if (runner.running) throw new AppError("conflict", "実行中の処理がある");
+    const input = RestoreInput.safeParse(await readJson(req, MAX_RESTORE_BYTES));
+    if (!input.success) throw new AppError("validation_failed", "会話の記録の形が違う");
+    await runner.restore(input.data);
     send(res, 204);
     return;
   }

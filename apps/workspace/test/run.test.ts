@@ -1,5 +1,5 @@
 // タスク 1 件の SDK の呼び出しと、作業トークンを差し替えた時の続きからの呼び直しを確かめる (社員が考えるの 3.2)
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Agent, AgentCall } from "../src/agent.ts";
 import { Runner } from "../src/run.ts";
 
@@ -83,6 +83,48 @@ describe("1 時間を超えるタスク", () => {
     expect(calls).toHaveLength(2);
     expect(calls[1]?.options.resume).toBe("session-9");
     expect(calls[1]?.options.env.ANTHROPIC_API_KEY).toBe("ticket-2");
+  });
+
+  it("呼び直す前と終わった時に、会話の記録の増えをその時の作業トークンで送る", async () => {
+    const { agent, finish } = fakeAgent();
+    const flushed: [string, string][] = [];
+    const runner = new Runner(agent, () => {}, undefined, {
+      flush: (sessionId, ticket) => Promise.resolve(void flushed.push([sessionId, ticket])),
+      restore: () => Promise.resolve(),
+    });
+    runner.start(RUN);
+    await settle();
+    expect(flushed).toEqual([]);
+    runner.replaceTicket("ticket-2");
+    await settle();
+    expect(flushed).toEqual([["session-1", "ticket-2"]]);
+    finish();
+    await settle();
+    expect(flushed).toEqual([
+      ["session-1", "ticket-2"],
+      ["session-1", "ticket-2"],
+    ]);
+  });
+
+  it("会話の記録を送れなくても、呼び出しは止めずに記録を残す", async () => {
+    const { agent, finish } = fakeAgent();
+    const failures: unknown[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const runner = new Runner(agent, (error) => failures.push(error), undefined, { flush: () => Promise.reject(new Error("届かない")), restore: () => Promise.resolve() });
+    runner.start(RUN);
+    await settle();
+    runner.replaceTicket("ticket-2");
+    await settle();
+    finish();
+    await settle();
+    const lines = warn.mock.calls.map(([line]) => String(line));
+    warn.mockRestore();
+    expect(failures).toEqual([]);
+    expect(runner.running).toBe(false);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { level: "warn", event: "transcript_send_failed", error: "届かない" },
+      { level: "warn", event: "transcript_send_failed", error: "届かない" },
+    ]);
   });
 
   it("SDK の呼び出しが失敗したら、走っていない状態に戻して失敗を知らせる", async () => {
