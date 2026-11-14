@@ -129,6 +129,51 @@ describe("入れるのはオーナーだけ", () => {
     expect((await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } })).status).toBe(200);
   });
 
+  it("公開鍵を取り直せなくても、ためた鍵で知っている kid の証明は通し、知らない kid は 30 秒取りに行かず 503", async () => {
+    const health = async (proof: string) => gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": proof } });
+    expect((await health(await gate.access.sign())).status).toBe(200);
+    clock.advance(61 * 60_000);
+    gate.certs.answer = "down";
+    // 1 時間を過ぎて取り直しに失敗しても、ためた鍵で確かめる
+    for (let n = 0; n < 3; n += 1) expect((await health(await gate.access.sign())).status).toBe(200);
+    expect(gate.certs.calls).toBe(2);
+    // 知らない kid は断る側に倒し、失敗の後 30 秒は取りに行かない
+    const stranger = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock });
+    const res = await health(await stranger.sign());
+    expect(res.status).toBe(503);
+    expect(await codeOf(res)).toBe("unavailable");
+    expect(gate.certs.calls).toBe(2);
+    // 30 秒を過ぎたら取り直し、戻った Access の鍵をためる
+    clock.advance(31_000);
+    gate.certs.answer = "ok";
+    expect((await health(await gate.access.sign())).status).toBe(200);
+    expect(gate.certs.calls).toBe(3);
+  });
+
+  it("知らない kid の取り直しに失敗した後も、知っている kid の証明は通す", async () => {
+    const health = async (proof: string) => gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": proof } });
+    expect((await health(await gate.access.sign())).status).toBe(200);
+    clock.advance(61 * 60_000);
+    gate.certs.answer = "down";
+    const stranger = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock });
+    expect((await health(await stranger.sign())).status).toBe(503);
+    expect((await health(await gate.access.sign())).status).toBe(200);
+    expect(gate.certs.calls).toBe(2);
+  });
+
+  it("最後に取れてから 24 時間を過ぎた鍵では、知っている kid の証明も通さず 503 unavailable", async () => {
+    const health = async () => gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } });
+    expect((await health()).status).toBe(200);
+    clock.advance(23 * 60 * 60_000);
+    gate.certs.answer = "down";
+    expect((await health()).status).toBe(200);
+    clock.advance(61 * 60_000);
+    const res = await health();
+    expect(res.status).toBe(503);
+    expect(await codeOf(res)).toBe("unavailable");
+    expect(gate.certs.calls).toBe(3);
+  });
+
   it("公開鍵の形が違えば証明を通さず 503 unavailable", async () => {
     gate.certs.answer = "malformed";
     const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } });
