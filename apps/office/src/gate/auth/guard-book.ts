@@ -14,6 +14,7 @@ export type RateBucket = "api" | "auth";
 /** 入口で通すかの答え。locked ならロックアウト中、retryAfter が数ならレート制限を超えた */
 export type Admission = { locked: boolean; retryAfter: number | null };
 
+// challenge は GuardDO の中にだけ置き、API の形にならないので core でなくここに置く
 /** パスキーの challenge と、何のために出したか */
 export const Challenge = z.object({ challenge: z.string(), purpose: z.enum(["register", "step_up"]) }).strict();
 
@@ -37,7 +38,9 @@ export type Notify = (ip: string, at: number) => Promise<void>;
 /** 送信元ごとの失敗とロックアウト、レート制限、challenge を数える */
 export class GuardBook {
   // レート制限の数は 1 分で消えるので、DO が起き直したら数え直してよい。記憶にだけ持つ
-  #windows = new Map<string, { start: number; count: number }>();
+  #counts = new Map<string, number>();
+  /** #counts を数えている分の始まり */
+  #minute = 0;
 
   /**
    * @param storage ロックアウトと challenge を置く入れ物
@@ -47,6 +50,14 @@ export class GuardBook {
     private readonly storage: GuardStorage,
     private readonly notify: Notify,
   ) {}
+
+  /**
+   * 今の分で数えている送信元と種類の組の数。記憶が増え続けない事をテストで確かめる
+   * @returns 組の数
+   */
+  get tracked(): number {
+    return this.#counts.size;
+  }
 
   /**
    * 入口で通すかを決める。ロックアウト中か、1 分の数を超えたかを見る
@@ -59,13 +70,16 @@ export class GuardBook {
     const until = z.number().optional().parse(await this.storage.get(`lock:${ip}`));
     if (until !== undefined && until > now) return { locked: true, retryAfter: null };
     // 1 分ごとに区切って数える。区切りの境目で最大 2 倍通るが、守りたいのは総当たりの速さなので足りる
-    const key = `${bucket}:${ip}`;
     const start = now - (now % MINUTE);
-    const window = this.#windows.get(key);
-    const current = window?.start === start ? window : { start, count: 0 };
-    current.count += 1;
-    this.#windows.set(key, current);
-    if (current.count > RATE_LIMITS[bucket]) return { locked: false, retryAfter: Math.ceil((start + MINUTE - now) / 1000) };
+    // 分が変わったら前の分の数は要らないので、送信元ごと捨てる。記憶が送信元の数だけ増え続けない
+    if (start !== this.#minute) {
+      this.#counts.clear();
+      this.#minute = start;
+    }
+    const key = `${bucket}:${ip}`;
+    const count = (this.#counts.get(key) ?? 0) + 1;
+    this.#counts.set(key, count);
+    if (count > RATE_LIMITS[bucket]) return { locked: false, retryAfter: Math.ceil((start + MINUTE - now) / 1000) };
     return { locked: false, retryAfter: null };
   }
 

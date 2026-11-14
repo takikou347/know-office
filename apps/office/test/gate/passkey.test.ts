@@ -120,15 +120,33 @@ describe("大事な操作の前にパスキーで確かめる", () => {
     expect(await codeOf(third)).toBe("step_up_required");
   });
 
+  it("確認の書き込みに失敗すると、新しいセッションを残さず、前のセッションのまま", async () => {
+    await register();
+    const response = await authenticator.authenticate(await options("step_up"), ORIGIN);
+    // D1 のまとめた書き込みだけを落とす。読み込みと 1 文の書き込みは本物の D1 に通す
+    const db = new Proxy(d1.DB, {
+      get: (target, name) => {
+        if (name === "batch") return () => Promise.reject(new Error("D1 が止まった"));
+        const value: unknown = Reflect.get(target, name);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]): unknown => Reflect.apply(value, target, args);
+      },
+    });
+    const init = { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(response) };
+    const res = await gate.app.request("/api/v1/me/step-up", init, { ...gate.env, DB: db });
+    expect(res.status).toBe(500);
+    expect(res.headers.get("Set-Cookie")).toBeNull();
+    expect(await d1.DB.prepare("SELECT count(*) AS n FROM sessions").first("n")).toBe(1);
+    expect((await gate.request("/api/v1/me", { headers })).status).toBe(200);
+  });
+
   it("同じ鍵をもう一度登録すると 409", async () => {
     await register();
     await stepUp();
     const res = await register();
     expect(res.status).toBe(409);
   });
-});
 
-describe("セッションの守り", () => {
   it("確認の後に前のクッキーが 401", async () => {
     await register();
     const before = headers;
@@ -138,9 +156,7 @@ describe("セッションの守り", () => {
     expect(me).toMatchObject({ data: { stepUpUntil: new Date(clock.now() + 15 * MINUTE).toISOString() } });
     expect(gate.audits.map((a) => a.action)).toEqual(["session.create", "passkey.add", "session.step_up"]);
   });
-});
 
-describe("総当たりと怪しい動き", () => {
   it("challenge は 1 度だけ使え、合わない確認は 401 で失敗の数に足す", async () => {
     await register();
     const response = await authenticator.authenticate(await options("step_up"), ORIGIN);

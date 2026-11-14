@@ -5,7 +5,7 @@ import { and, asc, eq, gt, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { createRouter } from "../app.ts";
-import { cookieHeader, createSession, IDLE_MS, isActive, signingKey, toSession, type SessionRow } from "../auth/session.ts";
+import { cookieHeader, IDLE_MS, issueSession, isActive, signingKey, toSession, type SessionRow } from "../auth/session.ts";
 import { vaultKey } from "../auth/vault.ts";
 import { notices, passkeys, sessions } from "../db/main.ts";
 import type { GateEnv } from "../env.ts";
@@ -119,7 +119,8 @@ export const sessionRoutes = router
       // 長いヘッダーで D1 を太らせない
       userAgent: (c.req.header("User-Agent") ?? "").slice(0, 512),
     };
-    const { row, cookie } = await createSession(c.env.DB, await sessionKey(c), from, c.var.clock);
+    const { row, cookie } = await issueSession(await sessionKey(c), from, c.var.clock);
+    await drizzle(c.env.DB).insert(sessions).values(row);
     await noticeUnusualLogin(c, row);
     await audit(c, "session.create", row.id, { ip: row.ip, country: row.country });
     c.header("Set-Cookie", cookieHeader(cookie, Math.floor((row.expiresAt - row.createdAt) / 1000)));

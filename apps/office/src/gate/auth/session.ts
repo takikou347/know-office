@@ -1,5 +1,5 @@
 // ログインセッション。クッキーにはトークンと署名、D1 にはトークンのハッシュだけを置く (ログインと記録の 3.2)
-import { AppError, type Clock, newId, type Session, sha256Hex } from "@know-office/core";
+import { AppError, type Clock, fromBase64url, newId, type Session, sha256Hex, toBase64url } from "@know-office/core";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database } from "@cloudflare/workers-types";
@@ -20,8 +20,6 @@ const TOUCH_MS = 5 * 60_000;
 export const STEP_UP_MS = 15 * 60_000;
 
 const encoder = new TextEncoder();
-const b64url = (data: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(data))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-const fromB64url = (text: string) => Uint8Array.from(atob(text.replaceAll("-", "+").replaceAll("_", "/")), (ch) => ch.charCodeAt(0));
 
 /**
  * セッションの署名の鍵を HMAC-SHA256 の鍵にする
@@ -43,23 +41,21 @@ export function cookieHeader(value: string, maxAgeSeconds: number): string {
 }
 
 /**
- * ログインセッションを作り、クッキーの値を返す
- * @param db 今の状態の D1
+ * ログインセッションの行とクッキーの値を作る。D1 には書かないので、呼ぶ側がほかの書き込みと 1 つの batch にまとめて insert する
  * @param key 署名の鍵
  * @param from 送信元の IP、国、ブラウザー
  * @param clock 時刻
  * @param carry パスキーの確認で作り直す時に引き継ぐ期限と、確認の期限
- * @returns 作った行とクッキーの値
+ * @returns sessions に入れる行とクッキーの値
  */
-export async function createSession(
-  db: D1Database,
+export async function issueSession(
   key: CryptoKey,
   from: { ip: string; country: string; userAgent: string },
   clock: Clock,
   carry: { expiresAt: number; stepUpUntil: number } | null = null,
 ): Promise<{ row: SessionRow; cookie: string }> {
   const now = clock.now();
-  const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const token = toBase64url(crypto.getRandomValues(new Uint8Array(32)));
   const row: SessionRow = {
     id: newId(clock),
     // D1 の中身が漏れてもクッキーを作れないよう、トークンそのものは置かない
@@ -73,8 +69,7 @@ export async function createSession(
     country: from.country,
     userAgent: from.userAgent,
   };
-  await drizzle(db).insert(sessions).values(row);
-  const signature = b64url(await crypto.subtle.sign("HMAC", key, encoder.encode(token)));
+  const signature = toBase64url(await crypto.subtle.sign("HMAC", key, encoder.encode(token)));
   return { row, cookie: `${token}.${signature}` };
 }
 
@@ -88,10 +83,12 @@ export async function createSession(
  * @throws unauthenticated クッキーが無い、署名が合わない、切れた、切られた、無い時
  */
 export async function readSession(db: D1Database, key: CryptoKey, cookie: string | undefined, clock: Clock): Promise<SessionRow> {
-  const [token, signature] = (cookie ?? "").split(".");
-  if (!token || !signature) throw new AppError("unauthenticated", "ログインセッションが無い");
+  const [token, encoded] = (cookie ?? "").split(".");
+  if (!token || !encoded) throw new AppError("unauthenticated", "ログインセッションが無い");
+  const signature = fromBase64url(encoded);
+  if (!signature) throw new AppError("unauthenticated", "ログインセッションの署名の形が違う");
   // HMAC の verify は時間が一定の比べ方をする。API の決まりの 3.6 の 3
-  const valid = await crypto.subtle.verify("HMAC", key, fromB64url(signature), encoder.encode(token)).catch(() => false);
+  const valid = await crypto.subtle.verify("HMAC", key, signature, encoder.encode(token)).catch(() => false);
   if (!valid) throw new AppError("unauthenticated", "ログインセッションの署名が合わない");
   const orm = drizzle(db);
   const [row] = await orm

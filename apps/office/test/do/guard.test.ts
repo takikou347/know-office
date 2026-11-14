@@ -30,9 +30,7 @@ describe("総当たりと怪しい動き", () => {
     for (let n = 0; n < 4; n += 1) await worker.guard("fail", "203.0.113.1", start + n * MINUTE);
     expect(await worker.guard("fail", "203.0.113.1", start + 11 * MINUTE)).toEqual({ locked: false });
   });
-});
 
-describe("レート制限", () => {
   it("送信元ごとに 1 分 300 回を超えると、次の分までの秒数を返す", async () => {
     for (let n = 0; n < 300; n += 1) expect(await worker.guard("admit", "203.0.113.1", "api", start + 1000)).toEqual({ locked: false, retryAfter: null });
     expect(await worker.guard("admit", "203.0.113.1", "api", start + 1000)).toEqual({ locked: false, retryAfter: 59 });
@@ -45,7 +43,7 @@ describe("レート制限", () => {
   });
 });
 
-describe("パスキーの challenge", () => {
+describe("大事な操作の前にパスキーで確かめる", () => {
   it("challenge は 1 度だけ、5 分のうちだけ取り出せる", async () => {
     await worker.guard("putChallenge", "s1", { challenge: "c1", purpose: "step_up" }, start);
     expect(await worker.guard("takeChallenge", "s1", start + 4 * MINUTE)).toEqual({ challenge: "c1", purpose: "step_up" });

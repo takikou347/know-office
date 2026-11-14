@@ -49,7 +49,7 @@ describe("開発環境の代わりの物", () => {
   it("証明は RS256 で、Access と同じクレームを持ち、テストが値を変えられる", async () => {
     const access = await createFakeAccess({ team: "dev", aud: "aud-dev", email: "owner@example.com", clock: fixedClock(NOW) });
     const { header, claims } = decode(await access.sign({ email: "someone@example.com" }));
-    expect(header).toMatchObject({ alg: "RS256", typ: "JWT", kid: access.kid });
+    expect(header).toMatchObject({ alg: "RS256", typ: "JWT", kid: access.kid() });
     expect(claims).toMatchObject({
       aud: ["aud-dev"],
       email: "someone@example.com",

@@ -9,7 +9,7 @@ import type { Context } from "hono";
 import { createRouter } from "../app.ts";
 import { guardOf, recordLoginFailure } from "../auth/middleware.ts";
 import { AuthenticationResponse, RegistrationResponse, relyingParty, requireStepUp, Transports } from "../auth/passkey.ts";
-import { cookieHeader, createSession, STEP_UP_MS } from "../auth/session.ts";
+import { cookieHeader, issueSession, STEP_UP_MS } from "../auth/session.ts";
 import { loginAttempts, passkeys, sessions } from "../db/main.ts";
 import type { GateEnv } from "../env.ts";
 import { audit } from "../ledger/record.ts";
@@ -147,8 +147,10 @@ export const passkeyRoutes = createRouter()
     const before = currentSession(c);
     // 確認の前に盗まれたクッキーで確認の後の操作をさせないよう、セッションを作り直す。期限は元のセッションの物を引き継ぐ
     const from = { ip: c.var.ip, country: before.country ?? "XX", userAgent: before.userAgent ?? "" };
-    const { row, cookie } = await createSession(c.env.DB, await sessionKey(c), from, c.var.clock, { expiresAt: before.expiresAt, stepUpUntil: now + STEP_UP_MS });
+    const { row, cookie } = await issueSession(await sessionKey(c), from, c.var.clock, { expiresAt: before.expiresAt, stepUpUntil: now + STEP_UP_MS });
+    // 新しいセッション、カウンター、前のセッションの終わり、ログインの記録は、どれかが落ちたら全て入れない
     await orm.batch([
+      orm.insert(sessions).values(row),
       orm.update(passkeys).set({ counter: result.authenticationInfo.newCounter, lastUsedAt: now }).where(eq(passkeys.id, passkey.id)),
       orm.update(sessions).set({ endedAt: now }).where(eq(sessions.id, before.id)),
       orm.insert(loginAttempts).values({ id: newId(c.var.clock), at: now, ip: c.var.ip, country: before.country, kind: "passkey", ok: true, reason: null }),

@@ -91,9 +91,7 @@ describe("セッション", () => {
     expect((await gate.request("/api/v1/sessions?limit=0", { headers })).status).toBe(422);
     expect((await gate.request("/api/v1/sessions?unknown=1", { headers })).status).toBe(400);
   });
-});
 
-describe("セッションの守り", () => {
   it("D1 にはトークンのハッシュだけを置く", async () => {
     const headers = await gate.signIn();
     const token = (headers["Cookie"] ?? "").split("=")[1]?.split(".")[0] ?? "";
@@ -106,6 +104,13 @@ describe("セッションの守り", () => {
     const headers = await gate.signIn();
     const cookie = headers["Cookie"] ?? "";
     const res = await gate.request("/api/v1/me", { headers: { ...headers, Cookie: `${cookie.slice(0, -2)}AA` } });
+    expect(res.status).toBe(401);
+  });
+
+  it.each(["a", "!!", ""])("署名が base64url として壊れたクッキー「%s」も 500 でなく 401", async (signature) => {
+    const headers = await gate.signIn();
+    const token = (headers["Cookie"] ?? "").split(".")[0] ?? "";
+    const res = await gate.request("/api/v1/me", { headers: { ...headers, Cookie: `${token}.${signature}` } });
     expect(res.status).toBe(401);
   });
 

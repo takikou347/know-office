@@ -1,15 +1,17 @@
 // 入れるのはオーナーだけ。Access の証明、ロックアウト、レート制限、Origin を確かめる (ログインと記録の 3.1、API の決まりの 1.2、3.2)
-import { Problem } from "@know-office/core";
+import { Problem, toBase64url } from "@know-office/core";
+import { createFakeAccess } from "../../dev/access.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
-import { createTestGate, ORIGIN, type TestGate } from "../helpers/gate.ts";
+import { createTestGate, ORIGIN, OWNER, type TestGate } from "../helpers/gate.ts";
 
-const clock = fixedClock(Date.UTC(2026, 10, 14, 3, 0, 0));
+let clock: ReturnType<typeof fixedClock>;
 let d1: TestD1;
 let gate: TestGate;
-// テストごとに空の D1 とゲートウェイを作り、前のテストの失敗の数に頼らない
+// テストごとに時刻、空の D1、ゲートウェイを作り、前のテストの失敗の数や進めた時刻に頼らない
 beforeEach(async () => {
+  clock = fixedClock(Date.UTC(2026, 10, 14, 3, 0, 0));
   d1 = await createTestD1();
   gate = await createTestGate({ clock, d1 });
 });
@@ -22,6 +24,15 @@ afterEach(() => d1.dispose());
  */
 async function codeOf(res: Response): Promise<string> {
   return Problem.parse(await res.json()).code;
+}
+
+/**
+ * JWT のヘッダーを base64url の JSON にする
+ * @param value ヘッダー
+ * @returns JWT の 1 つの部分
+ */
+function jsonPart(value: unknown): string {
+  return toBase64url(new TextEncoder().encode(JSON.stringify(value)));
 }
 
 describe("入れるのはオーナーだけ", () => {
@@ -39,11 +50,11 @@ describe("入れるのはオーナーだけ", () => {
   });
 
   it.each([
-    ["期限の切れた証明", { exp: Math.floor(clock.now() / 1000) - 1 }],
-    ["ほかのアプリの証明", { aud: ["other-aud"] }],
-    ["ほかのチームの証明", { iss: "https://other.cloudflareaccess.com" }],
+    ["期限の切れた証明", () => ({ exp: Math.floor(clock.now() / 1000) - 1 })],
+    ["ほかのアプリの証明", () => ({ aud: ["other-aud"] })],
+    ["ほかのチームの証明", () => ({ iss: "https://other.cloudflareaccess.com" })],
   ])("%s は 401", async (_, claims) => {
-    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign(claims) } });
+    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign(claims()) } });
     expect(res.status).toBe(401);
   });
 
@@ -55,6 +66,73 @@ describe("入れるのはオーナーだけ", () => {
       const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": bad } });
       expect(res.status).toBe(401);
     }
+  });
+
+  it("ほかの鍵で署名した証明と、alg を HS256 にすり替えた証明は 401", async () => {
+    const stranger = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock });
+    const [, body = ""] = (await gate.access.sign()).split(".");
+    const input = `${jsonPart({ alg: "HS256", kid: gate.access.kid(), typ: "JWT" })}.${body}`;
+    const hmac = await crypto.subtle.importKey("raw", new TextEncoder().encode("guessed"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const hs256 = `${input}.${toBase64url(await crypto.subtle.sign("HMAC", hmac, new TextEncoder().encode(input)))}`;
+    for (const bad of [await stranger.sign(), hs256]) {
+      const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": bad } });
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it("メールアドレスは大文字と小文字を区別しない", async () => {
+    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign({ email: OWNER.toUpperCase() }) } });
+    expect(res.status).toBe(200);
+  });
+
+  it("公開鍵は 1 時間ためて、その間は取りに行かない", async () => {
+    const health = async () => gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } });
+    expect((await health()).status).toBe(200);
+    clock.advance(59 * 60_000);
+    expect((await health()).status).toBe(200);
+    expect(gate.certs.calls).toBe(1);
+    clock.advance(2 * 60_000);
+    expect((await health()).status).toBe(200);
+    expect(gate.certs.calls).toBe(2);
+  });
+
+  it("Access が鍵を取り替えた後の証明は、公開鍵を 1 度だけ取り直して通す", async () => {
+    expect((await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } })).status).toBe(200);
+    clock.advance(31_000);
+    await gate.access.rotate();
+    expect((await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } })).status).toBe(200);
+    expect(gate.certs.calls).toBe(2);
+  });
+
+  it("知らない kid の証明では、30 秒に 1 度しか公開鍵を取り直さない", async () => {
+    const stranger = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock });
+    const proof = await stranger.sign();
+    for (let n = 0; n < 3; n += 1) expect((await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": proof } })).status).toBe(401);
+    expect(gate.certs.calls).toBe(1);
+    clock.advance(31_000);
+    expect((await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await stranger.sign() } })).status).toBe(401);
+    expect(gate.certs.calls).toBe(2);
+  });
+
+  it("公開鍵を読めない時は証明を通さず 503 unavailable にし、失敗の数に足さず、30 秒は取りに行かない", async () => {
+    gate.certs.answer = "down";
+    const proof = await gate.access.sign();
+    for (let n = 0; n < 3; n += 1) {
+      const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": proof } });
+      expect(res.status).toBe(503);
+      expect(await codeOf(res)).toBe("unavailable");
+    }
+    expect(gate.certs.calls).toBe(1);
+    expect(await d1.DB.prepare("SELECT count(*) AS n FROM login_attempts").first("n")).toBe(0);
+    gate.certs.answer = "ok";
+    clock.advance(31_000);
+    expect((await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } })).status).toBe(200);
+  });
+
+  it("公開鍵の形が違えば証明を通さず 503 unavailable", async () => {
+    gate.certs.answer = "malformed";
+    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } });
+    expect(res.status).toBe(503);
   });
 
   it("証明が正しくてもログインセッションが無ければ 401", async () => {
@@ -72,9 +150,7 @@ describe("総当たりと怪しい動き", () => {
     expect(res.status).toBe(403);
     expect(await codeOf(res)).toBe("locked_out");
   });
-});
 
-describe("レート制限", () => {
   it("ログインセッションの開始は 1 分 10 回を超えると 429 と Retry-After", async () => {
     const headers = { Origin: ORIGIN, "Cf-Access-Jwt-Assertion": await gate.access.sign() };
     for (let n = 0; n < 10; n += 1) expect((await gate.request("/api/v1/sessions", { method: "POST", headers })).status).toBe(201);
@@ -84,7 +160,7 @@ describe("レート制限", () => {
   });
 });
 
-describe("ブラウザーの守り", () => {
+describe("画面と入力のセキュリティ", () => {
   it("GET 以外は Origin が自分と違えば 403 origin_mismatch", async () => {
     const headers = await gate.signIn();
     for (const origin of ["https://evil.example", ""]) {
@@ -96,6 +172,8 @@ describe("ブラウザーの守り", () => {
 
   it("ログインの順は 401、403、404 の順に確かめる", async () => {
     expect((await gate.request("/api/v1/nothing")).status).toBe(401);
+    const stranger = { "Cf-Access-Jwt-Assertion": await gate.access.sign({ email: "someone@example.com" }) };
+    expect((await gate.request("/api/v1/nothing", { headers: stranger })).status).toBe(403);
     const headers = await gate.signIn();
     expect((await gate.request("/api/v1/nothing", { headers })).status).toBe(404);
   });

@@ -23,8 +23,11 @@ const CACHE_MS = 60 * 60_000;
 /** 知らない kid で取り直す間の最短。証明を作れない人が取り直しを繰り返させて Access に負荷をかけるのを防ぐ */
 const REFETCH_MS = 30_000;
 
+/** ためた公開鍵と、最後に取りに行って失敗した時刻 */
+type CertsCache = { at: number; keys: JSONWebKeySet } | { failedAt: number };
+
 // isolate の中で公開鍵をためる。fetch と URL ごとに持つので、開発環境と本番や、テストごとの代わりの Access が混ざらない
-const caches = new WeakMap<Fetcher, Map<string, { at: number; keys: JSONWebKeySet }>>();
+const caches = new WeakMap<Fetcher, Map<string, CertsCache>>();
 
 /**
  * 公開鍵を読む。ためた物が古いか、force の時だけ取り直す
@@ -33,23 +36,40 @@ const caches = new WeakMap<Fetcher, Map<string, { at: number; keys: JSONWebKeySe
  * @param clock 時刻
  * @param force 知らない kid が来た時に取り直すか
  * @returns 公開鍵の一覧
- * @throws unavailable 公開鍵を読めない時。断る側に倒すので証明は通らない
+ * @throws unavailable 公開鍵を読めない時と、読めなかった後の 30 秒。断る側に倒すので証明は通らない
  */
 async function certs(fetcher: Fetcher, url: string, clock: Clock, force: boolean): Promise<JSONWebKeySet> {
   const now = clock.now();
-  const cache = caches.get(fetcher) ?? new Map<string, { at: number; keys: JSONWebKeySet }>();
+  const cache = caches.get(fetcher) ?? new Map<string, CertsCache>();
   caches.set(fetcher, cache);
   const cached = cache.get(url);
-  if (cached && now - cached.at < (force ? REFETCH_MS : CACHE_MS)) return cached.keys;
+  // Access が落ちている間に、証明の付いた要求ごとに取りに行かない
+  if (cached && "failedAt" in cached && now - cached.failedAt < REFETCH_MS) throw new AppError("unavailable", "Access の公開鍵を読めない");
+  if (cached && "keys" in cached && now - cached.at < (force ? REFETCH_MS : CACHE_MS)) return cached.keys;
+  try {
+    const keys = await fetchCerts(fetcher, url);
+    cache.set(url, { at: now, keys });
+    return keys;
+  } catch (error) {
+    cache.set(url, { failedAt: now });
+    throw error;
+  }
+}
+
+/**
+ * Access から公開鍵を取り、形を確かめる
+ * @param fetcher 外への fetch
+ * @param url 公開鍵の URL
+ * @returns 公開鍵の一覧
+ * @throws unavailable 届かない、200 でない、形が違う時
+ */
+async function fetchCerts(fetcher: Fetcher, url: string): Promise<JSONWebKeySet> {
   // 宛先は endpoints() が環境変数から決めた物だけで、要求の中身から作らない
   const res = await allowedFetch(fetcher, url, [`${new URL(url).origin}/`]).catch(() => null);
   if (!res?.ok) throw new AppError("unavailable", "Access の公開鍵を読めない");
-  const parsed = Certs.safeParse(await res.json());
+  const parsed = Certs.safeParse(await res.json().catch(() => null));
   if (!parsed.success) throw new AppError("unavailable", "Access の公開鍵の形が違う");
-  // jose の JWK の型は鍵の種類ごとの項目を持つので、確かめた一覧をそのまま渡す
-  const keys = { keys: parsed.data.keys } as JSONWebKeySet;
-  cache.set(url, { at: now, keys });
-  return keys;
+  return { keys: parsed.data.keys };
 }
 
 /**

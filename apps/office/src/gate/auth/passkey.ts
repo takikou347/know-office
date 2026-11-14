@@ -4,6 +4,8 @@ import type { Context } from "hono";
 import { z } from "zod";
 import type { GateEnv } from "../env.ts";
 
+// ここの形は @simplewebauthn/server に渡す前に型を絞るためだけの物で、API の形 (core の WebAuthnResponse) は変えないのでゲートウェイに置く
+
 /** 認証器のつなぎ方。WebAuthn の AuthenticatorTransportFuture */
 export const Transports = z.array(z.enum(["ble", "cable", "hybrid", "internal", "nfc", "smart-card", "usb"]));
 

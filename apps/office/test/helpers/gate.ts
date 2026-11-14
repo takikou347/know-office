@@ -18,8 +18,10 @@ export type TestGate = {
   app: ReturnType<typeof createGate>;
   /** バインディングと変数 */
   env: Bindings;
-  /** 代わりの Access。証明を出す */
+  /** 代わりの Access。証明を出し、鍵を取り替える */
   access: FakeAccess;
+  /** Access の公開鍵を取りに来た回数と、返し方。down は 503、malformed は形の違う JSON を返す */
+  certs: { calls: number; answer: "ok" | "down" | "malformed" };
   /** 記録 DO に頼んだ監査ログ */
   audits: AuditInput[];
   /** ロックアウトと challenge の数え方。GuardDO と同じ物 */
@@ -64,8 +66,12 @@ function namespace<T>(stub: T) {
  */
 export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Promise<TestGate> {
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
+  const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const fetcher: Fetcher = (url) => {
     if (!url.startsWith(`${FAKES}/access/`)) return Promise.reject(new Error(`テストで外へ出た: ${url}`));
+    certs.calls += 1;
+    if (certs.answer === "down") return Promise.resolve(new Response("", { status: 503 }));
+    if (certs.answer === "malformed") return Promise.resolve(Response.json({ keys: "none" }));
     return Promise.resolve(access.app.request(url.slice(`${FAKES}/access`.length)));
   };
   const audits: AuditInput[] = [];
@@ -98,6 +104,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     app,
     env,
     access,
+    certs,
     audits,
     guard,
     request,
