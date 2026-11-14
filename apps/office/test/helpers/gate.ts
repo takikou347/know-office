@@ -37,6 +37,8 @@ export type TestGate = {
   office: OfficeGuard;
   /** 社員ごとの、勤務と数え方の代わり。StaffDO と同じ物 */
   staff: Record<StaffId, TestStaff>;
+  /** 社員ごとのワークスペースの代わり。差し替えた作業トークンを並べ、down なら届かない */
+  workspaces: Record<StaffId, TestWorkspace>;
   /** 自動停止が外へ頼む口の代わり。戻したサービスと、レビュー担当の答え */
   deps: GuardDeps & { rollbacks: string[]; answer: ReviewAnswer | null };
   /** 要求を出す */
@@ -53,6 +55,14 @@ export type TestStaff = {
   guard: StaffGuard;
   /** ワークスペースへの呼び出し */
   workspace: string[];
+};
+
+/** ワークスペースの DO の代わり */
+export type TestWorkspace = {
+  /** 受けた作業トークン */
+  tickets: string[];
+  /** true なら届かない */
+  down: boolean;
 };
 
 /**
@@ -175,6 +185,14 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     dropClaim: office.dropClaim.bind(office),
     restoreStop: office.restoreStop.bind(office),
   };
+  const workspaces: Record<StaffId, TestWorkspace> = { president: { tickets: [], down: false }, builder: { tickets: [], down: false }, reviewer: { tickets: [], down: false } };
+  const workspaceDo = (id: StaffId) => ({
+    replaceTicket: (ticket: string) => {
+      if (workspaces[id].down) return Promise.reject(new Error("ワークスペースに届かない"));
+      workspaces[id].tickets.push(ticket);
+      return Promise.resolve(null);
+    },
+  });
   // StaffDO は勤務の本と数え方の本を持つ。名前ごとに別の代わりを返す
   const staffDo = (id: StaffId) => {
     const { book, guard: g } = staff[id];
@@ -194,6 +212,8 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
         return null;
       }),
       pull: (now: number) => pullNext(env, book, now),
+      heartbeat: overRpc(book.heartbeat.bind(book)),
+      checkpoint: overRpc(book.checkpoint.bind(book)),
       stop: book.stop.bind(book),
       resume: book.resume.bind(book),
       observe: g.observe.bind(g),
@@ -208,6 +228,8 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
         await book.rebuildDay(day, now);
         return null;
       }),
+      renewToken: g.renewToken.bind(g),
+      revokeTokens: g.revokeTokens.bind(g),
     };
   };
   const recorder = {
@@ -231,6 +253,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     GUARD: namespace(guardDo),
     STAFF: { idFromName: (name: StaffId) => name, get: (id: StaffId) => staffDo(id) },
     RECORDER: namespace(recorder),
+    WORKSPACE: { idFromName: (name: StaffId) => ({ toString: () => `ws-${name}`, name }), get: (id: { name: StaffId }) => workspaceDo(id.name) },
     ENVIRONMENT: "development",
     DEV_FAKES_URL: FAKES,
     ACCESS_TEAM: "test",
@@ -251,6 +274,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     office,
     staff,
     deps,
+    workspaces,
     request,
     signIn: async () => {
       const proof = await access.sign();

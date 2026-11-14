@@ -1,6 +1,7 @@
 // ツールを使う前のフックが、ゲートウェイのルールの判断を聞き、答えが無ければ断る事を確かめる (社員が考えるの 3.4、4 章)
 import type { Fetcher } from "@know-office/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { agentOptions, WORK_ROOT } from "../src/agent.ts";
 import { DECISION_TIMEOUT_MS, GATE_DECISIONS_URL, preToolUse, type DeniedCall, type HookDeps } from "../src/hooks.ts";
 
 /** 判断を聞いた中身 */
@@ -129,5 +130,19 @@ describe("フックからルールの判断を聞く", () => {
     expect(out.hookSpecificOutput.permissionDecision).toBe("deny");
     expect(seen).toEqual([]);
     expect(denied).toHaveLength(1);
+  });
+});
+
+describe("ワークスペースを分ける", () => {
+  it("フックを書き換えられない", () => {
+    const { hook } = setup(() => answer(true, "通す"));
+    const options = agentOptions({ ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", hook, abortController: new AbortController() });
+    // リポジトリの中の .claude/ の設定と、利用者の設定を読まない。フックは関数で渡し、ファイルから読まない
+    expect(options.settingSources).toEqual([]);
+    expect(options.hooks).toEqual({ PreToolUse: [{ hooks: [hook] }] });
+    expect(options.cwd).toBe(WORK_ROOT);
+    // SDK に渡す環境変数は、作業トークンと動くのに要る物だけ。ワークスペースの環境変数をそのまま渡さない
+    expect(Object.keys(options.env).toSorted()).toEqual(["ANTHROPIC_API_KEY", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
+    expect(options.env.ANTHROPIC_API_KEY).toBe("ticket-1");
   });
 });
