@@ -45,7 +45,7 @@ import {
 } from "./mock.ts";
 import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { StopButton } from "./pages/guard/StopButton.tsx";
-import { ServiceSummary } from "./pages/ledger/ServiceSummary.tsx";
+import { RecordBreakdown } from "./pages/ledger/RecordBreakdown.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
 import { type ScreenId, moreScreens } from "./routes.ts";
 
@@ -503,8 +503,8 @@ function Records() {
           ))}
         </Grid>
       </Part>
-      <Part title="サービスごと">
-        <ServiceSummary />
+      <Part title="内訳">
+        <RecordBreakdown />
       </Part>
     </Section>
   );

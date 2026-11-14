@@ -130,7 +130,7 @@ export async function summarize(db: D1Database, recordDbs: RecordDb[], group: Re
   const counts = new Map<string, Counts>();
   add(counts, main);
   for (const r of records) add(counts, r);
-  const { "": total = { ...ZERO } } = Object.fromEntries(counts);
+  const total = counts.get("") ?? { ...ZERO };
   counts.delete("");
   // 登録した物は記録が無くても 0 の行で出し、消えたサービスなど名前の無い記録も鍵のまま出して、和を全体と合わせる
   const known = new Map(names);
@@ -150,8 +150,9 @@ const CSV_COLUMNS = ["key", "name", "workedMs", "tasks", "costMicroUsd", "tokens
  * @returns RFC 4180 の値
  */
 function cell(value: string | number): string {
-  const text = String(value);
-  const safe = /^[=+\-@\t\r]/.test(text) && typeof value === "string" ? `'${text}` : text;
+  if (typeof value === "number") return String(value);
+  // 数は式にならない。文だけを、式の頭の文字で始まる時に ' で無害にする
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 

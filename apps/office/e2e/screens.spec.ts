@@ -113,6 +113,26 @@ test("記録の画面で、サービスごとの内訳の最後に全体を出�
   expect((await res.text()).trim().split("\r\n").at(-1)).toMatch(/^total,全体,/);
 });
 
+test("記録の画面で社員ごとに切り替えると、社員ごとの内訳の最後に全体を出す", async ({ page }) => {
+  await page.goto("/records");
+  await page.getByRole("radio", { name: "社員ごと" }).check();
+  const table = page.getByRole("region", { name: "社員ごとの記録" }).getByRole("table");
+  await expect(table.getByRole("row", { name: /開発担当/ })).toBeVisible();
+  await expect(table.getByRole("row", { name: /社長/ })).toBeVisible();
+  await expect(table.getByRole("row").last()).toContainText("全体");
+  await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", /group=staff/);
+});
+
+test("記録の内訳を読めない時は、理由と問い合わせの番号を出す", async ({ page }) => {
+  await page.route("**/api/v1/records/summary?*", (route) =>
+    route.fulfill({ status: 500, contentType: "application/problem+json", body: JSON.stringify({ code: "internal", traceId: "0af7651916cd43dd8448eb211c80319c" }) }),
+  );
+  await page.goto("/records");
+  const alert = page.getByRole("alert").filter({ hasText: "記録を読めませんでした" });
+  await expect(alert).toContainText("理由: internal");
+  await expect(alert).toContainText("0af7651916cd43dd8448eb211c80319c");
+});
+
 test("レビューから戻ると、仕事の山のタブに戻る", async ({ page }) => {
   await page.goto("/staff/builder/tasks/t2");
   await page.getByRole("link", { name: "仕事の山に戻る" }).click();
