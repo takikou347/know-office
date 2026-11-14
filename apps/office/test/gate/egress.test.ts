@@ -2,8 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { routeEgress, WORKSPACE_EGRESS, type Caller } from "../../src/gate/egress.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
-import { type BoxDeps, type ContainerLike, WorkspaceBox } from "../../src/gate/work/workspace-box.ts";
-import { jst, NODE, startWork, useGuardWorld } from "../helpers/guard.ts";
+import { type BoxDeps, type ContainerLike, noticeWorkspaceDown, WorkspaceBox } from "../../src/gate/work/workspace-box.ts";
+import { jst, NODE, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
 
 const w = useGuardWorld();
 
@@ -78,10 +78,11 @@ function fakeKeys(): FakeKeys {
  * 待たずに数える依り所を作る
  * @param waits 待った長さを足す先
  * @param keys 鍵を置く所
+ * @param downs 起きなかった知らせを足す先
  * @returns WorkspaceBox の依り所
  */
-function boxDeps(waits: number[] = [], keys: FakeKeys = fakeKeys()): BoxDeps {
-  return { wait: (ms) => Promise.resolve(void waits.push(ms)), keys };
+function boxDeps(waits: number[] = [], keys: FakeKeys = fakeKeys(), downs: number[] = []): BoxDeps {
+  return { wait: (ms) => Promise.resolve(void waits.push(ms)), keys, notifyDown: () => Promise.resolve(void downs.push(1)) };
 }
 
 /**
@@ -152,11 +153,41 @@ describe("ワークスペースの起こし方", () => {
   it("/v1/health が返るまで待ち、60 秒で起きなければ 30 秒おきに 3 回やり直してから失敗を返す", async () => {
     const { container, seen } = fakeContainer(false);
     const waits: number[] = [];
-    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps(waits));
+    const downs: number[] = [];
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps(waits, fakeKeys(), downs));
     await expect(box.start()).rejects.toMatchObject({ code: "unavailable" });
     expect(seen.started).toHaveLength(4);
     expect(waits.filter((ms) => ms === 30_000)).toHaveLength(3);
     expect(seen.fetched.every((url) => url.endsWith("/v1/health"))).toBe(true);
+    // 4 回とも起きなければ 1 度だけ知らせる
+    expect(downs).toHaveLength(1);
+  });
+
+  it("起きた時は知らせない", async () => {
+    const { container } = fakeContainer();
+    const downs: number[] = [];
+    await new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps([], fakeKeys(), downs)).start();
+    expect(downs).toEqual([]);
+  });
+
+  it("知らせが失敗しても、起きなかった事を unavailable で返す", async () => {
+    const { container } = fakeContainer(false);
+    const deps: BoxDeps = { ...boxDeps(), notifyDown: () => Promise.reject(new Error("D1 が止まっている")) };
+    await expect(new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, deps).start()).rejects.toMatchObject({ code: "unavailable" });
+  });
+
+  it("起きなかった社員ごとに通知を 1 件出し、オーナーが読むまで重ねない", async () => {
+    await noticeWorkspaceDown(w.gate.env.DB, "builder", jst(9));
+    await noticeWorkspaceDown(w.gate.env.DB, "builder", jst(9, 5));
+    await noticeWorkspaceDown(w.gate.env.DB, "reviewer", jst(9, 5));
+    const notices = () => rows(w, "SELECT level, kind, title, scope, read_at FROM notices WHERE kind = 'workspace_down' ORDER BY at, title");
+    expect(await notices()).toEqual([
+      { level: "warn", kind: "workspace_down", title: "builder のワークスペースが起きない", scope: "office", read_at: null },
+      { level: "warn", kind: "workspace_down", title: "reviewer のワークスペースが起きない", scope: "office", read_at: null },
+    ]);
+    await w.gate.env.DB.prepare("UPDATE notices SET read_at = ? WHERE kind = 'workspace_down'").bind(jst(9, 10)).run();
+    await noticeWorkspaceDown(w.gate.env.DB, "builder", jst(10));
+    expect(await notices()).toHaveLength(3);
   });
 });
 

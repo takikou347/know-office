@@ -1,6 +1,10 @@
-// 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを呼ぶ (社員が考えるの 1.3、3.1)
-import { AppError, CONTAINER_CA, Health, log, RunInput, TicketInput } from "@know-office/core";
+// 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを鍵を付けて呼ぶ。起きなければ知らせる (社員が考えるの 1.3、3.1)
+import type { D1Database } from "@cloudflare/workers-types";
+import { AppError, CONTAINER_CA, Health, log, newId, RunInput, type StaffId, TicketInput } from "@know-office/core";
+import { and, eq, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
+import { notices } from "../db/main.ts";
 import { WORKSPACE_EGRESS, type Caller } from "../egress.ts";
 
 /** ワークスペースの Node のサーバーの番号 */
@@ -23,7 +27,36 @@ export type BoxDeps = {
   wait(ms: number): Promise<void>;
   /** ワークスペースのサーバーの鍵を置く所。起こすたびに作り直し、コンテナが動いている間は同じ物を使う */
   keys: { get(): Promise<string | undefined>; put(key: string): Promise<void> };
+  /** やり直しても起きなかった事をオーナーに知らせる */
+  notifyDown(): Promise<void>;
 };
+
+/**
+ * ワークスペースが起きなかった事を通知に出す。同じ社員の通知は、オーナーが読むまで重ねて出さない
+ * @param db D1 の DB
+ * @param staffId 社員 ID
+ * @param now 今の時刻
+ */
+export async function noticeWorkspaceDown(db: D1Database, staffId: StaffId, now: number): Promise<void> {
+  const orm = drizzle(db);
+  // 題は、同じ社員の通知を重ねないための鍵も兼ねる
+  const title = `${staffId} のワークスペースが起きない`;
+  const [open] = await orm
+    .select({ id: notices.id })
+    .from(notices)
+    .where(and(eq(notices.kind, "workspace_down"), eq(notices.title, title), isNull(notices.readAt)))
+    .limit(1);
+  if (open) return;
+  await orm.insert(notices).values({
+    id: newId({ now: () => now }),
+    at: now,
+    level: "warn",
+    kind: "workspace_down",
+    title,
+    body: "30 秒おきに 4 回起こしても /v1/health が返らなかった。社員はワークスペースを待ち、ハートビートが届かない間は起こし直す",
+    scope: "office",
+  });
+}
 
 /** ワークスペースのサーバーの鍵を渡す環境変数。apps/workspace の WORKSPACE_KEY_ENV と同じ */
 const WORKSPACE_KEY_ENV = "WORKSPACE_KEY";
@@ -69,7 +102,7 @@ export class WorkspaceBox<F = unknown> {
   ) {}
 
   /**
-   * 外向きの通信を切って起こし、/v1/health が返るまで 60 秒待つ。起きなければ 30 秒おきに 3 回やり直す
+   * 外向きの通信を切って起こし、/v1/health が返るまで 60 秒待つ。起きなければ 30 秒おきに 3 回やり直し、それでも起きなければオーナーに知らせる
    * @throws unavailable 4 回とも起きなかった時
    */
   async start(): Promise<void> {
@@ -83,6 +116,8 @@ export class WorkspaceBox<F = unknown> {
       log("warn", "workspace_start_slow", { staffId: this.caller.staffId, attempt });
     }
     log("error", "workspace_start_failed", { staffId: this.caller.staffId });
+    // 知らせられなくても、起きなかった事は呼んだ側に返す
+    await this.deps.notifyDown().catch((error: unknown) => log("warn", "workspace_notice_failed", { staffId: this.caller.staffId, error: error instanceof Error ? error.message : "unknown" }));
     throw new AppError("unavailable", "ワークスペースが起きない");
   }
 

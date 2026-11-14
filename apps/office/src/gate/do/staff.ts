@@ -315,7 +315,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
     const request = (name: string, step: (stub: DurableObjectStub<WorkspaceContainer>) => Promise<null>): Promise<void> => {
       // 待たずに頼む。DO は呼び出しの後も動いているので、頼んだ物は最後まで走る
       void (async () => step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId))))().catch((error: unknown) => {
-        // TODO(#52): 起きなかった時にオーナーへ通知を出す
+        // 起きなかった時の通知は WorkspaceBox が出す。ここは呼び出しの失敗を残すだけ
         log("error", "workspace_call_failed", { staffId, call: name, error: error instanceof Error ? error.message : "unknown" });
       });
       return Promise.resolve();
