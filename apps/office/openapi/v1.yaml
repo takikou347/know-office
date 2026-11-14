@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.3.0
+  version: 1.3.1
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -5277,13 +5277,17 @@ paths:
         処理の流れ:
 
 
-        1. 作業トークンを検証する
+        1. 作業トークンを検証し、社員とタスクを読む
 
-        2. `toOperation()` と `decide()` で可否を判断する
+        2. 全体、社員、タスクのどれかが止まっていれば 409 `stopped`
 
-        3. `tool_calls` に追加する
+        3. タスクの範囲の触れない所を、サービスの設定か office の初期値から読み、`toOperation()` と `decide()` で可否を判断する。外部の文章の印は `owner_info.read` の時だけ `StaffDO.externalSources()` で読む
 
-        4. 拒否した場合は `guard.observe` に `rule_denied` を渡す
+        4. `tool_calls` に追加する。`target` は鍵の形を伏せ、500 字で切る
+
+        5. `guard.observe` に `tool_call` を渡す。`secret.read` と `owner_info.read` は `sensitive_access` を、印を付ける時は `external_read` を、拒否した時は `rule_denied` を渡す
+
+        6. `sensitive_access` は `rule_denied` より先に渡し、社員ごと止めた時は `rule_denied` を渡さない
 
 
         このルート固有のエラー:
@@ -5291,10 +5295,12 @@ paths:
 
         - 409 `stopped`: 社員かタスクが停止中'
       x-steps:
-      - 作業トークンを検証する
-      - '`toOperation()` と `decide()` で可否を判断する'
-      - '`tool_calls` に追加する'
-      - 拒否した場合は `guard.observe` に `rule_denied` を渡す
+      - 作業トークンを検証し、社員とタスクを読む
+      - 全体、社員、タスクのどれかが止まっていれば 409 `stopped`
+      - タスクの範囲の触れない所を、サービスの設定か office の初期値から読み、`toOperation()` と `decide()` で可否を判断する。外部の文章の印は `owner_info.read` の時だけ `StaffDO.externalSources()` で読む
+      - '`tool_calls` に追加する。`target` は鍵の形を伏せ、500 字で切る'
+      - '`guard.observe` に `tool_call` を渡す。`secret.read` と `owner_info.read` は `sensitive_access` を、印を付ける時は `external_read` を、拒否した時は `rule_denied` を渡す'
+      - '`sensitive_access` は `rule_denied` より先に渡し、社員ごと止めた時は `rule_denied` を渡さない'
       x-errors:
       - '409 `stopped`: 社員かタスクが停止中'
       requestBody:
