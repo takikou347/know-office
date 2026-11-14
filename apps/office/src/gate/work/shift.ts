@@ -54,6 +54,9 @@ const PendingWork = z
   })
   .strict();
 
+/** 退勤の後に作り直す日ごとの集計。区分が重なった時の通知の ID も退勤の時に決めるので、区分の行を書いた後に何度作り直しても、集計の値も通知も増えない */
+const PendingTotals = z.object({ day: z.string(), reasons: z.array(z.string()), at: z.number(), noticeId: z.string() }).strict();
+
 /** 社員 DO の記憶。DO が起き直しても残す */
 export const Memory = z
   .object({
@@ -79,8 +82,8 @@ export const Memory = z
     workedMs: z.number(),
     /** 次に集計を作り直す時に足す、勤怠の行に出ない理由 (`<出来事>:<理由>`) */
     reasons: z.array(z.string()),
-    /** まだ D1 に書いたと確かめていない行。起き直したら同じ ID で書き直す */
-    pending: z.object({ attendance: z.array(PendingAttendance), work: z.array(PendingWork) }).strict(),
+    /** まだ D1 に書いたと確かめていない行と、まだ作り直したと確かめていない集計。起き直したら同じ ID で書き直し、集計を作り直す */
+    pending: z.object({ attendance: z.array(PendingAttendance), work: z.array(PendingWork), totals: z.array(PendingTotals).default([]) }).strict(),
   })
   .strict();
 
@@ -102,7 +105,7 @@ export const EMPTY_MEMORY: Memory = {
   retryAt: null,
   workedMs: 0,
   reasons: [],
-  pending: { attendance: [], work: [] },
+  pending: { attendance: [], work: [], totals: [] },
 };
 
 const isWorked = (kind: AttendanceKind) => (WORKED_KINDS as readonly string[]).includes(kind);
@@ -151,13 +154,16 @@ export class Shift {
   }
 
   /**
-   * 退勤した形にする。持っているタスクは次の日へ続け、区分を閉じる
+   * 退勤した形にする。持っているタスクは次の日へ続け、区分を閉じ、日ごとの集計の作り直しを溜める
    * @param now 今の時刻
    */
   clockOut(now: number): void {
     const m = this.m;
     if (m.task) this.closeTask(now, "continued");
     this.close(now);
+    // 集計は区分の行と同じ流れで書く。間で落ちても、起き直した時に作り直す
+    if (m.day) m.pending.totals.push({ day: m.day, reasons: m.reasons, at: now, noticeId: newId(clockAt(now)) });
+    m.reasons = [];
     m.state = "off";
     m.back = null;
     m.deadline = null;

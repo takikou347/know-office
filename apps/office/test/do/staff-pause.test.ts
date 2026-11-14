@@ -1,6 +1,8 @@
 // 止められていた時間、待っていた時間、途切れたハートビートの上限と戻り方。社員と勤怠の 3.1、3.2、3.5
 import { describe, expect, it } from "vitest";
-import { CALL_TASK, DAY, hire, HOUR, jst, MINUTE, rows, run, segments, startDay, TASK, totals, useD1 } from "../helpers/staff.ts";
+import { StaffBook } from "../../src/gate/work/staff-book.ts";
+import { Memory } from "../../src/gate/work/shift.ts";
+import { CALL_TASK, DAY, type Hired, hire, HOUR, jst, MINUTE, rows, run, segments, startDay, TASK, testDb, totals, useD1 } from "../helpers/staff.ts";
 
 describe("勤怠は実際の動きから付ける", () => {
   useD1();
@@ -166,4 +168,69 @@ describe("勤怠は書き換えない", () => {
     expect(await segments()).toEqual([{ kind: "scheduled", started_at: jst(9), ended_at: jst(17), reason: "schedule", day: DAY }]);
     expect(await rows("SELECT node_id FROM work_entries")).toEqual([{ node_id: TASK.nodeId }]);
   });
+
+  it("退勤の途中で落ちても、起き直した時に日ごとの集計を作り直す", async () => {
+    const s = hire();
+    await startDay(s);
+    await crashOnClockOut(s);
+    const again = hire("builder", s.storage);
+    expect((await again.book.status(jst(16, 47))).state).toBe("off");
+    expect(await totals()).toMatchObject({ clock_out: jst(16, 46), worked_ms: 7 * HOUR + 46 * MINUTE, reasons: JSON.stringify(["leave_early:schedule"]) });
+  });
+
+  it("退勤の途中で落ちて何度起き直しても、集計を変えず、区分の重なりの通知を 1 件だけ出す", async () => {
+    const s = hire();
+    await startDay(s);
+    // 所定の勤務と重なる区分を外から足す
+    await testDb()
+      .prepare("INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, corrects, note, created_at) VALUES (?, 'builder', ?, 'call', ?, ?, 'owner_instruction', NULL, NULL, ?)")
+      .bind("0190f4a8-0000-7000-8000-0000000000a1", DAY, jst(10), jst(10, 30), jst(10, 30))
+      .run();
+    await crashOnClockOut(s);
+    const rebuilt = await totals();
+    const notices = await rows("SELECT id, kind FROM notices");
+    expect(notices.map((n) => n["kind"])).toEqual(["attendance_overlap"]);
+    // 記憶を書かない読みで起き直すと、溜めた集計をもう一度作り直す
+    await hire("builder", s.storage).book.status(jst(16, 47));
+    expect(await totals()).toEqual(rebuilt);
+    expect(await rows("SELECT id, kind FROM notices")).toEqual(notices);
+    const again = hire("builder", s.storage);
+    await again.book.wake(jst(16, 48));
+    expect(await totals()).toEqual(rebuilt);
+    expect(await rows("SELECT id, kind FROM notices")).toEqual(notices);
+    expect(await s.storage.get("memory")).toMatchObject({ pending: { totals: [] } });
+  });
+
+  it("集計を溜める形の前に書いた記憶からも起き直せる", async () => {
+    const s = hire();
+    await startDay(s);
+    // 前の形の記憶には pending.totals が無い
+    const { pending, ...rest } = Memory.parse(await s.storage.get("memory"));
+    const { totals: _t, ...older } = pending;
+    await s.storage.put("memory", { ...rest, pending: older });
+    const again = hire("builder", s.storage);
+    again.at = s.at;
+    expect((await again.book.status(jst(9, 1))).state).toBe("working");
+    await run(again, jst(16, 59));
+    await again.book.finish("done", jst(16, 59));
+    await run(again, jst(17));
+    expect(await totals()).toMatchObject({ clock_out: jst(17), worked_ms: 8 * HOUR });
+  });
 });
+
+/**
+ * 出勤した社員を 16 時 46 分にタスクを取らせず早く退勤させ、退勤の記憶を書いた後、ワークスペースを止める所で落とす
+ * @param s 社員
+ */
+async function crashOnClockOut(s: Hired): Promise<void> {
+  await run(s, jst(16, 40));
+  await s.book.finish("done", jst(16, 40));
+  await run(s, jst(16, 46));
+  const crashing = new StaffBook("builder", s.storage, testDb(), {
+    start: () => Promise.resolve(),
+    stop: () => Promise.reject(new Error("ワークスペースを止める前に落ちた")),
+    wrapUp: () => Promise.resolve(),
+    restart: () => Promise.resolve(),
+  });
+  await expect(crashing.take(TASK, 20 * MINUTE, jst(16, 46))).rejects.toThrow("ワークスペースを止める前に落ちた");
+}

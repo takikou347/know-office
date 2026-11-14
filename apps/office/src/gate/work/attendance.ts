@@ -157,19 +157,28 @@ export function sumDay(rows: AttendanceRow[], base: { staffId: StaffId; day: str
  * @param base.clockIn 行がまだ無い時の出勤の時刻
  * @param base.out 退勤したか
  * @param base.reasons 行に出ない理由 (早い退勤、休み)。前の集計の理由に足す
+ * @param base.noticeId 区分が重なった時の通知の ID。渡すと、同じ ID で何度作り直しても通知は 1 件
  * @param now 今の時刻
  * @returns 無し
  */
-export async function rebuildDailyTotals(db: D1Database, base: { staffId: StaffId; day: string; clockIn: number | null; out: boolean; reasons: string[] }, now: number): Promise<void> {
+export async function rebuildDailyTotals(
+  db: D1Database,
+  base: { staffId: StaffId; day: string; clockIn: number | null; out: boolean; reasons: string[]; noticeId?: string },
+  now: number,
+): Promise<void> {
   const orm = drizzle(db);
   const rows = await orm.select().from(attendance).where(and(eq(attendance.staffId, base.staffId), eq(attendance.day, base.day)));
   const [before] = await orm.select({ reasons: dailyTotals.reasons }).from(dailyTotals).where(and(eq(dailyTotals.staffId, base.staffId), eq(dailyTotals.day, base.day)));
-  const { totals, overlap } = sumDay(effectiveRows(rows), { ...base, reasons: [...keptReasons(before?.reasons), ...base.reasons] });
+  const { noticeId, ...sumBase } = base;
+  const { totals, overlap } = sumDay(effectiveRows(rows), { ...sumBase, reasons: [...keptReasons(before?.reasons), ...base.reasons] });
   const { staffId: _s, day: _d, ...rest } = totals;
   const upsert = orm.insert(dailyTotals).values(totals).onConflictDoUpdate({ target: [dailyTotals.staffId, dailyTotals.day], set: rest });
   if (overlap) {
     const body = `${base.staffId} の ${base.day} の勤怠で、同じ時刻が 2 つの区分に入っている`;
-    const notice = orm.insert(notices).values({ id: newId(clockAt(now)), at: now, level: "warn", kind: "attendance_overlap", title: "勤怠の区分が重なっている", body, scope: "office" });
+    const notice = orm
+      .insert(notices)
+      .values({ id: noticeId ?? newId(clockAt(now)), at: now, level: "warn", kind: "attendance_overlap", title: "勤怠の区分が重なっている", body, scope: "office" })
+      .onConflictDoNothing();
     await orm.batch([upsert, notice]);
     return;
   }

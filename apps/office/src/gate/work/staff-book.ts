@@ -374,7 +374,7 @@ export class StaffBook {
   }
 
   /**
-   * 退勤する。区分とタスクを閉じ、ワークスペースを止め、集計を作り直し、次の予定を読む
+   * 退勤する。区分とタスクを閉じて集計を作り直し、ワークスペースを止め、次の予定を読む
    * @param s 記憶
    * @param now 今の時刻
    */
@@ -382,26 +382,25 @@ export class StaffBook {
     s.clockOut(now);
     await this.#commit(s);
     await this.workspace.stop();
-    if (s.m.day) await rebuildDailyTotals(this.db, { staffId: this.staffId, day: s.m.day, clockIn: null, out: true, reasons: s.m.reasons }, now);
-    s.m.reasons = [];
     await this.#refresh(s, now);
   }
 
   /**
-   * 溜めた行を書く。先に記憶に書いてから、D1 に同じ ID で 1 度だけ書く。間で落ちても、起き直した時に同じ行を書き直すだけで済む
+   * 溜めた行を書き、溜めた集計を作り直す。先に記憶に書いてから、D1 に同じ ID で 1 度だけ書き、その後に集計を作り直す。間で落ちても、起き直した時に同じ行を書き直し、同じ集計を作り直すだけで済む
    * @param s 記憶
    */
   async #commit(s: Shift): Promise<void> {
-    const { attendance: segments, work } = s.m.pending;
+    const { attendance: segments, work, totals } = s.m.pending;
     const statements: BatchItem<"sqlite">[] = [
       ...segments.map((row) => this.#orm.insert(attendance).values(row).onConflictDoNothing()),
       ...work.map((row) => this.#orm.insert(workEntries).values(row).onConflictDoNothing()),
     ];
-    const [first, ...rest] = statements;
-    if (!first) return;
+    if (statements.length === 0 && totals.length === 0) return;
     await this.storage.put("memory", s.m);
-    await this.#orm.batch([first, ...rest]);
-    s.m.pending = { attendance: [], work: [] };
+    const [first, ...rest] = statements;
+    if (first) await this.#orm.batch([first, ...rest]);
+    for (const t of totals) await rebuildDailyTotals(this.db, { staffId: this.staffId, day: t.day, clockIn: null, out: true, reasons: t.reasons, noticeId: t.noticeId }, t.at);
+    s.m.pending = { attendance: [], work: [], totals: [] };
   }
 
   /**
