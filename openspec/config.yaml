@@ -4,7 +4,7 @@ context: |
   Language: ja
   All artifacts must be written in ja.
   Keep OpenSpec structural headings and SHALL/MUST keywords in English.
-  know-office は KNOW IDEA の社内の管理アプリ。AI 社員が自分で仕事を進めるのを、オーナーがスマホ、iPad、PC で眺め、おかしな時だけ一言かける。
+  know-office は KNOW IDEA の社内の管理アプリ。AI 社員が自分でタスクを進めるのを、オーナーがスマホ、iPad、PC で眺め、おかしな時だけ一言かける。
   オーナーが決めるのは、お金が増えることと外部連携だけ。
 
 rules:
@@ -12,7 +12,7 @@ rules:
     - 結論から書き、作る物と実現する事を書く。作らない物は書かない
     - お金が増えることか外部連携に当たる時は、そう書く
   specs:
-    - 場面はそのまま試験の名前になる。数、時刻、上限を具体的に書く
-    - 作る物の形 (API、表、受け口) は書かず、knowidea の詳細設計に書く
+    - シナリオはそのままテストの名前になる。数、時刻、上限を具体的に書く
+    - 作る物の形 (API、表、インターフェース) は書かず、knowidea の詳細設計に書く
   tasks:
     - 落ちるテストを先に書くタスクを、作るタスクの前に置く
