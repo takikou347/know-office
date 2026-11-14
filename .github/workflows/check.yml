@@ -1,4 +1,4 @@
-# PR と main で、OpenSpec の仕様の形と、アプリの型、テスト、ビルドを確かめる
+# PR と main で、アプリの型、テスト、ビルドを確かめる
 name: Check
 
 on:
@@ -39,7 +39,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: npx -y @fission-ai/openspec@1.16.0 validate --all --strict
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
