@@ -12,6 +12,10 @@
   "dependencies": {
     "@know-office/core": "workspace:*",
     "hono": "4.13.17",
+    "knowidea-css": "0.12.0",
+    "knowidea-icons": "0.12.0",
+    "knowidea-tokens": "0.12.0",
+    "knowidea-ui": "0.12.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

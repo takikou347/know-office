@@ -1,0 +1,24 @@
+/* know-office だけの見た目。部品の見た目は knowidea-ui に置く */
+
+/* 勤怠の表: 広い幅は 6 列。スマートフォンは始めた、終えた、仕事の 3 列で、仕事を開くと残りが出る */
+.ko-attendance .ko-narrow {
+  display: none;
+}
+
+@media (width < 600px) {
+  .ko-attendance :is(th, td):nth-child(n + 4),
+  .ko-attendance .ko-wide {
+    display: none;
+  }
+
+  .ko-attendance .ko-narrow {
+    display: block;
+  }
+
+  .ko-attendance summary {
+    min-block-size: 44px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+}
