@@ -15,6 +15,9 @@ const pages: readonly { name: string; path: string; heading: string }[] = [
   { name: "サービスの様子", path: "/services/knowidea-ui", heading: "アイデアとサービス" },
 ];
 
+/** focus がどの物にも無く、body にある時の訳 */
+const BODY = "focus が body にある";
+
 /** WCAG 2.2 AA までの決まり */
 const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
@@ -24,9 +27,9 @@ const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
  * @returns 見えない時はその訳、見える時は null
  */
 async function focusProblem(page: Page): Promise<string | null> {
-  return page.evaluate(() => {
+  return page.evaluate((body) => {
     const el = document.activeElement;
-    if (!(el instanceof HTMLElement) || el === document.body) return "focus が body にある";
+    if (!(el instanceof HTMLElement) || el === document.body) return body;
     const name = `${el.tagName.toLowerCase()} 「${(el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 30)}」`;
     // カードのように、中のリンクに focus があると外の枠に輪を出す物もあるので、親もたどる
     let ringed = false;
@@ -41,7 +44,7 @@ async function focusProblem(page: Page): Promise<string | null> {
     // 上と下に貼り付く帯の下に隠れていない (WCAG 2.2 の 2.4.11)
     const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return hit && (el === hit || el.contains(hit)) ? null : `${name} が別の物に隠れている`;
-  });
+  }, BODY);
 }
 
 /**
@@ -51,9 +54,16 @@ async function focusProblem(page: Page): Promise<string | null> {
  * @param max Tab を押す上限
  */
 async function tabTo(page: Page, target: Locator, max = 60): Promise<void> {
+  let leftPage = false;
   for (let n = 0; n < max; n++) {
     await page.keyboard.press("Tab");
-    expect(await focusProblem(page)).toBeNull();
+    const problem = await focusProblem(page);
+    // 最後の物から Tab を押すと、Safari は focus をページの外 (アドレス欄など) へ出し、次の Tab で先頭に戻る。1 度だけは許す
+    if (problem === BODY && !leftPage) {
+      leftPage = true;
+      continue;
+    }
+    expect(problem).toBeNull();
     if (await target.evaluate((el) => el === document.activeElement)) return;
   }
   throw new Error(`Tab を ${max} 回押しても届かない: ${target.toString()}`);
