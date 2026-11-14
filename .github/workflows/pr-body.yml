@@ -1,0 +1,25 @@
+# PR の説明に AI の署名や帰属の行が無い事を確かめる。説明を直した時も回る
+name: PR body
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  body:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: PR の説明に署名や帰属の行を残さない
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        # knowidea の tools/check.py の SIGNATURE に、PR を作る道具が足すリンク (claude.ai/code) と HTML のコメントの行を足した形
+        run: |
+          set -eu
+          if printf '%s' "$BODY" | grep -qiE 'Co-Authored-By:.*(Claude|anthropic)|Claude-Session:|Generated (with|by) \[?Claude|claude\.ai/code|claude-projects-attribution'; then
+            echo "PR の説明に署名や帰属の行がある。説明から消す"
+            exit 1
+          fi
