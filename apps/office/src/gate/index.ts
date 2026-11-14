@@ -7,6 +7,7 @@ const gate = createApp().route("/", system);
 
 registerComponents(gate);
 
+/** ゲートウェイの型。画面は Hono の RPC でこの型を受ける */
 export type Gate = typeof gate;
 
 export default gate;

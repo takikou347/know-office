@@ -3,6 +3,7 @@ import { AppError } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import type { GateEnv } from "./env.ts";
 
+/** 受ける本文の上限 (1MB)。API の決まりの 1.2 の 7 */
 export const MAX_BODY_BYTES = 1024 * 1024;
 
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);

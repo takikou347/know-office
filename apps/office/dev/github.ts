@@ -1,6 +1,9 @@
 // 開発環境の代わりの GitHub。テストが置いた返事を返し、署名付きの通知を送る
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
+import { z } from "zod";
+
+const FakeRoute = z.object({ route: z.string(), body: z.unknown() });
 
 /** 届いた要求 */
 export type GitHubRequest = {
@@ -31,7 +34,7 @@ export function createFakeGitHub(): FakeGitHub {
 
   const app = new Hono()
     .post("/__fake/routes", async (c) => {
-      const { route, body } = await c.req.json<{ route: string; body: unknown }>();
+      const { route, body } = FakeRoute.parse(await c.req.json());
       routes.set(route, body);
       return c.body(null, 204);
     })
@@ -40,7 +43,7 @@ export function createFakeGitHub(): FakeGitHub {
       if (!c.req.header("authorization")) return c.json({ message: "Requires authentication" }, 401);
       const route = `${c.req.method} ${c.req.path}`;
       const text = await c.req.text();
-      requests.push({ route, body: text ? (JSON.parse(text) as unknown) : null });
+      requests.push({ route, body: text ? z.unknown().parse(JSON.parse(text)) : null });
       if (/^POST \/app\/installations\/\d+\/access_tokens$/.test(route)) {
         tokens += 1;
         return c.json({ token: `ghs_fake${String(tokens)}`, expires_at: "2099-01-01T00:00:00Z" }, 201);
@@ -76,6 +79,7 @@ export function sendWebhook(options: WebhookOptions): Promise<Response> {
   const signature = `sha256=${createHmac("sha256", options.secret).update(body).digest("hex")}`;
   const req = new Request(options.url, {
     method: "POST",
+    signal: AbortSignal.timeout(10_000),
     body,
     headers: {
       "content-type": "application/json",

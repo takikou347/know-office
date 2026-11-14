@@ -37,6 +37,7 @@ const DOCS_HTML = `<!doctype html>
 <body><div id="swagger"></div><script src="/swagger/swagger-ui-bundle.js"></script><script src="/swagger/swagger-init.js"></script></body>
 </html>`;
 
+/** システムのルート: 稼働確認、Swagger UI、OpenAPI の文書 */
 export const system = createRouter()
   .openapi(getHealth, (c) => ok(c, health("gate")))
   .openapi(getApiDocs, (c) => {

@@ -21,6 +21,7 @@ export const STATUS_RESPONSES = {
   503: ["Unavailable", "ワークスペースが起動していない。Retry-After に再試行までの秒数"],
 } as const;
 
+/** 失敗として返すステータス */
 export type ProblemStatus = keyof typeof STATUS_RESPONSES;
 
 /**

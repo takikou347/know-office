@@ -1,6 +1,7 @@
 // API の失敗の種類。ステータスと短い題を code ごとに決め、画面は code で分ける
 // 正本は knowidea の services/know-office/docs/04-detail/1-api.md の 3.1
 
+/** 失敗の種類の並び。problem+json の code と type の末尾に使う */
 export const ERROR_CODES = [
   "malformed_request",
   "unauthenticated",
@@ -23,6 +24,7 @@ export const ERROR_CODES = [
   "upstream_timeout",
 ] as const;
 
+/** 失敗の種類。`ERROR_CODES` の 1 つ */
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 /** code ごとのステータスと題 */

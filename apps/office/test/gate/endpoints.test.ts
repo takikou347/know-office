@@ -26,6 +26,17 @@ describe("開発環境の代わりの物", () => {
     expect(endpoints({ ENVIRONMENT: "development", ACCESS_TEAM: "team", DEV_FAKES_URL: "http://localhost:5199" })).toEqual(FAKES);
   });
 
+  it.each(["Development", "dev", "", "preview", " development"])("ENVIRONMENT が %j の時は本物の宛先を返す", (value) => {
+    expect(endpoints({ ENVIRONMENT: value, ACCESS_TEAM: "team", DEV_FAKES_URL: "http://localhost:5199" })).toEqual(REAL);
+  });
+
+  it.each(["http://localhost:5199@evil.example", "http://localhost:5199/", "http://localhost.evil.example:5199", "https://localhost:5199"])(
+    "development でも DEV_FAKES_URL が %j なら使わない",
+    (url) => {
+      expect(() => endpoints({ ENVIRONMENT: "development", ACCESS_TEAM: "team", DEV_FAKES_URL: url })).toThrow(expect.objectContaining({ code: "internal" }));
+    },
+  );
+
   it("development でも代わりの物が手元に無ければ使わない", () => {
     expect(() => endpoints({ ENVIRONMENT: "development", ACCESS_TEAM: "team", DEV_FAKES_URL: "https://evil.example.com" })).toThrow(
       expect.objectContaining({ code: "internal" }),
