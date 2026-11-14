@@ -1,11 +1,15 @@
 // ワークスペースのコンテナの DO と、コンテナの外向きの通信の受け手。判断は WorkspaceBox と routeEgress に置き、ここは包むだけ (社員が考えるの 3.1)
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { AppError, StaffId, systemClock } from "@know-office/core";
+import { z } from "zod";
 import { routeEgress } from "../egress.ts";
 import type { Bindings, WorkspaceContainer } from "../env.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import type { Caller } from "../work/ticket.ts";
 import { type ContainerLike, WorkspaceBox } from "../work/workspace-box.ts";
+
+/** ワークスペースのサーバーの鍵を置く、記憶の鍵の名前 */
+const WORKSPACE_KEY = "workspaceKey";
 
 /** 受け手に結ぶ、送ったワークスペース。コンテナを起こした DO だけが決め、コンテナからは変えられない */
 type EgressProps = Caller;
@@ -104,7 +108,13 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
     const caller: Caller = { staffId: parsed.data, workspaceId: this.ctx.id.toString() };
     // ctx.container は getTcpPort の Fetcher を返す。WorkspaceBox が使う fetch だけを持つ
     const like: ContainerLike<Fetcher> = container;
-    return new WorkspaceBox(like, (props) => this.ctx.exports.WorkspaceEgress({ props }), caller, sleep);
+    const storage = this.ctx.storage;
+    // 鍵は DO が起き直してもコンテナが動いている間は使うので、記憶に置く
+    const keys = {
+      get: async () => z.string().optional().parse(await storage.get(WORKSPACE_KEY)),
+      put: (key: string) => storage.put(WORKSPACE_KEY, key),
+    };
+    return new WorkspaceBox(like, (props) => this.ctx.exports.WorkspaceEgress({ props }), caller, { wait: sleep, keys });
   }
 
   /**

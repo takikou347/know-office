@@ -17,6 +17,25 @@ const POLL_MS = 1000;
 
 const HealthAnswer = z.object({ data: Health }).loose();
 
+/** WorkspaceBox の依り所。WorkspaceDO は DO の記憶と setTimeout、テストは代わりの物を渡す */
+export type BoxDeps = {
+  /** 待つ。テストは待たずに数える */
+  wait(ms: number): Promise<void>;
+  /** ワークスペースのサーバーの鍵を置く所。起こすたびに作り直し、コンテナが動いている間は同じ物を使う */
+  keys: { get(): Promise<string | undefined>; put(key: string): Promise<void> };
+};
+
+/** ワークスペースのサーバーの鍵を渡す環境変数。apps/workspace の WORKSPACE_KEY_ENV と同じ */
+const WORKSPACE_KEY_ENV = "WORKSPACE_KEY";
+
+/**
+ * ワークスペースのサーバーの鍵を作る
+ * @returns 32 バイトの乱数の 16 進
+ */
+function newWorkspaceKey(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** DO の ctx.container のうち使う所。テストは代わりの物を渡す */
 export type ContainerLike<F = unknown> = {
   /** 動いているか */
@@ -40,13 +59,13 @@ export class WorkspaceBox<F = unknown> {
    * @param container コンテナ
    * @param egress 送ったワークスペースを結んだ、ゲートウェイの受け手を作る
    * @param caller このワークスペース
-   * @param wait 待つ。テストは待たずに数える
+   * @param deps 待ち方と鍵を置く所
    */
   constructor(
     private readonly container: ContainerLike<F>,
     private readonly egress: (caller: Caller) => F,
     private readonly caller: Caller,
-    private readonly wait: (ms: number) => Promise<void>,
+    private readonly deps: BoxDeps,
   ) {}
 
   /**
@@ -57,7 +76,7 @@ export class WorkspaceBox<F = unknown> {
     for (let attempt = 0; attempt <= START_RETRIES; attempt += 1) {
       if (attempt > 0) {
         await this.container.destroy();
-        await this.wait(START_RETRY_MS);
+        await this.deps.wait(START_RETRY_MS);
       }
       if (!this.container.running) await this.#boot();
       if (await this.#healthy()) return;
@@ -98,13 +117,16 @@ export class WorkspaceBox<F = unknown> {
 
   /**
    * 受け手を付けてからコンテナを起こす。受け手を付けない宛先には、外向きの通信を切るので出られない
+   * ワークスペースのサーバーはコンテナの中の社員からも届くので、起こすたびに鍵を作って渡し、この鍵の無い要求を断らせる
    */
   async #boot(): Promise<void> {
     const fetcher = this.egress(this.caller);
     for (const host of WORKSPACE_EGRESS.http) await this.container.interceptOutboundHttp(host, fetcher);
     for (const host of WORKSPACE_EGRESS.https) await this.container.interceptOutboundHttps(host, fetcher);
-    // 鍵は渡さない。作業トークンは /v1/runs で渡す
-    this.container.start({ enableInternet: false, env: { NODE_EXTRA_CA_CERTS: CONTAINER_CA } });
+    // ゲートウェイの鍵は渡さない。作業トークンは /v1/runs で渡す
+    const key = newWorkspaceKey();
+    await this.deps.keys.put(key);
+    this.container.start({ enableInternet: false, env: { NODE_EXTRA_CA_CERTS: CONTAINER_CA, [WORKSPACE_KEY_ENV]: key } });
   }
 
   /**
@@ -119,7 +141,7 @@ export class WorkspaceBox<F = unknown> {
       } catch {
         // 起きる前はつながらない
       }
-      await this.wait(POLL_MS);
+      await this.deps.wait(POLL_MS);
     }
     return false;
   }
@@ -131,14 +153,16 @@ export class WorkspaceBox<F = unknown> {
    * @param body 本文
    * @param expected 成功のステータス
    * @throws conflict 409 が返った時
-   * @throws unavailable 届かない、ほかのステータスの時
+   * @throws unavailable 鍵が無い、届かない、ほかのステータスの時
    */
   async #call(method: string, path: string, body: unknown, expected: number): Promise<void> {
+    const key = await this.deps.keys.get();
+    if (key === undefined) throw new AppError("unavailable", "ワークスペースの鍵が無い。起こし直す");
     let res: Response;
     try {
       res = await this.container.getTcpPort(WORKSPACE_PORT).fetch(`http://workspace${path}`, {
         method,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });

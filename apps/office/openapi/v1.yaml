@@ -5594,12 +5594,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RestoreInput'
-      security: []
+      security:
+      - workspaceKey: []
       responses:
         '204':
           description: 成功。レスポンス本文なし
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -5643,12 +5646,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RunInput'
-      security: []
+      security:
+      - workspaceKey: []
       responses:
         '202':
           description: 受け付けた。進捗は /ws/v1/events で送られる
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -5688,12 +5694,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/WorkspaceMessageInput'
-      security: []
+      security:
+      - workspaceKey: []
       responses:
         '204':
           description: 成功。レスポンス本文なし
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -5725,12 +5734,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/TicketInput'
-      security: []
+      security:
+      - workspaceKey: []
       responses:
         '204':
           description: 成功。レスポンス本文なし
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -5763,12 +5775,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ReasonInput'
-      security: []
+      security:
+      - workspaceKey: []
       responses:
         '204':
           description: 成功。レスポンス本文なし
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -5797,6 +5812,10 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: タスクごとに発行する 1 時間有効の作業トークン (HS256)
+    workspaceKey:
+      type: http
+      scheme: bearer
+      description: ワークスペースの DO がコンテナを起こすたびに作り、環境変数で渡す鍵。社員 DO の呼び出しだけが持つ
   parameters:
     Cursor:
       name: cursor

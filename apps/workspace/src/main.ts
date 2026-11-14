@@ -1,7 +1,7 @@
-// ワークスペースのコンテナの入口。8080 番でサーバーを起こす
+// ワークスペースのコンテナの入口。ゲートウェイの鍵を環境変数から取り出し、8080 番でサーバーを起こす
 import { AppError, log } from "@know-office/core";
 import { Runner } from "./run.ts";
-import { createWorkspaceServer } from "./server.ts";
+import { createWorkspaceServer, takeWorkspaceKey } from "./server.ts";
 
 /** ワークスペースのサーバーの番号 */
 const PORT = 8080;
@@ -12,4 +12,6 @@ const runner = new Runner(
   (error) => log("error", "run_failed", { error: error instanceof Error ? error.message : "unknown" }),
 );
 
-createWorkspaceServer(runner).listen(PORT, "0.0.0.0");
+// SDK と社員のコマンドを動かす前に鍵を process.env から消す
+const key = takeWorkspaceKey(process.env);
+createWorkspaceServer(runner, key).listen(PORT, "0.0.0.0");

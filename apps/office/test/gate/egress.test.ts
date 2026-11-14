@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { routeEgress, WORKSPACE_EGRESS, type Caller } from "../../src/gate/egress.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
-import { type ContainerLike, WorkspaceBox } from "../../src/gate/work/workspace-box.ts";
+import { type BoxDeps, type ContainerLike, WorkspaceBox } from "../../src/gate/work/workspace-box.ts";
 import { jst, NODE, startWork, useGuardWorld } from "../helpers/guard.ts";
 
 const w = useGuardWorld();
@@ -10,7 +10,7 @@ const w = useGuardWorld();
 /** 受け手の代わり。誰から来たかを持つ */
 type FakeEgress = { caller: Caller; fetch(): Promise<Response> };
 /** 代わりのコンテナが受けた事 */
-type Seen = { started: ContainerStartOptions[]; intercepts: [string, string, Caller][]; fetched: string[] };
+type Seen = { started: ContainerStartOptions[]; intercepts: [string, string, Caller][]; fetched: string[]; headers: Headers[] };
 type ContainerStartOptions = Parameters<ContainerLike["start"]>[0];
 
 /**
@@ -19,7 +19,7 @@ type ContainerStartOptions = Parameters<ContainerLike["start"]>[0];
  * @returns コンテナと受けた事
  */
 function fakeContainer(healthy = true): { container: ContainerLike<FakeEgress>; seen: Seen } {
-  const seen: Seen = { started: [], intercepts: [], fetched: [] };
+  const seen: Seen = { started: [], intercepts: [], fetched: [], headers: [] };
   let running = false;
   const container: ContainerLike<FakeEgress> = {
     get running() {
@@ -32,9 +32,13 @@ function fakeContainer(healthy = true): { container: ContainerLike<FakeEgress>; 
     interceptOutboundHttp: (host, fetcher) => Promise.resolve(void seen.intercepts.push(["http", host, fetcher.caller])),
     interceptOutboundHttps: (host, fetcher) => Promise.resolve(void seen.intercepts.push(["https", host, fetcher.caller])),
     getTcpPort: () => ({
-      fetch: (url) => {
+      fetch: (url, init) => {
         seen.fetched.push(url);
-        return healthy ? Promise.resolve(Response.json({ data: { ok: true, part: "workspace" }, meta: { traceId: "t" } })) : Promise.reject(new Error("まだ起きていない"));
+        seen.headers.push(new Headers(init?.headers));
+        if (!healthy) return Promise.reject(new Error("まだ起きていない"));
+        if (url.endsWith("/v1/runs")) return Promise.resolve(new Response(null, { status: 202 }));
+        if (url.endsWith("/v1/ticket")) return Promise.resolve(new Response(null, { status: 204 }));
+        return Promise.resolve(Response.json({ data: { ok: true, part: "workspace" }, meta: { traceId: "t" } }));
       },
     }),
     destroy: () => {
@@ -54,6 +58,32 @@ function egressFor(caller: Caller): FakeEgress {
   return { caller, fetch: () => Promise.resolve(new Response("")) };
 }
 
+/** ワークスペースの鍵を置く所の代わり */
+type FakeKeys = { value: string | undefined; get(): Promise<string | undefined>; put(key: string): Promise<void> };
+
+/**
+ * ワークスペースの鍵を置く所の代わりを作る
+ * @returns 置いた鍵を持つ入れ物
+ */
+function fakeKeys(): FakeKeys {
+  const keys: FakeKeys = {
+    value: undefined,
+    get: () => Promise.resolve(keys.value),
+    put: (key) => Promise.resolve(void (keys.value = key)),
+  };
+  return keys;
+}
+
+/**
+ * 待たずに数える依り所を作る
+ * @param waits 待った長さを足す先
+ * @param keys 鍵を置く所
+ * @returns WorkspaceBox の依り所
+ */
+function boxDeps(waits: number[] = [], keys: FakeKeys = fakeKeys()): BoxDeps {
+  return { wait: (ms) => Promise.resolve(void waits.push(ms)), keys };
+}
+
 /**
  * ワークスペースの要求を受け手に渡す
  * @param url 宛先
@@ -69,7 +99,7 @@ describe("鍵はゲートウェイだけが持つ", () => {
   it("ワークスペースが外へ出る", async () => {
     const { container, seen } = fakeContainer();
     const caller: Caller = { staffId: "builder", workspaceId: "ws-builder" };
-    await new WorkspaceBox(container, egressFor, caller, () => Promise.resolve()).start();
+    await new WorkspaceBox(container, egressFor, caller, boxDeps()).start();
     // ゲートウェイ、Claude、GitHub の宛先だけを、送ったワークスペースを結んだゲートウェイの受け手に回す
     expect(seen.intercepts.toSorted((a, b) => a[1].localeCompare(b[1]))).toEqual([
       ["https", "api.anthropic.com", caller],
@@ -94,7 +124,7 @@ describe("鍵はゲートウェイだけが持つ", () => {
 
   it("ワークスペースから直に外へ出る", async () => {
     const { container, seen } = fakeContainer();
-    await new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, () => Promise.resolve()).start();
+    await new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps()).start();
     // 受け手を付けた宛先のほかは、コンテナの外向きの通信を切って届かなくする
     expect(seen.started).toHaveLength(1);
     expect(seen.started[0]?.enableInternet).toBe(false);
@@ -122,10 +152,40 @@ describe("ワークスペースの起こし方", () => {
   it("/v1/health が返るまで待ち、60 秒で起きなければ 30 秒おきに 3 回やり直してから失敗を返す", async () => {
     const { container, seen } = fakeContainer(false);
     const waits: number[] = [];
-    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, (ms) => Promise.resolve(void waits.push(ms)));
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps(waits));
     await expect(box.start()).rejects.toMatchObject({ code: "unavailable" });
     expect(seen.started).toHaveLength(4);
     expect(waits.filter((ms) => ms === 30_000)).toHaveLength(3);
     expect(seen.fetched.every((url) => url.endsWith("/v1/health"))).toBe(true);
+  });
+});
+
+describe("ワークスペースのサーバーはゲートウェイからだけ受ける", () => {
+  const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す" };
+
+  it("起こすたびに新しい鍵を作ってコンテナに渡し、タスクの開始と作業トークンの差し替えに付ける", async () => {
+    const { container, seen } = fakeContainer();
+    const keys = fakeKeys();
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps([], keys));
+    await box.start();
+    const first = seen.started[0]?.env?.WORKSPACE_KEY;
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(keys.value).toBe(first);
+    await box.run(RUN);
+    await box.replaceTicket("ticket-2");
+    expect(seen.headers.slice(-2).map((h) => h.get("authorization"))).toEqual([`Bearer ${String(first)}`, `Bearer ${String(first)}`]);
+    await box.stop();
+    await box.start();
+    const second = seen.started[1]?.env?.WORKSPACE_KEY;
+    expect(second).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).not.toBe(first);
+    expect(keys.value).toBe(second);
+  });
+
+  it("鍵が無ければワークスペースを呼ばずに unavailable を返す", async () => {
+    const { container, seen } = fakeContainer();
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps());
+    await expect(box.run(RUN)).rejects.toMatchObject({ code: "unavailable" });
+    expect(seen.fetched).toEqual([]);
   });
 });
