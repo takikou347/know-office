@@ -227,6 +227,15 @@ describe("同時に変えた時の版", () => {
     expect(await count(world, "SELECT COUNT(*) AS n FROM service_settings")).toBe(1);
   });
 
+  it("古い版で弱める変更は、パスキーの確認より先に版の違いで断る", async () => {
+    const ui = await service(world, "knowidea-ui", "example/knowidea-ui");
+    // 先に強めた後で、読んだ時の版 0 のまま元の値へ戻すのは、今の値から見ると弱める変更になる
+    await api(world, "PUT", `/api/v1/services/${ui}/settings/mergeWhen`, { version: 0, value: ["checks", "reviewer", "owner"], reason: "強める" });
+    expect(await api(world, "PUT", `/api/v1/services/${ui}/settings/mergeWhen`, { version: 0, value: ["checks", "reviewer"], reason: "古い版" }, 409)).toMatchObject({ code: "conflict" });
+    await api(world, "PUT", "/api/v1/settings/service.mergeWhen", { version: 0, value: ["checks", "reviewer", "owner"], reason: "強める" });
+    expect(await api(world, "PUT", "/api/v1/settings/service.mergeWhen", { version: 0, value: ["checks", "reviewer"], reason: "古い版" }, 409)).toMatchObject({ code: "conflict" });
+  });
+
   it("同じ版で office の初期値を同時に変えると、片方だけが入る", async () => {
     const send = (value: string[]) => world.gate.request("/api/v1/settings/service.mergeWhen", {
       method: "PUT",

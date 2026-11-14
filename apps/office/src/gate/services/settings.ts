@@ -173,6 +173,8 @@ export async function updateServiceSetting(
   if (key === "staffId") value = checkValue(OWN_SETTINGS.staffId, input.value);
   else if (input.value !== null) value = checkValue(INHERITED_SETTINGS[key], input.value);
   const current = (await loadServiceSettings(db, serviceId)).find((s) => s.key === key);
+  // 弱めるかは読んだ版の値と比べる。古い版のまま送った変更は、今の値と比べず先に断る
+  if (current?.version !== version) throw new AppError("conflict", "バージョンが違う");
   let defaultVersion: number | null = null;
   if (isInheritedKey(key)) {
     // 初期値に戻す時は、受け継いだ後の実効値で比べる
@@ -180,7 +182,6 @@ export async function updateServiceSetting(
     if (value === null) defaultVersion = office.version;
     if (weakens(key, current?.value, value === null ? office.value : value)) stepUp();
   }
-  if (current?.version !== version) throw new AppError("conflict", "バージョンが違う");
   await appendServiceSetting(db, { serviceId, key, value, version, defaultVersion, now });
   const after = (await loadServiceSettings(db, serviceId)).find((s) => s.key === key);
   if (!after) throw new AppError("internal", "書いた設定が読めない");
@@ -214,8 +215,9 @@ export async function updateOfficeDefault(
   if (!isInheritedKey(name)) throw new AppError("not_found", "このルートで変えられる設定の項目でない");
   const value = checkValue(INHERITED_SETTINGS[name], input.value);
   const current = (await loadOfficeDefaults(db))[name];
-  if (weakens(name, current.value, value)) stepUp();
+  // 弱めるかは読んだ版の値と比べる。古い版のまま送った変更は、今の値と比べず先に断る
   if (current.version !== version) throw new AppError("conflict", "バージョンが違う");
+  if (weakens(name, current.value, value)) stepUp();
   const next = version + 1;
   const written = await drizzle(db)
     .insert(settings)
