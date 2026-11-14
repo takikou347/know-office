@@ -1,6 +1,7 @@
 // push の前のチェックを全部走らせ、通った手順は 1 行、落ちた手順は出力の最後だけを出す。Claude の読む量を減らすため
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,15 +59,26 @@ function shell(step: ShellStep): StepResult {
  * @param root know-office の置き場
  * @param argv 命令の引数。`--e2e` で画面のテストを足す
  * @param env 環境変数。`KNOWIDEA_DIR` で knowidea の置き場を渡す。無ければ隣の knowidea
+ * @param lockDir ポートの錠を置く所。同じ機械の作業ツリーで同じ所を使う
  * @returns 走らせる手順
  */
-export function stepsFor(root: string, argv: readonly string[], env: Readonly<Record<string, string | undefined>>): ShellStep[] {
+export function stepsFor(
+  root: string,
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  lockDir: string = tmpdir(),
+): ShellStep[] {
+  // test は代わりの外部 (5199)、e2e は画面 (5174) の決まったポートを使う。並べて作る別の作業ツリーと
+  // 同時に走るとポートを取り合い、別の作業ツリーの dev サーバーを使い回して違うコードを確かめてしまうので、
+  // 機械に 1 つの錠で順番に走らせる。flock の無い機械 (macOS) ではそのまま走らせる
+  const lock = JSON.stringify(join(lockDir, "know-office-ports.lock"));
+  const locked = (cmd: string) => `if command -v flock >/dev/null; then flock ${lock} ${cmd}; else ${cmd}; fi`;
   const knowidea = resolve(env.KNOWIDEA_DIR ?? join(root, "..", "knowidea"));
   const check = join(knowidea, "tools", "check.py");
   const steps: ShellStep[] = [
     { name: "lint", cmd: "pnpm lint", cwd: root },
     { name: "typecheck", cmd: "pnpm typecheck", cwd: root },
-    { name: "test", cmd: "pnpm test", cwd: root },
+    { name: "test", cmd: locked("pnpm test"), cwd: root },
     { name: "build", cmd: "pnpm build", cwd: root },
     { name: "openspec", cmd: "npx -y @fission-ai/openspec@1.16.0 validate --all --strict", cwd: root },
     existsSync(check)
@@ -79,7 +91,7 @@ export function stepsFor(root: string, argv: readonly string[], env: Readonly<Re
     },
   ];
   if (argv.includes("--e2e")) {
-    steps.push({ name: "e2e", cmd: "pnpm e2e", cwd: root });
+    steps.push({ name: "e2e", cmd: locked("pnpm e2e"), cwd: root });
   }
   return steps;
 }

@@ -48,4 +48,11 @@ void describe("走らせる手順を並べる", () => {
     const step = stepsFor("/repo/know-office", [], { KNOWIDEA_DIR: "/none" }).find((s) => s.name === "check.py");
     assert.match(step?.cmd ?? "", /\/none に無い。KNOWIDEA_DIR で置き場を渡す" && exit 1$/);
   });
+
+  void it("決まったポートを使う test と e2e は、同じ機械のほかの作業ツリーと順番に走らせる", () => {
+    const steps = stepsFor("/repo/know-office", ["--e2e"], { KNOWIDEA_DIR: "/none" }, "/tmp");
+    const locked = steps.filter((step) => step.cmd.includes("flock"));
+    assert.deepEqual(locked.map((step) => step.name), ["test", "e2e"]);
+    assert.match(locked[0]?.cmd ?? "", /^if command -v flock >\/dev\/null; then flock "\/tmp\/know-office-ports.lock" pnpm test; else pnpm test; fi$/);
+  });
 });
