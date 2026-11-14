@@ -109,6 +109,8 @@ export type NewNode = {
   assignee?: StaffId | undefined;
   priority?: number | undefined;
   repo?: string | undefined;
+  branch?: string | undefined;
+  prNumber?: number | undefined;
   source?: string | undefined;
   issueNumber?: number | undefined;
 };
@@ -121,7 +123,7 @@ export type NewNode = {
  * @returns 作った行
  * @throws validation_failed タスクでない物に種類、担当、優先度を付けた時、タスクに種類が無い時
  * @throws not_found 親が無い時
- * @throws conflict 親の種類が階層に合わない時
+ * @throws conflict 親の種類が階層に合わない時、レビューのタスクを作った社員と同じモデルか、作った社員の分からないレビューのタスクを割り振る時
  */
 export async function createNode(env: Bindings, input: NewNode, actor: Actor): Promise<NodeRow> {
   const isTask = input.kind === "task";
@@ -142,8 +144,8 @@ export async function createNode(env: Bindings, input: NewNode, actor: Actor): P
     status: "todo",
     priority: input.priority ?? DEFAULT_PRIORITY,
     repo: input.repo ?? null,
-    branch: null,
-    prNumber: null,
+    branch: input.branch ?? null,
+    prNumber: input.prNumber ?? null,
     issueNumber: input.issueNumber ?? null,
     source: input.source ?? null,
     progress: null,
@@ -152,6 +154,7 @@ export async function createNode(env: Bindings, input: NewNode, actor: Actor): P
     createdAt: actor.now,
     updatedAt: actor.now,
   };
+  if (row.taskKind === "review" && row.assignee !== null) await checkModels(env.DB, row, row.assignee);
   await drizzle(env.DB).insert(nodes).values(row);
   await appendNodeEvent(env, { nodeId: row.id, staffId: staffOrNull(actor.by), kind: "created", detail: { by: actor.by } }, actor);
   await auditFrom(env, { at: actor.now, actor: actor.by, action: "node.create", target: row.id, scope: row.scope, detail: { kind: row.kind, parentId: row.parentId }, traceId: actor.traceId });
@@ -249,29 +252,54 @@ export async function moveNode(db: D1Database, row: NodeRow, status: NodeStatus,
 }
 
 /**
+ * 状態を from から to に戻す。読み直してから書くので、間に名前などが直されていても戻せる
+ * @param db 今の状態の D1
+ * @param id ID
+ * @param from 今の状態。違えば何もしない
+ * @param to 戻す状態
+ * @param now 今の時刻
+ * @returns 戻したか
+ */
+export async function revertNode(db: D1Database, id: string, from: NodeStatus, to: NodeStatus, now: number): Promise<boolean> {
+  const row = await findNode(db, id);
+  if (row.status !== from) return false;
+  return (await moveNode(db, row, to, now)) !== null;
+}
+
+/**
  * 作った社員とレビュー担当が別のモデルである事を確かめる
  * @param db 今の状態の D1
- * @param review レビューのタスク
- * @param reviewer 割り振る社員
- * @throws conflict 作った社員と同じモデルの時
+ * @param maker 作った社員
+ * @param reviewer 確かめる社員
+ * @throws conflict 同じモデルの時。どちらかの社員の行が無い時も、同じモデルの組と区別できないので断る
  */
-export async function checkModels(db: D1Database, review: NodeRow, reviewer: string): Promise<void> {
-  const orm = drizzle(db);
-  const [made] =
-    review.repo !== null && review.prNumber !== null
-      ? await orm
-          .select({ assignee: nodes.assignee })
-          .from(nodes)
-          .where(and(eq(nodes.repo, review.repo), eq(nodes.prNumber, review.prNumber), ne(nodes.taskKind, "review")))
-          .limit(1)
-      : [];
-  if (!made?.assignee) return;
-  const models = await orm.select({ id: staff.id, model: staff.model }).from(staff);
+export async function checkPair(db: D1Database, maker: string, reviewer: string): Promise<void> {
+  const models = await drizzle(db).select({ id: staff.id, model: staff.model }).from(staff);
   const modelOf = (id: string) => models.find((s) => s.id === id)?.model;
-  // 社員の行が無い時も、同じモデルの組と区別できないので断る
-  const a = modelOf(made.assignee);
+  const a = modelOf(maker);
   const b = modelOf(reviewer);
   if (a === undefined || b === undefined || a === b) throw new AppError("conflict", "作った社員と同じモデルには確かめさせない");
+}
+
+/**
+ * レビューのタスクから作った社員をたどり、レビュー担当と別のモデルである事を確かめる
+ * @param db 今の状態の D1
+ * @param review レビューのタスク
+ * @param review.repo 確かめるリポジトリ
+ * @param review.prNumber 確かめるプルリクエストの番号
+ * @param reviewer 割り振る社員
+ * @throws conflict リポジトリかプルリクエストの番号が無い時、作った社員が分からない時、作った社員と同じモデルの時
+ */
+export async function checkModels(db: D1Database, review: Pick<NodeRow, "repo" | "prNumber">, reviewer: string): Promise<void> {
+  // 作った社員が分からないと、同じモデルの組か確かめられないので断る
+  if (review.repo === null || review.prNumber === null) throw new AppError("conflict", "レビューのタスクに確かめるプルリクエストが無い");
+  const [made] = await drizzle(db)
+    .select({ assignee: nodes.assignee })
+    .from(nodes)
+    .where(and(eq(nodes.repo, review.repo), eq(nodes.prNumber, review.prNumber), ne(nodes.taskKind, "review")))
+    .limit(1);
+  if (!made?.assignee) throw new AppError("conflict", "作った社員が分からない");
+  await checkPair(db, made.assignee, reviewer);
 }
 
 /**

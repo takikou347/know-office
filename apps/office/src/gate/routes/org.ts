@@ -1,7 +1,7 @@
 // 組織: 組織図、役目の説明文、オーナーの承認 (ルートの一覧の 1.8、タスクとレビューの 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, Approval, ApprovalStatus, DecisionInput, newId, OrgStaff, PromptVersion, StaffId, UpdatePromptInput } from "@know-office/core";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { approvals, staff, staffPrompts } from "../db/main.ts";
 import { createRouter } from "../app.ts";
@@ -11,6 +11,7 @@ import { list, ok } from "../respond.ts";
 import { clockAt } from "../work/attendance.ts";
 import { notifyStaff } from "../work/loop.ts";
 import { appendNodeEvent, findNode, moveNode } from "../work/nodes.ts";
+import { loadOrg } from "../work/org.ts";
 
 const router = createRouter();
 
@@ -86,28 +87,8 @@ function toApproval(row: ApprovalRow): Approval {
 /** 組織のルート: 組織図、役目の説明文、オーナーの承認 */
 export const orgRoutes = router
   .openapi(listOrgRoute, async (c) => {
-    const { cursor, limit } = c.req.valid("query");
-    const orm = drizzle(c.env.DB);
-    const people = await orm.select().from(staff);
-    const prompts = await orm.select().from(staffPrompts);
-    // 上から下へ並べる。社員 ID は役ごとに決まっているので、その順をカーソルにする
-    const ordered = people
-      .flatMap((p) => {
-        const id = StaffId.safeParse(p.id);
-        return id.success ? [{ ...p, id: id.data }] : [];
-      })
-      .toSorted((a, b) => StaffId.options.indexOf(a.id) - StaffId.options.indexOf(b.id))
-      .filter((p) => cursor === undefined || StaffId.options.indexOf(p.id) > StaffId.options.indexOf(StaffId.catch("reviewer").parse(cursor)));
-    const page = ordered.slice(0, limit);
-    const items = page.map((p) => ({
-      id: p.id,
-      role: p.role,
-      bossId: p.bossId,
-      model: p.model,
-      prompt: prompts.find((v) => v.staffId === p.id && v.version === p.promptVersion)?.body ?? "",
-      promptVersion: p.promptVersion,
-    }));
-    return list(c, items, ordered.length > limit ? (page.at(-1)?.id ?? null) : null);
+    const { items, next } = await loadOrg(c.env.DB, c.req.valid("query"));
+    return list(c, items, next);
   })
   .openapi(updatePromptRoute, async (c) => {
     const { staffId } = c.req.valid("param");
@@ -118,14 +99,20 @@ export const orgRoutes = router
     if (!who) throw new AppError("not_found", "社員がいない");
     if (who.promptVersion !== version) throw new AppError("conflict", "バージョンが違う");
     const next = version + 1;
-    // 読んだ版のままの時だけ上げる。同時に直した 2 つの片方を断る
-    const moved = await orm
-      .update(staff)
-      .set({ promptVersion: next })
-      .where(and(eq(staff.id, staffId), eq(staff.promptVersion, version)))
-      .returning({ id: staff.id });
+    // 説明文の追加と版の更新は 1 回で書く。どちらも読んだ版のままの時だけ書き、同時に直した 2 つの片方を断る
+    const [, moved] = await orm.batch([
+      orm
+        .insert(staffPrompts)
+        .select(
+          sql`SELECT ${newId(clockAt(now))}, ${staffId}, ${next}, ${body}, 'owner', ${now} WHERE EXISTS (SELECT 1 FROM ${staff} WHERE ${staff.id} = ${staffId} AND ${staff.promptVersion} = ${version})`,
+        ),
+      orm
+        .update(staff)
+        .set({ promptVersion: next })
+        .where(and(eq(staff.id, staffId), eq(staff.promptVersion, version)))
+        .returning({ id: staff.id }),
+    ]);
     if (moved.length === 0) throw new AppError("conflict", "バージョンが違う");
-    await orm.insert(staffPrompts).values({ id: newId(clockAt(now)), staffId, version: next, body, by: "owner", createdAt: now });
     await audit(c, "staff.prompt", staffId, { version: next });
     return ok(c, { version: next });
   })
@@ -148,17 +135,30 @@ export const orgRoutes = router
     const [row] = await orm.select().from(approvals).where(eq(approvals.id, approvalId)).limit(1);
     if (!row) throw new AppError("not_found", "承認の項目が無い");
     if (row.status !== "pending") throw new AppError("conflict", "もう決めた");
+    // TODO(#53): 役の変更のほかの種類の承認の中身を作る。作るまでは承認を断り、承認を待ったままにする
+    if (decision === "approve" && row.kind !== "role_change") throw new AppError("conflict", "この種類の承認はまだ扱えない");
+    // 形の違う役の変更は、承認の更新も社員の更新も書かずに断る
+    const change = decision === "approve" ? RoleChange.safeParse(row.payload) : undefined;
+    if (change && !change.success) throw new AppError("validation_failed", "役の変更の中身の形が違う");
     const status = decision === "approve" ? "approved" : "rejected";
-    const decided = await orm
+    const decide = orm
       .update(approvals)
       .set({ status, decidedAt: now, reason })
       .where(and(eq(approvals.id, approvalId), eq(approvals.status, "pending")))
       .returning({ id: approvals.id });
+    // 役の変更は承認と同じ 1 回で書く。まだ決めていない時だけ社員を変え、同時に決めた 2 つの片方を断る
+    const decided = change?.success
+      ? (
+          await orm.batch([
+            orm
+              .update(staff)
+              .set({ role: change.data.role, bossId: change.data.bossId })
+              .where(and(eq(staff.id, change.data.target), sql`EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${approvalId} AND ${approvals.status} = 'pending')`)),
+            decide,
+          ])
+        )[1]
+      : await decide;
     if (decided.length === 0) throw new AppError("conflict", "もう決めた");
-    if (decision === "approve" && row.kind === "role_change") {
-      const change = RoleChange.safeParse(row.payload);
-      if (change.success) await orm.update(staff).set({ role: change.data.role, bossId: change.data.bossId }).where(eq(staff.id, change.data.target));
-    }
     // 答えを待っていたタスクは、承認でも差し戻しでも todo に戻し、社員が理由を読んで続ける
     const waiting = Waiting.safeParse(row.payload);
     if (waiting.success) {

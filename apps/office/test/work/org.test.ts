@@ -103,8 +103,37 @@ describe("オーナーに上げる事", () => {
     // 止まったタスクを離れ、開発担当は次のタスクを取る
     expect((await world.gate.staff.builder.book.status(world.clock.now())).nodeId).not.toBe(first);
 
-    await api(world, "POST", `/api/v1/approvals/${String(approval?.id)}/decision`, { decision: "approve", reason: "つないでよい" });
+    // 外部連携の承認の中身はまだ作っていないので、承認は断り、タスクは待ったままにする
+    expect(await api(world, "POST", `/api/v1/approvals/${String(approval?.id)}/decision`, { decision: "approve", reason: "つないでよい" }, 409)).toMatchObject({ code: "conflict" });
+    expect(await rows(world.d1.DB, "SELECT status FROM approvals WHERE id = ?", approval?.id)).toEqual([{ status: "pending" }]);
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "waiting_owner" }]);
+    await api(world, "POST", `/api/v1/approvals/${String(approval?.id)}/decision`, { decision: "reject", reason: "今はつながない" });
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "todo" }]);
     expect(world.gate.audits.map((a) => a.action)).toContain("approval.decide");
+  });
+});
+
+describe("組織図と承認の決まり", () => {
+  it("組織図のカーソルは社員 ID だけを受け、違えば 400 で断る", async () => {
+    expect(z.array(OrgRow).parse(await api(world, "GET", "/api/v1/org?limit=1&cursor=president")).map((s) => s.id)).toEqual(["builder"]);
+    expect(await api(world, "GET", "/api/v1/org?cursor=nobody", undefined, 400)).toMatchObject({ code: "malformed_request" });
+  });
+
+  it("役の変更は承認で社員に入り、中身の形が違えば 422 で断って承認を待ったままにする", async () => {
+    await purposeAndGoal(world);
+    await clockIn(world, "president", "builder");
+    await staffOf(world, "builder").pull(world.clock.now());
+    await staffOf(world, "president").pull(world.clock.now());
+    await tool(world, "president", "staff_request", { kind: "role_change", target: "builder", role: "開発と運用の担当", bossId: "president", reason: "運用の直しも任せる" });
+    const [good] = z.array(z.object({ id: z.string() }).loose()).parse(await api(world, "GET", "/api/v1/approvals"));
+    await api(world, "POST", `/api/v1/approvals/${String(good?.id)}/decision`, { decision: "approve", reason: "任せる" });
+    expect((await org(world)).find((s) => s.id === "builder")).toMatchObject({ role: "開発と運用の担当", bossId: "president" });
+
+    const bad = "0190f4a8-0000-7000-8000-00000000abcd";
+    await world.d1.DB.prepare("INSERT INTO approvals (id, kind, target, payload, status, requested_by, requested_at) VALUES (?, 'role_change', 'builder', '{\"target\":\"builder\"}', 'pending', 'president', ?)")
+      .bind(bad, world.clock.now())
+      .run();
+    expect(await api(world, "POST", `/api/v1/approvals/${bad}/decision`, { decision: "approve", reason: "任せる" }, 422)).toMatchObject({ code: "validation_failed" });
+    expect(await rows(world.d1.DB, "SELECT status FROM approvals WHERE id = ?", bad)).toEqual([{ status: "pending" }]);
   });
 });

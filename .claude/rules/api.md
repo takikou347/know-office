@@ -19,7 +19,7 @@ paths:
 - 失敗は `AppError` を投げ、`app.onError` が RFC 9457 の problem+json (`type`、`title`、`status`、`detail`、`instance`、`code`、`traceId`、422 だけ `errors`) に直す。ハンドラーの中で組まない
 - `code` は `core` の `ErrorCode` に並べる。500 は `detail` に中身を入れない
 - ステータスコードは 1-api.md の 3.1 の表だけから選ぶ。分け方は 401 (誰か分からない) → 403 (許さない) → 404 (無い) の順に確かめる
-- 足すだけの変更は v1 のまま入れる。消す、名前や型や意味を変える、要る入力を足す変更は `/api/v2/` を足す。`info.version` は足したら minor、直したら patch
+- 足すだけの変更は v1 のまま入れる。消す、名前や型や意味を変える、要る入力を足す変更は `/api/v2/` を足す。ただし、本番に出す前 (tasks.md の 4.9 の自動のデプロイの前) は、どの変更も v1 のまま直せる。`info.version` は足したら minor、直したら patch
 - 画面は Hono の RPC で同じ型を受け、`fetch` を手で書かない
 - 時刻は RFC 3339 の協定世界時、日は日本時間の `YYYY-MM-DD`、ID は UUID v7、お金は `...MicroUsd` の整数
 - 一覧は `?cursor=` と `limit` (1 から 100、初期値 50)

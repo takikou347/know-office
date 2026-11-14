@@ -4,7 +4,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, staff } from "../db/main.ts";
 import type { Bindings, Staff } from "../env.ts";
-import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow } from "./nodes.ts";
+import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
 /** GitHub を呼ぶ口。鍵の付け方と本物の呼び出しは 8.4 でつなぐ (タスクとレビューの 3.3、3.4) */
 export type Forge = {
@@ -72,16 +72,28 @@ function taskOf(row: NodeRow): StaffTask {
 }
 
 /**
- * タスクを doing にし、始めた時の役目の説明文の版を出来事に残す。役目の説明文は次のタスクから効くので、版はここで決まる
+ * タスクを doing にしてから社員に渡し、始めた時の役目の説明文の版を出来事に残す。役目の説明文は次のタスクから効くので、版はここで決まる
  * @param env バインディング
  * @param staffId 社員 ID
- * @param row タスクの行
+ * @param row 読んだ時のタスクの行
  * @param now 今の時刻
+ * @param hand 社員に渡す。受け取ったかを返す
+ * @returns 始めたか。読んでから担当か状態が変わっていれば始めない
  */
-async function markStarted(env: Bindings, staffId: string, row: NodeRow, now: number): Promise<void> {
+async function start(env: Bindings, staffId: string, row: NodeRow, now: number, hand: (task: StaffTask) => Promise<boolean>): Promise<boolean> {
+  // 読んでからオーナーが担当を変えるとバージョンが進むので、先に doing にして取れた時だけ渡す。2 人が同じタスクを取らない
+  const claimed = await moveNode(env.DB, row, "doing", now);
+  if (!claimed) return false;
+  let handed = false;
+  try {
+    handed = await hand(taskOf(claimed));
+  } finally {
+    if (!handed) await revertNode(env.DB, claimed.id, "doing", "todo", now);
+  }
+  if (!handed) return false;
   const [who] = await drizzle(env.DB).select({ promptVersion: staff.promptVersion }).from(staff).where(eq(staff.id, staffId)).limit(1);
-  await moveNode(env.DB, row, "doing", now);
   await appendNodeEvent(env, { nodeId: row.id, staffId, kind: "started", detail: { promptVersion: who?.promptVersion ?? null } }, { by: staffId, now });
+  return true;
 }
 
 /**
@@ -99,11 +111,9 @@ export async function pullNext(env: Bindings, book: TaskBook, now: number): Prom
     await askBoss(env, book.staffId, "山が空になった", now);
     return { taken: false, nodeId: null };
   }
-  // 中央値は直前 7 日のチェックポイントの記録から出す。記録がまだ無いので null で渡し、早い退勤を考えない
-  const { taken } = await book.take(taskOf(row), null, now);
-  if (!taken) return { taken: false, nodeId: null };
-  await markStarted(env, book.staffId, row, now);
-  return { taken: true, nodeId: row.id };
+  // TODO(#54): 中央値を直前 7 日のチェックポイントの記録から出す。今は null で渡し、早い退勤を考えない
+  const taken = await start(env, book.staffId, row, now, async (task) => (await book.take(task, null, now)).taken);
+  return taken ? { taken: true, nodeId: row.id } : { taken: false, nodeId: null };
 }
 
 /**
@@ -125,8 +135,10 @@ export async function notifyStaff(env: Bindings, staffId: string, now: number, c
   if (status.state !== "off" || !call) return;
   const row = await nextTodo(env, id.data);
   if (!row) return;
-  await target.call(taskOf(row), now);
-  await markStarted(env, id.data, row, now);
+  await start(env, id.data, row, now, async (task) => {
+    await target.call(task, now);
+    return true;
+  });
 }
 
 /**

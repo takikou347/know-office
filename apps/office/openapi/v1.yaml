@@ -2612,9 +2612,20 @@ paths:
       description: '処理の流れ:
 
 
-        1. `staff` と最新の `staff_prompts` を取得し、`boss_id` でツリーにする'
+        1. `cursor` を社員 ID として読む
+
+        2. `staff` と最新の `staff_prompts` を取得し、上の役から下の役の順に並べ、`cursor` の後から `limit` 件を返す
+
+
+        このルート固有のエラー:
+
+
+        - 400 `malformed_request`: `cursor` が社員 ID でない'
       x-steps:
-      - '`staff` と最新の `staff_prompts` を取得し、`boss_id` でツリーにする'
+      - '`cursor` を社員 ID として読む'
+      - '`staff` と最新の `staff_prompts` を取得し、上の役から下の役の順に並べ、`cursor` の後から `limit` 件を返す'
+      x-errors:
+      - '400 `malformed_request`: `cursor` が社員 ID でない'
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -2665,7 +2676,7 @@ paths:
 
         1. `version` が現在と一致することを確認する
 
-        2. `staff_prompts` に追加し、`staff.prompt_version` を更新する
+        2. `staff_prompts` への追加と `staff.prompt_version` の更新を 1 回のバッチで行う。どちらも `version` が現在のままの時だけ書く
 
         3. 監査ログに `staff.prompt` を記録する。次のタスクから反映される
 
@@ -2676,7 +2687,7 @@ paths:
         - 409 `conflict`: バージョンが異なる'
       x-steps:
       - '`version` が現在と一致することを確認する'
-      - '`staff_prompts` に追加し、`staff.prompt_version` を更新する'
+      - '`staff_prompts` への追加と `staff.prompt_version` の更新を 1 回のバッチで行う。どちらも `version` が現在のままの時だけ書く'
       - 監査ログに `staff.prompt` を記録する。次のタスクから反映される
       x-errors:
       - '409 `conflict`: バージョンが異なる'
@@ -2804,11 +2815,13 @@ paths:
 
         1. 承認の項目を取得し、未決定であることを確認する
 
-        2. 承認の場合は種類ごとに実行する。社員の追加と役割の変更は `staff` を更新し、マージとデプロイは GitHub のルールの条件を確認してから進める
+        2. 承認の場合は種類を確かめる。今は役割の変更だけを扱い、`payload` を `target`、`role`、`bossId` の形で確かめる
 
-        3. `approvals` を更新し、待機していたタスクを `todo` に戻す
+        3. `approvals` を更新する。役割の変更の承認は、`staff` の更新と 1 回のバッチで行い、どちらも未決定の時だけ書く
 
-        4. 監査ログに `approval.decide` を記録する
+        4. 待機していたタスクを `todo` に戻す
+
+        5. 監査ログに `approval.decide` を記録する
 
 
         このルート固有のエラー:
@@ -2816,15 +2829,19 @@ paths:
 
         - 404 `not_found`: 承認の項目が存在しない
 
-        - 409 `conflict`: すでに決定済み'
+        - 409 `conflict`: すでに決定済み、または役割の変更のほかの種類を承認しようとした (差し戻しは受ける)
+
+        - 422 `validation_failed`: 役割の変更の `payload` の形が違う。承認は未決定のまま'
       x-steps:
       - 承認の項目を取得し、未決定であることを確認する
-      - 承認の場合は種類ごとに実行する。社員の追加と役割の変更は `staff` を更新し、マージとデプロイは GitHub のルールの条件を確認してから進める
-      - '`approvals` を更新し、待機していたタスクを `todo` に戻す'
+      - 承認の場合は種類を確かめる。今は役割の変更だけを扱い、`payload` を `target`、`role`、`bossId` の形で確かめる
+      - '`approvals` を更新する。役割の変更の承認は、`staff` の更新と 1 回のバッチで行い、どちらも未決定の時だけ書く'
+      - 待機していたタスクを `todo` に戻す
       - 監査ログに `approval.decide` を記録する
       x-errors:
       - '404 `not_found`: 承認の項目が存在しない'
-      - '409 `conflict`: すでに決定済み'
+      - '409 `conflict`: すでに決定済み、または役割の変更のほかの種類を承認しようとした (差し戻しは受ける)'
+      - '422 `validation_failed`: 役割の変更の `payload` の形が違う。承認は未決定のまま'
       parameters:
       - name: approvalId
         in: path

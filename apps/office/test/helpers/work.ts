@@ -33,6 +33,8 @@ export type FakeForge = Forge & {
   merged: string[];
   /** チェックが通っているか */
   checks: boolean;
+  /** プルリクエストを出す間と main に入れる間に、ほかの要求を挟む */
+  during: { openPull?: () => Promise<void>; merge?: () => Promise<void> };
 };
 
 /** テストの物 */
@@ -53,12 +55,17 @@ function fakeForge(): FakeForge {
     pulls: [],
     merged: [],
     checks: true,
-    openPull: (input) => {
+    during: {},
+    openPull: async (input) => {
+      await forge.during.openPull?.();
       forge.pulls.push({ repo: input.repo, branch: input.branch, title: input.title });
-      return Promise.resolve({ number: forge.pulls.length, baseSha: "a".repeat(40), headSha: "b".repeat(40) });
+      return { number: forge.pulls.length, baseSha: "a".repeat(40), headSha: "b".repeat(40) };
     },
     checksPassed: () => Promise.resolve(forge.checks),
-    merge: (_repo, branch) => Promise.resolve(void forge.merged.push(branch)),
+    merge: async (_repo, branch) => {
+      await forge.during.merge?.();
+      forge.merged.push(branch);
+    },
   };
   return forge;
 }

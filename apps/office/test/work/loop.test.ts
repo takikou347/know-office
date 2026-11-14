@@ -1,7 +1,8 @@
 // 目的からタスクまでの木とタスクの繰り返し。社長が分け、開発担当が取り、レビュー担当の承認で main に入るまで (タスクとレビューの 3.1)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { finishTask, intakeTask } from "../../src/gate/work/loop.ts";
+import { finishTask, intakeTask, pullNext, type TaskBook } from "../../src/gate/work/loop.ts";
+import { createNode } from "../../src/gate/work/nodes.ts";
 import { api, at, advance, clockIn, idOf, purposeAndGoal, REPO, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork();
@@ -14,6 +15,35 @@ const world = useWork();
  */
 async function doing(w: WorkWorld, staffId: "president" | "builder" | "reviewer"): Promise<string | null> {
   return (await w.gate.staff[staffId].book.status(w.clock.now())).nodeId;
+}
+
+const Versioned = z.object({ version: z.number() }).loose();
+
+/**
+ * オーナーが木の 1 件を変える。断られても投げず、ステータスを返す
+ * @param w テストの物
+ * @param nodeId ID
+ * @param change 変える物
+ * @returns ステータス
+ */
+async function ownerPatch(w: WorkWorld, nodeId: string, change: Record<string, unknown>): Promise<number> {
+  const { version } = Versioned.parse(await api(w, "GET", `/api/v1/nodes/${nodeId}`));
+  const res = await w.gate.request(`/api/v1/nodes/${nodeId}`, { method: "PATCH", headers: { ...w.headers, "Content-Type": "application/json" }, body: JSON.stringify({ version, ...change }) });
+  return res.status;
+}
+
+/**
+ * 3 人を出勤させ、開発担当がプルリクエストを出し、レビュー担当がレビューのタスクを取るところまで進める
+ * @param w テストの物
+ * @returns 開発担当のタスクの ID
+ */
+async function openedPull(w: WorkWorld): Promise<string> {
+  const { goal } = await purposeAndGoal(w);
+  await clockIn(w, "president", "builder", "reviewer");
+  await presidentPlans(w);
+  const { tasks } = await split(w, goal, "勤怠の表をつなぐ");
+  expect(await tool(w, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+  return String(tasks[0]);
 }
 
 const Titled = z.object({ id: z.string(), title: z.string(), kind: z.string(), status: z.string() }).loose();
@@ -202,5 +232,87 @@ describe("タスクの繰り返しの決まり", () => {
     const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId: project, scope: "office", title: "急ぎの直し", taskKind: "fix", assignee: "builder" }, 201));
     expect(await world.gate.staff.builder.book.status(world.clock.now())).toMatchObject({ state: "called", nodeId: task });
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
+  });
+
+  it("取る間に担当が変わったタスクを 2 人で取らない", async () => {
+    const { goal } = await purposeAndGoal(world);
+    const project = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "project", parentId: goal, scope: "office", title: "勤怠" }, 201));
+    await clockIn(world, "president", "builder");
+    // 知らせずに置き、開発担当が取る途中でオーナーが担当を社長に変える
+    const task = (await createNode(world.gate.env, { kind: "task", parentId: project, scope: "office", title: "勤怠の表をつなぐ", taskKind: "build", assignee: "builder" }, { by: "owner", now: world.clock.now() })).id;
+    const book = world.gate.staff.builder.book;
+    const racing: TaskBook = {
+      staffId: "builder",
+      status: (now) => book.status(now),
+      take: async (t, median, now) => {
+        await ownerPatch(world, task, { assignee: "president" });
+        return book.take(t, median, now);
+      },
+    };
+    await pullNext(world.gate.env, racing, world.clock.now());
+
+    const holders = [await doing(world, "builder"), await doing(world, "president")].filter((id) => id === task);
+    expect(holders).toHaveLength(1);
+    const [row] = await rows(world.d1.DB, "SELECT status, assignee FROM nodes WHERE id = ?", task);
+    expect(row?.["status"]).toBe("doing");
+    expect(await doing(world, z.enum(["president", "builder"]).parse(row?.["assignee"]))).toBe(task);
+  });
+
+  it("プルリクエストを出す間にタスクの名前が変わっても、レビューに回す", async () => {
+    const { goal } = await purposeAndGoal(world);
+    await clockIn(world, "president", "builder");
+    await presidentPlans(world);
+    const { tasks } = await split(world, goal, "勤怠の表をつなぐ");
+    const first = String(tasks[0]);
+    world.forge.during.openPull = async () => {
+      expect(await ownerPatch(world, first, { title: "勤怠の表を本物の記録につなぐ" })).toBe(200);
+    };
+    expect(await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+    expect(await rows(world.d1.DB, "SELECT status, pr_number FROM nodes WHERE id = ?", first)).toEqual([{ status: "review", pr_number: 1 }]);
+    expect(await rows(world.d1.DB, "SELECT assignee, status FROM nodes WHERE task_kind = 'review'")).toEqual([{ assignee: "reviewer", status: "todo" }]);
+  });
+
+  it("作った社員と同じモデルのレビュー担当しかいない時は、プルリクエストを出さない", async () => {
+    const { goal } = await purposeAndGoal(world);
+    await clockIn(world, "president", "builder");
+    await presidentPlans(world);
+    const { tasks } = await split(world, goal, "勤怠の表をつなぐ");
+    await world.d1.DB.prepare("UPDATE staff SET model = (SELECT model FROM staff WHERE id = 'builder') WHERE id = 'reviewer'").run();
+    await expect(tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "conflict" });
+    expect(world.forge.pulls).toEqual([]);
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", tasks[0])).toEqual([{ status: "doing" }]);
+    expect(await doing(world, "builder")).toBe(tasks[0]);
+    expect(await rows(world.d1.DB, "SELECT id FROM nodes WHERE task_kind = 'review'")).toEqual([]);
+  });
+
+  it("見送ったタスクは、承認されても main に入れない", async () => {
+    const first = await openedPull(world);
+    expect(await ownerPatch(world, first, { status: "dropped" })).toBe(200);
+    await expect(tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).rejects.toMatchObject({ code: "conflict" });
+    expect(world.forge.merged).toEqual([]);
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "dropped" }]);
+  });
+
+  it("main に入れる間にタスクが変わっても、入れたタスクは done にする", async () => {
+    const first = await openedPull(world);
+    world.forge.during.merge = async () => {
+      await ownerPatch(world, first, { title: "勤怠の表を本物の記録につなぐ" });
+    };
+    expect(await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).toMatchObject({ isError: false });
+    expect(world.forge.merged).toHaveLength(1);
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "done" }]);
+  });
+
+  it("作った社員が分からないレビューのタスクは、誰にも割り振らない", async () => {
+    const first = await openedPull(world);
+    const [review] = await rows(world.d1.DB, "SELECT id FROM nodes WHERE task_kind = 'review'");
+    const reviewId = String(review?.["id"]);
+    await world.d1.DB.prepare("UPDATE nodes SET assignee = NULL WHERE id = ?").bind(first).run();
+    expect(await ownerPatch(world, reviewId, { assignee: "reviewer" })).toBe(409);
+
+    // リポジトリとプルリクエストの無いレビューのタスクも、作った物をたどれないので断る
+    const [made] = await rows(world.d1.DB, "SELECT parent_id FROM nodes WHERE id = ?", first);
+    const bare = (await createNode(world.gate.env, { kind: "task", parentId: String(made?.["parent_id"]), scope: "office", title: "レビュー: 手で足した", taskKind: "review" }, { by: "system", now: world.clock.now() })).id;
+    expect(await ownerPatch(world, bare, { assignee: "reviewer" })).toBe(409);
   });
 });

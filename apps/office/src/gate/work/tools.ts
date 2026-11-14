@@ -20,7 +20,7 @@ import type { Bindings } from "../env.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { clockAt } from "./attendance.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
-import { type Actor, appendNodeEvent, createNode, findNode, moveNode, type NodeRow, updateNode } from "./nodes.ts";
+import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, revertNode, updateNode } from "./nodes.ts";
 
 /** 呼び出し 1 回 */
 export type ToolCall = {
@@ -82,14 +82,15 @@ async function currentTask(env: Bindings, call: ToolCall): Promise<NodeRow> {
  * @param approval.target 対象
  * @param approval.payload 中身
  * @returns 承認の ID
+ * @throws conflict 今のタスクが無い時、読んだ後にタスクが変わった時
  */
 async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff_add" | "role_change" | "external_integration" | "cost_increase"; target: string; payload: Record<string, unknown> }): Promise<{ approvalId: string }> {
   const task = await currentTask(env, call);
+  if (!(await moveNode(env.DB, task, "waiting_owner", call.now))) throw new AppError("conflict", "タスクが変わった");
   const id = newId(clockAt(call.now));
   await drizzle(env.DB)
     .insert(approvals)
     .values({ id, kind: approval.kind, target: approval.target, payload: { ...approval.payload, nodeId: task.id }, status: "pending", requestedBy: call.staffId, requestedAt: call.now });
-  await moveNode(env.DB, task, "waiting_owner", call.now);
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "waiting_owner", detail: { approvalId: id, kind: approval.kind } }, actorOf(call));
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "approval.request", target: id, scope: task.scope, detail: { kind: approval.kind, target: approval.target }, traceId: call.traceId });
   // 答えを待つ間は次のタスクを進める
@@ -173,30 +174,56 @@ async function askBossTool(env: Bindings, _forge: Forge, call: ToolCall, input: 
  * @param call 呼び出し
  * @param input PrOpenTool
  * @returns プルリクエストの番号とブランチ
- * @throws conflict 今のタスクが無いか、直すリポジトリが無い時
+ * @throws conflict 今のタスクが無いか、直すリポジトリが無い時、レビュー担当が作った社員と同じモデルの時、出す間にタスクの担当か状態が変わった時
  */
 async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpenTool): Promise<{ number: number; branch: string }> {
   const task = await currentTask(env, call);
   if (task.repo === null) throw new AppError("conflict", "タスクに直すリポジトリが無い");
+  // レビューを割り振れないなら、GitHub に出す前に断る
+  await checkPair(env.DB, call.staffId, REVIEWER);
   const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
   const pr = await forge.openPull({ repo: task.repo, branch, title: input.title, body: input.body });
-  const moved = await moveNode(env.DB, task, "review", call.now, { branch, prNumber: pr.number });
+  // 出す間にオーナーが名前などを直すとバージョンが進むので、読み直して、まだこの社員の作業中の時だけ移す
+  const fresh = await findNode(env.DB, task.id);
+  if (fresh.status !== "doing" || fresh.assignee !== call.staffId) throw new AppError("conflict", "タスクが変わった");
+  const moved = await moveNode(env.DB, fresh, "review", call.now, { branch, prNumber: pr.number });
   if (!moved) throw new AppError("conflict", "タスクが変わった");
   await drizzle(env.DB)
     .insert(reviews)
     .values({ id: newId(clockAt(call.now)), nodeId: task.id, repo: task.repo, prNumber: pr.number, branch, baseSha: pr.baseSha, headSha: pr.headSha });
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "pr_opened", detail: { prNumber: pr.number, branch } }, actorOf(call));
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "pull_request.open", target: task.id, scope: task.scope, detail: { repo: task.repo, prNumber: pr.number }, traceId: call.traceId });
-  const review = await createNode(
+  // TODO(#54): プルリクエストを出した事を guard.observe に渡す
+  await createNode(
     env,
-    { kind: "task", parentId: task.parentId ?? undefined, scope: task.scope, title: `レビュー: ${task.title}`, taskKind: "review", repo: task.repo, source: "review", priority: task.priority },
-    actorOf(call),
+    { kind: "task", parentId: moved.parentId ?? undefined, scope: moved.scope, title: `レビュー: ${moved.title}`, taskKind: "review", assignee: REVIEWER, repo: task.repo, branch, prNumber: pr.number, source: "review", priority: moved.priority },
+    { by: "system", now: call.now, traceId: call.traceId },
   );
-  const linked = await moveNode(env.DB, review, "todo", call.now, { branch, prNumber: pr.number });
-  if (linked) await updateNode(env, review.id, linked.version, { assignee: REVIEWER }, { by: "system", now: call.now, traceId: call.traceId });
   await leaveTask(env, call.staffId, "done", call.now);
   await notifyStaff(env, REVIEWER, call.now, false);
   return { number: pr.number, branch };
+}
+
+/**
+ * 承認されたタスクを done にしてから main に入れる。入れられなければ review に戻す
+ * @param env バインディング
+ * @param forge GitHub
+ * @param made 確かめたタスク
+ * @param review レビューのタスク
+ * @param now 今の時刻
+ * @throws conflict 確かめたタスクが読んだ後に変わった時
+ */
+async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string }, now: number): Promise<void> {
+  // 先に done にして、同じタスクを 2 度入れない
+  const done = await moveNode(env.DB, made, "done", now);
+  if (!done) throw new AppError("conflict", "確かめるタスクが変わった");
+  try {
+    await forge.merge(review.repo, review.branch);
+  } catch (error) {
+    await revertNode(env.DB, made.id, "done", "review", now);
+    throw error;
+  }
+  // TODO(#54): main に入れた事を guard.observe に渡す
 }
 
 /**
@@ -206,7 +233,7 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
  * @param call 呼び出し
  * @param input ReviewSubmitTool
  * @returns main に入れたか
- * @throws conflict 今のタスクがレビューでない時、確かめるタスクが無い時
+ * @throws conflict 今のタスクがレビューでない時、確かめるタスクが無いか review でない時、確かめるタスクが読んだ後に変わった時
  */
 async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: ReviewSubmitTool): Promise<{ merged: boolean }> {
   const review = await currentTask(env, call);
@@ -218,22 +245,22 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
     .where(and(eq(nodes.repo, review.repo), eq(nodes.prNumber, review.prNumber), ne(nodes.taskKind, "review")))
     .limit(1);
   if (!made) throw new AppError("conflict", "確かめるタスクが無い");
-  await orm.update(reviews).set({ reviewerVerdict: input.verdict, reviewerSummary: input.summary }).where(eq(reviews.nodeId, made.id));
+  // 見送られたタスクや、もう入れたタスクを main に入れない
+  if (made.status !== "review") throw new AppError("conflict", "確かめるタスクがレビューを待っていない");
   const actor = actorOf(call);
   let merged = false;
   if (input.verdict === "reject") {
-    await moveNode(env.DB, made, "todo", call.now);
+    if (!(await moveNode(env.DB, made, "todo", call.now))) throw new AppError("conflict", "確かめるタスクが変わった");
     await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_rejected", detail: { summary: input.summary } }, actor);
   } else {
-    await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } }, actor);
     // main に入れる条件はチェックとレビュー担当の承認 (タスクとレビューの 3.4 の初期値)。チェックが分からない時は入れない
-    if (await forge.checksPassed(review.repo, review.prNumber)) {
-      await forge.merge(review.repo, review.branch);
-      await moveNode(env.DB, made, "done", call.now);
-      await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch } }, actor);
-      merged = true;
-    } else await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merge_waiting", detail: { reason: "checks" } }, actor);
+    merged = await forge.checksPassed(review.repo, review.prNumber);
+    if (merged) await mergeMade(env, forge, made, { repo: review.repo, branch: review.branch }, call.now);
+    await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } }, actor);
+    if (merged) await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch } }, actor);
+    else await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merge_waiting", detail: { reason: "checks" } }, actor);
   }
+  await orm.update(reviews).set({ reviewerVerdict: input.verdict, reviewerSummary: input.summary }).where(eq(reviews.nodeId, made.id));
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "review.submit", target: made.id, scope: made.scope, detail: { verdict: input.verdict, merged }, traceId: call.traceId });
   await finishTask(env, call.staffId, review.id, call.now);
   if (input.verdict === "reject" && made.assignee !== null) await notifyStaff(env, made.assignee, call.now, false);
