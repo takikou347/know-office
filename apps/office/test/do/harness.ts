@@ -1,14 +1,102 @@
 // DO を本物の workerd で試すための入口。テストだけが使う
+import { DurableObject } from "cloudflare:workers";
+import { toBase64 } from "@know-office/core";
 import { z } from "zod";
 import { GuardDO } from "../../src/gate/do/guard.ts";
 import { RecorderDO } from "../../src/gate/do/recorder.ts";
 import { StaffDO } from "../../src/gate/do/staff.ts";
 import { WorkspaceDO } from "../../src/gate/do/workspace.ts";
-import type { Bindings } from "../../src/gate/env.ts";
+import type { Bindings, WorkspaceContainer } from "../../src/gate/env.ts";
 
 export { GuardDO, RecorderDO, StaffDO, WorkspaceDO };
 
-const Binding = z.enum(["DB", "REC_2026", "REC_2027"]);
+/** ワークスペースへの呼び出し 1 回 */
+const WorkspaceCalls = z.array(z.object({ method: z.string(), args: z.array(z.unknown()) }));
+
+/** ワークスペースのコンテナの DO の代わり。呼び出しを記憶に並べる */
+export class RecordingWorkspace extends DurableObject<Bindings> implements WorkspaceContainer {
+  /**
+   * 呼び出しを並べる
+   * @param method メソッド
+   * @param args 引数
+   * @returns 無し
+   */
+  async #push(method: string, ...args: unknown[]): Promise<null> {
+    await this.ctx.storage.put("calls", [...(await this.calls()), { method, args }]);
+    return null;
+  }
+
+  /**
+   * 並べた呼び出しを返す
+   * @returns 呼び出しの並び
+   */
+  async calls(): Promise<z.infer<typeof WorkspaceCalls>> {
+    return WorkspaceCalls.parse((await this.ctx.storage.get("calls")) ?? []);
+  }
+
+  /**
+   * 起こす
+   * @param staffId 社員 ID
+   * @returns 無し
+   */
+  start(staffId: string): Promise<null> {
+    return this.#push("start", staffId);
+  }
+
+  /**
+   * 止める
+   * @returns 無し
+   */
+  stop(): Promise<null> {
+    return this.#push("stop");
+  }
+
+  /**
+   * 作り直す
+   * @param staffId 社員 ID
+   * @returns 無し
+   */
+  restart(staffId: string): Promise<null> {
+    return this.#push("restart", staffId);
+  }
+
+  /**
+   * 経過を書き残させる
+   * @returns 無し
+   */
+  wrapUp(): Promise<null> {
+    return this.#push("wrapUp");
+  }
+
+  /**
+   * 呼び出しを始めさせる
+   * @param input RunInput
+   * @returns 無し
+   */
+  run(input: unknown): Promise<null> {
+    return this.#push("run", input);
+  }
+
+  /**
+   * 作業トークンを差し替えさせる
+   * @param ticket 作業トークン
+   * @returns 無し
+   */
+  replaceTicket(ticket: string): Promise<null> {
+    return this.#push("replaceTicket", ticket);
+  }
+
+  /**
+   * 会話の記録を戻させる
+   * @param input RestoreInput
+   * @returns 無し
+   */
+  restore(input: unknown): Promise<null> {
+    return this.#push("restore", input);
+  }
+}
+
+const Binding = z.enum(["DB", "REC_2026", "REC_2027", "REC_2030"]);
 const Migrate = z.object({ binding: Binding, statements: z.array(z.string()) });
 const Query = z.object({ binding: Binding, sql: z.string() });
 const AdmitMany = z.object({ times: z.number().int().positive(), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) });
@@ -38,6 +126,8 @@ const StaffCall = z.object({
     "issueToken",
     "checkToken",
     "rebuildDay",
+    "appendTranscript",
+    "loadTranscript",
   ]),
   args: z.array(z.unknown()),
 });
@@ -105,6 +195,8 @@ export default {
         if (method === "resumeTask") return Response.json(await stub.resumeTask(z.string().parse(args[0])));
         if (method === "issueToken") return Response.json(await stub.issueToken(z.string().parse(args[0]), z.string().parse(args[1]), num(2)));
         if (method === "checkToken") return Response.json(await stub.checkToken(z.string().parse(args[0]), z.string().parse(args[1]), num(2)));
+        if (method === "appendTranscript") return Response.json(await stub.appendTranscript(z.string().parse(args[0]), args[1], num(2)));
+        if (method === "loadTranscript") return Response.json(await stub.loadTranscript(z.string().parse(args[0])));
         if (method === "halt" || method === "taskClock") return Response.json(await stub[method](num(0)));
         if (method === "wake" || method === "heartbeat" || method === "waitEnd" || method === "stop" || method === "resume") return Response.json(await stub[method](num(0)));
         return Response.json(await stub[method](args[0], num(1)));
@@ -113,6 +205,23 @@ export default {
         const code = error instanceof Error && "code" in error ? String(error.code) : "none";
         return new Response(`${String(error)} code=${code}`, { status: 409 });
       }
+    }
+    if (path === "/files") {
+      // R2 に置いた物を、中身ごと base64 で返す。暗号になっているかをテストで見る
+      const listed = await env.FILES.list({ prefix: z.object({ prefix: z.string() }).parse(body).prefix });
+      const files = [];
+      for (const object of listed.objects) {
+        const got = await env.FILES.get(object.key);
+        files.push({ key: object.key, body: got ? toBase64(await got.arrayBuffer()) : null });
+      }
+      return Response.json(files);
+    }
+    if (path === "/workspace") {
+      const { staffId } = z.object({ staffId: z.string() }).parse(body);
+      const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId));
+      // WORKSPACE には呼び出しを並べる代わりを結んでいる
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      return Response.json(await (stub as unknown as RecordingWorkspace).calls());
     }
     if (path === "/guard") {
       const call = GuardCall.parse(body);

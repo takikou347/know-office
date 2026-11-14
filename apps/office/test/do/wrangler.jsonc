@@ -3,18 +3,24 @@
   "name": "know-office-do-test",
   "main": "harness.ts",
   "compatibility_date": "2026-11-01",
+  // 作業トークンと会話の記録の鍵の元。テストだけの値
+  "vars": { "MASTER_KEY": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=" },
   "d1_databases": [
     { "binding": "DB", "database_name": "db", "database_id": "local-db" },
     { "binding": "REC_2026", "database_name": "rec-2026", "database_id": "local-rec-2026" },
-    { "binding": "REC_2027", "database_name": "rec-2027", "database_id": "local-rec-2027" }
+    { "binding": "REC_2027", "database_name": "rec-2027", "database_id": "local-rec-2027" },
+    // 社員 DO のテストは 2030 年の時刻で動くので、作業トークンの発行の監査ログを置く
+    { "binding": "REC_2030", "database_name": "rec-2030", "database_id": "local-rec-2030" }
   ],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "files" }],
   "durable_objects": {
     "bindings": [
       { "name": "RECORDER", "class_name": "RecorderDO" },
       { "name": "GUARD", "class_name": "GuardDO" },
       { "name": "STAFF", "class_name": "StaffDO" },
-      { "name": "WORKSPACE", "class_name": "WorkspaceDO" }
+      // コンテナは Docker で作るので、ワークスペースへの呼び出しを並べる代わりを置く。本物の WorkspaceBox は test/gate/egress.test.ts で確かめる
+      { "name": "WORKSPACE", "class_name": "RecordingWorkspace" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO", "StaffDO", "WorkspaceDO"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO", "StaffDO", "WorkspaceDO", "RecordingWorkspace"] }]
 }

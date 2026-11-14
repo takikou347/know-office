@@ -1,17 +1,18 @@
 // ワークスペースの外向きの通信の受け手。コンテナから出る要求は宛先ごとにここへ回り、ゲートウェイが作業トークンを確かめる (社員が考えるの 1.2、3.1)
 import { createRoute } from "@hono/zod-openapi";
-import { AppError, CheckpointInput, type Clock, type Fetcher, HeartbeatInput } from "@know-office/core";
+import { AppError, CheckpointInput, type Clock, type Fetcher, HeartbeatInput, TranscriptPartInput } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import { createApp } from "./app.ts";
 import { bodyShape } from "./body.ts";
 import type { Bindings, GateEnv } from "./env.ts";
 import { staffOf } from "./guard/actions.ts";
 import type { GuardDeps } from "./guard/deps.ts";
+import { problems } from "./openapi.ts";
 import { noContent } from "./respond.ts";
 import { rethrowRpc } from "./rpc.ts";
 import { decisionRoutes } from "./work/decisions.ts";
 import { relayClaude } from "./work/relay.ts";
-import { authenticateTicket, type Caller, renewTicket } from "./work/ticket.ts";
+import { authenticateTicket, bearer, type Caller, renewTicket, ticketTask } from "./work/ticket.ts";
 
 export type { Caller } from "./work/ticket.ts";
 
@@ -45,6 +46,15 @@ const checkpointRoute = createRoute({
   responses: { 204: { description: "成功" } },
 });
 
+const transcriptRoute = createRoute({
+  method: "post",
+  path: "/ws/v1/transcript-parts",
+  operationId: "sendTranscriptPart",
+  tags: ["workspace-gate"],
+  request: { body: { content: { "application/json": { schema: TranscriptPartInput } }, required: true } },
+  responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(400, 401, 403, 409, 413, 415, 422, 500) },
+});
+
 /**
  * 作業トークンを見る所を返す。Claude は x-api-key、ほかは Authorization の Bearer に入る
  * @param headers 要求のヘッダー
@@ -53,8 +63,7 @@ const checkpointRoute = createRoute({
  */
 function ticketOf(headers: Headers, host: string): string {
   if (host === "api.anthropic.com") return headers.get("x-api-key") ?? "";
-  const match = /^Bearer (\S+)$/.exec(headers.get("authorization") ?? "");
-  return match?.[1] ?? "";
+  return bearer(headers.get("authorization"));
 }
 
 /**
@@ -97,6 +106,14 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     // DO の RPC を越えると AppError のクラスが消えるので、断った code を戻す
     await staffOf(c.env, caller.staffId).checkpoint(input, now).catch(rethrowRpc);
     await renewTicket(c.env, caller.staffId, input.nodeId, now);
+    return noContent(c);
+  });
+  app.openapi(transcriptRoute, async (c) => {
+    const input = c.req.valid("json");
+    const now = c.var.clock.now();
+    // 記録は作業トークンのタスクの物として置く。本文からタスクを決めない
+    const { staffId, nodeId } = await ticketTask(c.env, bearer(c.req.header("authorization")), caller, now);
+    await staffOf(c.env, staffId).appendTranscript(nodeId, input, now).catch(rethrowRpc);
     return noContent(c);
   });
   decisionRoutes(app, caller);

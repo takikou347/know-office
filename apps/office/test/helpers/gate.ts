@@ -9,6 +9,7 @@ import { OfficeGuard } from "../../src/gate/guard/office-guard.ts";
 import { StaffGuard } from "../../src/gate/guard/staff-guard.ts";
 import { createGate } from "../../src/gate/index.ts";
 import { pullNext } from "../../src/gate/work/loop.ts";
+import { appendTranscript, loadTranscript, type TranscriptStore } from "../../src/gate/work/transcript.ts";
 import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/work/staff-book.ts";
 import type { TestD1 } from "./d1.ts";
 
@@ -17,6 +18,8 @@ const FAKES = "http://localhost:5199";
 export const ORIGIN = "http://localhost";
 /** テストの Anthropic の鍵。ゲートウェイだけが持ち、代わりの Claude API に届く */
 export const ANTHROPIC_KEY = "test-anthropic-key-0123456789";
+/** テストの MASTER_KEY。32 バイトの 7 */
+const MASTER_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 /** テストのオーナー */
 export const OWNER = "owner@example.com";
 
@@ -242,8 +245,15 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
       }),
       renewToken: g.renewToken.bind(g),
       revokeTokens: g.revokeTokens.bind(g),
+      // 社員 DO は会話の記録を鎖の中で 1 つずつ足す。テストは呼び出しを重ねないので鎖を省く
+      appendTranscript: overRpc(async (nodeId: string, input: unknown, now: number) => {
+        await appendTranscript(transcripts, id, nodeId, input, now);
+        return null;
+      }),
+      loadTranscript: overRpc((nodeId: string) => loadTranscript(transcripts, id, nodeId)),
     };
   };
+  const transcripts: TranscriptStore = { db: options.d1.DB, files: options.d1.FILES, master: MASTER_KEY };
   const recorder = {
     append: (input: AuditInput) => {
       audits.push(input);
@@ -262,6 +272,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     DB: options.d1.DB,
     REC_2026: options.d1.REC_2026,
     REC_2027: options.d1.REC_2027,
+    FILES: options.d1.FILES,
     GUARD: namespace(guardDo),
     STAFF: { idFromName: (name: StaffId) => name, get: (id: StaffId) => staffDo(id) },
     RECORDER: namespace(recorder),
@@ -271,7 +282,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
     ACCESS_TEAM: "test",
     ACCESS_AUD: "test-aud",
     OWNER_EMAIL: OWNER,
-    MASTER_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
+    MASTER_KEY,
     ANTHROPIC_API_KEY: ANTHROPIC_KEY,
   } as unknown as Bindings;
   const app = createGate({ clock: options.clock, fetch: fetcher, guard: deps });

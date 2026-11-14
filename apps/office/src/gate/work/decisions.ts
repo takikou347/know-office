@@ -27,7 +27,7 @@ import { ok } from "../respond.ts";
 import { loadOfficeDefaults, serviceRules } from "../services/settings.ts";
 import { clockAt } from "./attendance.ts";
 import { findNode, recordsOf } from "./nodes.ts";
-import { type Caller, ticketTask } from "./ticket.ts";
+import { bearer, type Caller, ticketTask } from "./ticket.ts";
 
 const decideRoute = createRoute({
   method: "post",
@@ -81,15 +81,6 @@ async function count(
   // 社員ごと止めた後は、そのタスクを重ねて止めない
   if (!decision.allow && !stopping.some((j) => j.scope === "staff")) await observe(env, { type: "rule_denied", staffId, nodeId, operation: op.kind, target }, now, deps, traceId);
   return stopping.length > 0;
-}
-
-/**
- * 作業トークンを Authorization から取り出す。受け手が先に確かめている
- * @param header Authorization の値
- * @returns 作業トークン
- */
-function bearer(header: string | undefined): string {
-  return /^Bearer (\S+)$/.exec(header ?? "")?.[1] ?? "";
 }
 
 /**

@@ -1,7 +1,7 @@
-// テストで使う本物の D1 (wrangler の手元の D1)。マイグレーションを流した空の DB と REC_<年> を作る
+// テストで使う本物の D1 と R2 (wrangler の手元の物)。マイグレーションを流した空の DB と REC_<年>、会話の記録の FILES を作る
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
 import { getPlatformProxy } from "wrangler";
 
 const MIGRATIONS = join(import.meta.dirname, "../../migrations");
@@ -14,6 +14,8 @@ export type TestD1 = {
   REC_2026: D1Database;
   /** 2027 年の記録 */
   REC_2027: D1Database;
+  /** 会話の記録を置く R2 */
+  FILES: R2Bucket;
   /** 止める */
   dispose(): Promise<void>;
 };
@@ -65,13 +67,13 @@ export async function resetMain(db: D1Database): Promise<void> {
  * @returns DB と REC_<年> と dispose
  */
 export async function createTestD1(): Promise<TestD1> {
-  const proxy = await getPlatformProxy<{ DB: D1Database; REC_2026: D1Database; REC_2027: D1Database }>({
+  const proxy = await getPlatformProxy<{ DB: D1Database; REC_2026: D1Database; REC_2027: D1Database; FILES: R2Bucket }>({
     configPath: join(import.meta.dirname, "wrangler.jsonc"),
     persist: false,
   });
-  const { DB, REC_2026, REC_2027 } = proxy.env;
+  const { DB, REC_2026, REC_2027, FILES } = proxy.env;
   await migrate(DB, "main");
   await migrate(REC_2026, "ledger");
   await migrate(REC_2027, "ledger");
-  return { DB, REC_2026, REC_2027, dispose: () => proxy.dispose() };
+  return { DB, REC_2026, REC_2027, FILES, dispose: () => proxy.dispose() };
 }

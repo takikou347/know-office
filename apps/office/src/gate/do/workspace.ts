@@ -71,7 +71,7 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
   }
 
   /**
-   * 経過を書き残させる。会話の記録を送る口 (tasks.md の 7.8) ができるまでは、チェックポイントを待つだけで何もしない
+   * 経過を書き残させる。ワークスペースの中断のルート (POST /v1/abort) ができるまでは、チェックポイントを待つだけで何もしない
    * @returns 無し
    */
   wrapUp(): Promise<null> {
@@ -95,6 +95,16 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
    */
   async replaceTicket(ticket: string): Promise<null> {
     await this.#box(await this.#staffId()).replaceTicket(ticket);
+    return null;
+  }
+
+  /**
+   * 復号した会話の記録を SDK の置き場に戻させる
+   * @param input RestoreInput
+   * @returns 無し
+   */
+  async restore(input: unknown): Promise<null> {
+    await this.#box(await this.#staffId()).restore(input);
     return null;
   }
 

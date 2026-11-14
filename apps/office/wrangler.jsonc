@@ -20,6 +20,8 @@
     { "binding": "REC_2030", "database_name": "know-office-rec-2030", "database_id": "local-rec-2030", "migrations_dir": "migrations/ledger" },
     { "binding": "REC_2031", "database_name": "know-office-rec-2031", "database_id": "local-rec-2031", "migrations_dir": "migrations/ledger" }
   ],
+  // 会話の記録、社員が作ったファイル、D1 の毎日の写しの置き場。バケットは Cloudflare に作った時 (tasks.md の 4.8) に同じ名前で作る。手元では名前だけで動く
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "know-office-files" }],
   "durable_objects": {
     "bindings": [
       { "name": "RECORDER", "class_name": "RecorderDO" },

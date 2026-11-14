@@ -19,6 +19,10 @@ export type TestWorker = {
   staff(staffId: string, method: string, ...args: unknown[]): Promise<unknown>;
   /** D1 に SQL を流して行を返す */
   query(binding: string, sql: string): Promise<unknown[]>;
+  /** R2 の FILES に置いた物を、頭の道で選んで中身ごと返す */
+  files(prefix: string): Promise<{ key: string; body: string | null }[]>;
+  /** 社員のワークスペースの代わりが受けた呼び出し */
+  workspace(staffId: string): Promise<{ method: string; args: unknown[] }[]>;
   /** 止める */
   dispose(): Promise<void>;
 };
@@ -63,6 +67,7 @@ export async function startTestWorker(): Promise<TestWorker> {
   await post("/migrate", { binding: "DB", statements: statements("main") });
   await post("/migrate", { binding: "REC_2026", statements: statements("ledger") });
   await post("/migrate", { binding: "REC_2027", statements: statements("ledger") });
+  await post("/migrate", { binding: "REC_2030", statements: statements("ledger") });
   return {
     call: (method, ...args) => post("/rpc", { method, args }),
     appendMany: async (entries) => {
@@ -72,6 +77,8 @@ export async function startTestWorker(): Promise<TestWorker> {
     guard: (method, ...args) => post("/guard", { method, args }),
     staff: (staffId, method, ...args) => post("/staff", { staffId, method, args }),
     query: async (binding, sql) => z.array(z.unknown()).parse(await post("/query", { binding, sql })),
+    files: async (prefix) => z.array(z.object({ key: z.string(), body: z.string().nullable() })).parse(await post("/files", { prefix })),
+    workspace: async (staffId) => z.array(z.object({ method: z.string(), args: z.array(z.unknown()) })).parse(await post("/workspace", { staffId })),
     dispose: () => worker.dispose(),
   };
 }

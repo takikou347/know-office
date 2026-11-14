@@ -1,6 +1,6 @@
 // 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを鍵を付けて呼ぶ。起きなければ知らせる (社員が考えるの 1.3、3.1)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, CONTAINER_CA, Health, log, newId, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
+import { AppError, CONTAINER_CA, Health, log, newId, RestoreInput, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -17,6 +17,8 @@ export const START_RETRY_MS = 30_000;
 export const START_RETRIES = 3;
 /** Node のサーバーを呼ぶ時の待ち (10 秒) */
 const CALL_TIMEOUT_MS = 10_000;
+/** 会話の記録を戻す時の待ち (60 秒)。記録の全部を 1 度に送るので、ほかの呼び出しより長く待つ */
+const RESTORE_TIMEOUT_MS = 60_000;
 const POLL_MS = 1000;
 
 const HealthAnswer = z.object({ data: Health }).loose();
@@ -170,6 +172,19 @@ export class WorkspaceBox<F = unknown> {
   }
 
   /**
+   * 復号した会話の記録を SDK の置き場に戻させる。続きを呼ぶ前に行う
+   * @param input RestoreInput
+   * @throws validation_failed 形が違う時
+   * @throws conflict 走っている時
+   * @throws unavailable ワークスペースが答えない時
+   */
+  async restore(input: unknown): Promise<void> {
+    const parsed = RestoreInput.safeParse(input);
+    if (!parsed.success) throw new AppError("validation_failed", "会話の記録の形が違う");
+    await this.#call("POST", "/v1/restore", parsed.data, 204, RESTORE_TIMEOUT_MS);
+  }
+
+  /**
    * 受け手を付けてからコンテナを起こす。受け手を付けない宛先には、外向きの通信を切るので出られない
    * ワークスペースのサーバーはコンテナの中の社員からも届くので、起こすたびに鍵を作って渡し、この鍵の無い要求を断らせる
    * 社員はサーバーと同じ uid で動き、/proc とメモリから鍵を読めるので、防ぐのは鍵を知らずに 8080 番を直に呼ぶ事だけ
@@ -207,10 +222,11 @@ export class WorkspaceBox<F = unknown> {
    * @param path 道
    * @param body 本文
    * @param expected 成功のステータス
+   * @param timeoutMs 待つ長さ
    * @throws conflict 409 が返った時
    * @throws unavailable 鍵が無い、届かない、ほかのステータスの時
    */
-  async #call(method: string, path: string, body: unknown, expected: number): Promise<void> {
+  async #call(method: string, path: string, body: unknown, expected: number, timeoutMs = CALL_TIMEOUT_MS): Promise<void> {
     let key = await this.deps.keys.get();
     if (key === undefined) {
       await this.start();
@@ -223,7 +239,7 @@ export class WorkspaceBox<F = unknown> {
         method,
         headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new AppError("unavailable", "ワークスペースに届かない");

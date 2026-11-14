@@ -46,7 +46,8 @@ async function sizes(): Promise<Record<string, number>> {
 describe("記録の量", () => {
   it("使った量はバインドした置き場ごとに返り、記録を足すと増える", async () => {
     const before = await sizes();
-    expect(Object.keys(before).toSorted()).toEqual(["DB", "REC_2026", "REC_2027"]);
+    // REC_2030 は、2030 年の時刻で動く社員 DO のテストが作業トークンの発行を残す置き場
+    expect(Object.keys(before).toSorted()).toEqual(["DB", "REC_2026", "REC_2027", "REC_2030"]);
     await appendDays(START_2026, 60);
     const after = await sizes();
     expect(after["REC_2026"]).toBeGreaterThan(before["REC_2026"] ?? 0);

@@ -1,12 +1,13 @@
 // 社員 DO。社員 1 人の勤務の時刻と勤怠を持つ。判断は StaffBook に置き、ここは alarm と記憶を包むだけ (社員と勤怠の 1.3)
 import { DurableObject } from "cloudflare:workers";
-import { AppError, log, StaffId, type StaffStatus, systemClock } from "@know-office/core";
+import { AppError, log, type RestoreInput, StaffId, type StaffStatus, systemClock } from "@know-office/core";
 import type { DurableObjectStub } from "@cloudflare/workers-types";
 import type { Bindings, Staff, WorkspaceContainer } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
 import { type IssuedTicket, type RenewedTicket, StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
 import { type Pulled, pullNext } from "../work/loop.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
+import { appendTranscript, loadTranscript, resumeRun, type TranscriptStore } from "../work/transcript.ts";
 
 /** 社員 DO。`idFromName(<社員 ID>)` で社員 1 人に 1 つ。ゲートウェイだけが RPC で呼び、時刻は呼ぶ側の Clock で渡す */
 export class StaffDO extends DurableObject<Bindings> implements Staff {
@@ -264,6 +265,37 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
+   * 会話の記録の続きを、タスクごとの鍵で暗号にして R2 に置く。同じ session の部分を 1 つずつ足すので、ほかの操作と同じ鎖で流す
+   * @param nodeId タスク ID。作業トークンから読む
+   * @param input TranscriptPartInput
+   * @param now 今の時刻
+   * @returns 無し
+   * @throws validation_failed 形が違う時
+   * @throws conflict 通し番号が前回の続きでない時
+   */
+  appendTranscript(nodeId: string, input: unknown, now: number): Promise<null> {
+    return this.#run((book) => appendTranscript(this.#transcripts(), book.staffId, nodeId, input, now));
+  }
+
+  /**
+   * タスクの最後の session の会話の記録を復号して返す。鍵は社員 DO だけが作る
+   * @param nodeId タスク ID
+   * @returns session、記録の全部の base64、次の通し番号。記録が無ければ null
+   * @throws internal 部分が欠けているか、戻せない時
+   */
+  loadTranscript(nodeId: string): Promise<RestoreInput | null> {
+    return this.#serial((book) => loadTranscript(this.#transcripts(), book.staffId, nodeId));
+  }
+
+  /**
+   * 会話の記録の置き場を返す
+   * @returns D1、R2、MASTER_KEY
+   */
+  #transcripts(): TranscriptStore {
+    return { db: this.env.DB, files: this.env.FILES, master: this.env.MASTER_KEY };
+  }
+
+  /**
    * 数え方の本を作る。勤務の本と同じ記憶を使う
    * @returns StaffGuard
    */
@@ -333,7 +365,13 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
       start: () => request("start", (stub) => stub.start(staffId)),
       stop: () => request("stop", (stub) => stub.stop()),
       wrapUp: () => request("wrapUp", (stub) => stub.wrapUp()),
-      restart: () => request("restart", (stub) => stub.restart(staffId)),
+      // 作り直した後は、持っているタスクの会話の記録を戻して続きを呼ぶ。止めている間は呼ばない
+      restart: (now) =>
+        request("restart", async (stub) => {
+          await stub.restart(staffId);
+          await resumeRun(this.env, staffId, now);
+          return null;
+        }),
     };
   }
 

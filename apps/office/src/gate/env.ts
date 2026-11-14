@@ -1,6 +1,6 @@
 // ゲートウェイの Hono の型。バインディングと、要求ごとの値を Variables に置く
-import type { D1Database, DurableObjectNamespace, Rpc } from "@cloudflare/workers-types";
-import type { Clock, Fetcher, StaffStatus } from "@know-office/core";
+import type { D1Database, DurableObjectNamespace, R2Bucket, Rpc } from "@cloudflare/workers-types";
+import type { Clock, Fetcher, RestoreInput, StaffStatus } from "@know-office/core";
 import type { Admission, Challenge, RateBucket } from "./auth/guard-book.ts";
 import type { SessionRow } from "./auth/session.ts";
 import type { GuardDeps, Observed } from "./guard/deps.ts";
@@ -99,6 +99,10 @@ export interface Staff extends Rpc.DurableObjectBranded {
   checkToken(jti: string, workspaceId: string, now: number): Promise<TicketCheck>;
   /** 1 日の集計を作り直す */
   rebuildDay(day: unknown, now: number): Promise<null>;
+  /** 会話の記録の続きを暗号にして置く */
+  appendTranscript(nodeId: string, input: unknown, now: number): Promise<null>;
+  /** タスクの最後の session の会話の記録を復号して返す */
+  loadTranscript(nodeId: string): Promise<RestoreInput | null>;
 }
 
 /** ワークスペースのコンテナの DO の RPC。社員 1 人に 1 つ */
@@ -115,6 +119,8 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   run(input: unknown): Promise<null>;
   /** 作業トークンを差し替えさせる */
   replaceTicket(ticket: string): Promise<null>;
+  /** 会話の記録を SDK の置き場に戻させる */
+  restore(input: unknown): Promise<null>;
 }
 
 /** 記録を年ごとに置く D1 のバインディングの名前。04-detail.md の 3.5 */
@@ -147,6 +153,8 @@ export type Bindings = {
   OWNER_EMAIL: string;
   /** vault の鍵を暗号にする主の鍵。32 バイトを base64 で */
   MASTER_KEY: string;
+  /** 会話の記録、社員が作ったファイル、D1 の毎日の写しを置く R2 */
+  FILES: R2Bucket;
   /** Claude API の鍵。シークレットで入れ、Claude のプロキシだけが Secret に包んで使う */
   ANTHROPIC_API_KEY?: string;
 } & Partial<Record<RecordBinding, D1Database>>;

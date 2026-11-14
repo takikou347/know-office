@@ -35,6 +35,15 @@ export type Caller = {
 };
 
 /**
+ * 作業トークンを Authorization の Bearer から取り出す。受け手が先に確かめている
+ * @param header Authorization の値
+ * @returns 作業トークン。無ければ空
+ */
+export function bearer(header: string | undefined | null): string {
+  return /^Bearer (\S+)$/.exec(header ?? "")?.[1] ?? "";
+}
+
+/**
  * 社員のワークスペースの ID を返す。ワークスペースのコンテナの DO の ID で、作業トークンの ws に入る
  * @param env バインディング
  * @param staffId 社員 ID

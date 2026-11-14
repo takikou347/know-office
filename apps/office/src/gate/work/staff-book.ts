@@ -25,8 +25,8 @@ export type Workspace = {
   stop(): Promise<void>;
   /** 30 分か 2 時間を過ぎた時に、経過を書き残させる */
   wrapUp(): Promise<void>;
-  /** ハートビートが途切れた時に作り直す */
-  restart(): Promise<void>;
+  /** ハートビートが途切れた時と止めた時に作り直す。now は作り直しを決めた時刻で、続きの作業トークンの発行に使う */
+  restart(now: number): Promise<void>;
 };
 
 /** 終わりまでがこれを切ると、新しいタスクを取る前に早い退勤を考える */
@@ -269,7 +269,7 @@ export class StaffBook {
    */
   async halt(now: number): Promise<void> {
     await this.stop(now);
-    if ((await this.#load()).m.state === "stopped") await this.workspace.restart();
+    if ((await this.#load()).m.state === "stopped") await this.workspace.restart(now);
   }
 
   /**
@@ -362,7 +362,7 @@ export class StaffBook {
     if (m.heartbeatAt !== null && now >= m.heartbeatAt + HEARTBEAT_TIMEOUT_MS) {
       // 最後のハートビートの後は動いていたか分からないので、そこで閉じる
       s.pause(m.heartbeatAt, "waiting", "workspace_down");
-      await this.workspace.restart();
+      await this.workspace.restart(now);
       m.retryAt = now + RETRY_MS;
       return true;
     }
@@ -404,7 +404,7 @@ export class StaffBook {
       return true;
     }
     if (m.state === "waiting" && m.open?.reason === "workspace_down" && m.retryAt !== null && now >= m.retryAt) {
-      await this.workspace.restart();
+      await this.workspace.restart(now);
       m.retryAt = now + RETRY_MS;
       return true;
     }

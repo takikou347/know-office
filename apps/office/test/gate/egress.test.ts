@@ -38,7 +38,7 @@ function fakeContainer(healthy = true, runningAtFirst = false): { container: Con
         seen.headers.push(new Headers(init?.headers));
         if (!healthy) return Promise.reject(new Error("まだ起きていない"));
         if (url.endsWith("/v1/runs")) return Promise.resolve(new Response(null, { status: 202 }));
-        if (url.endsWith("/v1/ticket")) return Promise.resolve(new Response(null, { status: 204 }));
+        if (url.endsWith("/v1/ticket") || url.endsWith("/v1/restore")) return Promise.resolve(new Response(null, { status: 204 }));
         return Promise.resolve(Response.json({ data: { ok: true, part: "workspace" }, meta: { traceId: "t" } }));
       },
     }),
@@ -235,6 +235,19 @@ describe("ワークスペースを分ける", () => {
     expect(second).toMatch(/^[0-9a-f]{64}$/);
     expect(second).not.toBe(first);
     expect(keys.value).toBe(second);
+  });
+
+  it("復号した会話の記録を鍵を付けて戻させ、形の違う物は送らない", async () => {
+    const { container, seen } = fakeContainer();
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps());
+    await box.start();
+    const restore = { sessionId: "0190f4a8-0000-7000-8000-00000000c001", transcript: btoa("{}\n"), nextSeq: 1 };
+    await box.restore(restore);
+    expect(seen.fetched.at(-1)).toBe("http://workspace/v1/restore");
+    expect(seen.headers.at(-1)?.get("authorization")).toBe(`Bearer ${String(seen.started[0]?.env?.WORKSPACE_KEY)}`);
+    const sent = seen.fetched.length;
+    await expect(box.restore({ ...restore, sessionId: "../x" })).rejects.toMatchObject({ code: "validation_failed" });
+    expect(seen.fetched).toHaveLength(sent);
   });
 
   it("動いているコンテナの鍵が記憶に無ければ、止めて起こし直してから呼ぶ", async () => {
