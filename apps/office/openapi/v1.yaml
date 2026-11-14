@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.0.3
+  version: 1.0.4
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -1410,9 +1410,9 @@ paths:
       description: '処理の流れ:
 
 
-        1. `GuardDO` と 3 人分の `StaffDO` から、停止中の範囲を集める'
+        1. `stops` のうち `kind` が `stop` で、`stop_updates` に `resumed` が無い行を新しい順に集める'
       x-steps:
-      - '`GuardDO` と 3 人分の `StaffDO` から、停止中の範囲を集める'
+      - '`stops` のうち `kind` が `stop` で、`stop_updates` に `resumed` が無い行を新しい順に集める'
       security:
       - accessJwt: []
         session: []
@@ -1516,11 +1516,11 @@ paths:
 
         1. 対象が存在し、まだ停止していないことを確認する
 
-        2. 自動停止の設計書にある範囲ごとの停止処理を行う
+        2. `GuardDO.claimStop` で止める権利を取る
 
-        3. `stops` に `by: "owner"` で追加する
+        3. `stops` に `by: "owner"` で追加し、通知を出し、監査ログに `guard.stop` を記録する
 
-        4. 監査ログに `guard.stop` を記録し、通知を出す
+        4. 自動停止の設計書にある範囲ごとの停止処理を行う。途中で失敗したら、通知と監査ログに `guard.stop_failed` を残して 500 を返す
 
 
         このルート固有のエラー:
@@ -1528,15 +1528,15 @@ paths:
 
         - 404 `not_found`: 対象が存在しない
 
-        - 409 `conflict`: すでに停止している'
+        - 409 `conflict`: すでに停止している、または同時に来た別の停止が先に権利を取った'
       x-steps:
       - 対象が存在し、まだ停止していないことを確認する
-      - 自動停止の設計書にある範囲ごとの停止処理を行う
-      - '`stops` に `by: "owner"` で追加する'
-      - 監査ログに `guard.stop` を記録し、通知を出す
+      - '`GuardDO.claimStop` で止める権利を取る'
+      - '`stops` に `by: "owner"` で追加し、通知を出し、監査ログに `guard.stop` を記録する'
+      - 自動停止の設計書にある範囲ごとの停止処理を行う。途中で失敗したら、通知と監査ログに `guard.stop_failed` を残して 500 を返す
       x-errors:
       - '404 `not_found`: 対象が存在しない'
-      - '409 `conflict`: すでに停止している'
+      - '409 `conflict`: すでに停止している、または同時に来た別の停止が先に権利を取った'
       requestBody:
         required: true
         content:
@@ -1599,7 +1599,7 @@ paths:
 
         1. `stops` と `stop_updates` を取得する
 
-        2. 直前の 20 件の操作を R2 から取得する
+        2. 直前の 20 件の操作を、監査ログの `guard.stop` (ニアミスは `guard.near`) の detail から取得する
 
 
         このルート固有のエラー:
@@ -1608,7 +1608,7 @@ paths:
         - 404 `not_found`: 停止の記録が存在しない'
       x-steps:
       - '`stops` と `stop_updates` を取得する'
-      - 直前の 20 件の操作を R2 から取得する
+      - 直前の 20 件の操作を、監査ログの `guard.stop` (ニアミスは `guard.near`) の detail から取得する
       x-errors:
       - '404 `not_found`: 停止の記録が存在しない'
       parameters:
@@ -1748,7 +1748,7 @@ paths:
 
         3. 全体の停止なら、鍵の再登録が済んでいることを確認する
 
-        4. `GuardDO` と `StaffDO` の停止を解除する
+        4. `GuardDO.releaseStop` で再開する権利を取り、`GuardDO` と `StaffDO` の停止を解除する
 
         5. `stop_updates` に `resumed` を追加し、監査ログに `guard.resume` を記録する
 
@@ -1760,17 +1760,17 @@ paths:
 
         - 401 `step_up_required`: パスキーの確認がない
 
-        - 409 `conflict`: 解除済み、停止には至らなかったニアミスの記録、または鍵の再登録が済んでいない'
+        - 409 `conflict`: 解除済み、同時に来た別の再開が先に権利を取った、停止には至らなかったニアミスの記録、または鍵の再登録が済んでいない'
       x-steps:
       - 停止の記録を取得する
       - 停止範囲がサービスか全体なら `requireStepUp(c)` で確認を求める
       - 全体の停止なら、鍵の再登録が済んでいることを確認する
-      - '`GuardDO` と `StaffDO` の停止を解除する'
+      - '`GuardDO.releaseStop` で再開する権利を取り、`GuardDO` と `StaffDO` の停止を解除する'
       - '`stop_updates` に `resumed` を追加し、監査ログに `guard.resume` を記録する'
       x-errors:
       - '404 `not_found`: 停止の記録が存在しない'
       - '401 `step_up_required`: パスキーの確認がない'
-      - '409 `conflict`: 解除済み、停止には至らなかったニアミスの記録、または鍵の再登録が済んでいない'
+      - '409 `conflict`: 解除済み、同時に来た別の再開が先に権利を取った、停止には至らなかったニアミスの記録、または鍵の再登録が済んでいない'
       x-step-up: conditional
       parameters:
       - name: stopId
