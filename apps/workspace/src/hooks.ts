@@ -1,5 +1,5 @@
 // ツールを使う前のフック。ゲートウェイのルールの判断を聞き、届かない、遅い、エラーの時は断る (社員が考えるの 3.4)
-import { allowedFetch, DecideAnswer, PreToolUseInput, type Clock, type Decision, type Fetcher } from "@know-office/core";
+import { allowedFetch, DecideAnswer, log, PreToolUseInput, type Clock, type Decision, type Fetcher } from "@know-office/core";
 
 /** ゲートウェイの受け口。ワークスペースの外向きの通信はこの宛先だけに出る */
 export const GATE_ORIGIN = "http://gate.internal/";
@@ -30,8 +30,6 @@ export type HookDeps = {
   clock: Clock;
   /** フックが断った記録を残す先 */
   record: (call: DeniedCall) => void;
-  /** 待ちの期限の作り方。初期値は AbortSignal.timeout */
-  deadline?: (ms: number) => AbortSignal;
 };
 
 /** SDK の PreToolUse のフックの返す形 */
@@ -47,24 +45,45 @@ export type PreToolUseOutput = {
   };
 };
 
+/** 5 秒で答えが返らなかった印 */
+class DecisionTimeout extends Error {
+  override name = "DecisionTimeout";
+}
+
 /**
- * ゲートウェイにツールの可否を聞く。答えが無い時は理由を付けて投げる
+ * ゲートウェイにツールの可否を聞く。答えが無い時は投げる
  * @param deps フックの依り所
  * @param toolName ツールの名前
  * @param toolInput ツールの入力
  * @returns ゲートウェイの判断
  */
 async function ask(deps: HookDeps, toolName: string, toolInput: Record<string, unknown>): Promise<Decision> {
-  const signal = (deps.deadline ?? ((ms) => AbortSignal.timeout(ms)))(DECISION_TIMEOUT_MS);
   const res = await allowedFetch(deps.fetcher, GATE_DECISIONS_URL, [GATE_ORIGIN], {
     method: "POST",
     headers: { authorization: `Bearer ${deps.token()}`, "content-type": "application/json" },
     body: JSON.stringify({ toolName, toolInput }),
-    signal,
+    signal: AbortSignal.timeout(DECISION_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`ルールの判断が ${res.status} を返した`);
   const body: unknown = await res.json();
   return DecideAnswer.parse(body).data;
+}
+
+/**
+ * 聞いた答えを 5 秒だけ待つ。fetch が signal を見なくても 5 秒で投げる
+ * @param pending 聞いている答え
+ * @returns 5 秒の内に返った答え
+ */
+async function within(pending: Promise<Decision>): Promise<Decision> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new DecisionTimeout("ルールの判断が 5 秒で返らない")), DECISION_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -90,18 +109,23 @@ export function preToolUse(deps: HookDeps): (input: unknown) => Promise<PreToolU
     if (parsed.success) {
       toolName = parsed.data.tool_name;
       try {
-        const decision = await ask(deps, toolName, parsed.data.tool_input);
+        const decision = await within(ask(deps, toolName, parsed.data.tool_input));
         // ゲートウェイが判断した時は、通しても断っても tool_calls にゲートウェイが残す
         return out(decision.allow, decision.reason);
       } catch (error) {
         // 届かない、5 秒で答えない、エラー、形が違う時は断る側に倒す
-        const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+        const timeout = error instanceof Error && ["DecisionTimeout", "TimeoutError", "AbortError"].includes(error.name);
         reason = timeout ? "ルールの判断が 5 秒で返らないので断る" : "ルールの判断を受けられないので断る";
       }
     } else {
       reason = "フックの入力の形が違うので断る";
     }
-    deps.record({ at: deps.clock.now(), toolName, reason });
+    try {
+      deps.record({ at: deps.clock.now(), toolName, reason });
+    } catch {
+      // 記録の先が落ちても、断る答えは必ず返す
+      log("error", "hook_record_failed", { toolName });
+    }
     return out(false, reason);
   };
 }

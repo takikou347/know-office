@@ -1,6 +1,6 @@
 // ツールを使う前のフックが、ゲートウェイのルールの判断を聞き、答えが無ければ断る事を確かめる (社員が考えるの 3.4、4 章)
 import type { Fetcher } from "@know-office/core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DECISION_TIMEOUT_MS, GATE_DECISIONS_URL, preToolUse, type DeniedCall, type HookDeps } from "../src/hooks.ts";
 
 /** 判断を聞いた中身 */
@@ -9,10 +9,10 @@ type Seen = { url: string; init: RequestInit | undefined };
 /**
  * テスト用のフックの依り所を作る
  * @param fetcher ゲートウェイの代わり
- * @param deadline 待ちの期限の作り方
+ * @param record 断った記録を残す先。省くと並びに足す
  * @returns 依り所、聞いた中身、残った記録
  */
-function setup(fetcher: Fetcher, deadline?: (ms: number) => AbortSignal) {
+function setup(fetcher: Fetcher, record?: HookDeps["record"]) {
   const seen: Seen[] = [];
   const denied: DeniedCall[] = [];
   const deps: HookDeps = {
@@ -22,8 +22,7 @@ function setup(fetcher: Fetcher, deadline?: (ms: number) => AbortSignal) {
     },
     token: () => "ticket-1",
     clock: { now: () => 1_700_000_000_000 },
-    record: (call) => denied.push(call),
-    ...(deadline ? { deadline } : {}),
+    record: record ?? ((call) => denied.push(call)),
   };
   return { hook: preToolUse(deps), seen, denied };
 }
@@ -38,26 +37,30 @@ function answer(allow: boolean, reason: string): Promise<Response> {
   return Promise.resolve(Response.json({ data: { allow, reason }, meta: { traceId: "t" } }));
 }
 
-// 答えないゲートウェイ。期限が来ると fetch と同じく中断で失敗する
-const silent: Fetcher = (_url, init) =>
-  new Promise((_resolve, reject) => {
-    init?.signal?.addEventListener("abort", () => reject(new DOMException("timeout", "TimeoutError")));
-  });
+// 答えず、signal も見ないゲートウェイ
+const silent: Fetcher = () => new Promise(() => {});
+
+// 4.9 秒で通す答えを返すゲートウェイ
+const late: Fetcher = () => new Promise((resolve) => setTimeout(() => resolve(Response.json({ data: { allow: true, reason: "通す" }, meta: { traceId: "t" } })), 4900));
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const READ = { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "/work/a" } };
 
 describe("鍵はゲートウェイだけが持つ", () => {
   it("ルールの判断が返らない", async () => {
-    let asked = 0;
-    const controller = new AbortController();
-    const { hook, denied } = setup(silent, (ms) => {
-      asked = ms;
-      return controller.signal;
+    vi.useFakeTimers();
+    const { hook, denied } = setup(silent);
+    let settled = false;
+    const pending = hook(READ).finally(() => {
+      settled = true;
     });
-    const pending = hook(READ);
-    controller.abort();
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     const out = await pending;
-    expect(asked).toBe(5000);
     expect(out.hookSpecificOutput.permissionDecision).toBe("deny");
     expect(denied).toEqual([{ at: 1_700_000_000_000, toolName: "Read", reason: out.hookSpecificOutput.permissionDecisionReason }]);
   });
@@ -66,6 +69,24 @@ describe("鍵はゲートウェイだけが持つ", () => {
 describe("フックからルールの判断を聞く", () => {
   it("待つのは 5 秒", () => {
     expect(DECISION_TIMEOUT_MS).toBe(5000);
+  });
+
+  it("5 秒の内に返った答えは使う", async () => {
+    vi.useFakeTimers();
+    const { hook } = setup(late);
+    const pending = hook(READ);
+    await vi.advanceTimersByTimeAsync(4900);
+    expect((await pending).hookSpecificOutput.permissionDecision).toBe("allow");
+  });
+
+  it("記録を残せなくても断る", async () => {
+    const { hook } = setup(
+      () => Promise.reject(new TypeError("fetch failed")),
+      () => {
+        throw new Error("記録の先が落ちた");
+      },
+    );
+    expect((await hook(READ)).hookSpecificOutput.permissionDecision).toBe("deny");
   });
 
   it("作業トークンを付けてゲートウェイに聞き、通す答えなら通す", async () => {

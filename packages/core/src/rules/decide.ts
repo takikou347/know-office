@@ -1,5 +1,7 @@
 // 社員の操作をオーナーのルールと照らし、通すか断るかを決める (社員が考えるの 3.4)
 import type { Operation } from "./operation.ts";
+import { inside, protectedPath } from "./path.ts";
+import { shellRefusal } from "./shell.ts";
 
 /** 判断の前提。オーナーのルールとタスクの様子 */
 export type RuleContext = {
@@ -25,69 +27,6 @@ export type RuleDecision = {
   /** 外部の文章の印を付けるか */
   marksExternal: boolean;
 };
-
-// /work の外でも触ってよい物。出力を捨てる先だけ
-const OUTSIDE_OK = ["/dev/null"];
-
-/**
- * 道を / から始まる形に直す。相対の道は root から読み、. と .. を畳む
- * @param path 道
- * @param root 相対の道の頭
- * @returns 畳んだ絶対の道
- */
-function normalize(path: string, root: string): string {
-  const parts: string[] = [];
-  for (const part of (path.startsWith("/") ? path : `${root}/${path}`).split("/")) {
-    if (part === "..") parts.pop();
-    else if (part !== "" && part !== ".") parts.push(part);
-  }
-  return `/${parts.join("/")}`;
-}
-
-/**
- * 道が置き場の下にあるかを確かめる
- * @param path 道
- * @param ctx 判断の前提
- * @returns 下にあれば true
- */
-function inside(path: string, ctx: RuleContext): boolean {
-  const root = normalize(ctx.workRoot, "/");
-  // ~ は社員の家の置き場で、/work の外
-  if (path.startsWith("~") || path.startsWith("$HOME")) return false;
-  const full = normalize(path, root);
-  return full === root || full.startsWith(`${root}/`) || OUTSIDE_OK.includes(full);
-}
-
-/**
- * 道が書けない所に当たるかを確かめる。置き場の下のどの深さのリポジトリでも当てる
- * @param path 道
- * @param ctx 判断の前提
- * @returns 当たれば true
- */
-function protectedPath(path: string, ctx: RuleContext): boolean {
-  const full = normalize(path, normalize(ctx.workRoot, "/"));
-  return ctx.protectedPaths.some((p) => full.includes(`/${p.replace(/^\/+/, "")}`));
-}
-
-/**
- * 命令を断る理由を探す
- * @param command シェルの命令
- * @param ctx 判断の前提
- * @returns 断る理由。通すなら null
- */
-function shellRefusal(command: string, ctx: RuleContext): string | null {
-  for (const part of command.split(/&&|\|\||[;|\n]/)) {
-    const words = part.trim().split(/\s+/);
-    const git = words[0] === "git" ? words.slice(1) : [];
-    if (git[0] === "push" && git.some((w) => /^(?:\+|(?:.*:)?(?:refs\/heads\/)?(?:main|master)$)/.test(w))) return "main への push は断る";
-    if (git[0] === "push" && git.some((w) => w === "-f" || w.startsWith("--force"))) return "--force の push は断る";
-    if (git[0] === "config" && !git.some((w) => ["--get", "--get-all", "--get-regexp", "--list", "-l"].includes(w))) return "git config の書き換えは断る";
-  }
-  if (/\s--force\b/.test(command)) return "--force は断る";
-  // 道らしい言葉 (/ を含む、~ か .. で始まる) が置き場の外を指せば断る。URL は相対の道として置き場の下に畳まれる
-  const paths = command.split(/[\s;&|<>()='"`]+/).filter((w) => w.includes("/") || w.startsWith("~") || w.startsWith("$HOME"));
-  return paths.every((p) => inside(p, ctx)) ? null : `${ctx.workRoot} の外は触れない`;
-}
 
 /**
  * 通す判断を作る
@@ -128,13 +67,13 @@ export function decide(op: Operation, ctx: RuleContext): RuleDecision {
     case "file.read":
     case "file.write": {
       if (op.target === "") return deny("道の無いファイルの操作は断る");
-      if (!op.paths.every((p) => inside(p, ctx))) return deny(`${ctx.workRoot} の外は触れない`);
-      if (op.kind === "file.write" && op.paths.some((p) => protectedPath(p, ctx))) return deny("ルールで触れない所には書けない");
+      if (!op.paths.every((p) => inside(p, ctx.workRoot))) return deny(`${ctx.workRoot} の外は触れない`);
+      if (op.kind === "file.write" && op.paths.some((p) => protectedPath(p, ctx.workRoot, ctx.protectedPaths))) return deny("ルールで触れない所には書けない");
       return allow(`${ctx.workRoot} の下`);
     }
     case "shell.run": {
       if (op.target === "") return deny("命令の無いシェルは断る");
-      const refusal = shellRefusal(op.target, ctx);
+      const refusal = shellRefusal(op.target, ctx.workRoot, ctx.protectedPaths);
       return refusal === null ? allow(`${ctx.workRoot} の下の命令`) : deny(refusal);
     }
     case "web.fetch":
