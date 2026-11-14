@@ -12,6 +12,7 @@ export { log, redact, redactText } from "./log.ts";
 export { jstClock, jstDay, jstDayStart, jstYear } from "./time.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
 export { AuditInput, AuditRow } from "./schemas/audit.ts";
+export { Notice, NoticeLevel } from "./schemas/notices.ts";
 export { StorageUse } from "./schemas/storage.ts";
 export { RecordGroup, RecordSummary, RecordTotals } from "./schemas/records.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";

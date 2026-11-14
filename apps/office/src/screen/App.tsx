@@ -1,7 +1,14 @@
 import type { Health } from "@know-office/core";
 import { AppBar, AppShell } from "knowidea-ui";
 import { type Navigate, Page } from "./pages.tsx";
-import { bottomCurrentOf, bottomItems, morePath, screenOf, sideItems } from "./routes.ts";
+import { LiveNoticeBar, NoticeProvider } from "./parts/notices.tsx";
+import {
+  bottomCurrentOf,
+  bottomItems,
+  morePath,
+  screenOf,
+  sideItems,
+} from "./routes.ts";
 
 export interface AppProps {
   health?: Health;
@@ -16,21 +23,28 @@ export function App({ health, url = "/", navigate = () => {} }: AppProps) {
   const more = pathname === morePath;
   const screen = screenOf(pathname);
   return (
-    <AppShell
-      items={sideItems}
-      current={more ? undefined : screen.id}
-      bottomItems={bottomItems}
-      bottomCurrent={bottomCurrentOf(pathname)}
-      brand={{ name: "know-office" }}
-      header={<AppBar title={more ? "その他" : screen.label} position="sticky" />}
-    >
-      <Page
-        screen={more ? "more" : screen.id}
-        pathname={pathname}
-        query={searchParams}
-        health={health}
-        navigate={navigate}
-      />
-    </AppShell>
+    <NoticeProvider>
+      <AppShell
+        items={sideItems}
+        current={more ? undefined : screen.id}
+        bottomItems={bottomItems}
+        bottomCurrent={bottomCurrentOf(pathname)}
+        brand={{ name: "know-office" }}
+        header={
+          <>
+            <AppBar title={more ? "その他" : screen.label} position="sticky" />
+            <LiveNoticeBar />
+          </>
+        }
+      >
+        <Page
+          screen={more ? "more" : screen.id}
+          pathname={pathname}
+          query={searchParams}
+          health={health}
+          navigate={navigate}
+        />
+      </AppShell>
+    </NoticeProvider>
   );
 }

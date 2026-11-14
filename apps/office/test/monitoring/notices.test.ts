@@ -95,7 +95,7 @@ describe("気付く", () => {
   it("API の失敗が続く", async () => {
     const work = await startTask(at(9));
     const first = at(9, 10);
-    for (const [i, status] of [500, 503, 500].entries()) {
+    for (const [i, status] of ([500, 500, 500] as const).entries()) {
       w.gate.claude.pushError(status, "api_error");
       expect((await callClaude(work, first + i * MINUTE)).status).toBe(status);
     }
@@ -142,7 +142,7 @@ describe("Claude の失敗の通知", () => {
 
   it("429 と 529 は上限の待ちで、失敗に数えない", async () => {
     const work = await startTask(at(12));
-    for (const [i, status] of [429, 529, 429].entries()) {
+    for (const [i, status] of ([429, 529, 429] as const).entries()) {
       w.gate.claude.pushError(status, status === 429 ? "rate_limit_error" : "overloaded_error");
       await callClaude(work, at(12, 10 + i));
     }

@@ -24,6 +24,7 @@ import {
 } from "knowidea-ui";
 import { type ReactNode, Suspense, lazy, useState } from "react";
 import { duration, jstTime } from "./format.ts";
+import { LiveNoticeList } from "./parts/notices.tsx";
 import {
   type Staff,
   type Task,
@@ -34,7 +35,6 @@ import {
   lessons,
   messages,
   monthCost,
-  notices,
   serviceLog,
   sessions,
   staff,
@@ -140,7 +140,7 @@ function Dashboard({ health }: { health?: Health }) {
         />
       </Part>
       <Part title="お知らせ">
-        <List label="お知らせ" items={notices.map((n) => ({ id: n.id, title: n.text, meta: n.time }))} />
+        <LiveNoticeList />
       </Part>
     </Section>
   );

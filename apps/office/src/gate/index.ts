@@ -6,6 +6,7 @@ import { registerComponents } from "./openapi.ts";
 import { attendanceRoutes } from "./routes/attendance.ts";
 import { guardRoutes } from "./routes/guard.ts";
 import { nodeRoutes } from "./routes/nodes.ts";
+import { noticeRoutes } from "./routes/notices.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { passkeyRoutes } from "./routes/passkeys.ts";
 import { recordRoutes } from "./routes/records.ts";
@@ -27,7 +28,8 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
     .route("/", nodeRoutes)
     .route("/", orgRoutes)
     .route("/", serviceRoutes)
-    .route("/", settingRoutes);
+    .route("/", settingRoutes)
+    .route("/", noticeRoutes);
   registerComponents(app);
   return app;
 }

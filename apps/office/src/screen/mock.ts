@@ -113,11 +113,6 @@ export const lessons = [
 
 export const monthCost = { used: 11.4, budget: 15 };
 
-export const notices = [
-  { id: "n1", time: "16:40", text: "作る役を止めた。1 時間の切符が切れても区切りが来ない" },
-  { id: "n2", time: "13:20", text: "CodeEditor のページを足す が可を待っている" },
-];
-
 export const flows: Record<string, { id: string; time: string; title: string; text: string }[]> = {
   t2: [
     { id: "f3", time: "13:20", title: "渡した", text: "見る役とオーナーに可を頼んだ" },

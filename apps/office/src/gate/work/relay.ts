@@ -1,5 +1,5 @@
 // Claude のプロキシ。作業トークンを確かめた要求を、鍵を替えて Claude API へ流れのまま送り、使った量と上限の待ちを残す (社員が考えるの 3.3)
-import { allowedFetch, allowedModels, AppError, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, Secret, type StaffId } from "@know-office/core";
+import { allowedFetch, allowedModels, AppError, PROBLEMS, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, Secret, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -8,6 +8,9 @@ import { endpoints } from "../endpoints.ts";
 import type { Bindings, GateEnv, Staff } from "../env.ts";
 import { ensureRunning, staffOf } from "../guard/actions.ts";
 import { observe } from "../guard/observe.ts";
+import { recordError } from "../ledger/errors.ts";
+import { CLAUDE_FAILED, noticeClaudeFailures } from "../ledger/notices.ts";
+import { problemResponse } from "../problem.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { clockAt } from "./attendance.ts";
 import { findNode, recordsOf } from "./nodes.ts";
@@ -70,13 +73,23 @@ export async function relayClaude(c: Context<GateEnv>, ticket: TicketClaims): Pr
   await ensureRunning(c.env, ticket.staffId, ticket.nodeId);
   const text = await c.req.text();
   const model = checkedModel(text, ticket.staffId);
-  const res = await callUpstream(c, path, text);
+  let res: Response;
+  try {
+    res = await callUpstream(c, path, text);
+  } catch (error) {
+    // 届かない失敗はここで数えて返す。onError に任せると upstream_failed として別に残り、二重に数える
+    if (!(error instanceof AppError) || error.code === "unavailable") throw error;
+    await noteClaudeFailure(c, path, PROBLEMS[error.code].status, error);
+    return problemResponse(c, error);
+  }
   const headers = downstreamHeaders(res.headers);
   const staff = staffOf(c.env, ticket.staffId);
   if (res.status === 429 || res.status === 529) {
     await staff.waitStart("rate_limit", c.var.clock.now()).catch(rethrowRpc);
     return new Response(res.body, { status: res.status, headers });
   }
+  // 529 の混み合いは上の待ちで扱い、ほかの 500 台を Claude の API の失敗として数える
+  if (res.status >= 500) await noteClaudeFailure(c, path, res.status, new Error(`Claude API が ${String(res.status)} を返した`));
   // トークンを数えるだけの呼び出しと失敗は、使った量に入れず、待ちも解かない
   if (path !== MESSAGES || !res.ok) return new Response(res.body, { status: res.status, headers });
   const waitedMs = await endWait(c, staff, ticket.staffId);
@@ -88,6 +101,20 @@ export async function relayClaude(c: Context<GateEnv>, ticket: TicketClaims): Pr
   const parsed = MessageBody.safeParse(safeJson(answer));
   if (parsed.success && parsed.data.usage) await recordUsage(c, call, parsed.data.usage);
   return new Response(answer, { status: res.status, headers });
+}
+
+/**
+ * Claude の API の失敗をエラーログに残し、5 分に 3 回に届いていれば通知を出す。通知を出せなくても返事は止めず、ログに残す
+ * @param c 要求の文脈
+ * @param path 道
+ * @param status 返したステータス
+ * @param error 失敗
+ */
+async function noteClaudeFailure(c: Context<GateEnv>, path: string, status: number, error: Error): Promise<void> {
+  await recordError(c.env, { source: "gate", level: "error", code: CLAUDE_FAILED, error, route: path, status, traceId: c.var.traceId }, c.var.clock);
+  await noticeClaudeFailures(c.env, c.var.clock, String(status)).catch((cause: unknown) => {
+    log("error", "claude_failure_notice_failed", { traceId: c.var.traceId, error: cause instanceof Error ? cause.message : "unknown" });
+  });
 }
 
 /**
