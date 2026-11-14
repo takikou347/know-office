@@ -11,6 +11,8 @@ paths:
 正本は knowidea の `../knowidea/services/know-office/docs/05-conventions.md` の 4 章。
 
 - テストは作る前に書き、思った理由で落ちる事を確かめてから作る。誤字とバグの直しも同じ
+- うまくいく道と一緒に、同時の更新 (2 つが同じ版を読む)、二重の決定、途中で落ちた時に何も残らない事、境目の値 (上限ちょうど、形の違う入力) のテストを先に書く。順に呼ぶだけのテストは同時を確かめない。書く直前に別の変更を挟むには、テストの env の `DB.batch` や `FILES.put` を包む
+- 最初から通る守りのテストは、作った所を壊して落ちる事を確かめてから残す
 - 要件のシナリオのテストは、`describe` を要件の名前、`it` をシナリオの名前と同じ日本語にする。対応は詳細設計の機能ごとの文書の 4 章
 - 1 つのシナリオを多くの画面や入力で回し、1 つの `it` では 5 秒を超える時は、`describe` をシナリオの名前にして、その中の `it` を画面や入力の名前にする
 - 置き場: 共通 `packages/core/test/<物>.test.ts`、ゲートウェイと DO `apps/office/test/<まとまり>/<物>.test.ts`、画面の通し `apps/office/e2e/<画面か流れ>.spec.ts`、ワークスペース `apps/workspace/test/<物>.test.ts`、型の食い違い `<物>.types.ts` に `@ts-expect-error`、リポジトリの道具 `scripts/<物>.test.ts` (`node:test`)
