@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:image": "vitest run --config vitest.image.config.ts"
   },
   "dependencies": {
     "@know-office/core": "workspace:*"

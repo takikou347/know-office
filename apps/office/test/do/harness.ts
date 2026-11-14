@@ -3,9 +3,10 @@ import { z } from "zod";
 import { GuardDO } from "../../src/gate/do/guard.ts";
 import { RecorderDO } from "../../src/gate/do/recorder.ts";
 import { StaffDO } from "../../src/gate/do/staff.ts";
+import { WorkspaceDO } from "../../src/gate/do/workspace.ts";
 import type { Bindings } from "../../src/gate/env.ts";
 
-export { GuardDO, RecorderDO, StaffDO };
+export { GuardDO, RecorderDO, StaffDO, WorkspaceDO };
 
 const Binding = z.enum(["DB", "REC_2026", "REC_2027"]);
 const Migrate = z.object({ binding: Binding, statements: z.array(z.string()) });

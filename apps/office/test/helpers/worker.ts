@@ -99,7 +99,8 @@ export async function startOfficeWorker(): Promise<OfficeWorker> {
       assets,
       // vite の ?raw の代わりに、wrangler の組み立てでも OpenAPI の文書を文字列として読む
       build: { moduleRules: [{ type: "Text", globs: ["**/*.yaml?raw"] }] },
-      dev: { server: { port: 0 }, inspector: false, persist: false, logLevel: "error" },
+      // コンテナは Docker で作るので、入口と画面の分かれ方を見るこのテストでは起こさない
+      dev: { server: { port: 0 }, inspector: false, persist: false, logLevel: "error", enableContainers: false },
     });
   } catch (error) {
     // 起こせない時も一時の置き場を残さない

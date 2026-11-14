@@ -28,15 +28,23 @@ import type { Observed, RecentOp } from "./deps.ts";
 export const RECENT_OPS = 20;
 /** 作業トークンの長さ */
 export const TICKET_MS = 60 * 60_000;
+/** チェックポイントで残りがこれを切っていれば、新しい作業トークンを渡す (社員が考えるの 3.2) */
+export const RENEW_BEFORE_MS = 10 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
-/** 発行した作業トークン。ID と発行した先だけを持ち、署名は 7.2 で付ける */
+/** 発行した作業トークン。ID と発行した先と期限だけを持ち、署名はゲートウェイが vault の鍵で付ける */
 const Ticket = z.object({ jti: z.string(), nodeId: z.string(), workspaceId: z.string(), expiresAt: z.number() }).strict();
 const Tickets = z.array(Ticket);
 const RecentOps = z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /** 作業トークンを確かめた答え。misuse は発行した先と違うワークスペースから使われた */
 export type TicketCheck = "ok" | "revoked" | "expired" | "misuse";
+
+/** 発行した作業トークンの ID と期限 */
+export type IssuedTicket = { jti: string; expiresAt: number };
+
+/** チェックポイントで発行し直した作業トークンと、渡し終えたら失効させる前の作業トークン */
+export type RenewedTicket = IssuedTicket & { replaces: string[] };
 
 /** 社員 1 人のシグナルを数え、作業トークンを発行と失効する。時刻はすべて引数で受ける */
 export class StaffGuard {
@@ -133,13 +141,39 @@ export class StaffGuard {
    * @param nodeId タスク ID
    * @param workspaceId 渡すワークスペースの ID
    * @param now 今の時刻
-   * @returns 作業トークン ID
+   * @returns 作業トークン ID と期限
    */
-  async issueToken(nodeId: string, workspaceId: string, now: number): Promise<{ jti: string }> {
+  async issueToken(nodeId: string, workspaceId: string, now: number): Promise<IssuedTicket> {
     const jti = newId(clockAt(now));
+    const expiresAt = now + TICKET_MS;
     const live = (await this.#tickets()).filter((t) => t.expiresAt > now);
-    await this.storage.put("tickets", [...live, { jti, nodeId, workspaceId, expiresAt: now + TICKET_MS }]);
-    return { jti };
+    await this.storage.put("tickets", [...live, { jti, nodeId, workspaceId, expiresAt }]);
+    return { jti, expiresAt };
+  }
+
+  /**
+   * タスクの有効な作業トークンの残りが 10 分を切っていれば、同じ先に新しい作業トークンを発行する。前の作業トークンは渡し終えるまで残す
+   * @param nodeId タスク ID
+   * @param workspaceId 渡すワークスペースの ID
+   * @param now 今の時刻
+   * @returns 新しい作業トークン。有効な作業トークンが無いか、まだ残りがあれば null
+   */
+  async renewToken(nodeId: string, workspaceId: string, now: number): Promise<RenewedTicket | null> {
+    const current = (await this.#tickets()).filter((t) => t.nodeId === nodeId && t.workspaceId === workspaceId && t.expiresAt > now);
+    // 止めて失効させたタスクには発行し直さない
+    if (current.length === 0) return null;
+    if (Math.max(...current.map((t) => t.expiresAt)) - now > RENEW_BEFORE_MS) return null;
+    return { ...(await this.issueToken(nodeId, workspaceId, now)), replaces: current.map((t) => t.jti) };
+  }
+
+  /**
+   * 作業トークンを ID で失効させる
+   * @param jtis 作業トークン ID
+   * @returns 無し
+   */
+  async revokeTokens(jtis: string[]): Promise<null> {
+    await this.#revoke((t) => jtis.includes(t.jti));
+    return null;
   }
 
   /**

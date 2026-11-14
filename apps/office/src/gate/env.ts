@@ -4,7 +4,7 @@ import type { Clock, Fetcher, StaffStatus } from "@know-office/core";
 import type { Admission, Challenge, RateBucket } from "./auth/guard-book.ts";
 import type { SessionRow } from "./auth/session.ts";
 import type { GuardDeps, Observed } from "./guard/deps.ts";
-import type { TicketCheck } from "./guard/staff-guard.ts";
+import type { IssuedTicket, RenewedTicket, TicketCheck } from "./guard/staff-guard.ts";
 import type { ChainCheck } from "./ledger/audit.ts";
 
 /** 記録 DO の RPC。画面の型から DO のコードを読まないよう、ここに形だけを置く */
@@ -88,11 +88,31 @@ export interface Staff extends Rpc.DurableObjectBranded {
   /** 今のタスクの働いた時間 */
   taskClock(now: number): Promise<{ nodeId: string; activeMs: number } | null>;
   /** タスクの作業トークンを発行する */
-  issueToken(nodeId: string, workspaceId: string, now: number): Promise<{ jti: string }>;
+  issueToken(nodeId: string, workspaceId: string, now: number): Promise<IssuedTicket>;
+  /** 残りが 10 分を切った作業トークンを発行し直す */
+  renewToken(nodeId: string, workspaceId: string, now: number): Promise<RenewedTicket | null>;
+  /** 作業トークンを ID で失効させる */
+  revokeTokens(jtis: string[]): Promise<null>;
   /** 作業トークンが使えるかを確かめる */
   checkToken(jti: string, workspaceId: string, now: number): Promise<TicketCheck>;
   /** 1 日の集計を作り直す */
   rebuildDay(day: unknown, now: number): Promise<null>;
+}
+
+/** ワークスペースのコンテナの DO の RPC。社員 1 人に 1 つ */
+export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
+  /** コンテナを起こし、/v1/health が返るまで待つ */
+  start(staffId: string): Promise<null>;
+  /** コンテナを止める */
+  stop(): Promise<null>;
+  /** コンテナを止めて起こし直す */
+  restart(staffId: string): Promise<null>;
+  /** 経過を書き残させる */
+  wrapUp(): Promise<null>;
+  /** タスク 1 件分の SDK の呼び出しを始めさせる */
+  run(input: unknown): Promise<null>;
+  /** 作業トークンを差し替えさせる */
+  replaceTicket(ticket: string): Promise<null>;
 }
 
 /** 記録を年ごとに置く D1 のバインディングの名前。04-detail.md の 3.5 */
@@ -111,6 +131,8 @@ export type Bindings = {
   GUARD: DurableObjectNamespace<Guard>;
   /** 社員 DO。社員 ID ごとに 1 つ */
   STAFF: DurableObjectNamespace<Staff>;
+  /** ワークスペースのコンテナの DO。社員 ID ごとに 1 つ */
+  WORKSPACE: DurableObjectNamespace<WorkspaceContainer>;
   /** production、preview、development */
   ENVIRONMENT?: string;
   /** 開発環境の代わりの物の置き場 */

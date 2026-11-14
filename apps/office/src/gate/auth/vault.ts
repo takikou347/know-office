@@ -6,7 +6,7 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { vault } from "../db/main.ts";
 
 /** vault に置く鍵の名前 */
-export type VaultName = "session_signing";
+export type VaultName = "session_signing" | "ticket_key";
 
 /**
  * 名前の鍵を読む。無ければ 32 バイトの乱数で作って置く

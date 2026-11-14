@@ -24,13 +24,20 @@
     "bindings": [
       { "name": "RECORDER", "class_name": "RecorderDO" },
       { "name": "GUARD", "class_name": "GuardDO" },
-      { "name": "STAFF", "class_name": "StaffDO" }
+      { "name": "STAFF", "class_name": "StaffDO" },
+      { "name": "WORKSPACE", "class_name": "WorkspaceDO" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["StaffDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["StaffDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["WorkspaceDO"] }
   ],
+  // ワークスペースのコンテナ。社員 1 人に 1 つ、CPU 4 分の 1 個とメモリ 1GB (basic) から始める (アーキテクチャの 3.3)
+  // イメージは know-office の全体を置き場にして作る。ワークスペースが core を読むため
+  "containers": [{ "class_name": "WorkspaceDO", "image": "../workspace/Dockerfile", "image_build_context": "../..", "instance_type": "basic", "max_instances": 3 }],
+  // 開発の実行と e2e は Docker が無くても動かす。コンテナを確かめる時は、これを外した設定で wrangler dev を起こす
+  "dev": { "enable_containers": false },
   "assets": {
     // /api の下だけ入口が受け、ほかは画面のファイルを返す
     "not_found_handling": "single-page-application",

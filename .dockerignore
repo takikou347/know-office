@@ -1,0 +1,7 @@
+# ワークスペースのイメージに入れない物。イメージは要る物だけを COPY する
+**/node_modules
+**/.wrangler
+**/dist
+.git
+.claude
+.dev.vars

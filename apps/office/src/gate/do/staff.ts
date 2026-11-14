@@ -1,19 +1,12 @@
 // 社員 DO。社員 1 人の勤務の時刻と勤怠を持つ。判断は StaffBook に置き、ここは alarm と記憶を包むだけ (社員と勤怠の 1.3)
 import { DurableObject } from "cloudflare:workers";
-import { AppError, StaffId, type StaffStatus, systemClock } from "@know-office/core";
-import type { Bindings, Staff } from "../env.ts";
+import { AppError, log, StaffId, type StaffStatus, systemClock } from "@know-office/core";
+import type { DurableObjectStub } from "@cloudflare/workers-types";
+import type { Bindings, Staff, WorkspaceContainer } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
-import { StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
+import { type IssuedTicket, type RenewedTicket, StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
 import { type Pulled, pullNext } from "../work/loop.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
-
-// ワークスペースのコンテナはまだ無い (tasks.md の 7.2 でつなぐ)。それまでは何もしない代わりを渡し、勤怠だけを付ける
-const IDLE_WORKSPACE: Workspace = {
-  start: () => Promise.resolve(),
-  stop: () => Promise.resolve(),
-  wrapUp: () => Promise.resolve(),
-  restart: () => Promise.resolve(),
-};
 
 /** 社員 DO。`idFromName(<社員 ID>)` で社員 1 人に 1 つ。ゲートウェイだけが RPC で呼び、時刻は呼ぶ側の Clock で渡す */
 export class StaffDO extends DurableObject<Bindings> implements Staff {
@@ -224,10 +217,30 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param nodeId タスク ID
    * @param workspaceId 渡すワークスペースの ID
    * @param now 今の時刻
-   * @returns 作業トークン ID
+   * @returns 作業トークン ID と期限
    */
-  issueToken(nodeId: string, workspaceId: string, now: number): Promise<{ jti: string }> {
+  issueToken(nodeId: string, workspaceId: string, now: number): Promise<IssuedTicket> {
     return this.#serial(() => this.#guardOf().then((g) => g.issueToken(nodeId, workspaceId, now)));
+  }
+
+  /**
+   * 残りが 10 分を切った作業トークンを発行し直す
+   * @param nodeId タスク ID
+   * @param workspaceId 渡すワークスペースの ID
+   * @param now 今の時刻
+   * @returns 新しい作業トークン。要らなければ null
+   */
+  renewToken(nodeId: string, workspaceId: string, now: number): Promise<RenewedTicket | null> {
+    return this.#serial(() => this.#guardOf().then((g) => g.renewToken(nodeId, workspaceId, now)));
+  }
+
+  /**
+   * 作業トークンを ID で失効させる
+   * @param jtis 作業トークン ID
+   * @returns 無し
+   */
+  revokeTokens(jtis: string[]): Promise<null> {
+    return this.#serial(() => this.#guardOf().then((g) => g.revokeTokens(jtis)));
   }
 
   /**
@@ -293,6 +306,28 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
+   * ワークスペースのコンテナを動かす口を作る。起きるまで最長 4 分ほど掛かるので、勤務の鎖を止めないよう待たずに頼む
+   * 起きなかった時は、ハートビートが届かない事から StaffBook が workspace_down で待ち、作り直す
+   * @param staffId 社員 ID
+   * @returns StaffBook に渡す口
+   */
+  #workspace(staffId: StaffId): Workspace {
+    const request = (name: string, step: (stub: DurableObjectStub<WorkspaceContainer>) => Promise<null>): Promise<void> => {
+      const pending = (async () => step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId))))().catch((error: unknown) => {
+        log("error", "workspace_call_failed", { staffId, call: name, error: error instanceof Error ? error.message : "unknown" });
+      });
+      this.ctx.waitUntil(pending);
+      return Promise.resolve();
+    };
+    return {
+      start: () => request("start", (stub) => stub.start(staffId)),
+      stop: () => request("stop", (stub) => stub.stop()),
+      wrapUp: () => request("wrapUp", (stub) => stub.wrapUp()),
+      restart: () => request("restart", (stub) => stub.restart(staffId)),
+    };
+  }
+
+  /**
    * 社員 ID を確かめて StaffBook を作る。社員 ID は idFromName の名前で、alarm で起きた時のために記憶にも置く
    * @returns StaffBook
    * @throws internal 社員 ID が分からない時
@@ -303,7 +338,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
     if (named !== undefined) await this.ctx.storage.put("staffId", named);
     const parsed = StaffId.safeParse(named ?? (await this.ctx.storage.get("staffId")));
     if (!parsed.success) throw new AppError("internal", "社員 DO の社員 ID が分からない");
-    this.#book = new StaffBook(parsed.data, this.ctx.storage, this.env.DB, IDLE_WORKSPACE);
+    this.#book = new StaffBook(parsed.data, this.ctx.storage, this.env.DB, this.#workspace(parsed.data));
     return this.#book;
   }
 }
