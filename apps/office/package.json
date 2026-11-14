@@ -3,14 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node --experimental-strip-types scripts/swagger-assets.ts && vite",
+    "build": "node --experimental-strip-types scripts/swagger-assets.ts && vite build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "e2e": "playwright test",
     "api-docs": "node --experimental-strip-types scripts/api-docs.ts"
   },
   "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
     "@know-office/core": "workspace:*",
     "hono": "4.13.17",
     "knowidea-css": "0.12.0",
@@ -18,7 +19,8 @@
     "knowidea-tokens": "0.12.0",
     "knowidea-ui": "0.12.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.68.0",
@@ -30,6 +32,7 @@
     "typescript": "7.0.2",
     "vite": "8.3.7",
     "vitest": "5.1.0",
-    "wrangler": "4.159.0"
+    "wrangler": "4.159.0",
+    "yaml": "2.9.1"
   }
 }

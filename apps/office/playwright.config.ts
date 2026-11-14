@@ -9,10 +9,20 @@ const widths = [
   { name: "desktop", viewport: { width: 1440, height: 900 } },
 ] as const;
 
+// 入れてあるブラウザが版と合わない所では、PW_CHROMIUM_PATH で Chrome の場所を、E2E_BROWSERS で走らせる物を絞る
+const chromiumPath = process.env["PW_CHROMIUM_PATH"];
+const only = process.env["E2E_BROWSERS"]?.split(",");
+
 const browsers = [
-  { name: "chrome", use: devices["Desktop Chrome"] },
+  {
+    name: "chrome",
+    use: {
+      ...devices["Desktop Chrome"],
+      ...(chromiumPath ? { launchOptions: { executablePath: chromiumPath } } : {}),
+    },
+  },
   { name: "safari", use: devices["Desktop Safari"] },
-] as const;
+].filter((b) => !only || only.includes(b.name));
 
 export default defineConfig({
   testDir: "e2e",
@@ -28,7 +38,7 @@ export default defineConfig({
   ),
   webServer: {
     command: `vite --port ${port} --strictPort`,
-    url: `http://localhost:${port}/api/health`,
+    url: `http://localhost:${port}/api/v1/health`,
     reuseExistingServer: !process.env["CI"],
     timeout: 60_000,
   },

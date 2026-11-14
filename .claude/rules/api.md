@@ -10,7 +10,7 @@ paths:
 
 正本は knowidea の `../knowidea/services/know-office/docs/04-detail/1-api.md` (決まり)、`2-routes.md` (全ルートと処理の順)、`3-data.md` (全テーブル)。05-conventions.md の 3.3。全文を読まず、作るルートとテーブルの行を grep で引く。
 
-- ルートを足す、変える時は、先に `apps/office/openapi/v1.yaml` (OpenAPI 3.1) を直し、その形でコードを書く。`pnpm openapi` がコードから v1.yaml を作り、テストが同じかを確かめる。`2-routes.md` の該当の行も同じ時に直す
+- ルートを足す、変える時は、先に `apps/office/openapi/v1.yaml` (OpenAPI 3.1) を直し、その形でコードを書く。v1.yaml は手で書き、テスト (`test/gate/openapi.test.ts`) がコードのルートとスキーマが同じかを確かめる。同じ時に knowidea で `python3 tools/routes_md.py ../know-office/apps/office/openapi/v1.yaml` を走らせ、`2-routes.md` を作り直す
 - パスは小文字の kebab-case の名詞の複数形 (`/api/v1/audit-logs`)。1 つしかない物は単数 (`/me`、`/guard/state`)。名詞で表せない操作だけ末尾に動詞 1 語を置いて `POST`。全部の置き換えは `PUT`、一部は `PATCH`
 - パスの変数は `{<物>Id}`、`operationId` は `<動詞><物>` の camelCase (`listStops`)、`tags` は物のまとまりごと。`components/schemas` の名前と Zod スキーマの名前を同じにする
 - キー、クエリ、パスの変数は camelCase。GitHub が決めたクエリ (`installation_id`) だけはそのまま。種類の値は snake_case
@@ -23,5 +23,5 @@ paths:
 - 画面は Hono の RPC で同じ型を受け、`fetch` を手で書かない
 - 時刻は RFC 3339 の協定世界時、日は日本時間の `YYYY-MM-DD`、ID は UUID v7、お金は `...MicroUsd` の整数
 - 一覧は `?cursor=` と `limit` (1 から 100、初期値 50)
-- ルートの処理の順とルートだけの失敗は、`v1.yaml` の各ルートの `x-steps` と `x-errors` (description にも同じ中身) に従う。処理を変えたら v1.yaml を先に直し、2-routes.md を作り直す
+- ルートの処理の順とルートだけの失敗は、`v1.yaml` の各ルートの `x-steps` と `x-errors` (description にも同じ中身) に従う。処理を変えたら v1.yaml を先に直し、同じ道具で 2-routes.md を作り直す
 - WAF が無いので 1-api.md の 3.6 の守りを外さない。入力は Zod の `strict()`、JWT は決めた `alg` だけ、署名の比べは `timingSafeEqual`、外への `fetch` は `allowedFetch` だけ、WebSocket の切り替えは `Origin` を確かめる。Access を外すパスを `/hooks/v1/github` のほかに足さない

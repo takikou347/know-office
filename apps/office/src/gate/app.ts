@@ -1,0 +1,75 @@
+// ゲートウェイの Hono を作る。入力の検証に落ちた時の返し方と失敗の返し方をそろえる
+import { OpenAPIHono, type Hook } from "@hono/zod-openapi";
+import { AppError, type FieldError } from "@know-office/core";
+import { HTTPException } from "hono/http-exception";
+import type { ZodError } from "zod";
+import { bodyShape } from "./body.ts";
+import type { GateEnv } from "./env.ts";
+import { notFound, onError, problemResponse } from "./problem.ts";
+import { trace } from "./trace.ts";
+
+const TARGET_PREFIX: Record<string, string> = { json: "#", query: "#/query", param: "#/path", header: "#/header", cookie: "#/cookie" };
+
+/**
+ * Zod の失敗を項目ごとの JSON Pointer と理由に直す
+ * @param error Zod の失敗
+ * @param target 入力の置き場所 (json、query、param など)
+ * @returns 項目ごとの理由
+ */
+export function toFieldErrors(error: ZodError, target: string): FieldError[] {
+  const prefix = TARGET_PREFIX[target] ?? "#";
+  return error.issues.map((issue) => ({
+    pointer: [prefix, ...issue.path.map((p) => String(p).replaceAll("~", "~0").replaceAll("/", "~1"))].join("/"),
+    detail: issue.message,
+  }));
+}
+
+/**
+ * 入力の検証に落ちたら 422 validation_failed を投げる
+ * @param result 検証の結果
+ * @throws validation_failed 入力が Zod スキーマに合わない時
+ */
+export const defaultHook: Hook<unknown, GateEnv, string, unknown> = (result) => {
+  if (result.success) return;
+  throw new AppError("validation_failed", "入力の検証に失敗した", { errors: toFieldErrors(result.error, result.target) });
+};
+
+/**
+ * 共通のミドルウェアと失敗の返し方を付けた Hono を作る
+ * @returns ルートを足す前のゲートウェイ
+ */
+export function createApp() {
+  const app = new OpenAPIHono<GateEnv>({ defaultHook });
+  app.use("*", trace);
+  app.use("/api/*", bodyShape);
+  app.notFound((c) => {
+    const allowed = allowedMethods(app, c.req.path);
+    if (allowed.length > 0) {
+      return problemResponse(c, new AppError("method_not_allowed", `${c.req.method} は使えない`, { headers: { Allow: allowed.join(", ") } }));
+    }
+    return notFound(c);
+  });
+  app.onError((err, c) => {
+    if (err instanceof HTTPException && err.status === 400) {
+      return problemResponse(c, new AppError("malformed_request", "リクエストを解釈できない"));
+    }
+    return onError(err, c);
+  });
+  return app;
+}
+
+/**
+ * パスに合うルートのメソッドを集める
+ * @param app ゲートウェイ
+ * @param path 要求のパス
+ * @returns 使えるメソッド。ルートが無ければ空
+ */
+function allowedMethods(app: OpenAPIHono<GateEnv>, path: string): string[] {
+  const methods = new Set<string>();
+  for (const route of app.routes) {
+    if (route.method === "ALL") continue;
+    const pattern = new RegExp(`^${route.path.replace(/:[^/]+/g, "[^/]+").replace(/\*/g, ".*")}$`);
+    if (pattern.test(path)) methods.add(route.method);
+  }
+  return [...methods].toSorted();
+}

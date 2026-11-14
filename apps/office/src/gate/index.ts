@@ -1,9 +1,11 @@
-// 入口。API はすべて /api の下に置き、ほかの道は画面のファイルを返す
-import { type Health, health } from "@know-office/core";
-import { Hono } from "hono";
+// ゲートウェイ。API はすべて /api/v1 の下に置き、ほかのパスは画面のファイルを返す
+import { createApp } from "./app.ts";
+import { registerComponents } from "./openapi.ts";
+import { system } from "./routes/system.ts";
 
-// 道はつなげて書く。画面が Gate の型から、道と返す形を受け取る
-const gate = new Hono().get("/api/health", (c) => c.json<Health>(health("gate")));
+const gate = createApp().route("/", system);
+
+registerComponents(gate);
 
 export type Gate = typeof gate;
 

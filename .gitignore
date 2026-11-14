@@ -7,3 +7,5 @@ dist
 test-results
 playwright-report
 dist-api-docs
+apps/office/public/swagger/swagger-ui.css
+apps/office/public/swagger/swagger-ui-bundle.js

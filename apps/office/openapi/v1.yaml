@@ -94,6 +94,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /api/v1/sessions:
     post:
       operationId: createSession
@@ -140,7 +142,7 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: &id001
+              schema:
                 type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -254,7 +256,7 @@ paths:
       - name: sessionId
         in: path
         required: true
-        schema: &id004
+        schema:
           type: string
           format: uuid
           description: UUID v7
@@ -512,7 +514,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -555,14 +558,17 @@ paths:
       - name: from
         in: query
         required: false
-        schema: &id002
+        schema:
           type: string
           format: date
           description: 日本時間の日付 YYYY-MM-DD
       - name: to
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
       security:
@@ -687,15 +693,22 @@ paths:
       - name: from
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: to
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: source
         in: query
         required: false
-        schema: *id001
+        schema:
+          type: string
       - name: code
         in: query
         required: false
@@ -875,7 +888,8 @@ paths:
           description: Swagger UI の HTML
           content:
             text/html:
-              schema: *id001
+              schema:
+                type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -904,7 +918,8 @@ paths:
           description: OpenAPI 3.1 のドキュメント
           content:
             application/yaml:
-              schema: *id001
+              schema:
+                type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -985,7 +1000,7 @@ paths:
       - name: staffId
         in: path
         required: true
-        schema: &id003
+        schema:
           type: string
           enum:
           - president
@@ -995,7 +1010,10 @@ paths:
       - name: day
         in: query
         required: true
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       security:
       - accessJwt: []
         session: []
@@ -1065,7 +1083,13 @@ paths:
       - name: staffId
         in: path
         required: true
-        schema: *id003
+        schema:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
       requestBody:
         required: true
         content:
@@ -1094,7 +1118,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1154,11 +1179,20 @@ paths:
       - name: staffId
         in: path
         required: true
-        schema: *id003
+        schema:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
       - name: orderId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -1207,15 +1241,27 @@ paths:
       - name: from
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: to
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: staffId
         in: query
         required: false
-        schema: *id003
+        schema:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
       security:
@@ -1291,7 +1337,10 @@ paths:
       - name: attendanceId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -1320,7 +1369,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1402,7 +1452,7 @@ paths:
       - name: scope
         in: query
         required: false
-        schema: &id012
+        schema:
           type: string
           enum:
           - task
@@ -1503,7 +1553,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1552,7 +1603,10 @@ paths:
       - name: stopId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -1612,7 +1666,10 @@ paths:
       - name: stopId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -1641,7 +1698,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1706,7 +1764,10 @@ paths:
       - name: stopId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -1932,11 +1993,17 @@ paths:
       - name: from
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: to
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       security:
       - accessJwt: []
         session: []
@@ -1987,7 +2054,13 @@ paths:
       - name: staffId
         in: path
         required: true
-        schema: *id003
+        schema:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
       security:
@@ -2056,7 +2129,13 @@ paths:
       - name: staffId
         in: path
         required: true
-        schema: *id003
+        schema:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
       requestBody:
         required: true
         content:
@@ -2085,7 +2164,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2140,7 +2220,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2185,7 +2266,8 @@ paths:
       - name: ticket
         in: query
         required: true
-        schema: *id001
+        schema:
+          type: string
       security:
       - accessJwt: []
         session: []
@@ -2220,15 +2302,19 @@ paths:
       - name: rootId
         in: query
         required: false
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       - name: status
         in: query
         required: false
-        schema: *id001
+        schema:
+          type: string
       - name: scope
         in: query
         required: false
-        schema: &id011
+        schema:
           type: string
           description: '`office` またはサービスの ID'
       - $ref: '#/components/parameters/Cursor'
@@ -2325,7 +2411,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2369,7 +2456,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -2434,7 +2524,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -2557,7 +2650,13 @@ paths:
       - name: staffId
         in: path
         required: true
-        schema: *id003
+        schema:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
       requestBody:
         required: true
         content:
@@ -2694,7 +2793,10 @@ paths:
       - name: approvalId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -2773,7 +2875,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -2833,15 +2938,20 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       - name: path
         in: query
         required: true
-        schema: *id001
+        schema:
+          type: string
       - name: since
         in: query
         required: false
-        schema: *id001
+        schema:
+          type: string
       security:
       - accessJwt: []
         session: []
@@ -2902,11 +3012,15 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       - name: path
         in: query
         required: true
-        schema: *id001
+        schema:
+          type: string
       - name: ref
         in: query
         required: true
@@ -2972,7 +3086,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -3036,7 +3153,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -3065,7 +3185,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3120,7 +3241,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -3205,7 +3329,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -3234,7 +3361,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3287,7 +3415,10 @@ paths:
       - name: nodeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -3398,11 +3529,13 @@ paths:
       - name: code
         in: query
         required: true
-        schema: *id001
+        schema:
+          type: string
       - name: state
         in: query
         required: true
-        schema: *id001
+        schema:
+          type: string
       security:
       - accessJwt: []
         session: []
@@ -3411,7 +3544,8 @@ paths:
           description: GitHub App のインストール画面にリダイレクトする
           headers:
             Location:
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3462,7 +3596,7 @@ paths:
       - name: installation_id
         in: query
         required: true
-        schema: &id007
+        schema:
           type: integer
       security:
       - accessJwt: []
@@ -3472,7 +3606,8 @@ paths:
           description: 設定画面にリダイレクトする
           headers:
             Location:
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3801,7 +3936,8 @@ paths:
           headers:
             Location:
               description: 作成したリソースの URL
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3842,7 +3978,10 @@ paths:
       - name: serviceId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -3908,7 +4047,10 @@ paths:
       - name: serviceId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -3994,7 +4136,10 @@ paths:
       - name: serviceId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -4069,7 +4214,10 @@ paths:
       - name: serviceId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
       security:
@@ -4139,11 +4287,15 @@ paths:
       - name: serviceId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       - name: key
         in: path
         required: true
-        schema: *id001
+        schema:
+          type: string
       requestBody:
         required: true
         content:
@@ -4264,7 +4416,8 @@ paths:
       - name: key
         in: path
         required: true
-        schema: *id001
+        schema:
+          type: string
       requestBody:
         required: true
         content:
@@ -4363,11 +4516,17 @@ paths:
       - name: from
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: to
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: group
         in: query
         required: true
@@ -4423,11 +4582,17 @@ paths:
       - name: from
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: to
         in: query
         required: false
-        schema: *id002
+        schema:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
       - name: group
         in: query
         required: true
@@ -4444,7 +4609,8 @@ paths:
           description: CSV
           content:
             text/csv:
-              schema: *id001
+              schema:
+                type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4575,7 +4741,10 @@ paths:
       - name: noticeId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       security:
       - accessJwt: []
         session: []
@@ -4669,7 +4838,10 @@ paths:
       - name: lessonId
         in: path
         required: true
-        schema: *id004
+        schema:
+          type: string
+          format: uuid
+          description: UUID v7
       requestBody:
         required: true
         content:
@@ -4847,7 +5019,8 @@ paths:
       - name: extensionId
         in: path
         required: true
-        schema: *id001
+        schema:
+          type: string
       requestBody:
         required: true
         content:
@@ -4933,7 +5106,7 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: &id005
+    servers:
     - url: http://gate.internal
       description: ワークスペースからの通信を中継するプロキシ
   /ws/v1/checkpoints:
@@ -4991,7 +5164,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id005
+    servers:
+    - url: http://gate.internal
+      description: ワークスペースからの通信を中継するプロキシ
   /ws/v1/decisions:
     post:
       operationId: decideTool
@@ -5064,7 +5239,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id005
+    servers:
+    - url: http://gate.internal
+      description: ワークスペースからの通信を中継するプロキシ
   /ws/v1/events:
     post:
       operationId: sendAgentEvents
@@ -5113,7 +5290,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id005
+    servers:
+    - url: http://gate.internal
+      description: ワークスペースからの通信を中継するプロキシ
   /ws/v1/transcript-parts:
     post:
       operationId: sendTranscriptPart
@@ -5165,7 +5344,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id005
+    servers:
+    - url: http://gate.internal
+      description: ワークスペースからの通信を中継するプロキシ
   /ws/v1/tools/{toolName}:
     post:
       operationId: callStaffTool
@@ -5205,7 +5386,8 @@ paths:
       - name: toolName
         in: path
         required: true
-        schema: *id001
+        schema:
+          type: string
       requestBody:
         required: true
         content:
@@ -5248,7 +5430,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id005
+    servers:
+    - url: http://gate.internal
+      description: ワークスペースからの通信を中継するプロキシ
   /v1/health:
     get:
       operationId: getWorkspaceHealth
@@ -5280,7 +5464,7 @@ paths:
                 additionalProperties: false
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: &id006
+    servers:
     - url: http://workspace:8080
       description: ワークスペースの Node サーバー。社員 DO だけが呼ぶ
   /v1/restore:
@@ -5326,7 +5510,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id006
+    servers:
+    - url: http://workspace:8080
+      description: ワークスペースの Node サーバー。社員 DO だけが呼ぶ
   /v1/runs:
     post:
       operationId: startRun
@@ -5375,7 +5561,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id006
+    servers:
+    - url: http://workspace:8080
+      description: ワークスペースの Node サーバー。社員 DO だけが呼ぶ
   /v1/messages:
     post:
       operationId: addRunMessage
@@ -5418,7 +5606,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id006
+    servers:
+    - url: http://workspace:8080
+      description: ワークスペースの Node サーバー。社員 DO だけが呼ぶ
   /v1/ticket:
     put:
       operationId: replaceTicket
@@ -5451,7 +5641,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id006
+    servers:
+    - url: http://workspace:8080
+      description: ワークスペースの Node サーバー。社員 DO だけが呼ぶ
   /v1/abort:
     post:
       operationId: abortRun
@@ -5487,7 +5679,9 @@ paths:
           $ref: '#/components/responses/UnprocessableContent'
         '500':
           $ref: '#/components/responses/InternalError'
-    servers: *id006
+    servers:
+    - url: http://workspace:8080
+      description: ワークスペースの Node サーバー。社員 DO だけが呼ぶ
 components:
   securitySchemes:
     accessJwt:
@@ -5510,7 +5704,8 @@ components:
       name: cursor
       in: query
       required: false
-      schema: *id001
+      schema:
+        type: string
       description: 前のレスポンスの meta.next
     Limit:
       name: limit
@@ -5579,7 +5774,8 @@ components:
       headers:
         Retry-After:
           description: 再試行までの秒数
-          schema: *id007
+          schema:
+            type: integer
     InternalError:
       description: 想定外のエラー。詳細は返さず、エラーログにだけ記録する
       content:
@@ -5601,7 +5797,8 @@ components:
       headers:
         Retry-After:
           description: 再試行までの秒数
-          schema: *id007
+          schema:
+            type: integer
   schemas:
     Meta:
       type: object
@@ -5615,7 +5812,8 @@ components:
     ListMeta:
       type: object
       properties:
-        traceId: *id001
+        traceId:
+          type: string
         next:
           type:
           - string
@@ -5630,17 +5828,20 @@ components:
       properties:
         type:
           type: string
-          format: uri-reference
           description: urn:know-office:problem:<code>
-        title: *id001
-        status: *id007
-        detail: *id001
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
         instance:
           type: string
           description: リクエストのパス
         code:
           $ref: '#/components/schemas/ErrorCode'
-        traceId: *id001
+        traceId:
+          type: string
         errors:
           type: array
           items:
@@ -5649,7 +5850,8 @@ components:
               pointer:
                 type: string
                 description: 'JSON Pointer。クエリパラメーターは #/query/<名前>'
-              detail: *id001
+              detail:
+                type: string
             required:
             - pointer
             - detail
@@ -5687,7 +5889,7 @@ components:
     Health:
       type: object
       properties:
-        ok: &id009
+        ok:
           type: boolean
         part:
           type: string
@@ -5702,20 +5904,29 @@ components:
     Session:
       type: object
       properties:
-        id: *id004
-        createdAt: &id008
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        createdAt:
           type: string
           format: date-time
-        expiresAt: *id008
-        endedAt: &id010
+        expiresAt:
+          type: string
+          format: date-time
+        endedAt:
           type:
           - string
           - 'null'
           format: date-time
-        current: *id009
-        ip: *id001
-        country: *id001
-        userAgent: *id001
+        current:
+          type: boolean
+        ip:
+          type: string
+        country:
+          type: string
+        userAgent:
+          type: string
       required:
       - id
       - createdAt
@@ -5732,9 +5943,17 @@ components:
         email:
           type: string
           format: email
-        sessionId: *id004
-        stepUpUntil: *id010
-        hasPasskey: *id009
+        sessionId:
+          type: string
+          format: uuid
+          description: UUID v7
+        stepUpUntil:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        hasPasskey:
+          type: boolean
       required:
       - email
       - sessionId
@@ -5763,8 +5982,13 @@ components:
     Passkey:
       type: object
       properties:
-        id: *id004
-        createdAt: *id008
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        createdAt:
+          type: string
+          format: date-time
       required:
       - id
       - createdAt
@@ -5772,25 +5996,40 @@ components:
     StepUp:
       type: object
       properties:
-        stepUpUntil: *id008
+        stepUpUntil:
+          type: string
+          format: date-time
       required:
       - stepUpUntil
       additionalProperties: false
     AuditRow:
       type: object
       properties:
-        id: *id004
-        at: *id008
-        actor: *id001
-        action: *id001
-        target: *id001
-        scope: *id011
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        action:
+          type: string
+        target:
+          type: string
+        scope:
+          type: string
+          description: '`office` またはサービスの ID'
         detail:
           type: object
           additionalProperties: true
-        prevHash: *id001
-        hash: *id001
-        traceId: *id001
+        prevHash:
+          type: string
+        hash:
+          type: string
+        traceId:
+          type: string
       required:
       - id
       - at
@@ -5815,7 +6054,8 @@ components:
     AuditVerification:
       type: object
       properties:
-        ok: *id009
+        ok:
+          type: boolean
         brokenAt:
           type:
           - string
@@ -5828,8 +6068,13 @@ components:
     ErrorEvent:
       type: object
       properties:
-        id: *id004
-        at: *id008
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
         source:
           type: string
           enum:
@@ -5847,7 +6092,8 @@ components:
           - warn
         code:
           $ref: '#/components/schemas/ErrorCode'
-        message: *id001
+        message:
+          type: string
         route:
           type:
           - string
@@ -5864,8 +6110,10 @@ components:
           type:
           - string
           - 'null'
-        traceId: *id001
-        fingerprint: *id001
+        traceId:
+          type: string
+        fingerprint:
+          type: string
       required:
       - id
       - at
@@ -5883,13 +6131,16 @@ components:
     Trace:
       type: object
       properties:
-        traceId: *id001
+        traceId:
+          type: string
         items:
           type: array
           items:
             type: object
             properties:
-              at: *id008
+              at:
+                type: string
+                format: date-time
               kind:
                 type: string
                 enum:
@@ -5899,8 +6150,12 @@ components:
                 - usage
                 - node_event
                 - message
-              summary: *id001
-              id: *id004
+              summary:
+                type: string
+              id:
+                type: string
+                format: uuid
+                description: UUID v7
             required:
             - at
             - kind
@@ -5914,8 +6169,10 @@ components:
     StorageUse:
       type: object
       properties:
-        binding: *id001
-        bytes: *id007
+        binding:
+          type: string
+        bytes:
+          type: integer
         ratio:
           type: number
           minimum: 0
@@ -5928,7 +6185,13 @@ components:
     StaffStatus:
       type: object
       properties:
-        id: *id003
+        id:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
         state:
           type: string
           enum:
@@ -5946,7 +6209,8 @@ components:
           type:
           - string
           - 'null'
-        workedMsToday: *id007
+        workedMsToday:
+          type: integer
       required:
       - id
       - state
@@ -5957,18 +6221,41 @@ components:
     DaySummary:
       type: object
       properties:
-        staffId: *id003
-        day: *id002
-        clockIn: *id010
-        clockOut: *id010
-        workedMs: *id007
-        extensionMs: *id007
-        callMs: *id007
-        stoppedMs: *id007
-        waitingMs: *id007
+        staffId:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
+        day:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
+        clockIn:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        clockOut:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        workedMs:
+          type: integer
+        extensionMs:
+          type: integer
+        callMs:
+          type: integer
+        stoppedMs:
+          type: integer
+        waitingMs:
+          type: integer
         reasons:
           type: array
-          items: *id001
+          items:
+            type: string
       required:
       - staffId
       - day
@@ -5984,13 +6271,27 @@ components:
     WorkEntry:
       type: object
       properties:
-        id: *id004
-        nodeId: *id004
-        scope: *id011
-        title: *id001
-        startedAt: *id008
-        endedAt: *id008
-        activeMs: *id007
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        nodeId:
+          type: string
+          format: uuid
+          description: UUID v7
+        scope:
+          type: string
+          description: '`office` またはサービスの ID'
+        title:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        activeMs:
+          type: integer
         result:
           type: string
           enum:
@@ -6024,7 +6325,10 @@ components:
     CreateOrderInput:
       type: object
       properties:
-        day: *id002
+        day:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
         kind:
           type: string
           enum:
@@ -6042,9 +6346,21 @@ components:
     Order:
       type: object
       properties:
-        id: *id004
-        staffId: *id003
-        day: *id002
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        staffId:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
+        day:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
         kind:
           type: string
           enum:
@@ -6060,8 +6376,14 @@ components:
           enum:
           - button
           - chat
-        cancelledAt: *id010
-        createdAt: *id008
+        cancelledAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
       required:
       - id
       - staffId
@@ -6083,10 +6405,16 @@ components:
           - call
           - stopped
           - waiting
-        startedAt: *id008
-        endedAt: *id008
-        reason: *id001
-        note: *id001
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        note:
+          type: string
       required:
       - kind
       - startedAt
@@ -6097,19 +6425,40 @@ components:
     AttendanceRow:
       type: object
       properties:
-        id: *id004
-        staffId: *id003
-        day: *id002
-        kind: *id001
-        startedAt: *id008
-        endedAt: *id008
-        reason: *id001
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        staffId:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
+        day:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
+        kind:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
         corrects:
           type:
           - string
           - 'null'
-        note: *id001
-        createdAt: *id008
+        note:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
       required:
       - id
       - staffId
@@ -6125,9 +6474,20 @@ components:
     Message:
       type: object
       properties:
-        id: *id004
-        at: *id008
-        staffId: *id003
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
+        staffId:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
         nodeId:
           type:
           - string
@@ -6137,7 +6497,8 @@ components:
           enum:
           - owner
           - staff
-        body: *id001
+        body:
+          type: string
       required:
       - id
       - at
@@ -6153,15 +6514,21 @@ components:
           type: string
           minLength: 1
           maxLength: 20000
-        nodeId: *id004
+        nodeId:
+          type: string
+          format: uuid
+          description: UUID v7
       required:
       - body
       additionalProperties: false
     LiveTicket:
       type: object
       properties:
-        ticket: *id001
-        expiresAt: *id008
+        ticket:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
       required:
       - ticket
       - expiresAt
@@ -6174,10 +6541,22 @@ components:
           items:
             type: object
             properties:
-              scope: *id012
-              target: *id001
-              stopId: *id004
-              since: *id008
+              scope:
+                type: string
+                enum:
+                - task
+                - staff
+                - service
+                - office
+              target:
+                type: string
+              stopId:
+                type: string
+                format: uuid
+                description: UUID v7
+              since:
+                type: string
+                format: date-time
             required:
             - scope
             - target
@@ -6190,25 +6569,43 @@ components:
     StopRow:
       type: object
       properties:
-        id: *id004
-        at: *id008
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
         kind:
           type: string
           enum:
           - stop
           - near
-        scope: *id012
-        target: *id001
-        signal: *id001
-        measured: &id013
+        scope:
+          type: string
+          enum:
+          - task
+          - staff
+          - service
+          - office
+        target:
+          type: string
+        signal:
+          type: string
+        measured:
           type: number
-        threshold: *id013
+        threshold:
+          type: number
         by:
           type: string
           enum:
           - system
           - owner
-        resumedAt: *id010
+        resumedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
         verdict:
           type:
           - string
@@ -6246,11 +6643,14 @@ components:
             items:
               type: object
               additionalProperties: true
-          rulesVersion: *id007
-          model: *id001
+          rulesVersion:
+            type: integer
+          model:
+            type: string
           externalSources:
             type: array
-            items: *id001
+            items:
+              type: string
         required:
         - recentOps
         - updates
@@ -6267,7 +6667,8 @@ components:
           - correct
           - 'false'
           - unknown
-        reason: *id001
+        reason:
+          type: string
       required:
       - verdict
       - reason
@@ -6275,9 +6676,17 @@ components:
     StopUpdate:
       type: object
       properties:
-        id: *id004
-        stopId: *id004
-        at: *id008
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        stopId:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
         kind:
           type: string
           enum:
@@ -6300,8 +6709,15 @@ components:
     StopTargetInput:
       type: object
       properties:
-        scope: *id012
-        target: *id001
+        scope:
+          type: string
+          enum:
+          - task
+          - staff
+          - service
+          - office
+        target:
+          type: string
       required:
       - scope
       - target
@@ -6311,8 +6727,15 @@ components:
       properties:
         staff:
           type: array
-          items: *id003
-        nodes: *id007
+          items:
+            type: string
+            enum:
+            - president
+            - builder
+            - reviewer
+            description: 社員 ID。役割ごとに固定
+        nodes:
+          type: integer
       required:
       - staff
       - nodes
@@ -6320,9 +6743,17 @@ components:
     CreateStopInput:
       type: object
       properties:
-        scope: *id012
-        target: *id001
-        reason: *id001
+        scope:
+          type: string
+          enum:
+          - task
+          - staff
+          - service
+          - office
+        target:
+          type: string
+        reason:
+          type: string
       required:
       - scope
       - target
@@ -6331,24 +6762,31 @@ components:
     Stop:
       type: object
       properties:
-        stopId: *id004
+        stopId:
+          type: string
+          format: uuid
+          description: UUID v7
       required:
       - stopId
       additionalProperties: false
     Resumption:
       type: object
       properties:
-        resumedAt: *id008
+        resumedAt:
+          type: string
+          format: date-time
       required:
       - resumedAt
       additionalProperties: false
     Thresholds:
       type: object
       properties:
-        version: *id007
+        version:
+          type: integer
         values:
           type: object
-          additionalProperties: *id013
+          additionalProperties:
+            type: number
       required:
       - version
       - values
@@ -6361,8 +6799,10 @@ components:
           description: 取得した時点のバージョン。現在と異なる場合は 409 conflict
         values:
           type: object
-          additionalProperties: *id013
-        reason: *id001
+          additionalProperties:
+            type: number
+        reason:
+          type: string
       required:
       - version
       - values
@@ -6371,15 +6811,19 @@ components:
     GuardEffect:
       type: object
       properties:
-        stops: *id007
-        falseRatio: *id013
+        stops:
+          type: integer
+        falseRatio:
+          type: number
         topCauses:
           type: array
           items:
             type: object
             properties:
-              signal: *id001
-              count: *id007
+              signal:
+                type: string
+              count:
+                type: integer
             required:
             - signal
             - count
@@ -6389,9 +6833,14 @@ components:
           items:
             type: object
             properties:
-              lessonId: *id004
-              before: *id007
-              after: *id007
+              lessonId:
+                type: string
+                format: uuid
+                description: UUID v7
+              before:
+                type: integer
+              after:
+                type: integer
             required:
             - lessonId
             - before
@@ -6406,19 +6855,29 @@ components:
     Lesson:
       type: object
       properties:
-        id: *id004
-        createdAt: *id008
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        createdAt:
+          type: string
+          format: date-time
         kind:
           type: string
           enum:
           - prompt_rule
           - threshold
           - rule_tool
-        cause: *id001
-        proposal: *id001
+        cause:
+          type: string
+        proposal:
+          type: string
         stopIds:
           type: array
-          items: *id004
+          items:
+            type: string
+            format: uuid
+            description: UUID v7
         status:
           type: string
           enum:
@@ -6443,7 +6902,8 @@ components:
           enum:
           - approve
           - reject
-        reason: *id001
+        reason:
+          type: string
       required:
       - decision
       - reason
@@ -6451,7 +6911,10 @@ components:
     Node:
       type: object
       properties:
-        id: *id004
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
         kind:
           type: string
           enum:
@@ -6463,9 +6926,13 @@ components:
           type:
           - string
           - 'null'
-        scope: *id011
-        title: *id001
-        body: *id001
+        scope:
+          type: string
+          description: '`office` またはサービスの ID'
+        title:
+          type: string
+        body:
+          type: string
         taskKind:
           type:
           - string
@@ -6491,13 +6958,18 @@ components:
           - stopped
           - waiting_owner
           - dropped
-        priority: *id007
+        priority:
+          type: integer
         progress:
           type: number
           minimum: 0
           maximum: 1
-        createdAt: *id008
-        updatedAt: *id008
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
       required:
       - id
       - kind
@@ -6539,12 +7011,15 @@ components:
             items:
               type: object
               properties:
-                at: *id008
+                at:
+                  type: string
+                  format: date-time
                 staffId:
                   type:
                   - string
                   - 'null'
-                kind: *id001
+                kind:
+                  type: string
                 detail:
                   type: object
                   additionalProperties: true
@@ -6568,13 +7043,19 @@ components:
           - goal
           - project
           - task
-        parentId: *id004
-        scope: *id011
+        parentId:
+          type: string
+          format: uuid
+          description: UUID v7
+        scope:
+          type: string
+          description: '`office` またはサービスの ID'
         title:
           type: string
           minLength: 1
           maxLength: 200
-        body: *id001
+        body:
+          type: string
       required:
       - kind
       - scope
@@ -6583,11 +7064,23 @@ components:
     UpdateNodeInput:
       type: object
       properties:
-        parentId: *id004
-        title: *id001
-        body: *id001
-        assignee: *id003
-        priority: *id007
+        parentId:
+          type: string
+          format: uuid
+          description: UUID v7
+        title:
+          type: string
+        body:
+          type: string
+        assignee:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
+        priority:
+          type: integer
         status:
           type: string
           enum:
@@ -6598,13 +7091,21 @@ components:
     OrgStaff:
       type: object
       properties:
-        id: *id003
-        role: *id001
+        id:
+          type: string
+          enum:
+          - president
+          - builder
+          - reviewer
+          description: 社員 ID。役割ごとに固定
+        role:
+          type: string
         bossId:
           type:
           - string
           - 'null'
-        promptVersion: *id007
+        promptVersion:
+          type: integer
       required:
       - id
       - role
@@ -6614,21 +7115,26 @@ components:
     UpdatePromptInput:
       type: object
       properties:
-        body: *id001
+        body:
+          type: string
       required:
       - body
       additionalProperties: false
     PromptVersion:
       type: object
       properties:
-        version: *id007
+        version:
+          type: integer
       required:
       - version
       additionalProperties: false
     Approval:
       type: object
       properties:
-        id: *id004
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
         kind:
           type: string
           enum:
@@ -6641,7 +7147,8 @@ components:
           - deploy
           - service_close
           - guard_change
-        target: *id001
+        target:
+          type: string
         payload:
           type: object
           additionalProperties: true
@@ -6651,9 +7158,16 @@ components:
           - pending
           - approved
           - rejected
-        requestedBy: *id001
-        requestedAt: *id008
-        decidedAt: *id010
+        requestedBy:
+          type: string
+        requestedAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
         reason:
           type:
           - string
@@ -6672,12 +7186,20 @@ components:
     ReviewHead:
       type: object
       properties:
-        nodeId: *id004
-        repo: *id001
-        prNumber: *id007
-        branch: *id001
-        baseSha: *id001
-        headSha: *id001
+        nodeId:
+          type: string
+          format: uuid
+          description: UUID v7
+        repo:
+          type: string
+        prNumber:
+          type: integer
+        branch:
+          type: string
+        baseSha:
+          type: string
+        headSha:
+          type: string
         lastSeenSha:
           type:
           - string
@@ -6687,13 +7209,16 @@ components:
           items:
             type: object
             properties:
-              name: *id001
-              ok: *id009
+              name:
+                type: string
+              ok:
+                type: boolean
             required:
             - name
             - ok
             additionalProperties: false
-        reviewerSummary: *id001
+        reviewerSummary:
+          type: string
         reviewerVerdict:
           type:
           - string
@@ -6703,7 +7228,8 @@ components:
           items:
             type: object
             properties:
-              path: *id001
+              path:
+                type: string
               status:
                 type: string
                 enum:
@@ -6711,7 +7237,8 @@ components:
                 - modified
                 - removed
                 - renamed
-              seen: *id009
+              seen:
+                type: boolean
             required:
             - path
             - status
@@ -6733,18 +7260,23 @@ components:
     FileDiff:
       type: object
       properties:
-        path: *id001
-        language: *id001
+        path:
+          type: string
+        language:
+          type: string
         hunks:
           type: array
           items:
             type: object
             properties:
-              oldStart: *id007
-              newStart: *id007
+              oldStart:
+                type: integer
+              newStart:
+                type: integer
               lines:
                 type: array
-                items: *id001
+                items:
+                  type: string
             required:
             - oldStart
             - newStart
@@ -6758,9 +7290,12 @@ components:
     FileContent:
       type: object
       properties:
-        path: *id001
-        ref: *id001
-        content: *id001
+        path:
+          type: string
+        ref:
+          type: string
+        content:
+          type: string
       required:
       - path
       - ref
@@ -6769,21 +7304,25 @@ components:
     SeenInput:
       type: object
       properties:
-        sha: *id001
+        sha:
+          type: string
       required:
       - sha
       additionalProperties: false
     CreateNoteInput:
       type: object
       properties:
-        path: *id001
-        line: *id007
+        path:
+          type: string
+        line:
+          type: integer
         side:
           type: string
           enum:
           - old
           - new
-        body: *id001
+        body:
+          type: string
       required:
       - path
       - line
@@ -6793,17 +7332,26 @@ components:
     ReviewNote:
       type: object
       properties:
-        id: *id004
-        at: *id008
-        by: *id001
-        path: *id001
-        line: *id007
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
+        by:
+          type: string
+        path:
+          type: string
+        line:
+          type: integer
         side:
           type: string
           enum:
           - old
           - new
-        body: *id001
+        body:
+          type: string
       required:
       - id
       - at
@@ -6821,7 +7369,8 @@ components:
           enum:
           - approve
           - request_changes
-        body: *id001
+        body:
+          type: string
       required:
       - verdict
       - body
@@ -6829,7 +7378,10 @@ components:
     ReviewVerdict:
       type: object
       properties:
-        nodeId: *id004
+        nodeId:
+          type: string
+          format: uuid
+          description: UUID v7
         ownerVerdict:
           type: string
           enum:
@@ -6842,10 +7394,14 @@ components:
     CreateCommitInput:
       type: object
       properties:
-        path: *id001
-        content: *id001
-        baseSha: *id001
-        message: *id001
+        path:
+          type: string
+        content:
+          type: string
+        baseSha:
+          type: string
+        message:
+          type: string
       required:
       - path
       - content
@@ -6855,7 +7411,8 @@ components:
     Commit:
       type: object
       properties:
-        sha: *id001
+        sha:
+          type: string
       required:
       - sha
       additionalProperties: false
@@ -6868,7 +7425,8 @@ components:
         manifest:
           type: object
           additionalProperties: true
-        state: *id001
+        state:
+          type: string
       required:
       - action
       - manifest
@@ -6877,8 +7435,10 @@ components:
     Repo:
       type: object
       properties:
-        fullName: *id001
-        private: *id009
+        fullName:
+          type: string
+        private:
+          type: boolean
       required:
       - fullName
       - private
@@ -6886,13 +7446,16 @@ components:
     GitHubRules:
       type: object
       properties:
-        version: *id007
+        version:
+          type: integer
         protectedPaths:
           type: array
-          items: *id001
+          items:
+            type: string
         requiredChecks:
           type: array
-          items: *id001
+          items:
+            type: string
         mergeBy:
           type: string
           enum:
@@ -6907,19 +7470,23 @@ components:
     UpdateGitHubRulesInput:
       type: object
       properties:
-        version: *id007
+        version:
+          type: integer
         protectedPaths:
           type: array
-          items: *id001
+          items:
+            type: string
         requiredChecks:
           type: array
-          items: *id001
+          items:
+            type: string
         mergeBy:
           type: string
           enum:
           - owner
           - reviewer
-        reason: *id001
+        reason:
+          type: string
       required:
       - version
       - protectedPaths
@@ -6930,8 +7497,12 @@ components:
     ServiceCard:
       type: object
       properties:
-        id: *id004
-        name: *id001
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        name:
+          type: string
         kind:
           type: string
           enum:
@@ -6969,10 +7540,14 @@ components:
       - $ref: '#/components/schemas/ServiceCard'
       - type: object
         properties:
-          aim: *id001
-          users: *id001
-          costEstimate: *id013
-          revenueEstimate: *id013
+          aim:
+            type: string
+          users:
+            type: string
+          costEstimate:
+            type: number
+          revenueEstimate:
+            type: number
           metrics:
             type: object
             additionalProperties: true
@@ -6981,9 +7556,13 @@ components:
             items:
               type: object
               properties:
-                at: *id008
-                kind: *id001
-                by: *id001
+                at:
+                  type: string
+                  format: date-time
+                kind:
+                  type: string
+                by:
+                  type: string
               required:
               - at
               - kind
@@ -7000,11 +7579,16 @@ components:
     CreateIdeaInput:
       type: object
       properties:
-        title: *id001
-        aim: *id001
-        users: *id001
-        costEstimate: *id013
-        revenueEstimate: *id013
+        title:
+          type: string
+        aim:
+          type: string
+        users:
+          type: string
+        costEstimate:
+          type: number
+        revenueEstimate:
+          type: number
       required:
       - title
       - aim
@@ -7024,7 +7608,8 @@ components:
           - operation
           - dropped
           - closed
-        reason: *id001
+        reason:
+          type: string
       required:
       - to
       - reason
@@ -7032,10 +7617,12 @@ components:
     Setting:
       type: object
       properties:
-        key: *id001
+        key:
+          type: string
         value:
           description: 設定ごとの Zod スキーマに従う
-        inherited: *id009
+        inherited:
+          type: boolean
       required:
       - key
       - value
@@ -7046,7 +7633,8 @@ components:
       properties:
         value:
           description: 設定ごとの形式。サービスの設定で null を送ると初期値に戻る
-        reason: *id001
+        reason:
+          type: string
       required:
       - value
       - reason
@@ -7054,14 +7642,18 @@ components:
     ReasonInput:
       type: object
       properties:
-        reason: *id001
+        reason:
+          type: string
       required:
       - reason
       additionalProperties: false
     Deployment:
       type: object
       properties:
-        id: *id004
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
         status:
           type: string
           enum:
@@ -7088,7 +7680,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Node'
-        monthCostMicroUsd: *id007
+        monthCostMicroUsd:
+          type: integer
         notices:
           type: array
           items:
@@ -7113,13 +7706,20 @@ components:
           items:
             type: object
             properties:
-              key: *id001
-              workedMs: *id007
-              tasks: *id007
-              costMicroUsd: *id007
-              tokens: *id007
-              deploys: *id007
-              failureRatio: *id013
+              key:
+                type: string
+              workedMs:
+                type: integer
+              tasks:
+                type: integer
+              costMicroUsd:
+                type: integer
+              tokens:
+                type: integer
+              deploys:
+                type: integer
+              failureRatio:
+                type: number
             required:
             - key
             - workedMs
@@ -7136,9 +7736,12 @@ components:
     Uptime:
       type: object
       properties:
-        month: *id001
-        ratio: *id013
-        checks: *id007
+        month:
+          type: string
+        ratio:
+          type: number
+        checks:
+          type: integer
       required:
       - month
       - ratio
@@ -7147,19 +7750,33 @@ components:
     Notice:
       type: object
       properties:
-        id: *id004
-        at: *id008
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
         level:
           type: string
           enum:
           - info
           - warn
           - stop
-        kind: *id001
-        title: *id001
-        body: *id001
-        scope: *id011
-        readAt: *id010
+        kind:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        scope:
+          type: string
+          description: '`office` またはサービスの ID'
+        readAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
       required:
       - id
       - at
@@ -7173,18 +7790,28 @@ components:
     Finding:
       type: object
       properties:
-        id: *id004
-        repo: *id001
-        issueNumber: *id007
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        repo:
+          type: string
+        issueNumber:
+          type: integer
         kind:
           type: string
           enum:
           - error
           - slow
           - cost
-        count: *id007
-        firstAt: *id008
-        lastAt: *id008
+        count:
+          type: integer
+        firstAt:
+          type: string
+          format: date-time
+        lastAt:
+          type: string
+          format: date-time
         status:
           type: string
           enum:
@@ -7205,10 +7832,14 @@ components:
     Extension:
       type: object
       properties:
-        id: *id001
-        title: *id001
-        enabled: *id009
-        ownerData: *id009
+        id:
+          type: string
+        title:
+          type: string
+        enabled:
+          type: boolean
+        ownerData:
+          type: boolean
       required:
       - id
       - title
@@ -7218,14 +7849,17 @@ components:
     ToggleExtensionInput:
       type: object
       properties:
-        enabled: *id009
+        enabled:
+          type: boolean
       required:
       - enabled
       additionalProperties: false
     HeartbeatInput:
       type: object
       properties:
-        at: *id008
+        at:
+          type: string
+          format: date-time
       required:
       - at
       additionalProperties: false
@@ -7239,8 +7873,12 @@ components:
           - commit
           - pr
           - note
-        nodeId: *id004
-        note: *id001
+        nodeId:
+          type: string
+          format: uuid
+          description: UUID v7
+        note:
+          type: string
       required:
       - kind
       - nodeId
@@ -7248,7 +7886,8 @@ components:
     DecideInput:
       type: object
       properties:
-        toolName: *id001
+        toolName:
+          type: string
         toolInput:
           type: object
           additionalProperties: true
@@ -7259,8 +7898,10 @@ components:
     Decision:
       type: object
       properties:
-        allow: *id009
-        reason: *id001
+        allow:
+          type: boolean
+        reason:
+          type: string
       required:
       - allow
       - reason
@@ -7291,12 +7932,16 @@ components:
                   type: string
                   enum:
                   - tool_result
-                toolName: *id001
-                command: *id001
-                exitCode: *id007
+                toolName:
+                  type: string
+                command:
+                  type: string
+                exitCode:
+                  type: integer
                 failedChecks:
                   type: array
-                  items: *id001
+                  items:
+                    type: string
               required:
               - kind
               - toolName
@@ -7310,7 +7955,10 @@ components:
                   type: string
                   enum:
                   - checkpoint
-                nodeId: *id004
+                nodeId:
+                  type: string
+                  format: uuid
+                  description: UUID v7
                 checkpoint:
                   type: string
                   enum:
@@ -7318,7 +7966,8 @@ components:
                   - commit
                   - pr
                   - note
-                note: *id001
+                note:
+                  type: string
               required:
               - kind
               - nodeId
@@ -7347,7 +7996,10 @@ components:
                   type: string
                   enum:
                   - result
-                nodeId: *id004
+                nodeId:
+                  type: string
+                  format: uuid
+                  description: UUID v7
                 result:
                   type: string
                   enum:
@@ -7368,8 +8020,10 @@ components:
     TranscriptPartInput:
       type: object
       properties:
-        sessionId: *id001
-        seq: *id007
+        sessionId:
+          type: string
+        seq:
+          type: integer
         chunk:
           type: string
           contentEncoding: base64
@@ -7391,8 +8045,10 @@ components:
     ToolResult:
       type: object
       properties:
-        content: *id001
-        isError: *id009
+        content:
+          type: string
+        isError:
+          type: boolean
       required:
       - content
       - isError
@@ -7400,7 +8056,8 @@ components:
     RestoreInput:
       type: object
       properties:
-        sessionId: *id001
+        sessionId:
+          type: string
         transcript:
           type: string
           contentEncoding: base64
@@ -7411,18 +8068,26 @@ components:
     RunInput:
       type: object
       properties:
-        nodeId: *id004
-        ticket: *id001
-        model: *id001
+        nodeId:
+          type: string
+          format: uuid
+          description: UUID v7
+        ticket:
+          type: string
+        model:
+          type: string
         effort:
           type: string
           enum:
           - low
           - medium
           - high
-        systemPrompt: *id001
-        prompt: *id001
-        resume: *id001
+        systemPrompt:
+          type: string
+        prompt:
+          type: string
+        resume:
+          type: string
       required:
       - nodeId
       - ticket
@@ -7434,14 +8099,16 @@ components:
     WorkspaceMessageInput:
       type: object
       properties:
-        body: *id001
+        body:
+          type: string
       required:
       - body
       additionalProperties: false
     TicketInput:
       type: object
       properties:
-        ticket: *id001
+        ticket:
+          type: string
       required:
       - ticket
       additionalProperties: false

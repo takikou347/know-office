@@ -51,8 +51,8 @@
       "rules": { "max-lines": "off" }
     },
     {
-      // GitHub Pages の Swagger UI の初期化。ブラウザが先に読んだ swagger-ui-bundle.js の大域の関数を呼ぶ
-      "files": ["apps/office/openapi/pages/*.js"],
+      // Swagger UI の初期化 (GitHub Pages とゲートウェイの /api/v1/docs)。ブラウザが先に読んだ swagger-ui-bundle.js の大域の関数を呼ぶ
+      "files": ["apps/office/openapi/pages/*.js", "apps/office/public/swagger/*.js"],
       "rules": { "typescript/no-unsafe-assignment": "off", "typescript/no-unsafe-call": "off" }
     },
     {
@@ -80,5 +80,5 @@
       "rules": { "no-restricted-imports": ["error", { "patterns": [{ "group": ["drizzle-orm", "drizzle-orm/*", "cloudflare:*", "**/gate/db/*", "**/gate/do/*"], "message": "画面はゲートウェイの型を Hono の RPC で受ける" }] }] }
     }
   ],
-  "ignorePatterns": ["**/dist/**", "**/.wrangler/**", "**/node_modules/**"]
+  "ignorePatterns": ["**/dist/**", "**/.wrangler/**", "**/node_modules/**", "apps/office/public/swagger/swagger-ui-bundle.js"]
 }

@@ -23,6 +23,9 @@ importers:
 
   apps/office:
     dependencies:
+      '@hono/zod-openapi':
+        specifier: 1.6.3
+        version: 1.6.3(hono@4.13.17)(zod@4.6.7)
       '@know-office/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -47,10 +50,13 @@ importers:
       react-dom:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@cloudflare/vite-plugin':
         specifier: 1.68.0
-        version: 1.68.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))(workerd@1.20261109.1)(wrangler@4.159.0(@types/node@26.6.6))
+        version: 1.68.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))(workerd@1.20261109.1)(wrangler@4.159.0(@types/node@26.6.6))
       '@playwright/test':
         specifier: 1.65.1
         version: 1.65.1
@@ -62,7 +68,7 @@ importers:
         version: 19.3.0(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: 6.3.0
-        version: 6.3.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))
+        version: 6.3.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))
       swagger-ui-dist:
         specifier: 5.34.1
         version: 5.34.1
@@ -71,13 +77,16 @@ importers:
         version: 7.0.2
       vite:
         specifier: 8.3.7
-        version: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)
+        version: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1)
       vitest:
         specifier: 5.1.0
-        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))
       wrangler:
         specifier: 4.159.0
         version: 4.159.0(@types/node@26.6.6)
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   apps/workspace:
     dependencies:
@@ -93,18 +102,27 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 5.1.0
-        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))
 
   packages/core:
+    dependencies:
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
       vitest:
         specifier: 5.1.0
-        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))
 
 packages:
+
+  '@asteasolutions/zod-to-openapi@9.1.0':
+    resolution: {integrity: sha512-pLMeRgRYS7/vZIgAAkOe2P6+XGTifR1MT9pqDoxZ11EmcJJ+DPmdPqLN8ZZF4U8R9KHCCQCS9c2wtuE8wSrfkw==}
+    peerDependencies:
+      zod: ^4.0.0
 
   '@babel/runtime@8.1.2':
     resolution: {integrity: sha512-Ay6HdEKZJAeGs6KKJ/ezCK5ssjFmkvUiR0TEGv/B1abyjLWrQ2RU+M507Ppk0NikhvVFhlEFC1/rHfCiYqSUcw==}
@@ -428,6 +446,19 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@hono/zod-openapi@1.6.3':
+    resolution: {integrity: sha512-VYR82Y60plu8g3pN60OUXMVKpmxh3R04Qs++3DY9vtwZ9/sA/BRY0PcRIR+Z37/3itWtM7pYwT9bKiH9JhqV6Q==}
+    engines: {node: '>=16.0.0'}
+    peerDependencies:
+      hono: '>=4.10.0'
+      zod: ^4.0.0
+
+  '@hono/zod-validator@0.9.1':
+    resolution: {integrity: sha512-iiv6w0qrIc0arfvCtUqBWsvl4fXjzaTcQcCJTTtCnkawF9HHGE+KjEl0ox3gQJ6rKZEgE3mLExlQCF72M+mNuw==}
+    peerDependencies:
+      hono: '>=4.11.2'
+      zod: ^3.25.0 || ^4.0.0
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -1230,6 +1261,9 @@ packages:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
 
+  openapi3-ts@4.6.2:
+    resolution: {integrity: sha512-gyyil3DweqhXiEhTqtAs9wwRLfWHmetwhI4kmM5Rn0d6gtmK863Ki7qqbQnp9+Wwlqoe3B1LFWj7kMp5ctE4rQ==}
+
   oxlint-tsgolint@7.0.2007:
     resolution: {integrity: sha512-i8X2qf6VVqFzoNVP34joMKuZpO6T2uXMOgKJaSPFc6p+E3FTnbIGPRbI8K4ZApmtDTMu2CIeGfpzeK1zzGwfnA==}
     hasBin: true
@@ -1496,13 +1530,26 @@ packages:
       utf-8-validate:
         optional: true
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   youch-core@0.3.3:
     resolution: {integrity: sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA==}
 
   youch@4.1.0-beta.10:
     resolution: {integrity: sha512-rLfVLB4FgQneDr0dv1oddCVZmKjcJ6yX6mS4pU82Mq/Dt9a3cLZQ62pDBL4AUO+uVrCvtWz3ZFUL2HFAFJ/BXQ==}
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
+
+  '@asteasolutions/zod-to-openapi@9.1.0(zod@4.6.7)':
+    dependencies:
+      openapi3-ts: 4.6.2
+      zod: 4.6.7
 
   '@babel/runtime@8.1.2': {}
 
@@ -1537,12 +1584,12 @@ snapshots:
     optionalDependencies:
       workerd: 1.20261109.1
 
-  '@cloudflare/vite-plugin@1.68.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))(workerd@1.20261109.1)(wrangler@4.159.0(@types/node@26.6.6))':
+  '@cloudflare/vite-plugin@1.68.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))(workerd@1.20261109.1)(wrangler@4.159.0(@types/node@26.6.6))':
     dependencies:
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261109.1)
       miniflare: 5.20261103.0-beta(@types/node@26.6.6)
       unenv: 2.0.0-rc.24
-      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)
+      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1)
       wrangler: 4.159.0(@types/node@26.6.6)
       ws: 8.22.0
     transitivePeerDependencies:
@@ -1772,6 +1819,19 @@ snapshots:
       react-dom: 19.3.1(react@19.3.1)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@hono/zod-openapi@1.6.3(hono@4.13.17)(zod@4.6.7)':
+    dependencies:
+      '@asteasolutions/zod-to-openapi': 9.1.0(zod@4.6.7)
+      '@hono/zod-validator': 0.9.1(hono@4.13.17)(zod@4.6.7)
+      hono: 4.13.17
+      openapi3-ts: 4.6.2
+      zod: 4.6.7
+
+  '@hono/zod-validator@0.9.1(hono@4.13.17)(zod@4.6.7)':
+    dependencies:
+      hono: 4.13.17
+      zod: 4.6.7
 
   '@img/colour@1.1.0': {}
 
@@ -2161,19 +2221,19 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vitejs/plugin-react@6.3.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))':
+  '@vitejs/plugin-react@6.3.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))':
     dependencies:
       '@rolldown/pluginutils': 1.1.0
-      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)
+      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1)
 
-  '@vitest/mocker@5.1.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))':
+  '@vitest/mocker@5.1.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.1.0
       estree-walker: 3.0.3
       magic-string: 1.4.5
     optionalDependencies:
-      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)
+      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1)
 
   '@vitest/spy@5.1.0': {}
 
@@ -2356,6 +2416,10 @@ snapshots:
 
   obug@3.0.0: {}
 
+  openapi3-ts@4.6.2:
+    dependencies:
+      yaml: 2.9.1
+
   oxlint-tsgolint@7.0.2007:
     optionalDependencies:
       '@oxlint-tsgolint/darwin-arm64': 7.0.2007
@@ -2534,7 +2598,7 @@ snapshots:
     dependencies:
       react: 19.3.1
 
-  vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2):
+  vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -2545,11 +2609,12 @@ snapshots:
       '@types/node': 26.6.6
       esbuild: 0.28.2
       fsevents: 2.3.3
+      yaml: 2.9.1
 
-  vitest@5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)):
+  vitest@5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.1.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2))
+      '@vitest/mocker': 5.1.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -2560,7 +2625,7 @@ snapshots:
       tinybench: 6.2.3
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)
+      vite: 8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@types/node': 26.6.6
@@ -2610,6 +2675,8 @@ snapshots:
 
   ws@8.22.0: {}
 
+  yaml@2.9.1: {}
+
   youch-core@0.3.3:
     dependencies:
       '@poppinss/exception': 1.2.3
@@ -2622,3 +2689,5 @@ snapshots:
       '@speed-highlight/core': 1.2.24
       cookie: 1.1.1
       youch-core: 0.3.3
+
+  zod@4.6.7: {}

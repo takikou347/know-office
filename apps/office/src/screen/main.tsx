@@ -89,9 +89,9 @@ function Root() {
   const [health, setHealth] = useState<Health>();
   const { url, navigate } = useRoute();
   useEffect(() => {
-    api.api.health
+    api.api.v1.health
       .$get()
-      .then((res) => (res.ok ? res.json() : undefined))
+      .then(async (res) => (res.ok ? (await res.json()).data : undefined))
       .then(setHealth)
       .catch(() => setHealth(undefined));
   }, []);
