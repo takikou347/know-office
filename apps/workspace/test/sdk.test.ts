@@ -138,6 +138,7 @@ function task(fetcher: Fetcher, sessions: string[]): AgentCall {
     prompt: "ログインを直す",
     options: agentOptions({ ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目の説明文 v1", hook, abortController: new AbortController() }),
     onSession: (id) => sessions.push(id),
+    onEvent: () => {},
   };
 }
 
@@ -175,6 +176,17 @@ describe("ワークスペースの Claude Agent SDK", () => {
     const options = sdkOptions({ ...call.options, resume: "session-1" });
     expect(options.resume).toBe("session-1");
     expect(options.abortController).toBe(call.options.abortController);
+  });
+
+  it("SDK の出来事を 1 つ読むたびに知らせる", async () => {
+    const run: QueryFn = async function* () {
+      yield { type: "system", subtype: "init", session_id: "session-1" };
+      yield { type: "assistant", session_id: "session-1" };
+      yield { type: "result", subtype: "success", session_id: "session-1" };
+    };
+    let events = 0;
+    await sdkAgent(run)({ ...task(gate(true, []), []), onEvent: () => void (events += 1) });
+    expect(events).toBe(3);
   });
 
   it("SDK が失敗で終えたら投げる", async () => {

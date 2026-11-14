@@ -106,6 +106,51 @@ describe("1 時間を超えるタスク", () => {
     ]);
   });
 
+  it("SDK の出来事を読む間、前に送ってから 60 秒過ぎていれば、待たず重ねずに会話の記録の増えを送る", async () => {
+    let now = 0;
+    const calls: AgentCall[] = [];
+    const agent: Agent = (call) => {
+      calls.push(call);
+      call.onSession("session-1");
+      return new Promise(() => {});
+    };
+    const flushed: number[] = [];
+    const pending: (() => void)[] = [];
+    const runner = new Runner(
+      agent,
+      () => {},
+      { fetcher: () => Promise.reject(new Error("呼ばない")), clock: { now: () => now }, record: () => {} },
+      {
+        flush: () => {
+          flushed.push(now);
+          return new Promise<void>((resolve) => pending.push(resolve));
+        },
+        restore: () => Promise.resolve(),
+      },
+    );
+    runner.start(RUN);
+    await settle();
+    const event = () => calls[0]?.onEvent();
+    now = 30_000;
+    event();
+    expect(flushed).toEqual([]);
+    now = 60_000;
+    event();
+    expect(flushed).toEqual([60_000]);
+    // 送っている間は重ねない
+    now = 125_000;
+    event();
+    expect(flushed).toEqual([60_000]);
+    pending.shift()?.();
+    await settle();
+    now = 126_000;
+    event();
+    expect(flushed).toEqual([60_000, 126_000]);
+    now = 150_000;
+    event();
+    expect(flushed).toEqual([60_000, 126_000]);
+  });
+
   it("会話の記録を送れなくても、呼び出しは止めずに記録を残す", async () => {
     const { agent, finish } = fakeAgent();
     const failures: unknown[] = [];

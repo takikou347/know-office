@@ -50,6 +50,7 @@ export function sdkAgent(run: QueryFn = query): Agent {
         sessionId = message.session_id;
         call.onSession(sessionId);
       }
+      call.onEvent();
       if (message.type === "result" && message.subtype !== "success") throw new Error(`SDK が ${message.subtype ?? "unknown"} で終わった`);
     }
   };

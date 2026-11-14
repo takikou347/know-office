@@ -29,6 +29,9 @@ export type Transcripts = {
   restore(input: RestoreInput): Promise<void>;
 };
 
+/** SDK の出来事を読む間に会話の記録を送る間 (60 秒)。落ちても失うのはこの間の分だけにする */
+const FLUSH_EVERY_MS = 60_000;
+
 /** 会話の記録を送らない口 */
 const NO_TRANSCRIPTS: Transcripts = { flush: () => Promise.resolve(), restore: () => Promise.resolve() };
 
@@ -39,6 +42,10 @@ type Current = {
   sessionId: string | undefined;
   controller: AbortController;
   renewPending: boolean;
+  /** 前に会話の記録を送り始めた時刻 */
+  flushedAt: number;
+  /** 会話の記録を送っている途中か */
+  flushing: boolean;
 };
 
 /** タスク 1 件分の SDK の呼び出しを持つ。1 度に 1 件だけ */
@@ -98,7 +105,7 @@ export class Runner {
    */
   start(input: RunInput): void {
     if (this.#current) throw new AppError("conflict", "実行中の処理がある");
-    const current: Current = { input, ticket: input.ticket, sessionId: input.resume, controller: new AbortController(), renewPending: false };
+    const current: Current = { input, ticket: input.ticket, sessionId: input.resume, controller: new AbortController(), renewPending: false, flushedAt: this.#hookBase.clock.now(), flushing: false };
     this.#current = current;
     void this.#loop(current);
   }
@@ -134,6 +141,7 @@ export class Runner {
               current.sessionId = sessionId;
               if (current.renewPending && !controller.signal.aborted) controller.abort(new TicketRenewed("作業トークンを差し替えた"));
             },
+            onEvent: () => this.#flushEvery(current),
           });
           await this.#flush(current);
           return;
@@ -153,15 +161,28 @@ export class Runner {
   }
 
   /**
+   * SDK の出来事を読む間、前に送り始めてから 60 秒過ぎていれば会話の記録の増えを送る。呼び出しを止めないよう待たず、送っている途中なら重ねない
+   * @param current 今のタスク
+   */
+  #flushEvery(current: Current): void {
+    if (current.flushing || this.#hookBase.clock.now() - current.flushedAt < FLUSH_EVERY_MS) return;
+    void this.#flush(current);
+  }
+
+  /**
    * 会話の記録の増えを、その時の作業トークンで送る。送れなくても呼び出しは止めず、次に同じ所から送り直す
    * @param current 今のタスク
    */
   async #flush(current: Current): Promise<void> {
     if (current.sessionId === undefined) return;
+    current.flushing = true;
+    current.flushedAt = this.#hookBase.clock.now();
     try {
       await this.#transcripts.flush(current.sessionId, current.ticket);
     } catch (error) {
       log("warn", "transcript_send_failed", { error: error instanceof Error ? error.message : "unknown" });
+    } finally {
+      current.flushing = false;
     }
   }
 }

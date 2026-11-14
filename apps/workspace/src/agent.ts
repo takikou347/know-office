@@ -43,6 +43,8 @@ export type AgentCall = {
   options: AgentOptions;
   /** SDK が session を決めた時に呼ぶ */
   onSession(sessionId: string): void;
+  /** SDK の出来事を 1 つ読むたびに呼ぶ。待たずに返す */
+  onEvent(): void;
 };
 
 /** SDK を 1 回呼び、終わるまで待つ。abortController で止めると投げる。本物は sdk.ts の sdkAgent */
