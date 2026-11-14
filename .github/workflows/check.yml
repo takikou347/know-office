@@ -41,6 +41,9 @@ jobs:
           cache: pnpm
       - run: npx -y @fission-ai/openspec@1.16.0 validate --all --strict
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm --filter @know-office/office exec playwright install --with-deps chromium webkit
+      - run: pnpm e2e

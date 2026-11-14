@@ -1,5 +1,4 @@
-import type { AddressInfo } from "node:net";
-import type { Health } from "@know-office/core";
+import { health } from "@know-office/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createWorkspaceServer } from "../src/server.ts";
 
@@ -9,7 +8,9 @@ describe("作業場", () => {
 
   beforeAll(async () => {
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("作業場の番号が取れない");
+    base = `http://127.0.0.1:${address.port}`;
   });
 
   afterAll(async () => {
@@ -19,8 +20,8 @@ describe("作業場", () => {
   it("/health が作業場の様子を返す", async () => {
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Health;
-    expect(body).toEqual({ ok: true, part: "workspace" });
+    const body: unknown = await res.json();
+    expect(body).toEqual(health("workspace"));
   });
 
   it("無い道は 404 を返す", async () => {

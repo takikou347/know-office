@@ -6,6 +6,13 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "lint": "oxlint --type-aware --deny-warnings",
+    "dev": "pnpm --filter @know-office/office dev",
+    "e2e": "pnpm --filter @know-office/office e2e"
+  },
+  "devDependencies": {
+    "oxlint": "1.93.0",
+    "oxlint-tsgolint": "7.0.2007"
   }
 }
