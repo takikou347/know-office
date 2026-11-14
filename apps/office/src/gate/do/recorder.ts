@@ -60,7 +60,6 @@ export class RecorderDO extends DurableObject<Bindings> implements Recorder {
     if (row?.state === "readonly") throw new AppError("conflict", `${String(year)} 年の記録は readonly で書けない`);
     if (row) return { db, startHash: row.first_hash ?? GENESIS_HASH };
     // 初めての年: 前の年の最後のハッシュを読み、新しい年の行を足すのと前の年を readonly にするのを 1 つの batch で行う
-
     const before = await this.env.DB.prepare("SELECT * FROM record_years WHERE year < ? ORDER BY year DESC LIMIT 1").bind(year).first<YearRow>();
     const previousLast = before ? ((await lastAuditHash(this.#binding(before.year))) ?? before.first_hash ?? GENESIS_HASH) : GENESIS_HASH;
     const statements = [
