@@ -5,8 +5,8 @@ const port = 5174;
 
 const widths = [
   { name: "phone", viewport: { width: 360, height: 780 } },
-  { name: "tablet", viewport: { width: 820, height: 1180 } },
-  { name: "desktop", viewport: { width: 1440, height: 900 } },
+  { name: "tablet", viewport: { width: 1024, height: 768 } },
+  { name: "desktop", viewport: { width: 1280, height: 800 } },
 ] as const;
 
 // 入れてあるブラウザが版と合わない所では、PW_CHROMIUM_PATH で Chrome の場所を、E2E_BROWSERS で走らせる物を絞る
