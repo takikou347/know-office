@@ -69,7 +69,7 @@ know-office SHALL 幅 360 ピクセルのスマートフォンからパソコン
 #### Scenario: 自動の検査
 
 - **WHEN** CI が 8 画面を開く
-- **THEN** axe の検査で重大な違反が 0 件である
+- **THEN** axe の検査で影響度 critical と serious の違反が 0 件である
 
 ### Requirement: 速さ
 
