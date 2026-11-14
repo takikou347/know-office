@@ -29,6 +29,12 @@ export type RunInput = z.infer<typeof RunInput>;
 /** 会話の記録の 1 つの部分の元の長さの上限 (512KiB)。ゲートウェイの本文の上限 1MB に base64 で収める */
 export const TRANSCRIPT_PART_BYTES = 512 * 1024;
 
+/** 戻す会話の記録の全部の上限 (24MiB)。base64 にして JSON に入れても、ワークスペースの /v1/restore の本文の上限 32MiB に収める */
+export const RESTORE_TRANSCRIPT_BYTES = 24 * 1024 * 1024;
+
+/** ワークスペースの /v1/restore が受ける本文の上限 (32MiB) */
+export const RESTORE_BODY_BYTES = 32 * 1024 * 1024;
+
 /** base64 の文字列。長い物も正規表現の戻りで投げないよう、fromBase64 で確かめる */
 const Base64Text = z
   .string()

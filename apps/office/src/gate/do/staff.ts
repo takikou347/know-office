@@ -291,6 +291,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * タスクの最後の session の会話の記録を復号して返す。鍵は社員 DO だけが作る
    * @param nodeId タスク ID
    * @returns session、記録の全部の base64、次の通し番号。記録が無ければ null
+   * @throws payload_too_large 記録の全部が上限を超える時
    * @throws internal 部分が欠けているか、戻せない時
    */
   loadTranscript(nodeId: string): Promise<RestoreInput | null> {

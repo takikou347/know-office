@@ -1,13 +1,11 @@
 // ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替え、会話の記録の復元を受ける (社員が考えるの 1.3、3.6)
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { AppError, health, log, PROBLEMS, RestoreInput, RunInput, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
+import { AppError, health, log, PROBLEMS, RESTORE_BODY_BYTES, RestoreInput, RunInput, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
 import type { Runner } from "./run.ts";
 
 /** 受ける本文の上限 (1MB) */
 const MAX_BODY_BYTES = 1024 * 1024;
-/** 会話の記録の復元で受ける本文の上限 (32MB)。社員 DO が記録の全部を 1 度に送る */
-const MAX_RESTORE_BYTES = 32 * 1024 * 1024;
 
 /**
  * 起こした時の鍵を環境変数から取り出し、process.env から消す。SDK と社員のコマンドは子のプロセスで動き、process.env を受け継ぐので、先に消す
@@ -122,7 +120,7 @@ async function handle(runner: Runner, key: string, req: IncomingMessage, res: Se
   if (route === "POST /v1/restore") {
     // 走っている間は、本文を読む前に断る
     if (runner.running) throw new AppError("conflict", "実行中の処理がある");
-    const input = RestoreInput.safeParse(await readJson(req, MAX_RESTORE_BYTES));
+    const input = RestoreInput.safeParse(await readJson(req, RESTORE_BODY_BYTES));
     if (!input.success) throw new AppError("validation_failed", "会話の記録の形が違う");
     await runner.restore(input.data);
     send(res, 204);

@@ -1,6 +1,6 @@
 // 会話の記録をタスクごとの鍵の AES-GCM で暗号にして R2 に置き、ワークスペースが落ちて作り直した後に復号して戻し、同じ session の続きを呼ぶ (社員が考えるの 3.6)
 import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
-import { AppError, deriveKey, fromBase64, newId, type RestoreInput, RunInput, type StaffId, toBase64, TranscriptPartInput } from "@know-office/core";
+import { AppError, deriveKey, fromBase64, log, newId, RESTORE_TRANSCRIPT_BYTES, type RestoreInput, RunInput, type StaffId, toBase64, TranscriptPartInput } from "@know-office/core";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, staff, staffPrompts, transcriptParts } from "../db/main.ts";
@@ -17,10 +17,14 @@ export type TranscriptStore = {
   files: R2Bucket;
   /** MASTER_KEY。タスクごとの鍵を作る */
   master: string;
+  /** 戻す記録の全部の上限。省くと RESTORE_TRANSCRIPT_BYTES。テストは小さくして試す */
+  maxBytes?: number;
 };
 
 /** AES-GCM の iv の長さ。置く物の頭に付ける */
 const IV_BYTES = 12;
+/** 置く物が元より増える長さ。iv と、AES-GCM の 16 バイトの認証タグ */
+const SEAL_OVERHEAD = IV_BYTES + 16;
 
 /** 落ちた後に続きから呼ぶ時の指示。最初の指示は会話の記録に残っているので繰り返さない */
 export const RESUME_PROMPT = "ワークスペースが落ちて作り直したので、会話の記録から続きを呼び直した。最後のチェックポイントより後の作業はリポジトリに残っていないかもしれないので、リポジトリの状態を確かめ直してから続ける";
@@ -133,6 +137,7 @@ export async function appendTranscript(store: TranscriptStore, staffId: StaffId,
  * @param staffId 社員 ID
  * @param nodeId タスク ID
  * @returns session、記録の全部の base64、次の通し番号。記録が無ければ null
+ * @throws payload_too_large 記録の全部が上限を超える時。R2 から読まずに投げる
  * @throws internal 部分が欠けているか、戻せない時
  */
 export async function loadTranscript(store: TranscriptStore, staffId: StaffId, nodeId: string): Promise<RestoreInput | null> {
@@ -145,6 +150,12 @@ export async function loadTranscript(store: TranscriptStore, staffId: StaffId, n
     .from(transcriptParts)
     .where(and(mine, eq(transcriptParts.sessionId, latest.sessionId)))
     .orderBy(asc(transcriptParts.seq));
+  // 大きすぎる記録は、ワークスペースが落ちて作り直すたびに R2 から読んで復号し直さないよう、D1 の行だけで先に断る
+  const bytes = parts.reduce((sum, part) => sum + part.bytes - SEAL_OVERHEAD, 0);
+  if (bytes > (store.maxBytes ?? RESTORE_TRANSCRIPT_BYTES)) {
+    log("warn", "transcript_too_large", { staffId, nodeId, sessionId: latest.sessionId, parts: parts.length, bytes });
+    throw new AppError("payload_too_large", "戻す会話の記録が大きすぎる");
+  }
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   for (const [index, part] of parts.entries()) {
     if (part.seq !== index) throw new AppError("internal", "会話の記録の部分が欠けている");

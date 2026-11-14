@@ -1,9 +1,9 @@
 // ワークスペースが会話の記録の続きを送る POST /ws/v1/transcript-parts が、作業トークンのタスクの記録として社員 DO に渡り、続きでない通し番号を断る事を確かめる (社員が考えるの 3.2、3.6)
 import { toBase64 } from "@know-office/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { routeEgress, type Caller } from "../../src/gate/egress.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
-import { loadTranscript } from "../../src/gate/work/transcript.ts";
+import { appendTranscript, loadTranscript } from "../../src/gate/work/transcript.ts";
 import { jst, NODE, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
 
 const w = useGuardWorld();
@@ -67,6 +67,31 @@ describe("会話の記録の続きを送る", () => {
     expect((await sendPart(token, { sessionId: SESSION, seq: 1, chunk: b64("2 行目\n") })).status).toBe(204);
     expect(await rows(w, "SELECT seq FROM transcript_parts ORDER BY seq")).toEqual([{ seq: 0 }, { seq: 1 }]);
     expect(await loadTranscript({ db: w.d1.DB, files: w.d1.FILES, master: w.gate.env.MASTER_KEY }, "builder", NODE)).toMatchObject({ transcript: b64("1 行目\n2 行目\n"), nextSeq: 2 });
+  });
+
+  it("戻す記録が上限を超える時は、R2 から読まずに投げ、中身を出さずに残す", async () => {
+    await startWork(w, "builder");
+    const store = { db: w.d1.DB, files: w.d1.FILES, master: w.gate.env.MASTER_KEY };
+    await appendTranscript(store, "builder", NODE, { sessionId: SESSION, seq: 0, chunk: b64("秘密の 1 行目\n") }, jst(9, 1));
+    await appendTranscript(store, "builder", NODE, { sessionId: SESSION, seq: 1, chunk: b64("秘密の 2 行目\n") }, jst(9, 2));
+    let reads = 0;
+    const files = new Proxy(w.d1.FILES, {
+      get: (target, prop, receiver) => {
+        if (prop === "get") reads += 1;
+        const value: unknown = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const limit = new TextEncoder().encode("秘密の 1 行目\n").byteLength + 1;
+    await expect(loadTranscript({ ...store, files, maxBytes: limit }, "builder", NODE)).rejects.toMatchObject({ code: "payload_too_large" });
+    const lines = warn.mock.calls.map(([line]) => String(line));
+    warn.mockRestore();
+    expect(reads).toBe(0);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([{ level: "warn", event: "transcript_too_large", staffId: "builder", nodeId: NODE, sessionId: SESSION, parts: 2, bytes: expect.any(Number) as unknown }]);
+    expect(lines.join("\n")).not.toContain("秘密");
+    // 上限の中なら読める
+    expect(await loadTranscript({ ...store, maxBytes: limit * 2 }, "builder", NODE)).toMatchObject({ nextSeq: 2 });
   });
 
   it("作業トークンが無ければ 401、形の違う入力は 422 で断る", async () => {
