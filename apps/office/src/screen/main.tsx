@@ -19,10 +19,10 @@ let shownPath = window.location.pathname;
 /** 画面が変わった事を、題と読み上げに伝える */
 function announce() {
   document.title = titleOf(window.location.pathname);
-  window.scrollTo(0, 0);
+  // AppShell は中身の main だけを送る。main は AppShell が Tab で入れる形にしているので、tabIndex は変えない
   const main = document.querySelector("main");
   if (main) {
-    main.tabIndex = -1;
+    main.scrollTo(0, 0);
     main.focus({ preventScroll: true });
   }
 }

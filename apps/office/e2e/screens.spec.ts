@@ -151,6 +151,20 @@ test("画面を移ると、題が変わり、中身に移る", async ({ page }) 
   await expect(page.getByRole("main")).toBeFocused();
 });
 
+test("画面を移ると、中身の先頭に戻り、中身に Tab で入れるままである", async ({ page }) => {
+  // 記録も守りも長いので、移った先でも送った分が残りうる。送られるのは中身の main だけ
+  await page.goto("/records");
+  const main = page.getByRole("main");
+  await main.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  expect(await main.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await page.locator("nav:visible").getByRole("link", { name: "守り" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "守り" })).toBeVisible();
+  expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
+  await expect(main).toBeFocused();
+  await expect.poll(() => main.evaluate((el) => el.scrollTop)).toBe(0);
+  await expect(main).toHaveAttribute("tabindex", "0");
+});
+
 test("今いる画面のリンクを押しても、履歴は積まない", async ({ page }) => {
   await page.goto("/");
   const staffLink = page.locator("nav:visible").getByRole("link", { name: "社員と仕事" });
