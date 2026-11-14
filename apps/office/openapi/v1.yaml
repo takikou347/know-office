@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.3.4
+  version: 1.3.5
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -5411,7 +5411,7 @@ paths:
 
         1. 作業トークンを検証する
 
-        2. `seq` が前回の続きであることを確認する
+        2. `seq` が前回の続きであることを確認する。前回と同じ `seq` で中身も同じなら 204 を返し、何も足さない
 
         3. タスクごとの鍵で暗号化して R2 に保存し、`transcript_parts` に追加する
 
@@ -5419,13 +5419,13 @@ paths:
         このルート固有のエラー:
 
 
-        - 409 `conflict`: `seq` が連続していない'
+        - 409 `conflict`: `seq` が連続していない、または前回と同じ `seq` で中身が違う'
       x-steps:
       - 作業トークンを検証する
-      - '`seq` が前回の続きであることを確認する'
+      - '`seq` が前回の続きであることを確認する。前回と同じ `seq` で中身も同じなら 204 を返し、何も足さない'
       - タスクごとの鍵で暗号化して R2 に保存し、`transcript_parts` に追加する
       x-errors:
-      - '409 `conflict`: `seq` が連続していない'
+      - '409 `conflict`: `seq` が連続していない、または前回と同じ `seq` で中身が違う'
       requestBody:
         required: true
         content:
@@ -5585,9 +5585,9 @@ paths:
       description: '処理の流れ:
 
 
-        1. 実行中の処理がないことを確認する
+        1. 実行中の処理がないことを確認する。本文は 16MiB と 1KiB まで (記録は元の大きさで 12MiB まで)
 
-        2. 会話の記録を SDK の保存先に書き込む
+        2. 会話の記録を SDK の保存先に書き込み、次の `seq` (`nextSeq`) を覚える
 
 
         このルート固有のエラー:
@@ -5595,8 +5595,8 @@ paths:
 
         - 409 `conflict`: 実行中の処理がある'
       x-steps:
-      - 実行中の処理がないことを確認する
-      - 会話の記録を SDK の保存先に書き込む
+      - 実行中の処理がないことを確認する。本文は 16MiB と 1KiB まで (記録は元の大きさで 12MiB まで)
+      - 会話の記録を SDK の保存先に書き込み、次の `seq` (`nextSeq`) を覚える
       x-errors:
       - '409 `conflict`: 実行中の処理がある'
       requestBody:
