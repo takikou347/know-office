@@ -27,7 +27,7 @@ jobs:
           set -eu
           git rev-parse -q --verify "$REV^{commit}" > /dev/null
           ok='noreply@(knowidea\.invalid|anthropic\.com|github\.com|example\.com)|[0-9]+\+[^@ ]+\[bot\]@users\.noreply\.github\.com'
-          legacy='c5b05eb8131c86cf61819b49278b747fb71322e3|e51e8e2ab6ad0fb1e450b210f1addb37f55f45b3'
+          legacy='29231946c49bb5a80542766038af472ef5a5389a|401fe9b19138207c88de1acd8ec957d0acb716a6'
           old=$(git log --format='%H %ae %ce' "$REV" | { grep -vE "^[0-9a-f]+ ($ok) ($ok)$" || true; } | { grep -vE "^($legacy) " || true; } | cut -c1-7 | head -10)
           if [ -n "$old" ]; then echo "noreply でないメールアドレスのコミットがある:" $old; exit 1; fi
           # 元の頭が分からない時(初めての push、置き換えた後)は、頭の 1 件だけを見る
