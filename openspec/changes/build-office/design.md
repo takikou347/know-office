@@ -115,9 +115,25 @@ D1 の表は次のとおり。追記だけの表は、更新と削除をトリ�
 
 入口、社員の状態、作業場、画面を 1 つの言語で書く。Workers と Durable Objects は TypeScript がいちばん手厚く支えられていて、Claude Agent SDK も TypeScript で使える。仕事のほとんどは Claude の API、GitHub、データベースの返事を待つ時間なので、Rust の速さは効かない。ルールの判断と守りは共通の部品にし、入口と作業場の両方から同じ物を使う。操作の種類は型で並べ、`never` での網羅の確かめと lint の規則で、分岐の漏れを検査で落とす。画面とサーバーは同じ型をそのまま使う。
 
+### 型安全は Drizzle と Zod
+
+境目ごとに型を 1 か所で決め、残りはそこから作る。
+
+| 境目 | 使う物 | 型の正本 |
+| --- | --- | --- |
+| D1 | Drizzle ORM (`drizzle-orm/d1`)。作り替えは drizzle-kit で SQL に起こし、wrangler で当てる | Drizzle の表の定義。行の型は `$inferSelect` と `$inferInsert` から取る |
+| API の入出力 | Zod。入口は `@hono/zod-validator` で確かめ、画面は Hono の RPC で同じ型を受ける | Zod の形。TypeScript の型は `z.infer` から取る |
+| 作業場との受け渡し、設定、外からの通知 | Zod | 共通の部品 (`@know-office/core`) の Zod の形 |
+
+- 外から来る物 (画面の入力、GitHub の通知、作業場の返事、D1 の JSON の列) は、使う前に必ず Zod で確かめる
+- 追記だけの表は、Drizzle の上に追記の関数だけを出し、書き換えと消す関数を作らない
+- Drizzle は D1 の作り替えの SQL も作るので、表の定義と作り替えがずれない。素の SQL より型が強く、Prisma より Workers の上で軽い
+
 ### 画面は Vite と React
 
 画面は Vite、React、knowidea-ui で作り、事前に作った物を入口と同じ Worker から配る。画面ごとにコードを分け、3D とエディタは開いた時だけ読み込む。Next.js は、サーバー側の機能を使わない形になり、入口の Hono と役目が重なるので使わない。
+
+Vite、Vitest、oxlint は VoidZero の道具で、すでに使っている。VoidZero の公開の仕組み Void (2026 年 10 月に公開) は D1 を扱うが、Durable Objects と Containers を扱う記述が無く、社員の状態と作業場を載せられないので今は使わない。扱えるようになったら入口と画面から移す。
 
 ### エディタは CodeMirror 6
 
