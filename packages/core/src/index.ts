@@ -74,6 +74,18 @@ export {
   UpdateNodeInput,
   UpdatePromptInput,
 } from "./schemas/work.ts";
+export {
+  DEFAULT_SERVICE_RULES,
+  INHERITED_KEYS,
+  INHERITED_SETTINGS,
+  type InheritedKey,
+  OWN_SETTINGS,
+  ReleaseCondition,
+  RepoAction,
+  type ServiceRules,
+  Setting,
+  UpdateSettingInput,
+} from "./schemas/settings.ts";
 export { AskBossTool } from "./schemas/tools/ask-boss.ts";
 export { AskOwnerTool } from "./schemas/tools/ask-owner.ts";
 export { NodeAssignTool } from "./schemas/tools/node-assign.ts";

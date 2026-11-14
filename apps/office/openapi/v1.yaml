@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.1.0
+  version: 1.2.0
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -4246,13 +4246,15 @@ paths:
       tags:
       - settings
       summary: サービスの設定
-      description: '初期値を引き継いでいるかを inherited で返す。
+      description: '初期値を引き継いでいるかを inherited で返す。項目はリポジトリ (`repo`)、担当の社員 (`staffId`)、できる操作 (`actions`)、main にマージする条件 (`mergeWhen`)、本番にデプロイする条件 (`deployWhen`)、触れない所 (`protectedPaths`)、このサービスだけを止める (`paused`) の順。
 
 
         処理の流れ:
 
 
-        1. 最新の `service_settings` と office の初期値から、適用される値を組み立てる
+        1. サービスを取得する
+
+        2. 最新の `service_settings` と office の初期値 (`settings` の `service.<項目>`) から、適用される値を組み立てる。リポジトリと担当の社員は初期値を持たず、`services` の行の値を使う
 
 
         このルート固有のエラー:
@@ -4260,7 +4262,8 @@ paths:
 
         - 404 `not_found`: サービスが存在しない'
       x-steps:
-      - 最新の `service_settings` と office の初期値から、適用される値を組み立てる
+      - サービスを取得する
+      - 最新の `service_settings` と office の初期値 (`settings` の `service.<項目>`) から、適用される値を組み立てる。リポジトリと担当の社員は初期値を持たず、`services` の行の値を使う
       x-errors:
       - '404 `not_found`: サービスが存在しない'
       parameters:
@@ -4294,12 +4297,16 @@ paths:
                 - data
                 - meta
                 additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -4310,32 +4317,35 @@ paths:
       tags:
       - settings
       summary: サービスの設定を変更する
-      description: '処理の流れ:
+      description: 'ルールの判断は受け継いだ値をそのたびに組み立てて使うので、変えた値は次の判断から効く。
 
 
-        1. `key` がサービスの設定項目かを確認し、キーごとの Zod スキーマで値を検証する
+        処理の流れ:
+
+
+        1. サービスを取得し、`key` がサービスの設定項目かを確認し、キーごとの Zod スキーマで値を検証する。`null` は初期値を持つ項目だけに使える
 
         2. `version` が現在と一致することを確認する
 
-        3. `service_settings` に追加し、監査ログに `service.setting` を記録する
-
-        4. ルールの判断に使う値を作り直す
+        3. `service_settings` に追加し、監査ログに `service.setting` を記録する。担当の社員を変える時は `services.staff_id` も同じ時に直す
 
 
         このルート固有のエラー:
 
 
-        - 404 `not_found`: 設定項目が存在しない
+        - 404 `not_found`: サービスが存在しない、設定項目が存在しない、またはリポジトリを変えようとした (触れるリポジトリから選ぶので、GitHub と連携するまで変えられない)
 
-        - 409 `conflict`: バージョンが異なる'
+        - 409 `conflict`: バージョンが異なる
+
+        - 422 `validation_failed`: 値が項目の形に合わない、または初期値を持たない項目に `null` を送った'
       x-steps:
-      - '`key` がサービスの設定項目かを確認し、キーごとの Zod スキーマで値を検証する'
+      - サービスを取得し、`key` がサービスの設定項目かを確認し、キーごとの Zod スキーマで値を検証する。`null` は初期値を持つ項目だけに使える
       - '`version` が現在と一致することを確認する'
-      - '`service_settings` に追加し、監査ログに `service.setting` を記録する'
-      - ルールの判断に使う値を作り直す
+      - '`service_settings` に追加し、監査ログに `service.setting` を記録する。担当の社員を変える時は `services.staff_id` も同じ時に直す'
       x-errors:
-      - '404 `not_found`: 設定項目が存在しない'
+      - '404 `not_found`: サービスが存在しない、設定項目が存在しない、またはリポジトリを変えようとした (触れるリポジトリから選ぶので、GitHub と連携するまで変えられない)'
       - '409 `conflict`: バージョンが異なる'
+      - '422 `validation_failed`: 値が項目の形に合わない、または初期値を持たない項目に `null` を送った'
       parameters:
       - name: serviceId
         in: path
@@ -4382,6 +4392,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -4398,7 +4410,10 @@ paths:
       tags:
       - settings
       summary: office の設定とサービスの初期値
-      description: '処理の流れ:
+      description: 'キーは勤務の時刻 (`workday.schedule`)、自動停止の基準 (`guard.thresholds`)、サービスの初期値 (`service.actions`、`service.mergeWhen`、`service.deployWhen`、`service.protectedPaths`、`service.paused`) の順。行が無い項目は組み込みの初期値をバージョン 0 で返し、inherited を true にする。
+
+
+        処理の流れ:
 
 
         1. `settings` からキーごとの最新の値を取得する'
@@ -4428,10 +4443,14 @@ paths:
                 - data
                 - meta
                 additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -4445,11 +4464,11 @@ paths:
       description: '処理の流れ:
 
 
-        1. `key` を確認する。`guard.thresholds` と `github.rules` は専用のルートで変更する
+        1. `key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`) かを確認し、キーごとの Zod スキーマで値を検証する。`guard.thresholds` と `github.rules` は専用のルートで変更する
 
         2. `version` が現在と一致することを確認する
 
-        3. `settings` に追加し、監査ログに `setting.update` を記録する
+        3. `settings` に範囲 `office` で追加し、監査ログに `setting.update` を記録する
 
 
         このルート固有のエラー:
@@ -4457,14 +4476,17 @@ paths:
 
         - 404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない
 
-        - 409 `conflict`: バージョンが異なる'
+        - 409 `conflict`: バージョンが異なる
+
+        - 422 `validation_failed`: 値が項目の形に合わない、または `null` を送った'
       x-steps:
-      - '`key` を確認する。`guard.thresholds` と `github.rules` は専用のルートで変更する'
+      - '`key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`) かを確認し、キーごとの Zod スキーマで値を検証する。`guard.thresholds` と `github.rules` は専用のルートで変更する'
       - '`version` が現在と一致することを確認する'
-      - '`settings` に追加し、監査ログに `setting.update` を記録する'
+      - '`settings` に範囲 `office` で追加し、監査ログに `setting.update` を記録する'
       x-errors:
       - '404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない'
       - '409 `conflict`: バージョンが異なる'
+      - '422 `validation_failed`: 値が項目の形に合わない、または `null` を送った'
       parameters:
       - name: key
         in: path
@@ -4504,6 +4526,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -7758,19 +7782,30 @@ components:
           description: 設定ごとの Zod スキーマに従う
         inherited:
           type: boolean
+          description: office の初期値と同じなら true、初期値から変えていれば false
+        version:
+          type: integer
+          description: 変える時に送るバージョン。一度も変えていなければ 0
       required:
       - key
       - value
       - inherited
+      - version
       additionalProperties: false
     UpdateSettingInput:
       type: object
       properties:
+        version:
+          type: integer
+          description: 取得した時点のバージョン。現在と異なる場合は 409 conflict
         value:
           description: 設定ごとの形式。サービスの設定で null を送ると初期値に戻る
         reason:
           type: string
+          minLength: 1
+          maxLength: 2000
       required:
+      - version
       - value
       - reason
       additionalProperties: false

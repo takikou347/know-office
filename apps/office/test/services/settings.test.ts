@@ -112,9 +112,12 @@ describe("設定の入力", () => {
     await api(world, "GET", `/api/v1/services/${newId(world.clock)}/settings`, undefined, 404);
     await api(world, "PUT", `/api/v1/services/${newId(world.clock)}/settings/paused`, { version: 0, value: true, reason: "止める" }, 404);
     await api(world, "PUT", `/api/v1/services/${ui}/settings/budget`, { version: 0, value: 1, reason: "無い項目" }, 404);
+    // リポジトリは触れるリポジトリから選ぶので、GitHub とつなぐまで変えられない
+    await api(world, "PUT", `/api/v1/services/${ui}/settings/repo`, { version: 0, value: "example/other", reason: "移す" }, 404);
     await api(world, "PUT", "/api/v1/settings/guard.thresholds", { version: 0, value: {}, reason: "専用のルートで変える" }, 404);
     await api(world, "PUT", "/api/v1/settings/github.rules", { version: 0, value: {}, reason: "専用のルートで変える" }, 404);
     await api(world, "PUT", "/api/v1/settings/service.repo", { version: 0, value: "example/x", reason: "初期値を持たない" }, 404);
+    expect(world.gate.audits.filter((a) => a.action === "service.setting" || a.action === "setting.update")).toEqual([]);
   });
 
   it("項目の形に合わない値と、初期値を持たない項目を初期値に戻す事は 422 にする", async () => {
