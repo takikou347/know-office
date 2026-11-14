@@ -2,6 +2,7 @@
 import { AppError, DEFAULT_THRESHOLDS } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { applyStop, type StopInput } from "../../src/gate/guard/actions.ts";
 import { checkOverruns, observe, verifyWorkToken } from "../../src/gate/guard/observe.ts";
 import { addNode, addService, denied, jst, MINUTE, NODE, NODE2, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
 import { ORIGIN } from "../helpers/gate.ts";
@@ -68,6 +69,18 @@ describe("止めるのはシステム", () => {
     // 止めている間に届いた返事では、重ねて止めない
     await send({ ...deploy, responses: 10, failures: 5 }, jst(10, 6));
     expect(await stops()).toHaveLength(1);
+  });
+
+  it("Web アプリを戻せなかった事を通知に残す", async () => {
+    await addService(w, "shop", "web_app");
+    w.gate.deps.rollback = () => Promise.reject(new Error("GitHub につながっていない"));
+    const deploy = { type: "deploy_result", serviceId: "shop", kind: "web", deployedAt: jst(10), baselineRate: 0.02, responses: 30, failures: 2 };
+    expect(await send(deploy, jst(10, 5))).toMatchObject({ action: "stop", scope: "service" });
+    expect(await stops()).toMatchObject([{ scope: "service", target: "shop" }]);
+    expect(await rows(w, "SELECT level, kind FROM notices ORDER BY kind")).toEqual([
+      { level: "stop", kind: "guard_rollback_failed" },
+      { level: "stop", kind: "guard_stop" },
+    ]);
   });
 
   it("2 倍を超えない", async () => {
@@ -158,6 +171,29 @@ describe("誤って止めない", () => {
 });
 
 describe("止めた記録", () => {
+  const manual: StopInput = { scope: "staff", target: "builder", signal: "manual", measured: 0, threshold: 0, rulesVersion: 0, recentOps: [], externalSources: [], by: "owner" };
+
+  it("効かせる所が途中で失敗しても、止めた記録と失敗が残る", async () => {
+    await startWork(w, "builder");
+    w.gate.staff.builder.guard.halt = () => Promise.reject(new Error("ワークスペースに届かない"));
+    await w.gate.staff.builder.book.heartbeat(jst(9, 59));
+    await send({ type: "external_read", staffId: "builder", nodeId: NODE, source: "https://example.com/" }, jst(10));
+    await expect(send({ type: "sensitive_access", staffId: "builder", nodeId: NODE, item: "address" }, jst(10, 1))).rejects.toThrow(AppError);
+    expect(await stops()).toMatchObject([{ kind: "stop", scope: "staff", target: "builder", signal: "exfiltration" }]);
+    expect(await rows(w, "SELECT level, kind FROM notices ORDER BY kind")).toEqual([
+      { level: "stop", kind: "guard_stop" },
+      { level: "stop", kind: "guard_stop_failed" },
+    ]);
+    expect(w.gate.audits.map((a) => a.action)).toEqual(["guard.stop", "guard.stop_failed"]);
+  });
+
+  it("同じ相手への止めが同時に 2 つ来ても、記録は 1 行", async () => {
+    await startWork(w, "builder");
+    const ids = await Promise.all([applyStop(w.gate.env, manual, jst(10), w.gate.deps), applyStop(w.gate.env, manual, jst(10), w.gate.deps)]);
+    expect(ids.filter((id) => id !== null)).toHaveLength(1);
+    expect(await stops()).toHaveLength(1);
+  });
+
   it("記録が残る", async () => {
     await startWork(w, "builder");
     for (let n = 0; n < 23; n += 1) await send({ type: "tool_call", staffId: "builder" }, jst(9, 30) + n * 1000);

@@ -116,6 +116,17 @@ describe("再開", () => {
     expect(w.gate.audits.at(-1)).toMatchObject({ action: "guard.resume" });
   });
 
+  it("同時に再開を押しても、再開の記録は 1 行", async () => {
+    await startWork(w, "builder");
+    await observe(w.gate.env, denied(), jst(9, 5), w.gate.deps);
+    const headers = await signIn();
+    const [stop] = await rows(w, "SELECT id FROM stops");
+    const path = `/api/v1/guard/stops/${String(stop?.["id"])}/resume`;
+    const statuses = await Promise.all([call("POST", path, headers), call("POST", path, headers)]);
+    expect(statuses.map((r) => r.status).toSorted((a, b) => a - b)).toEqual([200, 409]);
+    expect(await rows(w, "SELECT kind FROM stop_updates")).toEqual([{ kind: "resumed" }]);
+  });
+
   it("サービスの再開にもパスキーが要り、タスクの再開には要らない", async () => {
     await addService(w, "shop", "library");
     await startWork(w, "builder");
@@ -149,5 +160,11 @@ describe("止めた記録", () => {
     expect(detail).toMatchObject({ id, verdict: "false", rulesVersion: 0, model: "claude-opus-5-5", externalSources: [] });
     expect(z.object({ recentOps: z.array(z.object({ type: z.string() }).loose()) }).loose().parse(detail).recentOps.map((op) => op.type)).toEqual(["tool_call", "rule_denied"]);
     expect((await call("GET", "/api/v1/guard/stops/0190f4a8-0000-7000-8000-00000000ffff", headers)).status).toBe(404);
+    // 社員にひもづかない止めた記録はモデルを持たない
+    const office = await call("POST", "/api/v1/guard/stops", headers, { scope: "office", target: "office", reason: "確かめ" });
+    const officeId = z.object({ stopId: z.string() }).parse(await data(office)).stopId;
+    w.clock.advance(MINUTE);
+    const fresh = await w.gate.signIn();
+    expect(await data(await call("GET", `/api/v1/guard/stops/${officeId}`, fresh))).toMatchObject({ model: null });
   });
 });

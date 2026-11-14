@@ -7,6 +7,7 @@ import { z } from "zod";
 import { rotateVaultKeys } from "../auth/vault.ts";
 import { nodes, notices, services, sessions, staff, stops, stopUpdates } from "../db/main.ts";
 import type { Bindings, Guard, Staff } from "../env.ts";
+import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
 import type { GuardDeps, RecentOp } from "./deps.ts";
 
@@ -104,78 +105,46 @@ async function record(env: Bindings, entry: { at: number; actor: string; action:
 }
 
 /**
- * 範囲ごとに止め、止めた記録と通知と監査ログを残す。もう止めている相手は重ねて止めない
+ * 止めた記録と通知と監査ログを先に残し、その後に範囲ごとに止める。同じ相手への止めが同時に来ても、記録は 1 行だけ
+ * 止める動きが途中で失敗しても記録は残り、失敗した事を通知、監査ログ、エラーログに残してから投げる
  * @param env バインディング
  * @param input 止める範囲とシグナル
  * @param now 今の時刻
  * @param deps 外へ頼む口
  * @returns 止めた記録の ID。もう止めていれば null
+ * @throws internal 止める動きが途中で失敗した時
  */
 export async function applyStop(env: Bindings, input: StopInput, now: number, deps: GuardDeps): Promise<string | null> {
   if (await openStop(env.DB, input.scope, input.target)) return null;
   const orm = drizzle(env.DB);
-  let staffId: StaffId | null = null;
-  let nodeProgress: unknown = null;
-  switch (input.scope) {
-    case "task": {
-      const [node] = await orm.select().from(nodes).where(eq(nodes.id, input.target)).limit(1);
-      const assignee = StaffId.safeParse(node?.assignee);
-      staffId = assignee.success ? assignee.data : null;
-      nodeProgress = { staffId, progress: node?.progress ?? null };
-      // タスクは上司に戻す。上司がいなければ持っていた社員のまま
-      const [boss] = staffId ? await orm.select({ bossId: staff.bossId }).from(staff).where(eq(staff.id, staffId)).limit(1) : [];
-      if (node) await orm.update(nodes).set({ status: "stopped", assignee: boss?.bossId ?? node.assignee, updatedAt: now }).where(eq(nodes.id, node.id));
-      if (staffId) await staffOf(env, staffId).dropTask(input.target, now);
-      break;
-    }
-    case "staff":
-      staffId = StaffId.parse(input.target);
-      await staffOf(env, staffId).halt(now);
-      break;
-    case "service": {
-      const [service] = await orm.select({ kind: services.kind }).from(services).where(eq(services.id, input.target)).limit(1);
-      // ライブラリは公開を断るだけで、戻すのは Web アプリだけ
-      if (service?.kind === "web_app") await deps.rollback(input.target);
-      break;
-    }
-    case "office":
-      for (const id of ALL_STAFF) await staffOf(env, id).halt(now);
-      await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
-      await rotateVaultKeys(env.DB, env.MASTER_KEY, now);
-      await guardDo(env).holdKeys();
-      break;
-    default:
-      return input.scope satisfies never;
-  }
-  const [model] = staffId ? await orm.select({ model: staff.model }).from(staff).where(eq(staff.id, staffId)).limit(1) : [];
   const stopId = newId(clockAt(now));
-  await orm.batch([
-    orm.insert(stops).values({
-      id: stopId,
-      at: now,
-      kind: "stop",
-      scope: input.scope,
-      target: input.target,
-      signal: input.signal,
-      measured: input.measured,
-      threshold: input.threshold,
-      rulesVersion: input.rulesVersion,
-      recentOpsKey: null,
-      nodeProgress,
-      externalSources: input.externalSources,
-      model: model?.model ?? null,
-      by: input.by,
-    }),
-    orm.insert(notices).values({
-      id: newId(clockAt(now)),
-      at: now,
-      level: "stop",
-      kind: "guard_stop",
-      title: `${SCOPE_LABEL[input.scope]}を止めた`,
-      body: input.reason ?? `${input.signal}: ${String(input.measured)} / ${String(input.threshold)}`,
-      scope: "office",
-    }),
-  ]);
+  // 止める権利は GuardDO の中で 1 つずつ渡すので、同時に来た 2 つ目はここで返る
+  if (!(await guardDo(env).claimStop(input.scope, input.target, stopId))) return null;
+  const subject = await subjectOf(env.DB, input);
+  try {
+    await orm.batch([
+      orm.insert(stops).values({
+        id: stopId,
+        at: now,
+        kind: "stop",
+        scope: input.scope,
+        target: input.target,
+        signal: input.signal,
+        measured: input.measured,
+        threshold: input.threshold,
+        rulesVersion: input.rulesVersion,
+        recentOpsKey: null,
+        nodeProgress: subject.nodeProgress,
+        externalSources: input.externalSources,
+        model: subject.model,
+        by: input.by,
+      }),
+      orm.insert(notices).values(notice(now, "stop", "guard_stop", `${SCOPE_LABEL[input.scope]}を止めた`, input.reason ?? `${input.signal}: ${String(input.measured)} / ${String(input.threshold)}`)),
+    ]);
+  } catch (error) {
+    await guardDo(env).dropClaim(stopId);
+    throw error;
+  }
   // 直前の 20 件の出来事は、止めた記録と同じ時に監査ログの detail に残す
   await record(env, {
     at: now,
@@ -185,7 +154,94 @@ export async function applyStop(env: Bindings, input: StopInput, now: number, de
     detail: { scope: input.scope, target: input.target, signal: input.signal, measured: input.measured, threshold: input.threshold, reason: input.reason ?? null, recentOps: input.recentOps },
     traceId: input.traceId,
   });
+  try {
+    await enforce(env, input, subject.staffId, now, deps);
+  } catch (error) {
+    await orm.insert(notices).values(notice(now, "stop", "guard_stop_failed", `${SCOPE_LABEL[input.scope]}を止める動きが途中で失敗した`, "止めた記録は残っている。止まっていない所があるので、記録を確かめる"));
+    await record(env, { at: now, actor: "system", action: "guard.stop_failed", target: stopId, detail: { scope: input.scope, target: input.target }, traceId: input.traceId });
+    await recordError(env, { source: "gate", level: "error", code: "guard_stop_failed", error }, clockAt(now));
+    throw new AppError("internal", "止める動きが途中で失敗した");
+  }
   return stopId;
+}
+
+/**
+ * 止める相手にひもづく社員とタスクの経過を読む。記録に残すだけで、何も変えない
+ * @param db 今の状態の D1
+ * @param input 止める範囲と相手
+ * @returns 社員、使っていたモデル、タスクの経過
+ */
+async function subjectOf(db: D1Database, input: StopInput): Promise<{ staffId: StaffId | null; model: string | null; nodeProgress: unknown }> {
+  const orm = drizzle(db);
+  let staffId: StaffId | null = null;
+  let nodeProgress: unknown = null;
+  if (input.scope === "task") {
+    const [node] = await orm.select().from(nodes).where(eq(nodes.id, input.target)).limit(1);
+    const assignee = StaffId.safeParse(node?.assignee);
+    staffId = assignee.success ? assignee.data : null;
+    nodeProgress = { staffId, progress: node?.progress ?? null };
+  }
+  if (input.scope === "staff") staffId = StaffId.parse(input.target);
+  const [row] = staffId ? await orm.select({ model: staff.model }).from(staff).where(eq(staff.id, staffId)).limit(1) : [];
+  return { staffId, model: row?.model ?? null, nodeProgress };
+}
+
+/**
+ * 範囲ごとに止める動きを効かせる
+ * @param env バインディング
+ * @param input 止める範囲と相手
+ * @param staffId タスクを持っていた社員
+ * @param now 今の時刻
+ * @param deps 外へ頼む口
+ */
+async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null, now: number, deps: GuardDeps): Promise<void> {
+  const orm = drizzle(env.DB);
+  switch (input.scope) {
+    case "task": {
+      const [node] = await orm.select().from(nodes).where(eq(nodes.id, input.target)).limit(1);
+      // タスクは上司に戻す。上司がいなければ持っていた社員のまま
+      const [boss] = staffId ? await orm.select({ bossId: staff.bossId }).from(staff).where(eq(staff.id, staffId)).limit(1) : [];
+      if (node) await orm.update(nodes).set({ status: "stopped", assignee: boss?.bossId ?? node.assignee, updatedAt: now }).where(eq(nodes.id, node.id));
+      if (staffId) await staffOf(env, staffId).dropTask(input.target, now);
+      return;
+    }
+    case "staff":
+      await staffOf(env, StaffId.parse(input.target)).halt(now);
+      return;
+    case "service": {
+      const [service] = await orm.select({ kind: services.kind }).from(services).where(eq(services.id, input.target)).limit(1);
+      // ライブラリは公開を断るだけで、戻すのは Web アプリだけ。戻せなくても、止めた記録が開いている間は公開を断る
+      if (service?.kind !== "web_app") return;
+      try {
+        await deps.rollback(input.target);
+      } catch (error) {
+        await orm.insert(notices).values(notice(now, "stop", "guard_rollback_failed", `${input.target} を前のバージョンに戻せなかった`, "公開は止めている。前のバージョンへは手で戻す"));
+        await recordError(env, { source: "gate", level: "error", code: "guard_rollback_failed", error }, clockAt(now));
+      }
+      return;
+    }
+    case "office":
+      for (const id of ALL_STAFF) await staffOf(env, id).halt(now);
+      await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
+      await rotateVaultKeys(env.DB, env.MASTER_KEY, now);
+      await guardDo(env).holdKeys();
+      return;
+    default:
+      input.scope satisfies never;
+  }
+}
+
+/**
+ * 通知の行を作る
+ * @param now 今の時刻
+ * @param level warn か stop
+ * @param kind 通知の種類
+ * @param title 題
+ * @param body 中身
+ * @returns notices に足す値
+ */
+function notice(now: number, level: "warn" | "stop", kind: string, title: string, body: string): typeof notices.$inferInsert {
+  return { id: newId(clockAt(now)), at: now, level, kind, title, body, scope: "office" };
 }
 
 /**
@@ -234,9 +290,11 @@ export async function recordNear(env: Bindings, input: Omit<StopInput, "by" | "r
  * @param reason 再開の理由
  * @param now 今の時刻
  * @param traceId 要求のトレース ID
- * @returns 無し
+ * @returns 再開したか。同じ記録の再開が同時に来た時の 2 つ目は false
  */
-export async function resumeStop(env: Bindings, stop: StopRowData, by: "reviewer" | "owner", reason: string | null, now: number, traceId?: string): Promise<void> {
+export async function resumeStop(env: Bindings, stop: StopRowData, by: "reviewer" | "owner", reason: string | null, now: number, traceId?: string): Promise<boolean> {
+  // 再開する権利は GuardDO の中で 1 つずつ渡すので、resumed の行は 1 つだけになる
+  if (!(await guardDo(env).releaseStop(stop.id))) return false;
   const orm = drizzle(env.DB);
   switch (stop.scope) {
     case "task": {
@@ -261,6 +319,7 @@ export async function resumeStop(env: Bindings, stop: StopRowData, by: "reviewer
   }
   await orm.insert(stopUpdates).values({ id: newId(clockAt(now)), stopId: stop.id, at: now, kind: "resumed", by, reason });
   await record(env, { at: now, actor: by === "owner" ? "owner" : "system", action: "guard.resume", target: stop.id, detail: { scope: stop.scope, target: stop.target, by, reason }, traceId });
+  return true;
 }
 
 /**

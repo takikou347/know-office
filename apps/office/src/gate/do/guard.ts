@@ -53,6 +53,35 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
   }
 
   /**
+   * その範囲と相手を止める権利を取る
+   * @param scope 範囲
+   * @param target 相手
+   * @param stopId 止めた記録の ID
+   * @returns 取れたか
+   */
+  claimStop(scope: string, target: string, stopId: string): Promise<boolean> {
+    return this.#office.claimStop(scope, target, stopId);
+  }
+
+  /**
+   * 止めた記録を再開する権利を取る
+   * @param stopId 止めた記録の ID
+   * @returns 取れたか
+   */
+  releaseStop(stopId: string): Promise<boolean> {
+    return this.#office.releaseStop(stopId);
+  }
+
+  /**
+   * 記録を残せなかった時に、止める権利を返す
+   * @param stopId 止めた記録の ID
+   * @returns 無し
+   */
+  dropClaim(stopId: string): Promise<null> {
+    return this.#office.dropClaim(stopId);
+  }
+
+  /**
    * 入口で通すかを決める
    * @param ip 送信元
    * @param bucket レート制限の種類

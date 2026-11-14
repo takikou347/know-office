@@ -46,6 +46,8 @@ const GuardCall = z.discriminatedUnion("method", [
   z.object({ method: z.literal("takeChallenge"), args: z.tuple([z.string(), z.number()]) }),
   z.object({ method: z.literal("observe"), args: z.tuple([z.unknown(), z.number(), z.unknown()]) }),
   z.object({ method: z.literal("keysHeld"), args: z.tuple([]) }),
+  z.object({ method: z.literal("claimStop"), args: z.tuple([z.string(), z.string(), z.string()]) }),
+  z.object({ method: z.literal("releaseStop"), args: z.tuple([z.string()]) }),
 ]);
 
 /**
@@ -116,6 +118,8 @@ export default {
       if (call.method === "putChallenge") return Response.json(await guard.putChallenge(...call.args));
       if (call.method === "observe") return Response.json(await guard.observe(...call.args));
       if (call.method === "keysHeld") return Response.json(await guard.keysHeld());
+      if (call.method === "claimStop") return Response.json(await guard.claimStop(...call.args));
+      if (call.method === "releaseStop") return Response.json(await guard.releaseStop(...call.args));
       return Response.json(await guard.takeChallenge(...call.args));
     }
     const { method, args } = Call.parse(body);

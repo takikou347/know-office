@@ -179,7 +179,7 @@ export const guardRoutes = router
       recentOps: ops.success ? ops.data.recentOps : [],
       updates: updates.map((u) => ({ id: u.id, at: iso(u.at), kind: u.kind, by: u.by, verdict: u.verdict, reason: u.reason })),
       rulesVersion: row.rulesVersion,
-      model: row.model ?? "",
+      model: row.model,
       externalSources: sources.success ? sources.data : [],
     });
   })
@@ -199,7 +199,7 @@ export const guardRoutes = router
     if (((await stopStates(c.env.DB, [row.id])).get(row.id)?.resumedAt ?? null) !== null) throw new AppError("conflict", "もう再開している");
     if (row.scope === "office" && (await guardDo(c.env).keysHeld())) throw new AppError("conflict", "GitHub App と Claude の鍵を入れ直してから再開する");
     const now = c.var.clock.now();
-    await resumeStop(c.env, row, "owner", null, now, c.var.traceId);
+    if (!(await resumeStop(c.env, row, "owner", null, now, c.var.traceId))) throw new AppError("conflict", "もう再開している");
     return ok(c, { resumedAt: iso(now) });
   })
   .openapi(previewStopRoute, async (c) => {

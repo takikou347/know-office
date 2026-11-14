@@ -32,4 +32,14 @@ describe("止める仕組みの DO", () => {
     expect(await worker.guard("observe", { type: "threshold_mismatch" }, jst(9), DEFAULT_THRESHOLDS)).toMatchObject({ action: "stop", scope: "office", signal: "certain_fraud" });
     expect(await worker.guard("keysHeld")).toBe(false);
   });
+
+  it("同じ相手を止める権利と、同じ記録を再開する権利は 1 つだけが取れる", async () => {
+    const claims = await Promise.all([worker.guard("claimStop", "staff", "builder", "s1"), worker.guard("claimStop", "staff", "builder", "s2")]);
+    expect(claims.filter((c) => c === true)).toHaveLength(1);
+    const winner = claims[0] === true ? "s1" : "s2";
+    const releases = await Promise.all([worker.guard("releaseStop", winner), worker.guard("releaseStop", winner)]);
+    expect(releases.filter((r) => r === true)).toHaveLength(1);
+    // 再開の後は、同じ相手をまた止められる
+    expect(await worker.guard("claimStop", "staff", "builder", "s3")).toBe(true);
+  });
 });

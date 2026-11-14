@@ -197,7 +197,7 @@ export const StopDetail = z
         recentOps: z.array(Entry),
         updates: z.array(Entry),
         rulesVersion: z.number().int(),
-        model: z.string(),
+        model: z.string().nullable(),
         externalSources: z.array(z.string()),
       })
       .strict(),

@@ -1,5 +1,5 @@
 // 自動停止が外へ頼む口と、DO が返す数えた答えの形 (自動停止の 3.4、3.6)
-import { type Judgment, log } from "@know-office/core";
+import type { Judgment } from "@know-office/core";
 
 /** 直前の出来事 1 件。出来事の項目はどれも文字、数、真偽、null */
 export type RecentOp = Record<string, string | number | boolean | null>;
@@ -41,11 +41,9 @@ export type GuardDeps = {
   review(record: StopRecord): Promise<ReviewAnswer | null>;
 };
 
-/** まだつないでいない口。GitHub (tasks.md の 8 章) とレビュー担当のモデル (7 章) をつなぐまで、戻せなかった事を記録に残し、再開はオーナーが行う */
+/** まだつないでいない口。戻しは失敗として返し、止めた側が通知とエラーログに残す。レビュー担当は答えず、再開はオーナーが行う */
+// TODO(#48): rollback を 8 章の GitHub 連携の rollback.yml に、review を 7 章のモデルの呼び出しにつなぐ
 export const UNCONNECTED_DEPS: GuardDeps = {
-  rollback: (serviceId) => {
-    log("warn", "guard_rollback_unconnected", { serviceId });
-    return Promise.resolve();
-  },
+  rollback: () => Promise.reject(new Error("rollback.yml をまだつないでいない")),
   review: () => Promise.resolve(null),
 };

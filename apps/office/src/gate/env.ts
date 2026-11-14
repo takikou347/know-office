@@ -37,6 +37,12 @@ export interface Guard extends Rpc.DurableObjectBranded {
   keysHeld(): Promise<boolean>;
   /** 外の鍵の印を外す */
   releaseKeys(): Promise<null>;
+  /** その範囲と相手を止める権利を取る */
+  claimStop(scope: string, target: string, stopId: string): Promise<boolean>;
+  /** 止めた記録を再開する権利を取る */
+  releaseStop(stopId: string): Promise<boolean>;
+  /** 記録を残せなかった時に、止める権利を返す */
+  dropClaim(stopId: string): Promise<null>;
 }
 
 /** 社員 DO の RPC。時刻は呼ぶ側の Clock で渡す。入力は DO の中で Zod で確かめる (社員と勤怠の 1.3) */
