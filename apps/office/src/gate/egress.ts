@@ -103,7 +103,7 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
 }
 
 /**
- * コンテナから出た要求を宛先で分け、ゲートウェイ、Claude、GitHub の宛先だけをゲートウェイで受ける。ほかは 403 で断る
+ * コンテナから出た要求を宛先で分け、ゲートウェイ、Claude、GitHub の宛先の決まった番号だけをゲートウェイで受ける。ほかは 403 で断る
  * @param request コンテナから出た要求
  * @param env バインディング
  * @param caller 送ったワークスペース。コンテナを起こした DO が受け手に結ぶ
@@ -112,8 +112,10 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
  */
 export async function routeEgress(request: Request, env: Bindings, caller: Caller, options: EgressOptions): Promise<Response> {
   const url = new URL(request.url);
+  // URL は決まった番号 (http の 80、https の 443) を空にする。ほかの番号には出さない
   const allowed =
-    (url.protocol === "http:" && WORKSPACE_EGRESS.http.some((h) => h === url.hostname)) || (url.protocol === "https:" && WORKSPACE_EGRESS.https.some((h) => h === url.hostname));
+    url.port === "" &&
+    ((url.protocol === "http:" && WORKSPACE_EGRESS.http.some((h) => h === url.hostname)) || (url.protocol === "https:" && WORKSPACE_EGRESS.https.some((h) => h === url.hostname)));
   if (!allowed) {
     return new Response(JSON.stringify({ type: "urn:know-office:problem:forbidden", title: "Forbidden", status: 403, detail: "この宛先には出られない", code: "forbidden" }), {
       status: 403,

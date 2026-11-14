@@ -104,6 +104,18 @@ describe("鍵はゲートウェイだけが持つ", () => {
       expect(res.status).toBe(403);
     }
   });
+
+  it("受け手は http の 80 番と https の 443 番だけを受け、ほかの番号は 403 で断る", async () => {
+    for (const url of ["http://gate.internal:8080/ws/v1/heartbeat", "http://gate.internal:443/ws/v1/heartbeat", "https://api.anthropic.com:8443/v1/messages", "https://api.github.com:80/repos/o/r"]) {
+      const res = await send(url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      expect({ url, status: res.status }).toEqual({ url, status: 403 });
+    }
+    // 番号を書いても、決まった番号なら受ける
+    w.clock.advance(jst(9, 1) - w.clock.now());
+    const beat = await send("http://gate.internal:80/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(jst(9, 1)).toISOString() }) });
+    expect(beat.status).toBe(204);
+    expect((await send("https://api.anthropic.com:443/v1/messages", { method: "POST", body: "{}" })).status).toBe(401);
+  });
 });
 
 describe("ワークスペースの起こし方", () => {
