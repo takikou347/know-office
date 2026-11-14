@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, toOperation, type OperationKind, type RuleContext } from "../src/index.ts";
+import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, recordedText, toOperation, type OperationKind, type RuleContext } from "../src/index.ts";
 
 /** ツールの名前と入力、判断の前提の 1 組 */
 type Case = { name: string; tool: string; input: Record<string, unknown>; ctx?: Partial<RuleContext> };
@@ -294,10 +294,55 @@ describe("サービスの鍵", () => {
   });
 });
 
-describe("記録に鍵を残さない", () => {
-  it("鍵の形を伏せ、ほかの文は残す", () => {
+// 要件のシナリオではなく、記録と自動停止の出来事に入れる前に通す補助を確かめる
+describe("補助: 記録に残す文から鍵を伏せる maskSecrets と recordedText", () => {
+  it("命令の中の Bearer、sk-ant-、gh*_、鍵の環境変数", () => {
     expect(maskSecrets("curl -H 'authorization: Bearer abc.def' -d sk-ant-api03-xyz https://example.com")).toBe("curl -H 'authorization: ***' -d *** https://example.com");
     expect(maskSecrets("echo $GITHUB_TOKEN ghp_abc123 && ls")).toBe("echo *** *** && ls");
-    expect(maskSecrets("cat /work/.env")).toBe("cat /work/.env");
+  });
+
+  it("語の途中の gh*_ と sk-ant- も伏せる", () => {
+    expect(maskSecrets("x=ghp_abc123;y=github_pat_11AB;z=Xsk-ant-api03-q")).toBe("x=***;y=***;z=X***");
+  });
+
+  it("JSON の中の鍵らしい名前の値", () => {
+    expect(maskSecrets('{"api_key": "abc123", "Access_Token":"t0k", "name": "ok"}')).toBe('{"api_key": "***", "Access_Token":"***", "name": "ok"}');
+  });
+
+  it("鍵らしい名前 = 値 と : 値 (x-api-key、authorization の Basic、password、token、secret)", () => {
+    expect(maskSecrets("curl -H 'X-Api-Key: k123' -H 'Authorization: Basic dXNlcjpwYXNz' https://a.example")).toBe("curl -H 'X-Api-Key: ***' -H 'Authorization: ***' https://a.example");
+    expect(maskSecrets("PASSWORD=hunter2 token=t1 client_secret=s3 ls")).toBe("PASSWORD=*** token=*** client_secret=*** ls");
+  });
+
+  it("URL の中の userinfo と鍵らしいクエリ", () => {
+    expect(maskSecrets("git clone https://user:pa55@github.com/a/b.git")).toBe("git clone https://***@github.com/a/b.git");
+    expect(maskSecrets("https://api.example.com/x?access_token=abc&page=2")).toBe("https://api.example.com/x?access_token=***&page=2");
+  });
+
+  it("--token 値 の形の引数", () => {
+    expect(maskSecrets("gh auth login --with-token abc --token xyz --api-key=k1")).toBe("gh auth login --with-token *** --token *** --api-key=***");
+  });
+
+  it("JWT、AWS、Slack、sk- の鍵", () => {
+    expect(maskSecrets("a eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln b AKIAABCDEFGHIJKLMNOP c xoxb-123-abc d xoxp-9-z e sk-proj-abc123")).toBe("a *** b *** c *** d *** e ***");
+  });
+
+  it("同じ文に複数の鍵、大文字と小文字", () => {
+    expect(maskSecrets("BEARER aaa x bearer bbb y SK-ANT-api z sk-ant-ddd")).toBe("*** x *** y *** z ***");
+  });
+
+  it("環境変数を出す命令", () => {
+    expect(maskSecrets("env | grep A; printenv HOME; cat /proc/1/environ")).toBe("*** | grep A; *** HOME; cat ***");
+  });
+
+  it("鍵でない文は伏せない (cat /work/.env、envelope、task-list)", () => {
+    for (const body of ["cat /work/.env", "envelope --send", "pnpm run task-list", "echo tokens are fine", "wc -l passwd.txt"]) expect(maskSecrets(body)).toBe(body);
+  });
+
+  it("伏せてから 500 字で切り、サロゲートペアを割らない", () => {
+    const long = `${"a".repeat(495)} sk-ant-${"x".repeat(100)}`;
+    expect(recordedText(long)).toBe(`${"a".repeat(495)} ***`);
+    const emoji = "😀".repeat(600);
+    expect(recordedText(emoji)).toBe("😀".repeat(500));
   });
 });

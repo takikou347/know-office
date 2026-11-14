@@ -38,9 +38,9 @@ import { pathsOf, shellSegments } from "./shell.ts";
 const STAFF_TOOL = /^mcp__staff__(\w+)$/;
 const OFFICE_TOOLS = ["checkpoint", "report", "ask_boss"];
 
-// 鍵の形 (GitHub と Anthropic の鍵の頭、Bearer)、鍵の環境変数、環境変数を全部出す命令
+// 鍵の形 (GitHub と Anthropic の鍵の頭、Bearer)、鍵の環境変数、環境変数を全部出す命令。鍵の頭は語の途中に埋めても当たるよう \b を付けない
 const SECRET_TEXT = [
-  /\b(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/,
+  /(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/,
   /\bBearer\s+[\w.~+/=-]+/i,
   /\$\{?\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\}?/i,
   /(?:^|[\s;&|(])(?:env|export\s+-p|set)\s*(?:$|[;&|)])/,
@@ -50,13 +50,54 @@ const SECRET_TEXT = [
 const GUARD_TEXT = /\/(?:api|ws)\/v\d+\/(?:guard|stops)\b/;
 const STAFF_TEXT = /\/(?:api|ws)\/v\d+\/staff\b/;
 
+// 鍵らしい名前 (x-api-key、authorization、password、token、secret、api_key、access_token など)。前後の語の続きも名前に含める
+const KEY_NAME = String.raw`[\w-]*(?:api[_-]?key|token|secret|password|passwd|authorization)[\w-]*`;
+
+/** 記録に入れる前に伏せる形と、置き換える文。モジュールの頭で 1 度だけ作る */
+const MASKS: readonly (readonly [RegExp, string])[] = [
+  // URL の userinfo (user:pass@)
+  [/\b([a-z][a-z\d+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1***@"],
+  // --token 値 の形の引数
+  [new RegExp(String.raw`(-${KEY_NAME})(\s+)(?!-)[^\s"'&;|]+`, "gi"), "$1$2***"],
+  // 名前 = 値 と 名前: 値。JSON の "名前": "値" と、authorization の Bearer と Basic も含める
+  [new RegExp(String.raw`(${KEY_NAME}["']?\s*[:=]\s*["']?)(?:(?:Bearer|Basic|Token)\s+)?[^\s"'&,;}]+`, "gi"), "$1***"],
+  // JWT
+  [/eyJ[\w-]+\.[\w-]+\.[\w-]*/g, "***"],
+  // AWS のアクセスキー
+  [/AKIA[\dA-Z]{16}/g, "***"],
+  // Slack のトークン
+  [/xox[bp]-[\w-]+/g, "***"],
+  // GitHub と Anthropic の鍵の頭は語の途中でも伏せる
+  [/(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/gi, "***"],
+  // sk- で始まる鍵一般
+  [/\bsk-[\w-]+/gi, "***"],
+  [/\bBearer\s+[\w.~+/=-]+/gi, "***"],
+  [/\$\{?\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\}?/gi, "***"],
+  // 環境変数を全部出す命令。前後の区切りは残す
+  [/(?<=^|[\s;&|(])(?:env|export\s+-p|set)(?=\s*(?:$|[;&|)]))/g, "***"],
+  [/(?<=^|[\s;&|(])printenv\b/g, "***"],
+  [/\/proc\/[^\s/]+\/environ/g, "***"],
+];
+
+/** 記録と出来事に残す文の長さの上限 (字数)。長い命令で記録が膨らまないようにする */
+export const MAX_RECORDED = 500;
+
 /**
  * 文の中の鍵の形を伏せる。記録と自動停止の出来事に入れる前に通す
  * @param body 命令、URL、言葉、道
  * @returns 鍵の形を *** に置き換えた文
  */
 export function maskSecrets(body: string): string {
-  return SECRET_TEXT.reduce((out, pattern) => out.replace(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`), "***"), body);
+  return MASKS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), body);
+}
+
+/**
+ * 記録に残す文を作る。鍵の形を伏せてから 500 字で切り、サロゲートペアを割らない
+ * @param body 命令、URL、言葉、道
+ * @returns 伏せて切った文
+ */
+export function recordedText(body: string): string {
+  return Array.from(maskSecrets(body)).slice(0, MAX_RECORDED).join("");
 }
 
 /**

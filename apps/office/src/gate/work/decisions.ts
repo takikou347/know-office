@@ -7,10 +7,13 @@ import {
   DEFAULT_RULES,
   decide,
   INHERITED_SETTINGS,
-  maskSecrets,
+  MAX_RECORDED,
+  type Judgment,
   newId,
   type Operation,
   type RuleContext,
+  type RuleDecision,
+  recordedText,
   type StaffId,
   toOperation,
 } from "@know-office/core";
@@ -20,6 +23,7 @@ import { stops } from "../db/main.ts";
 import { toolCalls } from "../db/records.ts";
 import type { Bindings, GateEnv } from "../env.ts";
 import { openStops, staffOf } from "../guard/actions.ts";
+import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
@@ -27,9 +31,6 @@ import { loadOfficeDefaults, serviceRules } from "../services/settings.ts";
 import { clockAt } from "./attendance.ts";
 import { findNode, recordsOf } from "./nodes.ts";
 import { type Caller, ticketTask } from "./ticket.ts";
-
-/** tool_calls と出来事に残す相手の長さの上限。長い命令で記録が膨らまないようにする */
-const MAX_TARGET = 500;
 
 const decideRoute = createRoute({
   method: "post",
@@ -48,10 +49,10 @@ const decideRoute = createRoute({
  * @throws stopped 止めた記録がまだ再開していない時
  */
 async function ensureRunning(env: Bindings, staffId: StaffId, nodeId: string): Promise<void> {
-  const open = await openStops(
-    env.DB,
-    or(and(eq(stops.scope, "office"), eq(stops.target, "office")), and(eq(stops.scope, "staff"), eq(stops.target, staffId)), and(eq(stops.scope, "task"), eq(stops.target, nodeId))),
-  );
+  const officeStopped = and(eq(stops.scope, "office"), eq(stops.target, "office"));
+  const staffStopped = and(eq(stops.scope, "staff"), eq(stops.target, staffId));
+  const taskStopped = and(eq(stops.scope, "task"), eq(stops.target, nodeId));
+  const open = await openStops(env.DB, or(officeStopped, staffStopped, taskStopped));
   if (open.length > 0) throw new AppError("stopped", "社員かタスクが止まっている");
 }
 
@@ -66,13 +67,38 @@ async function protectedPathsOf(env: Bindings, scope: string): Promise<string[]>
   return INHERITED_SETTINGS.protectedPaths.parse((await loadOfficeDefaults(env.DB)).protectedPaths.value);
 }
 
+/** 観察が止めた時に返す答え。ルールが通す判断でも断る */
+const STOPPED: Decision = { allow: false, reason: "止めた" };
+
 /**
- * 記録と出来事に入れる相手。鍵の形を伏せ、長さを切る
- * @param op 操作
- * @returns 残す相手
+ * 判断を自動停止に渡して数える。鍵とオーナーの情報への試みは、タスクを止める rule_denied より先に渡す。先にタスクを止めると外部の文章の印が消え、持ち出しを見逃す
+ * @param env バインディング
+ * @param input 社員、タスク、操作、判断、記録に残す相手
+ * @param input.staffId 社員 ID
+ * @param input.nodeId タスク ID
+ * @param input.op 操作
+ * @param input.decision ルールの判断
+ * @param input.target 鍵を伏せて切った相手
+ * @param now 今の時刻
+ * @param deps 自動停止が外へ頼む口
+ * @param traceId 要求のトレース ID
+ * @returns rule_denied より前の出来事で止めたか
  */
-function recordedTarget(op: Operation): string {
-  return maskSecrets(op.target).slice(0, MAX_TARGET);
+async function count(
+  env: Bindings,
+  input: { staffId: StaffId; nodeId: string; op: Operation; decision: RuleDecision; target: string },
+  now: number,
+  deps: GuardDeps,
+  traceId: string,
+): Promise<boolean> {
+  const { staffId, nodeId, op, decision, target } = input;
+  const judgments: Judgment[] = [await observe(env, { type: "tool_call", staffId }, now, deps, traceId)];
+  if (op.kind === "secret.read" || op.kind === "owner_info.read") judgments.push(await observe(env, { type: "sensitive_access", staffId, nodeId, item: target }, now, deps, traceId));
+  if (decision.marksExternal) judgments.push(await observe(env, { type: "external_read", staffId, nodeId, source: target }, now, deps, traceId));
+  const stopping = judgments.filter((j) => j.action === "stop");
+  // 社員ごと止めた後は、そのタスクを重ねて止めない
+  if (!decision.allow && !stopping.some((j) => j.scope === "staff")) await observe(env, { type: "rule_denied", staffId, nodeId, operation: op.kind, target }, now, deps, traceId);
+  return stopping.length > 0;
 }
 
 /**
@@ -105,7 +131,9 @@ export function decisionRoutes(app: OpenAPIHono<GateEnv>, caller: Caller): void 
       external: op.kind === "owner_info.read" && (await staff.externalSources(nodeId)).length > 0,
     };
     const decision = decide(op, ctx);
-    const target = recordedTarget(op);
+    const target = recordedText(op.target);
+    // 数えは記録より先に渡す。tool_calls に書けずに 500 を返しても、自動停止の数えには入る
+    const answer: Decision = (await count(c.env, { staffId, nodeId, op, decision, target }, now, c.var.guard, c.var.traceId)) ? STOPPED : { allow: decision.allow, reason: decision.reason };
     await drizzle(recordsOf(c.env, now))
       .insert(toolCalls)
       .values({
@@ -114,24 +142,15 @@ export function decisionRoutes(app: OpenAPIHono<GateEnv>, caller: Caller): void 
         staffId,
         nodeId,
         scope: node.scope,
-        tool: input.toolName.slice(0, MAX_TARGET),
+        // tool は SDK が決めたツールの名前で鍵を入れる所ではなく、知らないツールを断った跡を名前のまま残すため伏せない (長さだけ切る)
+        tool: Array.from(input.toolName).slice(0, MAX_RECORDED).join(""),
         opKind: op.kind,
         target,
-        allowed: decision.allow,
-        reason: decision.reason,
+        allowed: answer.allow,
+        reason: answer.reason,
         ms: c.var.clock.now() - now,
         traceId: c.var.traceId,
       });
-    const deps = c.var.guard;
-    const traceId = c.var.traceId;
-    let stopped = (await observe(c.env, { type: "tool_call", staffId }, now, deps, traceId)).action === "stop";
-    // 鍵とオーナーの情報への試みは、タスクを止める rule_denied より先に渡す。先にタスクを止めると外部の文章の印が消え、持ち出しを見逃す
-    if (op.kind === "secret.read" || op.kind === "owner_info.read") {
-      stopped = (await observe(c.env, { type: "sensitive_access", staffId, nodeId, item: target }, now, deps, traceId)).action === "stop" || stopped;
-    }
-    if (decision.marksExternal) await observe(c.env, { type: "external_read", staffId, nodeId, source: target }, now, deps, traceId);
-    // 社員ごと止めた後は、そのタスクを重ねて止めない
-    if (!decision.allow && !stopped) await observe(c.env, { type: "rule_denied", staffId, nodeId, operation: op.kind, target }, now, deps, traceId);
-    return ok(c, { allow: decision.allow, reason: decision.reason });
+    return ok(c, answer);
   });
 }
