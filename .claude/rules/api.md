@@ -23,3 +23,5 @@ paths:
 - 画面は Hono の RPC で同じ型を受け、`fetch` を手で書かない
 - 時刻は RFC 3339 の協定世界時、日は日本時間の `YYYY-MM-DD`、ID は UUID v7、お金は `...MicroUsd` の整数
 - 一覧は `?cursor=` と `limit` (1 から 100、初期値 50)
+- ルートの処理の順とルートだけの失敗は、機能ごとの詳細設計の 3 章の「ルートごとの処理」の表に従う。処理を変えたらその行も同じ時に直す
+- WAF が無いので 1-api.md の 3.6 の守りを外さない。入力は Zod の `strict()`、JWT は決めた `alg` だけ、署名の比べは `timingSafeEqual`、外への `fetch` は `allowedFetch` だけ、WebSocket の切り替えは `Origin` を確かめる。Access を外すパスを `/hooks/v1/github` のほかに足さない

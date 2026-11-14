@@ -26,7 +26,7 @@ paths:
 ## 書き方
 
 - 否定は早く返すガード (`if (!session) throw ...`) と、否定の側にしか処理の無い所だけに使う
-- 想定した失敗は `core` の `AppError(code, message)` を投げる。想定外は `internal` にし、中身は `log` と `audit_log` にだけ残す。オーナーの情報、鍵、作業トークンを記録の文に入れない
+- 想定した失敗は `core` の `AppError(code, message)` を投げる。想定外は `internal` にし、中身は `log` と `error_events` (エラーログ) にだけ残す。オーナーの情報、鍵、作業トークンを記録の文に入れない
 - セキュリティに関わる判断は、届かない、遅い、形が違う時は断る側に倒す
 - 今の時刻は引数で受けた `Clock` の `now()` を使い、`Date.now()` を直に呼ばない
 - 外を呼ぶ時は `AbortSignal.timeout()` を付ける。初期値は 10 秒、ルールの判断は 5 秒

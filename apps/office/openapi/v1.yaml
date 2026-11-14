@@ -9,37 +9,37 @@ servers:
   description: know-office の Worker (画面と同じ源)
 tags:
 - name: system
-  description: 動いているか、量、つないだ記録、この文書
+  description: 'システム: ヘルスチェック、エラーログ、監査ログ、ストレージ使用量、API ドキュメント'
 - name: auth
-  description: ログイン、セッション、パスキー
+  description: '認証: セッション、パスキー'
 - name: staff
-  description: 社員の状態と勤怠
+  description: '社員: 状態、勤怠、当日の指示'
 - name: records
-  description: 記録、集計、見つけて直す仕組み
+  description: 'レポート: ダッシュボード、勤怠と稼働の集計、改善の Issue'
 - name: guard
-  description: 自動停止と蒸留
+  description: '自動停止: 停止、再開、しきい値、改善案'
 - name: conversation
-  description: 会話と配信
+  description: '会話: メッセージ、リアルタイム配信'
 - name: nodes
-  description: 目的からタスクまでの木
+  description: 'タスク: 目的、目標、プロジェクト、タスクの木'
 - name: org
-  description: 組織図、役目、オーナーの承認
+  description: '組織: 組織図、役割の指示文、オーナーの承認'
 - name: reviews
-  description: know-office の中のレビュー
+  description: 'レビュー: 差分、コメント、承認'
 - name: github
-  description: GitHub App の連携
+  description: 'GitHub 連携: App、Webhook、ルール'
 - name: services
-  description: サービスの流れ
+  description: 'サービス: アイデアから運用まで'
 - name: settings
-  description: office とサービスの設定
+  description: '設定: office とサービス'
 - name: notices
-  description: 画面の通知
+  description: 通知
 - name: extensions
-  description: 管理の拡張
+  description: 拡張機能
 - name: workspace-gate
-  description: ワークスペースからゲートウェイへ
+  description: '内部 API: ワークスペースからゲートウェイへ'
 - name: workspace
-  description: 社員 DO からワークスペースへ
+  description: '内部 API: 社員 DO からワークスペースへ'
 security:
 - accessJwt: []
   session: []
@@ -83,7 +83,7 @@ paths:
       tags:
       - auth
       summary: セッションを始める
-      description: ログインの証明から ko_session のクッキーを付ける。セッションの確かめを通らない唯一のルート。
+      description: ログインの証明から __Host-ko_session のクッキーを付ける。セッションの確かめを通らない唯一のルート。
       security:
       - accessJwt: []
         session: []
@@ -273,6 +273,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -318,6 +320,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -369,6 +373,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -382,7 +388,7 @@ paths:
       operationId: listAuditLogs
       tags:
       - system
-      summary: つないだ記録の一覧
+      summary: 監査ログの一覧
       description: パスキーの確認が 15 分のうちに要る。
       x-step-up: true
       parameters:
@@ -437,7 +443,7 @@ paths:
       operationId: verifyAuditLogs
       tags:
       - system
-      summary: 1 年分の記録のつなぎを確かめる
+      summary: 1 年分の監査ログのハッシュチェーンを検証する
       requestBody:
         required: true
         content:
@@ -469,10 +475,113 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
           $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/errors:
+    get:
+      operationId: listErrors
+      tags:
+      - system
+      summary: エラーログの一覧
+      description: D1 の error_events を新しい順に返す。スタックトレースは返さず、Workers Logs で traceId から見る。
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema: *id002
+      - name: to
+        in: query
+        required: false
+        schema: *id002
+      - name: source
+        in: query
+        required: false
+        schema: *id001
+      - name: code
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ErrorCode'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ErrorEvent'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/traces/{traceId}:
+    get:
+      operationId: getTrace
+      tags:
+      - system
+      summary: traceId で 1 つの要求をたどる
+      description: 同じ traceId のエラー、監査ログ、ツールの呼び出し、使用量、タスクの出来事、会話を時刻の順に返す。
+      parameters:
+      - name: traceId
+        in: path
+        required: true
+        schema: *id001
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Trace'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -482,7 +591,7 @@ paths:
       operationId: listStorage
       tags:
       - system
-      summary: D1 ごとの使った量
+      summary: D1 ごとのストレージ使用量
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -706,6 +815,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -863,6 +974,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1006,6 +1119,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1103,6 +1218,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1192,6 +1309,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1273,6 +1392,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1421,6 +1542,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1592,6 +1715,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1686,6 +1811,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1777,6 +1904,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -1882,6 +2011,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2071,6 +2202,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2127,6 +2260,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2181,6 +2316,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2239,6 +2376,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2495,6 +2634,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2613,6 +2754,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2707,6 +2850,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2763,6 +2908,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2866,6 +3013,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -2956,6 +3105,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3288,6 +3439,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3430,6 +3583,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3461,6 +3616,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3495,6 +3652,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3541,6 +3700,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3553,7 +3714,7 @@ paths:
       operationId: sendAgentEvents
       tags:
       - workspace-gate
-      summary: 発言、ツールの結果、チェックポイント、終わり
+      summary: 発言、ツールの結果、チェックポイント、エラー、終わり
       requestBody:
         required: true
         content:
@@ -3571,6 +3732,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3601,6 +3764,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3654,6 +3819,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3707,6 +3874,8 @@ paths:
           description: 成功。本文は無い
         '400':
           $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3734,6 +3903,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3761,6 +3932,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3786,6 +3959,8 @@ paths:
           description: 成功。本文は無い
         '400':
           $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3811,6 +3986,8 @@ paths:
           description: 成功。本文は無い
         '400':
           $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
@@ -3828,8 +4005,8 @@ components:
     session:
       type: apiKey
       in: cookie
-      name: ko_session
-      description: HMAC で署名したセッション
+      name: __Host-ko_session
+      description: HMAC で署名したセッション。__Host- 付きで、別のサブドメインから差し替えられない
     workToken:
       type: http
       scheme: bearer
@@ -3882,6 +4059,12 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: 本文が大きすぎる。1MB まで、GitHub の通知は 5MB まで
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     UnsupportedMediaType:
       description: application/json でない
       content:
@@ -3905,7 +4088,7 @@ components:
           description: 待つ秒
           schema: *id007
     InternalError:
-      description: 想定外。中身は返さず記録にだけ残す
+      description: 想定外。中身は返さずエラーログにだけ残す
       content:
         application/problem+json:
           schema:
@@ -4000,6 +4183,7 @@ components:
       - method_not_allowed
       - conflict
       - stopped
+      - payload_too_large
       - unsupported_media_type
       - validation_failed
       - rate_limited
@@ -4147,6 +4331,92 @@ components:
       required:
       - ok
       - brokenAt
+      additionalProperties: false
+    ErrorEvent:
+      type: object
+      properties:
+        id: *id004
+        at: *id008
+        source:
+          type: string
+          enum:
+          - gate
+          - staff_do
+          - recorder_do
+          - guard_do
+          - live_do
+          - workspace
+          - job
+        level:
+          type: string
+          enum:
+          - error
+          - warn
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message: *id001
+        route:
+          type:
+          - string
+          - 'null'
+        status:
+          type:
+          - integer
+          - 'null'
+        staffId:
+          type:
+          - string
+          - 'null'
+        nodeId:
+          type:
+          - string
+          - 'null'
+        traceId: *id001
+        fingerprint: *id001
+      required:
+      - id
+      - at
+      - source
+      - level
+      - code
+      - message
+      - route
+      - status
+      - staffId
+      - nodeId
+      - traceId
+      - fingerprint
+      additionalProperties: false
+    Trace:
+      type: object
+      properties:
+        traceId: *id001
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              at: *id008
+              kind:
+                type: string
+                enum:
+                - error
+                - audit
+                - tool_call
+                - usage
+                - node_event
+                - message
+              summary: *id001
+              id: *id004
+            required:
+            - at
+            - kind
+            - summary
+            - id
+            additionalProperties: false
+      required:
+      - traceId
+      - items
       additionalProperties: false
     StorageUse:
       type: object
@@ -5518,6 +5788,7 @@ components:
                 - message
                 - tool_result
                 - checkpoint
+                - error
                 - result
             additionalProperties: true
       required:
