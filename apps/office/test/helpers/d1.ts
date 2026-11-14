@@ -19,22 +19,45 @@ export type TestD1 = {
 };
 
 /**
+ * マイグレーションのフォルダの SQL を文ごとに並べる
+ * @param folder main か ledger
+ * @returns SQL の文
+ */
+function statements(folder: "main" | "ledger"): string[] {
+  const dir = join(MIGRATIONS, folder);
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .toSorted()
+    .flatMap((file) => readFileSync(join(dir, file), "utf8").split("--> statement-breakpoint"))
+    .map((statement) =>
+      statement
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
+/**
  * マイグレーションのフォルダの SQL を順に流す
  * @param db 流す先
  * @param folder main か ledger
  */
 export async function migrate(db: D1Database, folder: "main" | "ledger"): Promise<void> {
-  const dir = join(MIGRATIONS, folder);
-  for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).toSorted()) {
-    for (const statement of readFileSync(join(dir, file), "utf8").split("--> statement-breakpoint")) {
-      const sql = statement
-        .split("\n")
-        .filter((line) => !line.trimStart().startsWith("--"))
-        .join("\n")
-        .trim();
-      if (sql) await db.prepare(sql).run();
-    }
-  }
+  for (const sql of statements(folder)) await db.prepare(sql).run();
+}
+
+/**
+ * DB のテーブルを全部消し、main のマイグレーションを流し直す。D1 を作り直すより速いので、ファイルで 1 つの D1 をテストごとに空にする時に使う
+ * @param db 空にする DB
+ */
+export async function resetMain(db: D1Database): Promise<void> {
+  const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all<{ name: string }>();
+  // 往復を減らすため、消すのと作るのをそれぞれ 1 つの batch で流す
+  const drops = tables.results.map((t) => db.prepare(`DROP TABLE IF EXISTS "${t.name}"`));
+  if (drops.length > 0) await db.batch(drops);
+  await db.batch(statements("main").map((sql) => db.prepare(sql)));
 }
 
 /**

@@ -15,6 +15,8 @@ const IDLE_WORKSPACE: Workspace = {
 /** 社員 DO。`idFromName(<社員 ID>)` で社員 1 人に 1 つ。ゲートウェイだけが RPC で呼び、時刻は呼ぶ側の Clock で渡す */
 export class StaffDO extends DurableObject<Bindings> implements Staff {
   #book: StaffBook | undefined;
+  /** 操作を 1 つずつ流す鎖。前の操作が断られても次へ進む */
+  #chain: Promise<unknown> = Promise.resolve();
 
   /**
    * 次の出来事を処理し、次の alarm を掛ける。alarm は本物の時刻で鳴る
@@ -38,8 +40,8 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param now 今の時刻
    * @returns 状態、今のタスク、今日の働いた時間
    */
-  async status(now: number): Promise<StaffStatus> {
-    return (await this.#open()).status(now);
+  status(now: number): Promise<StaffStatus> {
+    return this.#serial((book) => book.status(now));
   }
 
   /**
@@ -69,9 +71,8 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param now 今の時刻
    * @returns 取ったか
    */
-  async take(task: unknown, medianMs: number | null, now: number): Promise<{ taken: boolean }> {
-    const book = await this.#open();
-    return this.ctx.blockConcurrencyWhile(() => book.take(task, medianMs, now));
+  take(task: unknown, medianMs: number | null, now: number): Promise<{ taken: boolean }> {
+    return this.#serial((book) => book.take(task, medianMs, now));
   }
 
   /**
@@ -142,14 +143,46 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
-   * 判断を 1 つずつ順に流す。D1 を待つ間に alarm やほかの呼び出しが割り込むと、開いている区分が割れる
+   * 勤怠の行を訂正する。勤怠を書くほかの操作と同じ鎖で流す
+   * @param originalId 訂正する行の ID
+   * @param input CorrectionValues
+   * @param now 今の時刻
+   * @returns 足した行の ID
+   * @throws not_found この社員の行が無い時
+   * @throws conflict もう訂正された行か、区分が重なる時
+   */
+  correct(originalId: string, input: unknown, now: number): Promise<{ id: string }> {
+    return this.#serial((book) => book.correct(originalId, input, now));
+  }
+
+  /**
+   * 記憶を変える操作を流し、何も返さない
    * @param step StaffBook の操作
    * @returns 無し
    */
   async #run(step: (book: StaffBook) => Promise<void>): Promise<null> {
-    const book = await this.#open();
-    await this.ctx.blockConcurrencyWhile(() => step(book));
+    await this.#serial(step);
     return null;
+  }
+
+  /**
+   * 操作を 1 つずつ順に流す。D1 を待つ間に alarm やほかの呼び出しが割り込むと、開いている区分が割れる
+   * blockConcurrencyWhile の中で投げると DO が作り直されるので使わない。断られた操作は鎖の外で投げ、鎖は次へ進める
+   * @param step StaffBook の操作
+   * @returns 操作の答え
+   */
+  async #serial<T>(step: (book: StaffBook) => Promise<T>): Promise<T> {
+    const settled = this.#chain.then(async () => {
+      try {
+        return { ok: true as const, value: await step(await this.#open()) };
+      } catch (error) {
+        return { ok: false as const, error };
+      }
+    });
+    this.#chain = settled;
+    const result = await settled;
+    if (result.ok) return result.value;
+    throw result.error;
   }
 
   /**

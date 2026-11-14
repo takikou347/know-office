@@ -1,8 +1,8 @@
 // 社員 DO の勤務のテストの手伝い。時計を進め、DO の記憶と alarm、ワークスペースの代わりを置く
-import { afterEach, beforeEach, expect } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { StaffId } from "@know-office/core";
 import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/work/staff-book.ts";
-import { createTestD1, type TestD1 } from "./d1.ts";
+import { createTestD1, resetMain, type TestD1 } from "./d1.ts";
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -27,7 +27,7 @@ export type Hired = {
   book: StaffBook;
   storage: StaffStorage & { alarm: number | null };
   workspace: string[];
-  /** 最後に時計を進めた時刻 */
+  /** 最後にハートビートを送った時刻。ハートビートを止めて進めた時は進めた先 */
   at: number;
 };
 
@@ -59,12 +59,13 @@ export async function addOrder(order: { id: string; kind: string; until: number 
   return row;
 }
 
-/** 要件ごとの describe で、テストごとに空の D1 を作る。社員 DO のテストは workerd の D1 を使うので作らない */
+/** 要件ごとの describe で、D1 を 1 つ作り、テストごとに空にする。社員 DO のテストは workerd の D1 を使うので作らない */
 export function useD1(): void {
-  beforeEach(async () => {
+  beforeAll(async () => {
     d1 = await createTestD1();
   }, 30_000);
-  afterEach(() => d1.dispose());
+  beforeEach(() => resetMain(d1.DB));
+  afterAll(() => d1.dispose());
 }
 
 /**
@@ -101,23 +102,27 @@ export function hire(staffId: StaffId = "builder", storage?: Hired["storage"]): 
   return { book: new StaffBook(staffId, store, d1.DB, workspace), storage: store, workspace: calls, at: jst(0) };
 }
 
+/** ワークスペースが送るハートビートの間。本物は 30 秒だが、90 秒の途切れに掛からない範囲で往復を減らす */
+const BEAT_MS = 60_000;
+
 /**
- * 時計を to まで進める。ワークスペースは 30 秒ごとにハートビートを送り、alarm は掛かった時刻に鳴らす
+ * 時計を to まで進める。alarm の時刻だけを順に鳴らす。beats なら 90 秒の途切れに掛からないよう、60 秒ごとにハートビートを挟む
+ * 同じ時刻ならハートビートを先に送る。beats の時の s.at は最後のハートビートの時刻で、次はそこから 60 秒後に送る
  * @param s 社員
  * @param to 進める先
  * @param beats ハートビートを送るか
  */
 export async function run(s: Hired, to: number, beats = true): Promise<void> {
   for (;;) {
-    const beat = beats ? s.at + 30_000 : Infinity;
+    const beat = beats ? s.at + BEAT_MS : Infinity;
     const alarm = s.storage.alarm ?? Infinity;
-    const next = Math.min(beat, alarm);
-    if (next > to) break;
-    s.at = next;
-    if (alarm <= beat) await s.book.wake(alarm);
-    else await s.book.heartbeat(beat);
+    if (Math.min(beat, alarm) > to) break;
+    if (beat <= alarm) {
+      s.at = beat;
+      await s.book.heartbeat(beat);
+    } else await s.book.wake(alarm);
   }
-  s.at = to;
+  if (!beats) s.at = to;
 }
 
 /**

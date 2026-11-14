@@ -5,9 +5,9 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { attendance, workEntries } from "../db/main.ts";
-import { rebuildDailyTotals } from "./attendance.ts";
+import { correctAttendance, rebuildDailyTotals } from "./attendance.ts";
 import { planDay, upcomingPlan } from "./plan.ts";
-import { ACTIVE, EMPTY_MEMORY, HEARTBEAT_TIMEOUT_MS, Memory, Shift, WRAP_MS } from "./shift.ts";
+import { ACTIVE, EMPTY_MEMORY, HEARTBEAT_TIMEOUT_MS, Memory, RETRY_MS, Shift, WRAP_MS } from "./shift.ts";
 
 /** 記憶の入れ物。DO の ctx.storage と同じ形。読んだ物は Zod で確かめてから使う */
 export type StaffStorage = {
@@ -136,12 +136,12 @@ export class StaffBook {
     if (s.m.state === "working" && plan) {
       if (s.m.task) throw new AppError("conflict", "もうタスクを持っている");
       const left = plan.end - now;
-      taken = !(left < EARLY_WINDOW_MS && medianMs !== null && medianMs > left);
-      if (taken) s.m.task = { ...parsed.data, startedAt: now, pausedMs: 0, pausedAt: null };
-      else {
+      const leave = left < EARLY_WINDOW_MS && medianMs !== null && medianMs > left;
+      if (leave) {
         s.m.reasons.push("leave_early:schedule");
         await this.#clockOut(s, now);
-      }
+      } else s.m.task = { ...parsed.data, startedAt: now, pausedMs: 0, pausedAt: null };
+      taken = s.m.task !== null;
     }
     await this.#save(s, now);
     return { taken };
@@ -254,15 +254,28 @@ export class StaffBook {
   }
 
   /**
+   * 勤怠の行を訂正する。社員 DO の中で順に流すので、読んでから書くまでの間にほかの区分や訂正が入らない
+   * @param originalId 訂正する行の ID
+   * @param input 置き換える値
+   * @param now 今の時刻
+   * @returns 足した行の ID
+   * @throws validation_failed 値の形が違う時
+   * @throws not_found この社員の行が無い時
+   * @throws conflict もう訂正された行か、直した区分がほかの区分と重なる時
+   */
+  async correct(originalId: string, input: unknown, now: number): Promise<{ id: string }> {
+    return correctAttendance(this.db, this.staffId, originalId, input, now);
+  }
+
+  /**
    * 時刻で決まる出来事を、何も変わらなくなるまで順に処理する
    * @param s 記憶
    * @param now 今の時刻
    */
   async #process(s: Shift, now: number): Promise<void> {
     // 1 回の処理で移れる数は限られる。決まりの誤りで回り続けないよう上限を置く
-    for (let n = 0; n < 8; n += 1) {
-      if (!(await this.#step(s, now))) return;
-    }
+    let moved = true;
+    for (let n = 0; n < 8 && moved; n += 1) moved = await this.#step(s, now);
   }
 
   /**
@@ -287,11 +300,12 @@ export class StaffBook {
       await this.#refresh(s, now);
       return true;
     }
-    if (!ACTIVE.includes(m.state)) return false;
+    if (m.state === "stopped" || m.state === "waiting") return this.#paused(s, now);
     if (m.heartbeatAt !== null && now >= m.heartbeatAt + HEARTBEAT_TIMEOUT_MS) {
       // 最後のハートビートの後は動いていたか分からないので、そこで閉じる
       s.pause(m.heartbeatAt, "waiting", "workspace_down");
       await this.workspace.restart();
+      m.retryAt = now + RETRY_MS;
       return true;
     }
     if (m.state !== "working") {
@@ -300,7 +314,7 @@ export class StaffBook {
       await this.#clockOut(s, now);
       return true;
     }
-    const end = !plan || plan.off ? now : plan.end;
+    const end = plan?.off === false ? plan.end : now;
     if (plan && m.open?.kind === "scheduled" && now >= plan.scheduledEnd && end > plan.scheduledEnd) {
       s.switch(plan.scheduledEnd, "extension", "owner_instruction");
       return true;
@@ -319,6 +333,27 @@ export class StaffBook {
   }
 
   /**
+   * stopped と waiting の間の出来事を 1 つ処理する。上限を過ぎれば上限の時刻で退勤し、ワークスペースが落ちたままなら 5 分ごとに作り直す
+   * @param s 記憶
+   * @param now 今の時刻
+   * @returns 何か変わったか
+   */
+  async #paused(s: Shift, now: number): Promise<boolean> {
+    const m = s.m;
+    const limit = s.pauseLimit();
+    if (limit !== null && now >= limit) {
+      await this.#clockOut(s, limit);
+      return true;
+    }
+    if (m.state === "waiting" && m.open?.reason === "workspace_down" && m.retryAt !== null && now >= m.retryAt) {
+      await this.workspace.restart();
+      m.retryAt = now + RETRY_MS;
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * 出勤する。区分を開き、ワークスペースを起こし、出勤を集計に残す
    * @param s 記憶
    * @param now 今の時刻
@@ -330,7 +365,7 @@ export class StaffBook {
   async #clockIn(s: Shift, now: number, day: string, state: "working" | "called", kind: "scheduled" | "extension" | "call", reason: "schedule" | "owner_instruction"): Promise<void> {
     s.clockIn(now, day, state, kind, reason);
     await this.workspace.start();
-    await this.#flush(s);
+    await this.#commit(s);
     await rebuildDailyTotals(this.db, { staffId: this.staffId, day, clockIn: now, out: false, reasons: [] }, now);
   }
 
@@ -341,7 +376,7 @@ export class StaffBook {
    */
   async #clockOut(s: Shift, now: number): Promise<void> {
     s.clockOut(now);
-    await this.#flush(s);
+    await this.#commit(s);
     await this.workspace.stop();
     if (s.m.day) await rebuildDailyTotals(this.db, { staffId: this.staffId, day: s.m.day, clockIn: null, out: true, reasons: s.m.reasons }, now);
     s.m.reasons = [];
@@ -349,18 +384,20 @@ export class StaffBook {
   }
 
   /**
-   * 溜めた行を 1 つの batch で D1 に書く
+   * 溜めた行を書く。先に記憶に書いてから、D1 に同じ ID で 1 度だけ書く。間で落ちても、起き直した時に同じ行を書き直すだけで済む
    * @param s 記憶
    */
-  async #flush(s: Shift): Promise<void> {
+  async #commit(s: Shift): Promise<void> {
+    const { attendance: segments, work } = s.m.pending;
     const statements: BatchItem<"sqlite">[] = [
-      ...s.attendanceRows.map((row) => this.#orm.insert(attendance).values(row)),
-      ...s.workRows.map((row) => this.#orm.insert(workEntries).values(row)),
+      ...segments.map((row) => this.#orm.insert(attendance).values(row).onConflictDoNothing()),
+      ...work.map((row) => this.#orm.insert(workEntries).values(row).onConflictDoNothing()),
     ];
-    s.attendanceRows = [];
-    s.workRows = [];
     const [first, ...rest] = statements;
-    if (first) await this.#orm.batch([first, ...rest]);
+    if (!first) return;
+    await this.storage.put("memory", s.m);
+    await this.#orm.batch([first, ...rest]);
+    s.m.pending = { attendance: [], work: [] };
   }
 
   /**
@@ -382,7 +419,10 @@ export class StaffBook {
    */
   async #load(): Promise<Shift> {
     const stored = await this.storage.get("memory");
-    return new Shift(this.staffId, stored === undefined ? structuredClone(EMPTY_MEMORY) : Memory.parse(stored));
+    const s = new Shift(this.staffId, stored === undefined ? structuredClone(EMPTY_MEMORY) : Memory.parse(stored));
+    // 前の操作が D1 に書いた後、記憶を書く前に落ちていれば、溜めた行をもう一度書く
+    await this.#commit(s);
+    return s;
   }
 
   /**
@@ -391,7 +431,7 @@ export class StaffBook {
    * @param now 今の時刻
    */
   async #save(s: Shift, now: number): Promise<void> {
-    await this.#flush(s);
+    await this.#commit(s);
     await this.storage.put("memory", s.m);
     const next = s.next(now);
     if (next === null) await this.storage.deleteAlarm();

@@ -53,6 +53,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   stop(now: number): Promise<null>;
   /** 止めていたのを再開する */
   resume(now: number): Promise<null>;
+  /** 勤怠の行を訂正する */
+  correct(originalId: string, input: unknown, now: number): Promise<{ id: string }>;
 }
 
 /** 記録を年ごとに置く D1 のバインディングの名前。04-detail.md の 3.5 */

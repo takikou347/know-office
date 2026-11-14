@@ -7,7 +7,7 @@ import {
   type Clock,
   DEFAULT_SCHEDULE,
   newId,
-  StaffId,
+  type StaffId,
   WORKED_KINDS,
   WorkSchedule,
 } from "@know-office/core";
@@ -39,6 +39,19 @@ export type CorrectionValues = z.infer<typeof CorrectionValues>;
 
 /** daily_totals の reasons。`<出来事>:<理由>` を並べる */
 const Reasons = z.array(z.string());
+
+/** 勤怠の行に出ない理由の頭。早い退勤と休みは区分を作らないので、集計を作り直す時に前の集計から引き継ぐ */
+const OFF_ROW_REASONS = ["leave_early:", "off:"] as const;
+
+/**
+ * 前の集計の理由のうち、勤怠の行に出ない物だけを返す。行に出る理由は効いている行から作り直す
+ * @param stored daily_totals の reasons の値
+ * @returns 引き継ぐ理由
+ */
+function keptReasons(stored: unknown): string[] {
+  const parsed = Reasons.safeParse(stored);
+  return parsed.success ? parsed.data.filter((r) => OFF_ROW_REASONS.some((head) => r.startsWith(head))) : [];
+}
 
 /**
  * その時刻だけを返す Clock を作る。ID の UUID v7 に時刻を入れる
@@ -151,47 +164,43 @@ export async function rebuildDailyTotals(db: D1Database, base: { staffId: StaffI
   const orm = drizzle(db);
   const rows = await orm.select().from(attendance).where(and(eq(attendance.staffId, base.staffId), eq(attendance.day, base.day)));
   const [before] = await orm.select({ reasons: dailyTotals.reasons }).from(dailyTotals).where(and(eq(dailyTotals.staffId, base.staffId), eq(dailyTotals.day, base.day)));
-  // 早い退勤と休みは attendance の行に出ないので、前の集計の理由を引き継ぐ
-  const kept = Reasons.safeParse(before?.reasons);
-  const { totals, overlap } = sumDay(effectiveRows(rows), { ...base, reasons: [...(kept.success ? kept.data : []), ...base.reasons] });
+  const { totals, overlap } = sumDay(effectiveRows(rows), { ...base, reasons: [...keptReasons(before?.reasons), ...base.reasons] });
   const { staffId: _s, day: _d, ...rest } = totals;
   const upsert = orm.insert(dailyTotals).values(totals).onConflictDoUpdate({ target: [dailyTotals.staffId, dailyTotals.day], set: rest });
-  if (!overlap) {
-    await upsert;
+  if (overlap) {
+    const body = `${base.staffId} の ${base.day} の勤怠で、同じ時刻が 2 つの区分に入っている`;
+    const notice = orm.insert(notices).values({ id: newId(clockAt(now)), at: now, level: "warn", kind: "attendance_overlap", title: "勤怠の区分が重なっている", body, scope: "office" });
+    await orm.batch([upsert, notice]);
     return;
   }
-  await orm.batch([
-    upsert,
-    orm.insert(notices).values({
-      id: newId(clockAt(now)),
-      at: now,
-      level: "warn",
-      kind: "attendance_overlap",
-      title: "勤怠の区分が重なっている",
-      body: `${base.staffId} の ${base.day} の勤怠で、同じ時刻が 2 つの区分に入っている`,
-      scope: "office",
-    }),
-  ]);
+  await upsert;
 }
 
 /**
- * 勤怠の行を訂正する。元の行は残し、corrects に元の ID を持つ行を足して、日ごとの集計を作り直す
+ * 勤怠の行を訂正する。元の行は残し、corrects に元の ID を持つ行を足して、日ごとの集計を作り直す。読んでから書くまでの間に行が入らないよう、社員 DO の中から呼ぶ
  * @param db D1 の DB
+ * @param staffId 社員 ID。ほかの社員の行は無い物として扱う
  * @param originalId 訂正する行の ID
  * @param input 置き換える値
  * @param now 今の時刻
  * @returns 足した行の ID
  * @throws validation_failed 値の形が違う時
- * @throws not_found 元の行が無い時
- * @throws conflict 直した区分がほかの区分と重なる時
+ * @throws not_found この社員の元の行が無い時
+ * @throws conflict 元の行がもう訂正されているか、直した区分がほかの区分と重なる時
  */
-export async function correctAttendance(db: D1Database, originalId: string, input: unknown, now: number): Promise<{ id: string }> {
+export async function correctAttendance(db: D1Database, staffId: StaffId, originalId: string, input: unknown, now: number): Promise<{ id: string }> {
   const parsed = CorrectionValues.safeParse(input);
   if (!parsed.success) throw new AppError("validation_failed", "訂正の値の形が違う");
   const values = parsed.data;
   const orm = drizzle(db);
-  const [original] = await orm.select().from(attendance).where(eq(attendance.id, originalId));
+  const [original] = await orm
+    .select()
+    .from(attendance)
+    .where(and(eq(attendance.id, originalId), eq(attendance.staffId, staffId)));
   if (!original) throw new AppError("not_found", "訂正する勤怠の行が無い");
+  const rows = await orm.select().from(attendance).where(and(eq(attendance.staffId, staffId), eq(attendance.day, original.day)));
+  // 訂正は 1 つの行に 1 度だけ。直し直す時は訂正の行を訂正する
+  if (rows.some((r) => r.corrects === original.id)) throw new AppError("conflict", "この行はもう訂正されている");
   const row: AttendanceRow = {
     id: newId(clockAt(now)),
     staffId: original.staffId,
@@ -204,16 +213,13 @@ export async function correctAttendance(db: D1Database, originalId: string, inpu
     note: values.note,
     createdAt: now,
   };
-  const rows = await orm.select().from(attendance).where(and(eq(attendance.staffId, original.staffId), eq(attendance.day, original.day)));
-  const staffId = StaffId.parse(original.staffId);
   const [before] = await orm.select().from(dailyTotals).where(and(eq(dailyTotals.staffId, staffId), eq(dailyTotals.day, original.day)));
-  const kept = Reasons.safeParse(before?.reasons);
   const { totals, overlap } = sumDay(effectiveRows([...rows, row]), {
     staffId,
     day: original.day,
     clockIn: before?.clockIn ?? null,
-    out: before?.clockOut !== null && before?.clockOut !== undefined,
-    reasons: kept.success ? kept.data : [],
+    out: typeof before?.clockOut === "number",
+    reasons: keptReasons(before?.reasons),
   });
   if (overlap) throw new AppError("conflict", "直した区分がほかの区分と重なる");
   const { staffId: _s, day: _d, ...rest } = totals;

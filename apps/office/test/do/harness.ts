@@ -15,7 +15,7 @@ const AppendMany = z.object({ entries: z.array(z.unknown()) });
 const Call = z.object({ method: z.enum(["append", "verify", "size"]), args: z.array(z.unknown()) });
 const StaffCall = z.object({
   staffId: z.enum(["president", "builder", "reviewer"]),
-  method: z.enum(["wake", "status", "heartbeat", "checkpoint", "take", "finish", "order", "call", "waitStart", "waitEnd", "stop", "resume"]),
+  method: z.enum(["wake", "status", "heartbeat", "checkpoint", "take", "finish", "order", "call", "waitStart", "waitEnd", "stop", "resume", "correct"]),
   args: z.array(z.unknown()),
 });
 const GuardCall = z.discriminatedUnion("method", [
@@ -70,6 +70,7 @@ export default {
       const num = (i: number) => z.number().parse(args[i]);
       try {
         if (method === "status") return Response.json(await stub.status(num(0)));
+        if (method === "correct") return Response.json(await stub.correct(z.string().parse(args[0]), args[1], num(2)));
         if (method === "take") return Response.json(await stub.take(args[0], z.number().nullable().parse(args[1]), num(2)));
         if (method === "wake" || method === "heartbeat" || method === "waitEnd" || method === "stop" || method === "resume") return Response.json(await stub[method](num(0)));
         return Response.json(await stub[method](args[0], num(1)));

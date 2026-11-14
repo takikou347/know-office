@@ -1,6 +1,5 @@
 // 社員 DO の勤務の時刻と勤怠を、時計を進めて確かめる。社員と勤怠の 4 章。D1 は手元の本物
 import { describe, expect, it } from "vitest";
-import { correctAttendance } from "../../src/gate/work/attendance.ts";
 import { addOrder, CALL_TASK, DAY, hire, HOUR, jst, MINUTE, rows, run, segments, startDay, TASK, testDb, totals, useD1 } from "../helpers/staff.ts";
 
 describe("勤務の時間", () => {
@@ -283,42 +282,5 @@ describe("ワークスペースのハートビート", () => {
     again.at = jst(10, 4);
     await run(again, jst(17));
     expect((await segments())[1]).toMatchObject({ kind: "waiting", started_at: jst(10), ended_at: jst(10, 4) });
-  });
-});
-
-describe("勤怠は書き換えない", () => {
-  useD1();
-
-  it("誤りを直す", async () => {
-    const s = hire();
-    await startDay(s);
-    await run(s, jst(17, 10));
-    await s.book.checkpoint({ kind: "commit", nodeId: TASK.nodeId }, jst(17, 10));
-    const [extension] = await rows("SELECT id FROM attendance WHERE kind = 'extension'");
-    const original = String(extension?.["id"]);
-    await correctAttendance(testDb(), original, { kind: "extension", startedAt: jst(17), endedAt: jst(17, 25), reason: "checkpoint_wait", note: "チェックの終わりを取り違えた" }, jst(18));
-    const all = await rows("SELECT id, kind, ended_at, corrects FROM attendance ORDER BY created_at");
-    expect(all).toHaveLength(3);
-    expect(all).toContainEqual({ id: original, kind: "extension", ended_at: jst(17, 10), corrects: null });
-    expect(all.at(-1)).toMatchObject({ kind: "extension", ended_at: jst(17, 25), corrects: original });
-    expect(await totals()).toMatchObject({ clock_out: jst(17, 25), worked_ms: 8 * HOUR + 25 * MINUTE, extension_ms: 25 * MINUTE });
-  });
-
-  it("訂正が別の区分と重なれば断る", async () => {
-    const s = hire();
-    await startDay(s);
-    await run(s, jst(12));
-    await s.book.finish("done", jst(12));
-    await run(s, jst(17));
-    const [scheduled] = await rows("SELECT id FROM attendance");
-    await testDb().prepare("INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, created_at) VALUES ('0190f4a8-0000-7000-8000-0000000000b1', 'builder', ?, 'call', ?, ?, 'owner_instruction', ?)")
-      .bind(DAY, jst(18), jst(19), jst(19))
-      .run();
-    await expect(
-      correctAttendance(testDb(), String(scheduled?.["id"]), { kind: "scheduled", startedAt: jst(9), endedAt: jst(18, 30), reason: "schedule", note: "重なる" }, jst(20)),
-    ).rejects.toMatchObject({ code: "conflict" });
-    await expect(correctAttendance(testDb(), "0190f4a8-0000-7000-8000-0000000000ff", { kind: "scheduled", startedAt: jst(9), endedAt: jst(10), reason: "schedule", note: "無い" }, jst(20))).rejects.toMatchObject({
-      code: "not_found",
-    });
   });
 });

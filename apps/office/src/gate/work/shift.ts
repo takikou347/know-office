@@ -1,7 +1,6 @@
-// 社員 DO の記憶と、区分の開け閉め。閉じた区分とした仕事を D1 に書く行にして溜める (社員と勤怠の 3.1、3.5)
-import { AttendanceKind, AttendanceReason, newId, type StaffId, StaffState, type StaffStatus, StaffTask, WORKED_KINDS, type WorkResult } from "@know-office/core";
+// 社員 DO の記憶と、区分の開け閉め。閉じた区分とした仕事は、ID を決めた行にして記憶に溜める (社員と勤怠の 3.1、3.5)
+import { AttendanceKind, AttendanceReason, newId, type StaffId, StaffState, type StaffStatus, StaffTask, WORKED_KINDS, WorkResult } from "@know-office/core";
 import { z } from "zod";
-import type { attendance, workEntries } from "../db/main.ts";
 import { clockAt } from "./attendance.ts";
 import { Plan } from "./plan.ts";
 
@@ -11,6 +10,8 @@ export const WRAP_MS = 30 * 60_000;
 export const CALL_MS = 2 * 60 * 60_000;
 /** ハートビートがこの間届かなければ途切れたとする */
 export const HEARTBEAT_TIMEOUT_MS = 90_000;
+/** ワークスペースが戻らない間、作り直しを呼び直す間 */
+export const RETRY_MS = 5 * 60_000;
 /** 勤務中の状態。ハートビートと時刻の出来事を見る */
 export const ACTIVE: readonly StaffState[] = ["working", "wrapping", "called"];
 
@@ -19,6 +20,39 @@ const Segment = z.object({ kind: AttendanceKind, reason: AttendanceReason, start
 
 /** 持っているタスク。止められていた間と待っていた間は pausedMs に足す */
 const HeldTask = StaffTask.extend({ startedAt: z.number(), pausedMs: z.number(), pausedAt: z.number().nullable() });
+
+/** D1 に書く前の勤怠の行。ID は記憶に書く前に決め、D1 には同じ ID で 1 度だけ入る */
+const PendingAttendance = z
+  .object({
+    id: z.string(),
+    staffId: z.string(),
+    day: z.string(),
+    kind: AttendanceKind,
+    startedAt: z.number(),
+    endedAt: z.number(),
+    reason: AttendanceReason,
+    corrects: z.null(),
+    note: z.null(),
+    createdAt: z.number(),
+  })
+  .strict();
+
+/** D1 に書く前のした仕事の行 */
+const PendingWork = z
+  .object({
+    id: z.string(),
+    staffId: z.string(),
+    day: z.string(),
+    nodeId: z.string(),
+    scope: z.string(),
+    title: z.string(),
+    startedAt: z.number(),
+    endedAt: z.number(),
+    activeMs: z.number(),
+    result: WorkResult,
+    corrects: z.null(),
+  })
+  .strict();
 
 /** 社員 DO の記憶。DO が起き直しても残す */
 export const Memory = z
@@ -35,12 +69,18 @@ export const Memory = z
     back: z.object({ state: StaffState, kind: AttendanceKind, reason: AttendanceReason }).strict().nullable(),
     task: HeldTask.nullable(),
     heartbeatAt: z.number().nullable(),
-    /** wrapping は 30 分、called は 2 時間の期限 */
+    /** wrapping は 30 分、called は 2 時間の期限。止められていた分と待っていた分だけ後へずらす */
     deadline: z.number().nullable(),
+    /** stopped か waiting に入った時刻。戻る時に deadline をずらす */
+    pausedFrom: z.number().nullable(),
+    /** ワークスペースが落ちている間、次に作り直しを呼ぶ時刻 */
+    retryAt: z.number().nullable(),
     /** day の閉じた区分のうち、働いた時間に入る分の和 */
     workedMs: z.number(),
     /** 次に集計を作り直す時に足す、勤怠の行に出ない理由 (`<出来事>:<理由>`) */
     reasons: z.array(z.string()),
+    /** まだ D1 に書いたと確かめていない行。起き直したら同じ ID で書き直す */
+    pending: z.object({ attendance: z.array(PendingAttendance), work: z.array(PendingWork) }).strict(),
   })
   .strict();
 
@@ -58,19 +98,17 @@ export const EMPTY_MEMORY: Memory = {
   task: null,
   heartbeatAt: null,
   deadline: null,
+  pausedFrom: null,
+  retryAt: null,
   workedMs: 0,
   reasons: [],
+  pending: { attendance: [], work: [] },
 };
 
 const isWorked = (kind: AttendanceKind) => (WORKED_KINDS as readonly string[]).includes(kind);
 
-/** 記憶を持ち、区分を開け閉めし、D1 に書く行を溜める。時刻は引数で受け、D1 にもワークスペースにも触れない */
+/** 記憶を持ち、区分を開け閉めし、D1 に書く行を記憶に溜める。時刻は引数で受け、D1 にもワークスペースにも触れない */
 export class Shift {
-  /** 足す勤怠の行 */
-  attendanceRows: (typeof attendance.$inferInsert)[] = [];
-  /** 足すした仕事の行 */
-  workRows: (typeof workEntries.$inferInsert)[] = [];
-
   /**
    * @param staffId 社員 ID
    * @param m 記憶
@@ -124,6 +162,8 @@ export class Shift {
     m.back = null;
     m.deadline = null;
     m.heartbeatAt = null;
+    m.pausedFrom = null;
+    m.retryAt = null;
   }
 
   /**
@@ -138,6 +178,7 @@ export class Shift {
     m.back = { state: m.state, kind: m.open.kind, reason: m.open.reason };
     this.switch(from, state, reason);
     m.state = state;
+    m.pausedFrom = from;
     if (m.task && m.task.pausedAt === null) m.task.pausedAt = from;
   }
 
@@ -152,6 +193,10 @@ export class Shift {
     m.state = m.back.state;
     m.back = null;
     m.heartbeatAt = now;
+    // 止められていた間と待っていた間は、30 分と 2 時間の期限に数えない
+    if (m.deadline !== null && m.pausedFrom !== null) m.deadline += now - m.pausedFrom;
+    m.pausedFrom = null;
+    m.retryAt = null;
     if (m.task && m.task.pausedAt !== null) {
       m.task.pausedMs += now - m.task.pausedAt;
       m.task.pausedAt = null;
@@ -179,7 +224,7 @@ export class Shift {
     m.open = null;
     if (!open || !m.day || to <= open.startedAt) return;
     if (isWorked(open.kind)) m.workedMs += to - open.startedAt;
-    this.attendanceRows.push({ id: newId(clockAt(to)), staffId: this.staffId, day: m.day, kind: open.kind, startedAt: open.startedAt, endedAt: to, reason: open.reason, corrects: null, note: null, createdAt: to });
+    m.pending.attendance.push({ id: newId(clockAt(to)), staffId: this.staffId, day: m.day, kind: open.kind, startedAt: open.startedAt, endedAt: to, reason: open.reason, corrects: null, note: null, createdAt: to });
   }
 
   /**
@@ -193,7 +238,7 @@ export class Shift {
     m.task = null;
     if (!task || !m.day) return;
     const paused = task.pausedMs + (task.pausedAt === null ? 0 : now - task.pausedAt);
-    this.workRows.push({
+    m.pending.work.push({
       id: newId(clockAt(now)),
       staffId: this.staffId,
       day: m.day,
@@ -209,6 +254,17 @@ export class Shift {
   }
 
   /**
+   * stopped と waiting の上限を返す。呼び出しなら呼び出しの期限、ほかは終わりの時刻から 30 分
+   * @returns 時刻。stopped と waiting でなければ null
+   */
+  pauseLimit(): number | null {
+    const m = this.m;
+    if (m.state !== "stopped" && m.state !== "waiting") return null;
+    if (m.back?.state === "called") return m.deadline;
+    return m.plan ? m.plan.end + WRAP_MS : null;
+  }
+
+  /**
    * 次の出来事の時刻を返す。alarm は 1 つしか掛けられないので最も早い物にする (社員と勤怠の 3.2)
    * @param now 今の時刻
    * @returns 時刻。待つ物が無ければ null
@@ -219,6 +275,9 @@ export class Shift {
     if (m.state === "off" && m.plan) times.push(m.plan.start);
     if (ACTIVE.includes(m.state) && m.heartbeatAt !== null) times.push(m.heartbeatAt + HEARTBEAT_TIMEOUT_MS);
     if ((m.state === "wrapping" || m.state === "called") && m.deadline !== null) times.push(m.deadline);
+    const limit = this.pauseLimit();
+    if (limit !== null) times.push(limit);
+    if (m.state === "waiting" && m.retryAt !== null) times.push(m.retryAt);
     if (m.state === "working" && m.plan) {
       times.push(m.plan.off ? now : m.plan.end);
       if (m.open?.kind === "scheduled" && m.plan.end > m.plan.scheduledEnd) times.push(m.plan.scheduledEnd);
