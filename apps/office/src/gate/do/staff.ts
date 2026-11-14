@@ -126,10 +126,10 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   /**
    * API の上限の待ちを解く
    * @param now 今の時刻
-   * @returns 無し
+   * @returns 待っていた時間。上限で待っていなければ null
    */
-  waitEnd(now: number): Promise<null> {
-    return this.#run((book) => book.waitEnd(now));
+  async waitEnd(now: number): Promise<{ waitedMs: number | null }> {
+    return { waitedMs: await this.#serial((book) => book.waitEnd(now)) };
   }
 
   /**

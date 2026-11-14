@@ -66,7 +66,7 @@ export function createFakeClaude(): FakeClaude {
       const key = c.req.header("x-api-key");
       if (!key) return c.json({ type: "error", error: { type: "authentication_error", message: "x-api-key が無い" } }, 401);
       keys.push(key);
-      await next();
+      return next();
     })
     // 数えるだけの呼び出しは積んだ返事を使わず、本文の長さから決まった数を返す
     .post("/v1/messages/count_tokens", async (c) => c.json({ input_tokens: Math.ceil((await c.req.text()).length / 4) }))

@@ -69,8 +69,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   call(task: unknown, now: number): Promise<null>;
   /** API の上限で待ち始める */
   waitStart(reason: unknown, now: number): Promise<null>;
-  /** API の上限の待ちを解く */
-  waitEnd(now: number): Promise<null>;
+  /** API の上限の待ちを解き、待っていた時間を返す */
+  waitEnd(now: number): Promise<{ waitedMs: number | null }>;
   /** 自動停止で止める */
   stop(now: number): Promise<null>;
   /** 止めていたのを再開する */
@@ -147,6 +147,8 @@ export type Bindings = {
   OWNER_EMAIL: string;
   /** vault の鍵を暗号にする主の鍵。32 バイトを base64 で */
   MASTER_KEY: string;
+  /** Claude API の鍵。シークレットで入れ、Claude のプロキシだけが Secret に包んで使う */
+  ANTHROPIC_API_KEY?: string;
 } & Partial<Record<RecordBinding, D1Database>>;
 
 /** ゲートウェイの Hono に渡す型。バインディングとミドルウェアが置く値の型を持つ */

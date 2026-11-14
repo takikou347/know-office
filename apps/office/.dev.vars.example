@@ -5,3 +5,4 @@ ACCESS_TEAM=dev
 ACCESS_AUD=dev-aud
 OWNER_EMAIL=owner@example.com
 MASTER_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+ANTHROPIC_API_KEY=dev-fake-anthropic-key

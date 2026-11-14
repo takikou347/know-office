@@ -1,6 +1,6 @@
 // ワークスペースの外向きの通信の受け手。コンテナから出る要求は宛先ごとにここへ回り、ゲートウェイが作業トークンを確かめる (社員が考えるの 1.2、3.1)
 import { createRoute } from "@hono/zod-openapi";
-import { AppError, CheckpointInput, type Clock, HeartbeatInput } from "@know-office/core";
+import { AppError, CheckpointInput, type Clock, type Fetcher, HeartbeatInput } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import { createApp } from "./app.ts";
 import { bodyShape } from "./body.ts";
@@ -10,6 +10,7 @@ import type { GuardDeps } from "./guard/deps.ts";
 import { noContent } from "./respond.ts";
 import { rethrowRpc } from "./rpc.ts";
 import { decisionRoutes } from "./work/decisions.ts";
+import { relayClaude } from "./work/relay.ts";
 import { authenticateTicket, type Caller, renewTicket } from "./work/ticket.ts";
 
 export type { Caller } from "./work/ticket.ts";
@@ -26,6 +27,8 @@ export type EgressOptions = {
   clock: Clock;
   /** 自動停止が外へ頼む口 */
   guard: GuardDeps;
+  /** 外への fetch。テストは代わりの Claude API に回す */
+  fetch?: Fetcher;
 };
 
 const heartbeatRoute = createRoute({
@@ -61,7 +64,7 @@ function ticketOf(headers: Headers, host: string): string {
  * @returns /ws/v1/ と、Claude と GitHub の宛先を受ける Hono
  */
 function createWorkspaceGate(caller: Caller, options: EgressOptions) {
-  const app = createApp({ clock: options.clock, guard: options.guard });
+  const app = createApp({ clock: options.clock, guard: options.guard, ...(options.fetch ? { fetch: options.fetch } : {}) });
   // 作業トークンの要るルートは、ルートの有る無しより先に確かめる。作業トークン無しでルートを探れないようにする
   app.use(
     "*",
@@ -75,12 +78,14 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
       } else {
         const token = ticketOf(c.req.raw.headers, host);
         if (token === "") throw new AppError("unauthenticated", "作業トークンが無い");
-        await authenticateTicket(c.env, token, caller, c.var.clock.now(), c.var.guard);
+        const ticket = await authenticateTicket(c.env, token, caller, c.var.clock.now(), c.var.guard);
+        // Claude のプロキシは Anthropic の形のままで、ゲートウェイのルートに入れない (社員が考えるの 1.2)
+        if (host === "api.anthropic.com") return relayClaude(c, ticket);
       }
-      await next();
+      return next();
     }),
   );
-  // 本文の形はゲートウェイのルートだけで確かめる。Claude への本文は 1MB を超えうるので、プロキシ (tasks.md の 7.6) が決める
+  // 本文の形はゲートウェイのルートだけで確かめる。Claude への本文は 1MB を超えうるので、プロキシが確かめる
   app.use("/ws/*", bodyShape);
   app.openapi(heartbeatRoute, async (c) => {
     await staffOf(c.env, caller.staffId).heartbeat(c.var.clock.now()).catch(rethrowRpc);
@@ -97,7 +102,7 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
   decisionRoutes(app, caller);
   app.all("*", (c) => {
     const host = new URL(c.req.url).hostname;
-    // Claude のプロキシ (tasks.md の 7.6) と GitHub のプロキシ (8.4) をつなぐまでは、作業トークンを確かめた後に断る
+    // GitHub のプロキシ (tasks.md の 8.4) をつなぐまでは、作業トークンを確かめた後に断る
     if (host !== "gate.internal") throw new AppError("unavailable", `${host} へのプロキシはまだ無い`);
     throw new AppError("not_found", `${c.req.path} は存在しない`);
   });

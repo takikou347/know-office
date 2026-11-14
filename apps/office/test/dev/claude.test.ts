@@ -68,7 +68,7 @@ describe("開発環境の代わりの物", () => {
   it("代わりの Claude API は数えるだけの呼び出しに積んだ返事を使わずに答え、届いた鍵を残す", async () => {
     const claude = createFakeClaude();
     const res = await claude.app.request("/v1/messages/count_tokens", { method: "POST", headers: HEADERS, body: BODY });
-    expect(await res.json()).toEqual({ input_tokens: expect.any(Number) });
+    expect(await res.json()).toEqual({ input_tokens: expect.any(Number) as unknown });
     expect(claude.keys).toEqual(["test-key"]);
   });
 });

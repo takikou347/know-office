@@ -217,14 +217,19 @@ export class StaffBook {
   /**
    * API の上限の待ちを解く
    * @param now 今の時刻
-   * @returns 無し
+   * @returns 待っていた時間。上限で待っていなければ null
    */
-  async waitEnd(now: number): Promise<void> {
+  async waitEnd(now: number): Promise<number | null> {
     const s = await this.#load();
     // alarm が遅れて上限を過ぎていれば、戻る前に上限の時刻で退勤する
     await this.#process(s, now);
-    if (s.m.state === "waiting" && s.m.open?.reason === "rate_limit") s.resume(now);
+    let waitedMs: number | null = null;
+    if (s.m.state === "waiting" && s.m.open?.reason === "rate_limit") {
+      waitedMs = now - s.m.open.startedAt;
+      s.resume(now);
+    }
     await this.#save(s, now);
+    return waitedMs;
   }
 
   /**

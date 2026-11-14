@@ -49,7 +49,9 @@ async function startTask(staffId: StaffId = "builder"): Promise<Work> {
  * @param path 道
  * @returns 受け手の返事
  */
-function callClaude(work: Work, body: Record<string, unknown>, path = "/v1/messages"): Promise<Response> {
+async function callClaude(work: Work, body: Record<string, unknown>, path = "/v1/messages"): Promise<Response> {
+  // ワークスペースは 30 秒ごとにハートビートを送る。届かないと勤怠が workspace_down の待ちに入るので、呼ぶ前に送っておく
+  await w.gate.staff[work.staffId].book.heartbeat(w.clock.now());
   const caller: Caller = { staffId: work.staffId, workspaceId: workspaceIdOf(w.gate.env, work.staffId) };
   const request = new Request(`https://api.anthropic.com${path}`, {
     method: "POST",
@@ -109,23 +111,23 @@ describe("トークンを減らす", () => {
 describe("落ちても続きから", () => {
   it("API の上限", async () => {
     const work = await startTask();
-    w.clock.advance(at(10) - w.clock.now());
+    w.clock.advance(at(9, 30) - w.clock.now());
     w.gate.claude.pushError(429, "rate_limit_error");
     const limited = await callClaude(work, messages("直す"));
     // 待ち直しは SDK に任せるので、上限の返事はそのまま返し、勤怠は待っている状態に入る
     expect(limited.status).toBe(429);
-    expect((await w.gate.staff.builder.book.status(at(10))).state).toBe("waiting");
+    expect((await w.gate.staff.builder.book.status(at(9, 30))).state).toBe("waiting");
     expect(await usageOf(work.nodeId)).toEqual([]);
     // 15 分後に通ったら待ちを解き、同じタスクの続きを行う
-    w.clock.advance(at(10, 15) - w.clock.now());
+    w.clock.advance(at(9, 45) - w.clock.now());
     w.gate.claude.push({ content: [{ type: "text", text: "続けた" }] });
     const resumed = await callClaude(work, messages("直す"));
     expect(resumed.status).toBe(200);
     expect(await resumed.text()).toContain("続けた");
-    expect((await w.gate.staff.builder.book.status(at(10, 15))).state).toBe("working");
+    expect((await w.gate.staff.builder.book.status(at(9, 45))).state).toBe("working");
     expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ node_id: work.nodeId, waited_ms: 15 * MINUTE })]);
     expect(await rows(w, "SELECT kind, started_at, ended_at, reason FROM attendance WHERE kind = 'waiting'")).toEqual([
-      { kind: "waiting", started_at: at(10), ended_at: at(10, 15), reason: "rate_limit" },
+      { kind: "waiting", started_at: at(9, 30), ended_at: at(9, 45), reason: "rate_limit" },
     ]);
   });
 });
@@ -174,6 +176,8 @@ describe("Claude のプロキシ", () => {
     w.gate.claude.push({ content: [{ type: "text", text: "軽い" }] });
     const light = await callClaude(work, messages("題を付ける", "claude-haiku-5-5"));
     expect(light.status).toBe(200);
+    // 使った量は流れを読み終えた所で残る
+    expect(await light.text()).toContain("軽い");
     // 軽いタスクのモデルは 0.1、0.5 ドル / 百万で、入力 10 と出力 10 は 6 になる
     expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ model: "claude-haiku-5-5", cost_micro_usd: 6 })]);
   });
@@ -182,7 +186,7 @@ describe("Claude のプロキシ", () => {
     const work = await startTask();
     const res = await callClaude(work, { model: "claude-sonnet-5-5", system: SYSTEM, messages: [{ role: "user", content: "数える" }] }, "/v1/messages/count_tokens");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ input_tokens: expect.any(Number) });
+    expect(await res.json()).toEqual({ input_tokens: expect.any(Number) as unknown });
     expect(w.gate.claude.keys).toEqual([ANTHROPIC_KEY]);
     expect(await usageOf(work.nodeId)).toEqual([]);
   });

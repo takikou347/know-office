@@ -225,7 +225,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1 }): Pro
       checkpoint: overRpc(book.checkpoint.bind(book)),
       stop: book.stop.bind(book),
       waitStart: overRpc(book.waitStart.bind(book)),
-      waitEnd: book.waitEnd.bind(book),
+      waitEnd: async (now: number) => ({ waitedMs: await book.waitEnd(now) }),
       resume: book.resume.bind(book),
       observe: g.observe.bind(g),
       dropTask: g.dropTask.bind(g),
