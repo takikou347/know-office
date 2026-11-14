@@ -5,6 +5,7 @@ import { DEFAULT_SCHEDULE, INHERITED_KEYS, Setting, UpdateSettingInput } from "@
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
+import { requireStepUp } from "../auth/passkey.ts";
 import { settings } from "../db/main.ts";
 import { loadThresholds } from "../guard/thresholds.ts";
 import { audit } from "../ledger/record.ts";
@@ -33,6 +34,7 @@ const updateServiceSettingRoute = createRoute({
   path: "/api/v1/services/{serviceId}/settings/{key}",
   operationId: "updateServiceSetting",
   tags: ["settings"],
+  "x-step-up": "conditional",
   request: { params: ServiceParam.extend(KeyParam.shape), body: jsonBody(UpdateSettingInput) },
   responses: { 200: okResponse(Setting), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
@@ -51,6 +53,7 @@ const updateSettingRoute = createRoute({
   path: "/api/v1/settings/{key}",
   operationId: "updateSetting",
   tags: ["settings"],
+  "x-step-up": "conditional",
   request: { params: KeyParam, body: jsonBody(UpdateSettingInput) },
   responses: { 200: okResponse(Setting), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
@@ -96,7 +99,7 @@ export const settingRoutes = router
   .openapi(updateServiceSettingRoute, async (c) => {
     const { serviceId, key } = c.req.valid("param");
     const { version, value, reason } = c.req.valid("json");
-    const setting = await updateServiceSetting(c.env.DB, { serviceId, key, value, version, now: c.var.clock.now() });
+    const setting = await updateServiceSetting(c.env.DB, { serviceId, key, value, version, now: c.var.clock.now() }, () => requireStepUp(c));
     await audit(c, "service.setting", serviceId, { key, value, version: setting.version, reason });
     return ok(c, setting);
   })
@@ -114,7 +117,7 @@ export const settingRoutes = router
   .openapi(updateSettingRoute, async (c) => {
     const { key } = c.req.valid("param");
     const { version, value, reason } = c.req.valid("json");
-    const setting = await updateOfficeDefault(c.env.DB, { key, value, version, reason, now: c.var.clock.now() });
+    const setting = await updateOfficeDefault(c.env.DB, { key, value, version, reason, now: c.var.clock.now() }, () => requireStepUp(c));
     await audit(c, "setting.update", key, { value: setting.value, version: setting.version, reason });
     return ok(c, setting);
   });

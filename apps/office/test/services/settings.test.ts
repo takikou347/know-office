@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { services } from "../../src/gate/db/main.ts";
 import { serviceRules } from "../../src/gate/services/settings.ts";
-import { api, type WorkWorld, useWork } from "../helpers/work.ts";
+import { api, MINUTE, type WorkWorld, useWork } from "../helpers/work.ts";
 
 const world = useWork();
 
@@ -22,6 +22,14 @@ async function service(w: WorkWorld, name: string, repo: string): Promise<string
   const id = newId(w.clock);
   await drizzle(w.d1.DB).insert(services).values({ id, name, kind: "library", stage: "operation", repo, staffId: "builder", createdAt: w.clock.now() });
   return id;
+}
+
+/**
+ * パスキーで確かめた事にする。確認の流れそのものは passkey.test.ts で確かめる
+ * @param w テストの物
+ */
+async function stepUp(w: WorkWorld): Promise<void> {
+  await w.d1.DB.prepare("UPDATE sessions SET step_up_until = ?").bind(w.clock.now() + 15 * MINUTE).run();
 }
 
 /**
@@ -66,6 +74,8 @@ describe("サービスごとの設定", () => {
   it("サービスだけ変える", async () => {
     const ui = await service(world, "knowidea-ui", "example/knowidea-ui");
     const office = await service(world, "know-office", "example/know-office");
+    // オーナーの承認を外すのは守りを弱める変更なので、パスキーで確かめてから変える
+    await stepUp(world);
     const changed = await api(world, "PUT", `/api/v1/services/${ui}/settings/deployWhen`, { version: 0, value: ["checks", "reviewer"], reason: "ライブラリはチェックとレビューで出す" });
     expect(changed).toEqual({ key: "deployWhen", value: ["checks", "reviewer"], inherited: false, version: 1 });
     // そのサービスだけに効き、「初期値から変えている」と出る
@@ -91,6 +101,7 @@ describe("サービスごとの設定", () => {
   it("office の初期値を変える", async () => {
     const ui = await service(world, "knowidea-ui", "example/knowidea-ui");
     const office = await service(world, "know-office", "example/know-office");
+    await stepUp(world);
     await api(world, "PUT", `/api/v1/services/${ui}/settings/mergeWhen`, { version: 0, value: ["reviewer"], reason: "文書だけのリポジトリ" });
     const changed = await api(world, "PUT", "/api/v1/settings/service.mergeWhen", { version: 0, value: ["checks", "owner"], reason: "main はオーナーが入れる" });
     expect(changed).toEqual({ key: "service.mergeWhen", value: ["checks", "owner"], inherited: false, version: 1 });
@@ -141,5 +152,54 @@ describe("設定の入力", () => {
     });
     const [row] = await drizzle(world.d1.DB).select({ staffId: services.staffId }).from(services);
     expect(row?.staffId).toBe("president");
+  });
+});
+
+/** 弱める変更 1 件。before があれば先にパスキー無しで入れ、after で弱める */
+type Weakening = { name: string; key: string; before?: unknown; after: unknown };
+
+const SERVICE_WEAKENINGS: Weakening[] = [
+  { name: "できる操作に今の値に無い操作を足す", key: "actions", before: ["read"], after: ["read", "push"] },
+  { name: "main にマージする条件から条件を外す", key: "mergeWhen", after: ["reviewer"] },
+  { name: "本番にデプロイする条件から条件を外す", key: "deployWhen", after: ["checks", "reviewer"] },
+  { name: "触れない所から道を外す", key: "protectedPaths", after: [] },
+  { name: "止めたサービスを動かす", key: "paused", before: true, after: false },
+  { name: "初期値に戻した結果が弱める時", key: "paused", before: true, after: null },
+];
+
+describe("弱める変更だけパスキーを求める", () => {
+  it.each(SERVICE_WEAKENINGS)("$name", async (c) => {
+    const ui = await service(world, "knowidea-ui", "example/knowidea-ui");
+    const path = `/api/v1/services/${ui}/settings/${c.key}`;
+    let version = 0;
+    if (c.before !== undefined) {
+      // 強める変更はパスキー無しで通る
+      await api(world, "PUT", path, { version, value: c.before, reason: "強める" });
+      version += 1;
+    }
+    const refused = z.object({ code: z.string() }).loose().parse(await api(world, "PUT", path, { version, value: c.after, reason: "弱める" }, 401));
+    expect(refused.code).toBe("step_up_required");
+    await stepUp(world);
+    expect(await api(world, "PUT", path, { version, value: c.after, reason: "弱める" })).toMatchObject({ key: c.key, version: version + 1 });
+  });
+
+  it("強める変更と同じ値はパスキー無しで通す", async () => {
+    const ui = await service(world, "knowidea-ui", "example/knowidea-ui");
+    const put = (key: string, version: number, value: unknown) => api(world, "PUT", `/api/v1/services/${ui}/settings/${key}`, { version, value, reason: "強める" });
+    expect(await put("mergeWhen", 0, ["checks", "reviewer", "owner"])).toMatchObject({ version: 1 });
+    expect(await put("mergeWhen", 1, ["checks", "reviewer", "owner"])).toMatchObject({ version: 2 });
+    expect(await put("actions", 0, ["read", "branch"])).toMatchObject({ version: 1 });
+    expect(await put("protectedPaths", 0, [".github/workflows/", "migrations/"])).toMatchObject({ version: 1 });
+    expect(await put("paused", 0, true)).toMatchObject({ version: 1 });
+    // 受け継いだ値と同じ所へ戻すのは弱めない
+    expect(await put("deployWhen", 0, null)).toMatchObject({ inherited: true, version: 1 });
+  });
+
+  it("office の初期値を弱める", async () => {
+    const refused = z.object({ code: z.string() }).loose().parse(await api(world, "PUT", "/api/v1/settings/service.protectedPaths", { version: 0, value: [], reason: "弱める" }, 401));
+    expect(refused.code).toBe("step_up_required");
+    expect(await api(world, "PUT", "/api/v1/settings/service.mergeWhen", { version: 0, value: ["checks", "reviewer", "owner"], reason: "強める" })).toMatchObject({ version: 1 });
+    await stepUp(world);
+    expect(await api(world, "PUT", "/api/v1/settings/service.protectedPaths", { version: 0, value: [], reason: "弱める" })).toMatchObject({ version: 1 });
   });
 });

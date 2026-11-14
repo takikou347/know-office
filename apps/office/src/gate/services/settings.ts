@@ -10,6 +10,7 @@ import {
   OWN_SETTINGS,
   type ServiceRules,
   type Setting,
+  weakens,
 } from "@know-office/core";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -152,14 +153,17 @@ export async function serviceRules(db: D1Database, serviceId: string): Promise<S
  * @param input.value 値。null は初期値に戻す
  * @param input.version 読んだ版
  * @param input.now 今の時刻
+ * @param stepUp 弱める変更の時に呼ぶ、パスキーの確認を求める関数
  * @returns 変えた後の設定
  * @throws not_found サービスか項目が無い時、リポジトリを変えようとした時
  * @throws validation_failed 値が項目の形に合わない時、初期値を持たない項目を null にした時
+ * @throws step_up_required 守りを弱める変更で、パスキーの確認が無い時 (stepUp が投げる)
  * @throws conflict 版が違う時
  */
 export async function updateServiceSetting(
   db: D1Database,
   input: { serviceId: string; key: string; value: unknown; version: number; now: number },
+  stepUp: () => void,
 ): Promise<Setting> {
   const { serviceId, key, version, now } = input;
   await findService(db, serviceId);
@@ -169,6 +173,11 @@ export async function updateServiceSetting(
   if (key === "staffId") value = checkValue(OWN_SETTINGS.staffId, input.value);
   else if (input.value !== null) value = checkValue(INHERITED_SETTINGS[key], input.value);
   const current = (await loadServiceSettings(db, serviceId)).find((s) => s.key === key);
+  if (isInheritedKey(key)) {
+    // 初期値に戻す時は、受け継いだ後の実効値で比べる
+    const after = value === null ? (await loadOfficeDefaults(db))[key].value : value;
+    if (weakens(key, current?.value, after)) stepUp();
+  }
   if (current?.version !== version) throw new AppError("conflict", "バージョンが違う");
   const id = newId(clockAt(now));
   const next = version + 1;
@@ -207,18 +216,26 @@ export async function updateServiceSetting(
  * @param input.version 読んだ版
  * @param input.reason 理由
  * @param input.now 今の時刻
+ * @param stepUp 弱める変更の時に呼ぶ、パスキーの確認を求める関数
  * @returns 変えた後の設定
  * @throws not_found このルートで変えられる項目でない時
  * @throws validation_failed 値が項目の形に合わない時
+ * @throws step_up_required 守りを弱める変更で、パスキーの確認が無い時 (stepUp が投げる)
  * @throws conflict 版が違う時
  */
-export async function updateOfficeDefault(db: D1Database, input: { key: string; value: unknown; version: number; reason: string; now: number }): Promise<Setting> {
+export async function updateOfficeDefault(
+  db: D1Database,
+  input: { key: string; value: unknown; version: number; reason: string; now: number },
+  stepUp: () => void,
+): Promise<Setting> {
   const { key, version, reason, now } = input;
   const name = key.startsWith(DEFAULT_PREFIX) ? key.slice(DEFAULT_PREFIX.length) : "";
   // 基準と GitHub のルールはパスキーの確認が要る専用のルートで変えるので、ここでは扱わない
   if (!isInheritedKey(name)) throw new AppError("not_found", "このルートで変えられる設定の項目でない");
   const value = checkValue(INHERITED_SETTINGS[name], input.value);
-  if ((await loadOfficeDefaults(db))[name].version !== version) throw new AppError("conflict", "バージョンが違う");
+  const current = (await loadOfficeDefaults(db))[name];
+  if (weakens(name, current.value, value)) stepUp();
+  if (current.version !== version) throw new AppError("conflict", "バージョンが違う");
   const next = version + 1;
   const written = await drizzle(db)
     .insert(settings)

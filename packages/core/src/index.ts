@@ -85,6 +85,7 @@ export {
   type ServiceRules,
   Setting,
   UpdateSettingInput,
+  weakens,
 } from "./schemas/settings.ts";
 export { AskBossTool } from "./schemas/tools/ask-boss.ts";
 export { AskOwnerTool } from "./schemas/tools/ask-owner.ts";

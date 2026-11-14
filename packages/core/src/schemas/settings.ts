@@ -78,3 +78,33 @@ export const UpdateSettingInput = z
 
 /** 設定を変える入力の型 */
 export type UpdateSettingInput = z.infer<typeof UpdateSettingInput>;
+
+const Items = z.array(z.string());
+
+/**
+ * 設定の変更が守りを弱めるかを見る。弱める変更はパスキーの確認を求める。値は受け継いだ後の実効値で渡す
+ * @param key 受け継ぐ項目の名前
+ * @param before 今の値
+ * @param after 変えた後の値
+ * @returns できる操作を足す、条件や触れない所を外す、止めたサービスを動かす時に true
+ */
+export function weakens(key: InheritedKey, before: unknown, after: unknown): boolean {
+  if (key === "paused") return before === true && after === false;
+  // 形の分からない値は弱めるとみて、パスキーを求める側に倒す
+  const was = Items.safeParse(before);
+  const now = Items.safeParse(after);
+  if (!was.success || !now.success) return true;
+  // できる操作は足すと弱まり、条件と触れない所は外すと弱まる
+  return key === "actions" ? grew(was.data, now.data) : grew(now.data, was.data);
+}
+
+/**
+ * 後の並びに、前の並びに無い物があるかを見る
+ * @param from 前の並び
+ * @param to 後の並び
+ * @returns 増えた物があれば true
+ */
+function grew(from: readonly string[], to: readonly string[]): boolean {
+  const had = new Set(from);
+  return to.some((v) => !had.has(v));
+}
