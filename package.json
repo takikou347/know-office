@@ -9,7 +9,8 @@
     "build": "pnpm -r build",
     "lint": "oxlint --type-aware --deny-warnings",
     "dev": "pnpm --filter @know-office/office dev",
-    "e2e": "pnpm --filter @know-office/office e2e"
+    "e2e": "pnpm --filter @know-office/office e2e",
+    "clean": "rm -rf apps/*/dist apps/*/.wrangler apps/*/test-results apps/*/playwright-report"
   },
   "devDependencies": {
     "oxlint": "1.93.0",
