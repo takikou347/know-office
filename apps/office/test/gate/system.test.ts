@@ -26,9 +26,9 @@ describe("共通のヘッダー", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("共通のミドルウェアは 1 回ずつだけ登録される (trace、セキュリティヘッダー、本文の形)", () => {
+  it("共通のミドルウェアは 1 回ずつだけ登録される (時刻、trace、セキュリティヘッダー、本文の形)", () => {
     const paths = gate.routes.filter((r) => r.method === "ALL").map((r) => r.path.replace(/^\*/, "/*"));
-    expect(paths).toEqual(["/*", "/api/*", "/api/*"]);
+    expect(paths).toEqual(["/*", "/*", "/api/*", "/api/*"]);
   });
 
   it("どの GET のルートも、ほかのメソッドには 405 と Allow を返す", async () => {

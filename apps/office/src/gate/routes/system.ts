@@ -1,6 +1,6 @@
 // システム: 稼働確認と API ドキュメント
 import { createRoute, z } from "@hono/zod-openapi";
-import { Health, health } from "@know-office/core";
+import { AppError, Health, health } from "@know-office/core";
 import v1 from "../../../openapi/v1.yaml?raw";
 import { createRouter } from "../app.ts";
 import { CONTENT_SECURITY_POLICY } from "../headers.ts";
@@ -39,7 +39,14 @@ const DOCS_HTML = `<!doctype html>
 
 /** システムのルート: 稼働確認、Swagger UI、OpenAPI の文書 */
 export const system = createRouter()
-  .openapi(getHealth, (c) => ok(c, health("gate")))
+  .openapi(getHealth, async (c) => {
+    try {
+      await c.env.DB.prepare("SELECT 1").first();
+    } catch {
+      throw new AppError("unavailable", "D1 が応答しない");
+    }
+    return ok(c, health("gate"));
+  })
   .openapi(getApiDocs, (c) => {
     // Swagger UI は style 属性を使うので、このルートだけ style-src に unsafe-inline を足す。API の決まりの 3.5
     c.header("Content-Security-Policy", CONTENT_SECURITY_POLICY.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"));

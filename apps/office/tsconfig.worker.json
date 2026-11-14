@@ -1,0 +1,6 @@
+{
+  // Workers の中だけで動くコード (Durable Objects と Worker の入口)。Workers の型で確かめる
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": ["@cloudflare/workers-types", "vite/client"] },
+  "include": ["src/gate/do", "src/gate/worker.ts", "test/do/harness.ts"]
+}

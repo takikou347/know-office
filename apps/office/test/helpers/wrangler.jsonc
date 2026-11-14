@@ -1,0 +1,10 @@
+// テストで D1 を作るための設定。中身は手元だけで動く
+{
+  "name": "know-office-test",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [
+    { "binding": "DB", "database_name": "db", "database_id": "local-db" },
+    { "binding": "REC_2026", "database_name": "rec-2026", "database_id": "local-rec-2026" },
+    { "binding": "REC_2027", "database_name": "rec-2027", "database_id": "local-rec-2027" }
+  ]
+}

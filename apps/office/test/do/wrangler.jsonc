@@ -1,0 +1,13 @@
+// DO のテストの入口の設定。手元だけで動く
+{
+  "name": "know-office-do-test",
+  "main": "harness.ts",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [
+    { "binding": "DB", "database_name": "db", "database_id": "local-db" },
+    { "binding": "REC_2026", "database_name": "rec-2026", "database_id": "local-rec-2026" },
+    { "binding": "REC_2027", "database_name": "rec-2027", "database_id": "local-rec-2027" }
+  ],
+  "durable_objects": { "bindings": [{ "name": "RECORDER", "class_name": "RecorderDO" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO"] }]
+}

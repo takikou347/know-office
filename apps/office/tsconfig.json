@@ -5,5 +5,7 @@
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
-  "include": ["src", "test", "e2e", "scripts", "dev", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src", "test", "e2e", "scripts", "dev", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"],
+  // Workers の中だけで動くコードは tsconfig.worker.json で Workers の型と確かめる
+  "exclude": ["src/gate/do", "src/gate/worker.ts", "test/do/harness.ts"]
 }

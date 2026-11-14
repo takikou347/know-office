@@ -1,7 +1,8 @@
 // 失敗の返し方。RFC 9457 の problem+json に直す
-import { AppError, type ErrorCode, type FieldError, PROBLEMS, type Problem } from "@know-office/core";
+import { AppError, type ErrorCode, type FieldError, log, PROBLEMS, type Problem, systemClock } from "@know-office/core";
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import type { GateEnv } from "./env.ts";
+import { recordError } from "./records/errors.ts";
 
 /**
  * problem+json の本文を作る
@@ -44,9 +45,16 @@ export function problemResponse(c: Context<GateEnv>, err: AppError): Response {
  * @param c 要求の文脈
  * @returns problem+json の返事
  */
-export const onError: ErrorHandler<GateEnv> = (err, c) => {
-  if (err instanceof AppError) return problemResponse(c, err);
-  return problemResponse(c, new AppError("internal", "想定外のエラーが起きた"));
+export const onError: ErrorHandler<GateEnv> = async (err, c) => {
+  const known = err instanceof AppError ? err : new AppError("internal", "想定外のエラーが起きた");
+  const status = PROBLEMS[known.code].status;
+  // 500 台は直す所なので、スタックトレースを log に、1 行を error_events に残す。中身は返事に入れない
+  if (status >= 500) {
+    const traceId = c.get("traceId");
+    log("error", "request_failed", { traceId, route: c.req.routePath, status, code: known.code, stack: err instanceof Error ? err.stack : undefined });
+    await recordError(c.env, { source: "gate", level: "error", code: known.code, error: err, route: c.req.routePath, status, traceId }, c.get("clock") ?? systemClock);
+  }
+  return problemResponse(c, known);
 };
 
 /**

@@ -1,13 +1,25 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "know-office",
-  "main": "src/gate/index.ts",
+  "main": "src/gate/worker.ts",
   "compatibility_date": "2026-11-01",
   // Cloudflare が自動で付ける、Access を通らない URL は切る
   "workers_dev": false,
   "preview_urls": false,
   // 開発環境は .dev.vars で development に替える。無い時は本物の宛先を使う
   "vars": { "ENVIRONMENT": "production" },
+  // D1 の置き場。database_id は Cloudflare に作った時 (tasks.md の 4.8) に本物に替える。手元では名前だけで動く
+  "d1_databases": [
+    { "binding": "DB", "database_name": "know-office", "database_id": "local-db", "migrations_dir": "migrations/main" },
+    { "binding": "REC_2026", "database_name": "know-office-rec-2026", "database_id": "local-rec-2026", "migrations_dir": "migrations/records" },
+    { "binding": "REC_2027", "database_name": "know-office-rec-2027", "database_id": "local-rec-2027", "migrations_dir": "migrations/records" },
+    { "binding": "REC_2028", "database_name": "know-office-rec-2028", "database_id": "local-rec-2028", "migrations_dir": "migrations/records" },
+    { "binding": "REC_2029", "database_name": "know-office-rec-2029", "database_id": "local-rec-2029", "migrations_dir": "migrations/records" },
+    { "binding": "REC_2030", "database_name": "know-office-rec-2030", "database_id": "local-rec-2030", "migrations_dir": "migrations/records" },
+    { "binding": "REC_2031", "database_name": "know-office-rec-2031", "database_id": "local-rec-2031", "migrations_dir": "migrations/records" }
+  ],
+  "durable_objects": { "bindings": [{ "name": "RECORDER", "class_name": "RecorderDO" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO"] }],
   "assets": {
     // /api の下だけ入口が受け、ほかは画面のファイルを返す
     "not_found_handling": "single-page-application",

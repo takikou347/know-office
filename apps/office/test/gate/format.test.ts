@@ -1,11 +1,18 @@
 // 成功は { data, meta }、失敗は problem+json で返す事を確かめる。API の決まりの 2 章
 import { createRoute, z } from "@hono/zod-openapi";
 import { Meta, Problem } from "@know-office/core";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../../src/gate/app.ts";
 import gate from "../../src/gate/index.ts";
 import { MAX_BODY_BYTES } from "../../src/gate/body.ts";
 import { ok } from "../../src/gate/respond.ts";
+import { createTestD1, type TestD1 } from "../helpers/d1.ts";
+
+let d1: TestD1;
+beforeAll(async () => {
+  d1 = await createTestD1();
+});
+afterAll(() => d1.dispose());
 
 /**
  * 返事の本文をキーと値の組で読む
@@ -29,7 +36,7 @@ const PROBLEM_KEYS = ["code", "detail", "instance", "status", "title", "traceId"
 
 describe("返事の形", () => {
   it("成功は data と meta だけを持ち、meta に traceId がある", async () => {
-    const res = await gate.request("/api/v1/health");
+    const res = await gate.request("/api/v1/health", {}, { DB: d1.DB });
     expect(res.status).toBe(200);
     const body = await read(res);
     expect(Object.keys(body).toSorted()).toEqual(["data", "meta"]);
@@ -39,7 +46,7 @@ describe("返事の形", () => {
 
   it("traceparent があれば、その trace-id を traceId に引き継ぐ", async () => {
     const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
-    const res = await gate.request("/api/v1/health", { headers: { traceparent: `00-${traceId}-00f067aa0ba902b7-01` } });
+    const res = await gate.request("/api/v1/health", { headers: { traceparent: `00-${traceId}-00f067aa0ba902b7-01` } }, { DB: d1.DB });
     expect(Meta.parse((await read(res)).meta).traceId).toBe(traceId);
   });
 

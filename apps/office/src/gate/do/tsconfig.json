@@ -1,0 +1,5 @@
+{
+  // Durable Objects は Workers の中だけで動くので、Workers の型で確かめる
+  "extends": "../../../tsconfig.worker.json",
+  "include": ["."]
+}

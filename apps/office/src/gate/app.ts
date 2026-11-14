@@ -1,6 +1,6 @@
 // ゲートウェイの Hono を作る。入力の検証に落ちた時の返し方と失敗の返し方をそろえる
 import { OpenAPIHono, type Hook } from "@hono/zod-openapi";
-import { AppError, type FieldError } from "@know-office/core";
+import { AppError, type Clock, type FieldError, systemClock } from "@know-office/core";
 import { HTTPException } from "hono/http-exception";
 import type { ZodError } from "zod";
 import { bodyShape } from "./body.ts";
@@ -50,10 +50,16 @@ export function createRouter() {
 
 /**
  * 共通のミドルウェアと失敗の返し方を付けた Hono を作る
+ * @param options clock は今の時刻。テストは決まった時刻を渡す
  * @returns ルートを足す前のゲートウェイ
  */
-export function createApp() {
+export function createApp(options: { clock?: Clock } = {}) {
+  const clock = options.clock ?? systemClock;
   const app = new OpenAPIHono<GateEnv>({ defaultHook });
+  app.use("*", async (c, next) => {
+    c.set("clock", clock);
+    await next();
+  });
   app.use("*", trace);
   app.use("/api/*", securityHeaders);
   app.use("/api/*", bodyShape);
