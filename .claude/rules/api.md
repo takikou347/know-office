@@ -8,7 +8,7 @@ paths:
 
 # API の書き方
 
-正本は knowidea の `../knowidea/services/know-office/docs/04-detail/1-api.md` (決まり)、`2-routes.md` (全ルート)、`3-data.md` (全テーブル)。05-conventions.md の 3.3。全文を読まず、作るルートとテーブルの行を grep で引く。
+正本は knowidea の `../knowidea/services/know-office/docs/04-detail/1-api.md` (決まり)、`2-routes.md` (全ルートと処理の順)、`3-data.md` (全テーブル)。05-conventions.md の 3.3。全文を読まず、作るルートとテーブルの行を grep で引く。
 
 - ルートを足す、変える時は、先に `apps/office/openapi/v1.yaml` (OpenAPI 3.1) を直し、その形でコードを書く。`pnpm openapi` がコードから v1.yaml を作り、テストが同じかを確かめる。`2-routes.md` の該当の行も同じ時に直す
 - パスは小文字の kebab-case の名詞の複数形 (`/api/v1/audit-logs`)。1 つしかない物は単数 (`/me`、`/guard/state`)。名詞で表せない操作だけ末尾に動詞 1 語を置いて `POST`。全部の置き換えは `PUT`、一部は `PATCH`
@@ -23,5 +23,5 @@ paths:
 - 画面は Hono の RPC で同じ型を受け、`fetch` を手で書かない
 - 時刻は RFC 3339 の協定世界時、日は日本時間の `YYYY-MM-DD`、ID は UUID v7、お金は `...MicroUsd` の整数
 - 一覧は `?cursor=` と `limit` (1 から 100、初期値 50)
-- ルートの処理の順とルートだけの失敗は、機能ごとの詳細設計の 3 章の「ルートごとの処理」の表に従う。処理を変えたらその行も同じ時に直す
+- ルートの処理の順とルートだけの失敗は、`v1.yaml` の各ルートの `x-steps` と `x-errors` (description にも同じ中身) に従う。処理を変えたら v1.yaml を先に直し、2-routes.md を作り直す
 - WAF が無いので 1-api.md の 3.6 の守りを外さない。入力は Zod の `strict()`、JWT は決めた `alg` だけ、署名の比べは `timingSafeEqual`、外への `fetch` は `allowedFetch` だけ、WebSocket の切り替えは `Origin` を確かめる。Access を外すパスを `/hooks/v1/github` のほかに足さない

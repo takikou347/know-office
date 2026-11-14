@@ -50,6 +50,23 @@ paths:
       tags:
       - system
       summary: ゲートウェイが動いているか
+      description: '処理の順:
+
+
+        1. `DB` に `SELECT 1` を投げる
+
+        2. ゲートウェイ、画面、ワークスペースのどれが答えたかを返す
+
+
+        このルートだけの失敗:
+
+
+        - 503 `unavailable`: D1 が返らない'
+      x-steps:
+      - '`DB` に `SELECT 1` を投げる'
+      - ゲートウェイ、画面、ワークスペースのどれが答えたかを返す
+      x-errors:
+      - '503 `unavailable`: D1 が返らない'
       security:
       - accessJwt: []
         session: []
@@ -83,7 +100,24 @@ paths:
       tags:
       - auth
       summary: セッションを始める
-      description: ログインの証明から __Host-ko_session のクッキーを付ける。セッションの確かめを通らない唯一のルート。
+      description: 'ログインの証明から __Host-ko_session のクッキーを付ける。セッションの確かめを通らない唯一のルート。
+
+
+        処理の順:
+
+
+        1. 32 バイトのトークンを作り、`sessions` に SHA-256 と送信元を 1 行足す
+
+        2. 新しい国か夜中なら通知を出し、`guard.observe` に `login` を渡す
+
+        3. 監査ログ `session.create`
+
+        4. クッキーを置き、201'
+      x-steps:
+      - 32 バイトのトークンを作り、`sessions` に SHA-256 と送信元を 1 行足す
+      - 新しい国か夜中なら通知を出し、`guard.observe` に `login` を渡す
+      - 監査ログ `session.create`
+      - クッキーを置き、201
       security:
       - accessJwt: []
         session: []
@@ -121,6 +155,15 @@ paths:
       tags:
       - auth
       summary: セッションの一覧
+      description: '処理の順:
+
+
+        1. `sessions` から切れていない行を作った順に読む
+
+        2. 今のセッションに `current` を付ける'
+      x-steps:
+      - '`sessions` から切れていない行を作った順に読む'
+      - 今のセッションに `current` を付ける
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -158,6 +201,15 @@ paths:
       tags:
       - auth
       summary: 今のセッションのほかを全部切る
+      description: '処理の順:
+
+
+        1. 今のほかの切れていない行に `ended_at` を入れる
+
+        2. 監査ログ `session.end_others`'
+      x-steps:
+      - 今のほかの切れていない行に `ended_at` を入れる
+      - 監査ログ `session.end_others`
       security:
       - accessJwt: []
         session: []
@@ -178,6 +230,26 @@ paths:
       tags:
       - auth
       summary: 1 つのセッションを切る
+      description: '処理の順:
+
+
+        1. 行を読む
+
+        2. `ended_at` を入れる。今のセッションならクッキーも消す
+
+        3. 監査ログ `session.end`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 行が無いか切れている'
+      x-steps:
+      - 行を読む
+      - '`ended_at` を入れる。今のセッションならクッキーも消す'
+      - 監査ログ `session.end`
+      x-errors:
+      - '404 `not_found`: 行が無いか切れている'
       parameters:
       - name: sessionId
         in: path
@@ -208,6 +280,12 @@ paths:
       tags:
       - auth
       summary: ログインしている人とセッション
+      description: '処理の順:
+
+
+        1. セッションの行と、パスキーが在るかを返す'
+      x-steps:
+      - セッションの行と、パスキーが在るかを返す
       security:
       - accessJwt: []
         session: []
@@ -241,7 +319,35 @@ paths:
       tags:
       - auth
       summary: パスキーで確かめ直す
-      description: 15 分の間、パスキーの確認が要るルートを通す。
+      description: '15 分の間、パスキーの確認が要るルートを通す。
+
+
+        処理の順:
+
+
+        1. `GuardDO` に置いた challenge と WebAuthn の応答を確かめる
+
+        2. `passkeys` の `counter` と `last_used_at` を直す
+
+        3. 今のセッションを切り、`expires_at` を引き継いだ新しいトークンのセッションを `step_up_until` 付きで作る
+
+        4. `login_attempts` と監査ログ `session.step_up`
+
+        5. クッキーを置き直す
+
+
+        このルートだけの失敗:
+
+
+        - 401 `unauthenticated`: 応答が合わない、challenge が切れた。失敗を数える'
+      x-steps:
+      - '`GuardDO` に置いた challenge と WebAuthn の応答を確かめる'
+      - '`passkeys` の `counter` と `last_used_at` を直す'
+      - 今のセッションを切り、`expires_at` を引き継いだ新しいトークンのセッションを `step_up_until` 付きで作る
+      - '`login_attempts` と監査ログ `session.step_up`'
+      - クッキーを置き直す
+      x-errors:
+      - '401 `unauthenticated`: 応答が合わない、challenge が切れた。失敗を数える'
       requestBody:
         required: true
         content:
@@ -289,6 +395,15 @@ paths:
       tags:
       - auth
       summary: WebAuthn の options を作る
+      description: '処理の順:
+
+
+        1. challenge を作り、`GuardDO` の記憶に今のセッションの物として 5 分持つ
+
+        2. 登録か確認かに合わせた WebAuthn の options を返す'
+      x-steps:
+      - challenge を作り、`GuardDO` の記憶に今のセッションの物として 5 分持つ
+      - 登録か確認かに合わせた WebAuthn の options を返す
       requestBody:
         required: true
         content:
@@ -336,7 +451,38 @@ paths:
       tags:
       - auth
       summary: パスキーを登録する
-      description: 登録済みのパスキーがある時だけ、パスキーの確認が 15 分のうちに要る。
+      description: '登録済みのパスキーがある時だけ、パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. パスキーが在れば `requireStepUp(c)`
+
+        2. challenge と応答を確かめる
+
+        3. `passkeys` に 1 行足す
+
+        4. 監査ログ `passkey.add`
+
+
+        このルートだけの失敗:
+
+
+        - 401 `step_up_required`: 2 本目で確認が無い
+
+        - 401 `unauthenticated`: 応答が合わない
+
+        - 409 `conflict`: 同じ鍵が在る'
+      x-steps:
+      - パスキーが在れば `requireStepUp(c)`
+      - challenge と応答を確かめる
+      - '`passkeys` に 1 行足す'
+      - 監査ログ `passkey.add`
+      x-errors:
+      - '401 `step_up_required`: 2 本目で確認が無い'
+      - '401 `unauthenticated`: 応答が合わない'
+      - '409 `conflict`: 同じ鍵が在る'
       x-step-up: conditional
       requestBody:
         required: true
@@ -389,7 +535,21 @@ paths:
       tags:
       - system
       summary: 監査ログの一覧
-      description: パスキーの確認が 15 分のうちに要る。
+      description: 'パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. 期間から `record_years` で置き場を選ぶ
+
+        2. `audit_log` を新しい順に読む
+
+        3. 読んだ事を監査ログに残す'
+      x-steps:
+      - 期間から `record_years` で置き場を選ぶ
+      - '`audit_log` を新しい順に読む'
+      - 読んだ事を監査ログに残す
       x-step-up: true
       parameters:
       - name: from
@@ -444,6 +604,26 @@ paths:
       tags:
       - system
       summary: 1 年分の監査ログのハッシュチェーンを検証する
+      description: '処理の順:
+
+
+        1. `RecorderDO.verify(year)` を呼ぶ
+
+        2. 合わなければ `guard.observe` に `chain_broken` を渡し、全体を止める
+
+        3. `ok` と合わない最初の行を返す
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: その年の置き場が無い'
+      x-steps:
+      - '`RecorderDO.verify(year)` を呼ぶ'
+      - 合わなければ `guard.observe` に `chain_broken` を渡し、全体を止める
+      - '`ok` と合わない最初の行を返す'
+      x-errors:
+      - '404 `not_found`: その年の置き場が無い'
       requestBody:
         required: true
         content:
@@ -491,7 +671,18 @@ paths:
       tags:
       - system
       summary: エラーログの一覧
-      description: D1 の error_events を新しい順に返す。スタックトレースは返さず、Workers Logs で traceId から見る。
+      description: 'D1 の error_events を新しい順に返す。スタックトレースは返さず、Workers Logs で traceId から見る。
+
+
+        処理の順:
+
+
+        1. 期間から置き場を選ぶ
+
+        2. `error_events` を `source` と `code` で絞り、新しい順に読む'
+      x-steps:
+      - 期間から置き場を選ぶ
+      - '`error_events` を `source` と `code` で絞り、新しい順に読む'
       parameters:
       - name: from
         in: query
@@ -551,7 +742,32 @@ paths:
       tags:
       - system
       summary: traceId で 1 つの要求をたどる
-      description: 同じ traceId のエラー、監査ログ、ツールの呼び出し、使用量、タスクの出来事、会話を時刻の順に返す。パスキーの確認が 15 分のうちに要る。
+      description: '同じ traceId のエラー、監査ログ、ツールの呼び出し、使用量、タスクの出来事、会話を時刻の順に返す。パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. パスキーの確認を求める
+
+        2. 今年と前の年の置き場で、`error_events`、`audit_log`、`tool_calls`、`usage`、`node_events`、`messages` を `trace_id` の索引で読む
+
+        3. 時刻の順に並べる
+
+
+        このルートだけの失敗:
+
+
+        - 422 `validation_failed`: 32 桁の 16 進でない
+
+        - 404 `not_found`: 1 行も無い'
+      x-steps:
+      - パスキーの確認を求める
+      - 今年と前の年の置き場で、`error_events`、`audit_log`、`tool_calls`、`usage`、`node_events`、`messages` を `trace_id` の索引で読む
+      - 時刻の順に並べる
+      x-errors:
+      - '422 `validation_failed`: 32 桁の 16 進でない'
+      - '404 `not_found`: 1 行も無い'
       x-step-up: true
       parameters:
       - name: traceId
@@ -598,6 +814,15 @@ paths:
       tags:
       - system
       summary: D1 ごとのストレージ使用量
+      description: '処理の順:
+
+
+        1. `RecorderDO.size()` を呼ぶ
+
+        2. 置き場ごとの量と 10GB に対する割合を返す'
+      x-steps:
+      - '`RecorderDO.size()` を呼ぶ'
+      - 置き場ごとの量と 10GB に対する割合を返す
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -636,6 +861,12 @@ paths:
       tags:
       - system
       summary: Swagger UI
+      description: '処理の順:
+
+
+        1. 画面のファイルから Swagger UI の HTML を返す'
+      x-steps:
+      - 画面のファイルから Swagger UI の HTML を返す
       security:
       - accessJwt: []
         session: []
@@ -659,6 +890,12 @@ paths:
       tags:
       - system
       summary: この OpenAPI 文書
+      description: '処理の順:
+
+
+        1. 画面のファイルから `v1.yaml` を返す'
+      x-steps:
+      - 画面のファイルから `v1.yaml` を返す
       security:
       - accessJwt: []
         session: []
@@ -682,7 +919,15 @@ paths:
       tags:
       - staff
       summary: 社員の今の状態
-      description: 3 人の状態、今のタスク、今日の働いた時間。
+      description: '3 人の状態、今のタスク、今日の働いた時間。
+
+
+        処理の順:
+
+
+        1. 3 人の `StaffDO.status()` を並べて呼ぶ'
+      x-steps:
+      - 3 人の `StaffDO.status()` を並べて呼ぶ
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -721,7 +966,21 @@ paths:
       tags:
       - staff
       summary: 1 日の勤怠
-      description: 勤怠の表の上の 1 行と、タスク 1 件 1 行の表。
+      description: '勤怠の表の上の 1 行と、タスク 1 件 1 行の表。
+
+
+        処理の順:
+
+
+        1. その日の `attendance` を訂正で置き換えて読む
+
+        2. `work_entries` と `daily_totals` を読む
+
+        3. 開いている区分を `StaffDO.status()` から足す'
+      x-steps:
+      - その日の `attendance` を訂正で置き換えて読む
+      - '`work_entries` と `daily_totals` を読む'
+      - 開いている区分を `StaffDO.status()` から足す
       parameters:
       - name: staffId
         in: path
@@ -776,7 +1035,32 @@ paths:
       tags:
       - staff
       summary: その日だけの指示を出す
-      description: 延長、早い退勤、休み。
+      description: '延長、早い退勤、休み。
+
+
+        処理の順:
+
+
+        1. 同じ日に取り消されていない同じ種類の指示が無いか、`until` が過ぎていないかを確かめる
+
+        2. `day_orders` に `source: "button"` で 1 行足す
+
+        3. `StaffDO.order(o)` で予定を作り直す
+
+        4. 監査ログ `order.create`
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 同じ指示が在る、時刻が過ぎた'
+      x-steps:
+      - 同じ日に取り消されていない同じ種類の指示が無いか、`until` が過ぎていないかを確かめる
+      - '`day_orders` に `source: "button"` で 1 行足す'
+      - '`StaffDO.order(o)` で予定を作り直す'
+      - 監査ログ `order.create`
+      x-errors:
+      - '409 `conflict`: 同じ指示が在る、時刻が過ぎた'
       parameters:
       - name: staffId
         in: path
@@ -837,7 +1121,35 @@ paths:
       tags:
       - staff
       summary: 指示を取り消す
-      description: 取り消しの行を足し、取り消した指示を返す。
+      description: '取り消しの行を足し、取り消した指示を返す。
+
+
+        処理の順:
+
+
+        1. 指示を読む
+
+        2. `cancels` を持つ行を足す
+
+        3. `StaffDO.order(o)`
+
+        4. 監査ログ `order.cancel`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 指示が無い
+
+        - 409 `conflict`: 取り消し済み'
+      x-steps:
+      - 指示を読む
+      - '`cancels` を持つ行を足す'
+      - '`StaffDO.order(o)`'
+      - 監査ログ `order.cancel`
+      x-errors:
+      - '404 `not_found`: 指示が無い'
+      - '409 `conflict`: 取り消し済み'
       parameters:
       - name: staffId
         in: path
@@ -882,6 +1194,15 @@ paths:
       tags:
       - records
       summary: 勤怠の記録
+      description: '処理の順:
+
+
+        1. 期間と社員で `attendance` を訂正で置き換えて読む
+
+        2. `daily_totals` を合わせて返す'
+      x-steps:
+      - 期間と社員で `attendance` を訂正で置き換えて読む
+      - '`daily_totals` を合わせて返す'
       parameters:
       - name: from
         in: query
@@ -936,7 +1257,35 @@ paths:
       tags:
       - records
       summary: 勤怠を訂正する
-      description: 訂正の行を足す。パスキーの確認が 15 分のうちに要る。
+      description: '訂正の行を足す。パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. 元の行を読む
+
+        2. 直した区分がほかの区分と重ならないかを確かめる
+
+        3. `corrects` に元の ID を持つ行を足し、`daily_totals` を作り直す。`db.batch()` で 1 度に送る
+
+        4. 監査ログ `attendance.correct`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 元の行が無い
+
+        - 409 `conflict`: 区分が重なる'
+      x-steps:
+      - 元の行を読む
+      - 直した区分がほかの区分と重ならないかを確かめる
+      - '`corrects` に元の ID を持つ行を足し、`daily_totals` を作り直す。`db.batch()` で 1 度に送る'
+      - 監査ログ `attendance.correct`
+      x-errors:
+      - '404 `not_found`: 元の行が無い'
+      - '409 `conflict`: 区分が重なる'
       x-step-up: true
       parameters:
       - name: attendanceId
@@ -996,6 +1345,12 @@ paths:
       tags:
       - guard
       summary: 止まっている物
+      description: '処理の順:
+
+
+        1. `GuardDO` と 3 人の `StaffDO` から止まっている範囲を集める'
+      x-steps:
+      - '`GuardDO` と 3 人の `StaffDO` から止まっている範囲を集める'
       security:
       - accessJwt: []
         session: []
@@ -1029,6 +1384,12 @@ paths:
       tags:
       - guard
       summary: 止めた記録と近かった記録
+      description: '処理の順:
+
+
+        1. `stops` を絞って新しい順に読み、`stop_updates` を合わせる'
+      x-steps:
+      - '`stops` を絞って新しい順に読み、`stop_updates` を合わせる'
       parameters:
       - name: kind
         in: query
@@ -1088,6 +1449,32 @@ paths:
       tags:
       - guard
       summary: 手で止める
+      description: '処理の順:
+
+
+        1. 対象が在るか、もう止まっていないかを確かめる
+
+        2. 3.4 の動きを行う
+
+        3. `stops` に `by: "owner"` で 1 行足す
+
+        4. 監査ログ `guard.stop` と通知
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 対象が無い
+
+        - 409 `conflict`: 止まっている'
+      x-steps:
+      - 対象が在るか、もう止まっていないかを確かめる
+      - 3.4 の動きを行う
+      - '`stops` に `by: "owner"` で 1 行足す'
+      - 監査ログ `guard.stop` と通知
+      x-errors:
+      - '404 `not_found`: 対象が無い'
+      - '409 `conflict`: 止まっている'
       requestBody:
         required: true
         content:
@@ -1141,7 +1528,26 @@ paths:
       tags:
       - guard
       summary: 止めた記録の 1 件
-      description: 直前の 20 件の操作と経過を含む。
+      description: '直前の 20 件の操作と経過を含む。
+
+
+        処理の順:
+
+
+        1. `stops` と `stop_updates` を読む
+
+        2. R2 から直前の 20 件の操作を読む
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`'
+      x-steps:
+      - '`stops` と `stop_updates` を読む'
+      - R2 から直前の 20 件の操作を読む
+      x-errors:
+      - 404 `not_found`
       parameters:
       - name: stopId
         in: path
@@ -1182,6 +1588,26 @@ paths:
       tags:
       - guard
       summary: 止めた判断に判定を付ける
+      description: '処理の順:
+
+
+        1. 行を読む
+
+        2. `stop_updates` に `verdict` を `by: "owner"` で足す
+
+        3. 監査ログ `guard.verdict`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`'
+      x-steps:
+      - 行を読む
+      - '`stop_updates` に `verdict` を `by: "owner"` で足す'
+      - 監査ログ `guard.verdict`
+      x-errors:
+      - 404 `not_found`
       parameters:
       - name: stopId
         in: path
@@ -1240,7 +1666,41 @@ paths:
       tags:
       - guard
       summary: 再開する
-      description: 止めた範囲がサービスか全体の時だけ、パスキーの確認が 15 分のうちに要る。
+      description: '止めた範囲がサービスか全体の時だけ、パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. 行を読む
+
+        2. 範囲がサービスか全体なら `requireStepUp(c)`
+
+        3. 全体なら 3.5 の鍵の入れ直しが済んだかを確かめる
+
+        4. `GuardDO` と `StaffDO` を戻す
+
+        5. `stop_updates` に `resumed` を足し、監査ログ `guard.resume`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 401 `step_up_required`
+
+        - 409 `conflict`: 再開済み、近かった記録、鍵の入れ直しが済んでいない'
+      x-steps:
+      - 行を読む
+      - 範囲がサービスか全体なら `requireStepUp(c)`
+      - 全体なら 3.5 の鍵の入れ直しが済んだかを確かめる
+      - '`GuardDO` と `StaffDO` を戻す'
+      - '`stop_updates` に `resumed` を足し、監査ログ `guard.resume`'
+      x-errors:
+      - 404 `not_found`
+      - 401 `step_up_required`
+      - '409 `conflict`: 再開済み、近かった記録、鍵の入れ直しが済んでいない'
       x-step-up: conditional
       parameters:
       - name: stopId
@@ -1284,6 +1744,20 @@ paths:
       tags:
       - guard
       summary: 手で止める前に止まる範囲を見る
+      description: '処理の順:
+
+
+        1. 範囲を決め、止まるタスクと社員を数える。何も変えない
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 対象が無い'
+      x-steps:
+      - 範囲を決め、止まるタスクと社員を数える。何も変えない
+      x-errors:
+      - '404 `not_found`: 対象が無い'
       requestBody:
         required: true
         content:
@@ -1331,6 +1805,12 @@ paths:
       tags:
       - guard
       summary: 今の基準
+      description: '処理の順:
+
+
+        1. `settings` の `guard.thresholds` の最新の行を読む'
+      x-steps:
+      - '`settings` の `guard.thresholds` の最新の行を読む'
       security:
       - accessJwt: []
         session: []
@@ -1363,7 +1843,32 @@ paths:
       tags:
       - guard
       summary: 基準を変える
-      description: パスキーの確認が 15 分のうちに要る。
+      description: 'パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. `version` が今と同じかを確かめる
+
+        2. `settings` に 1 行足す
+
+        3. 監査ログ `guard.thresholds` に前と後の値と理由
+
+        4. `GuardDO` に新しいハッシュを渡す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 版が違う'
+      x-steps:
+      - '`version` が今と同じかを確かめる'
+      - '`settings` に 1 行足す'
+      - 監査ログ `guard.thresholds` に前と後の値と理由
+      - '`GuardDO` に新しいハッシュを渡す'
+      x-errors:
+      - '409 `conflict`: 版が違う'
       x-step-up: true
       requestBody:
         required: true
@@ -1414,6 +1919,15 @@ paths:
       tags:
       - guard
       summary: 止める仕組みの効き目
+      description: '処理の順:
+
+
+        1. `stops` と `stop_updates` を数える
+
+        2. 入れた対策の前後 7 日を比べる'
+      x-steps:
+      - '`stops` と `stop_updates` を数える'
+      - 入れた対策の前後 7 日を比べる
       parameters:
       - name: from
         in: query
@@ -1460,6 +1974,15 @@ paths:
       tags:
       - conversation
       summary: 社員との会話
+      description: '処理の順:
+
+
+        1. `messages` を新しい順に読む
+
+        2. 長い発言は R2 から本文を読む'
+      x-steps:
+      - '`messages` を新しい順に読む'
+      - 長い発言は R2 から本文を読む
       parameters:
       - name: staffId
         in: path
@@ -1503,7 +2026,32 @@ paths:
       tags:
       - conversation
       summary: 社員に話す
-      description: 時間外なら呼び出しになる。
+      description: '時間外なら呼び出しになる。
+
+
+        処理の順:
+
+
+        1. `messages` に 1 行足す。2,000 字を超える分は R2 に置く
+
+        2. タスク中ならワークスペースの `POST /v1/messages` に渡し、時間外なら `StaffDO.call`
+
+        3. 言葉の指示は軽いモデルで分け、`day_orders` に足す
+
+        4. `LiveDO` に渡す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `stopped`: 社員が止まっている'
+      x-steps:
+      - '`messages` に 1 行足す。2,000 字を超える分は R2 に置く'
+      - タスク中ならワークスペースの `POST /v1/messages` に渡し、時間外なら `StaffDO.call`
+      - 言葉の指示は軽いモデルで分け、`day_orders` に足す
+      - '`LiveDO` に渡す'
+      x-errors:
+      - '409 `stopped`: 社員が止まっている'
       parameters:
       - name: staffId
         in: path
@@ -1564,6 +2112,12 @@ paths:
       tags:
       - conversation
       summary: 配信用の 60 秒の作業トークン
+      description: '処理の順:
+
+
+        1. `LiveDO` に 60 秒で 1 回だけ使える作業トークンを作らせる'
+      x-steps:
+      - '`LiveDO` に 60 秒で 1 回だけ使える作業トークンを作らせる'
       security:
       - accessJwt: []
         session: []
@@ -1601,7 +2155,32 @@ paths:
       tags:
       - conversation
       summary: 発言、状態、止まり、通知を流す
-      description: Origin と作業トークンを確かめる。
+      description: 'Origin と作業トークンを確かめる。
+
+
+        処理の順:
+
+
+        1. `Origin` が自分の URL かを確かめる
+
+        2. 作業トークンを `LiveDO` で使い切る
+
+        3. 101 で `LiveDO` の WebSocket に渡す
+
+
+        このルートだけの失敗:
+
+
+        - 401 `unauthenticated`: 作業トークンが無い、使用済み
+
+        - 403 `origin_mismatch`'
+      x-steps:
+      - '`Origin` が自分の URL かを確かめる'
+      - 作業トークンを `LiveDO` で使い切る
+      - 101 で `LiveDO` の WebSocket に渡す
+      x-errors:
+      - '401 `unauthenticated`: 作業トークンが無い、使用済み'
+      - 403 `origin_mismatch`
       parameters:
       - name: ticket
         in: query
@@ -1631,6 +2210,12 @@ paths:
       tags:
       - nodes
       summary: 目的からタスクまでの木
+      description: '処理の順:
+
+
+        1. `nodes` をスコープと状態で絞り、`parent_id` で木にする'
+      x-steps:
+      - '`nodes` をスコープと状態で絞り、`parent_id` で木にする'
       parameters:
       - name: rootId
         in: query
@@ -1686,6 +2271,32 @@ paths:
       tags:
       - nodes
       summary: 目的、目標、タスクを置く
+      description: '処理の順:
+
+
+        1. 親が在り、目的、目標、プロジェクト、タスクの順に合うかを確かめる
+
+        2. `nodes` と `node_events` に 1 行ずつ足す
+
+        3. 監査ログ `node.create`
+
+        4. 時間外に社員へ割り振れば `StaffDO.call`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 親が無い
+
+        - 409 `conflict`: 親の種類が合わない'
+      x-steps:
+      - 親が在り、目的、目標、プロジェクト、タスクの順に合うかを確かめる
+      - '`nodes` と `node_events` に 1 行ずつ足す'
+      - 監査ログ `node.create`
+      - 時間外に社員へ割り振れば `StaffDO.call`
+      x-errors:
+      - '404 `not_found`: 親が無い'
+      - '409 `conflict`: 親の種類が合わない'
       requestBody:
         required: true
         content:
@@ -1737,7 +2348,23 @@ paths:
       tags:
       - nodes
       summary: タスクの 1 件
-      description: 上の階層と出来事の流れを含む。
+      description: '上の階層と出来事の流れを含む。
+
+
+        処理の順:
+
+
+        1. `nodes`、`node_events`、`work_entries` を読む
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`'
+      x-steps:
+      - '`nodes`、`node_events`、`work_entries` を読む'
+      x-errors:
+      - 404 `not_found`
       parameters:
       - name: nodeId
         in: path
@@ -1777,6 +2404,32 @@ paths:
       tags:
       - nodes
       summary: 分け方、割り振り、見送りを直す
+      description: '処理の順:
+
+
+        1. 行を読み、`version` が今と同じかを確かめる
+
+        2. 割り振りが作った社員とレビュー担当を同じモデルにしないかを確かめる
+
+        3. `nodes` を直し、`node_events` に足す
+
+        4. 監査ログ `node.update`、`StaffDO` に知らせる
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 409 `conflict`: 版が違う、同じモデルの組'
+      x-steps:
+      - 行を読み、`version` が今と同じかを確かめる
+      - 割り振りが作った社員とレビュー担当を同じモデルにしないかを確かめる
+      - '`nodes` を直し、`node_events` に足す'
+      - 監査ログ `node.update`、`StaffDO` に知らせる
+      x-errors:
+      - 404 `not_found`
+      - '409 `conflict`: 版が違う、同じモデルの組'
       parameters:
       - name: nodeId
         in: path
@@ -1833,6 +2486,12 @@ paths:
       tags:
       - org
       summary: 組織図
+      description: '処理の順:
+
+
+        1. `staff` と `staff_prompts` の最新を読み、`boss_id` で木にする'
+      x-steps:
+      - '`staff` と `staff_prompts` の最新を読み、`boss_id` で木にする'
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -1871,7 +2530,29 @@ paths:
       tags:
       - org
       summary: 役目の説明文を直す
-      description: 次のタスクから効く。
+      description: '次のタスクから効く。
+
+
+        処理の順:
+
+
+        1. `version` が今と同じかを確かめる
+
+        2. `staff_prompts` に足し、`staff.prompt_version` を直す
+
+        3. 監査ログ `staff.prompt`。次のタスクから使う
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 版が違う'
+      x-steps:
+      - '`version` が今と同じかを確かめる'
+      - '`staff_prompts` に足し、`staff.prompt_version` を直す'
+      - 監査ログ `staff.prompt`。次のタスクから使う
+      x-errors:
+      - '409 `conflict`: 版が違う'
       parameters:
       - name: staffId
         in: path
@@ -1926,6 +2607,12 @@ paths:
       tags:
       - org
       summary: オーナーの承認を待つ物
+      description: '処理の順:
+
+
+        1. `approvals` の決まっていない行を古い順に読む'
+      x-steps:
+      - '`approvals` の決まっていない行を古い順に読む'
       parameters:
       - name: status
         in: query
@@ -1977,6 +2664,32 @@ paths:
       tags:
       - org
       summary: 承認か差し戻しを出す
+      description: '処理の順:
+
+
+        1. 行を読み、決まっていないかを確かめる
+
+        2. 承認なら種類ごとに行う。社員の追加と役の変更は `staff`、マージとデプロイは 3.4 の条件を確かめて進める
+
+        3. `approvals` を直し、待っていたタスクを `todo` に戻す
+
+        4. 監査ログ `approval.decide`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 409 `conflict`: 決まっている'
+      x-steps:
+      - 行を読み、決まっていないかを確かめる
+      - 承認なら種類ごとに行う。社員の追加と役の変更は `staff`、マージとデプロイは 3.4 の条件を確かめて進める
+      - '`approvals` を直し、待っていたタスクを `todo` に戻す'
+      - 監査ログ `approval.decide`
+      x-errors:
+      - 404 `not_found`
+      - '409 `conflict`: 決まっている'
       parameters:
       - name: approvalId
         in: path
@@ -2033,7 +2746,29 @@ paths:
       tags:
       - reviews
       summary: レビューの頭
-      description: レビュー担当の要点、チェックの結果、変えたファイルの木。
+      description: 'レビュー担当の要点、チェックの結果、変えたファイルの木。
+
+
+        処理の順:
+
+
+        1. `reviews` を読む
+
+        2. GitHub の compare で変わったファイルの一覧を取る
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - '`reviews` を読む'
+      - GitHub の compare で変わったファイルの一覧を取る
+      x-errors:
+      - 404 `not_found`
+      - 502 `upstream_failed`
       parameters:
       - name: nodeId
         in: path
@@ -2074,7 +2809,26 @@ paths:
       tags:
       - reviews
       summary: 1 ファイルの変更
-      description: since で前に見た所からの差。
+      description: 'since で前に見た所からの差。
+
+
+        処理の順:
+
+
+        1. 1 ファイルの変更を compare から取る
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: ファイルが無い
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - 1 ファイルの変更を compare から取る
+      x-errors:
+      - '404 `not_found`: ファイルが無い'
+      - 502 `upstream_failed`
       parameters:
       - name: nodeId
         in: path
@@ -2127,6 +2881,23 @@ paths:
       tags:
       - reviews
       summary: 変更の前か後の中身
+      description: '処理の順:
+
+
+        1. 前か後の中身をファイルの API から取る
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - 前か後の中身をファイルの API から取る
+      x-errors:
+      - 404 `not_found`
+      - 502 `upstream_failed`
       parameters:
       - name: nodeId
         in: path
@@ -2183,6 +2954,20 @@ paths:
       tags:
       - reviews
       summary: ここまで見た印
+      description: '処理の順:
+
+
+        1. `reviews.last_seen_sha` を今の `head_sha` にする
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`'
+      x-steps:
+      - '`reviews.last_seen_sha` を今の `head_sha` にする'
+      x-errors:
+      - 404 `not_found`
       parameters:
       - name: nodeId
         in: path
@@ -2224,6 +3009,29 @@ paths:
       tags:
       - reviews
       summary: 行への指摘
+      description: '処理の順:
+
+
+        1. `review_notes` に足す
+
+        2. GitHub のレビューのコメントに写す
+
+        3. 作った社員のタスクに `node_events` で足し、`todo` に戻す
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - '`review_notes` に足す'
+      - GitHub のレビューのコメントに写す
+      - 作った社員のタスクに `node_events` で足し、`todo` に戻す
+      x-errors:
+      - 404 `not_found`
+      - 502 `upstream_failed`
       parameters:
       - name: nodeId
         in: path
@@ -2282,6 +3090,32 @@ paths:
       tags:
       - reviews
       summary: 承認か差し戻し
+      description: '処理の順:
+
+
+        1. `baseSha` が今の `head_sha` と同じかを確かめる
+
+        2. `owner_verdict` を直し、GitHub のレビューに写す
+
+        3. 承認なら 3.4 の条件で main を進め、差し戻しならタスクを `todo` に戻す
+
+        4. 監査ログ `review.verdict`
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 変更が進んだ
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - '`baseSha` が今の `head_sha` と同じかを確かめる'
+      - '`owner_verdict` を直し、GitHub のレビューに写す'
+      - 承認なら 3.4 の条件で main を進め、差し戻しならタスクを `todo` に戻す
+      - 監査ログ `review.verdict`
+      x-errors:
+      - '409 `conflict`: 変更が進んだ'
+      - 502 `upstream_failed`
       parameters:
       - name: nodeId
         in: path
@@ -2338,6 +3172,35 @@ paths:
       tags:
       - reviews
       summary: その場で直してコミットする
+      description: '処理の順:
+
+
+        1. `baseSha` が今の `head_sha` と同じかを確かめる
+
+        2. 触れない所を変えていないかをルールで確かめる
+
+        3. Git の API でブランチにコミットを足す
+
+        4. 監査ログ `review.commit`
+
+
+        このルートだけの失敗:
+
+
+        - 403 `rule_denied`
+
+        - 409 `conflict`
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - '`baseSha` が今の `head_sha` と同じかを確かめる'
+      - 触れない所を変えていないかをルールで確かめる
+      - Git の API でブランチにコミットを足す
+      - 監査ログ `review.commit`
+      x-errors:
+      - 403 `rule_denied`
+      - 409 `conflict`
+      - 502 `upstream_failed`
       parameters:
       - name: nodeId
         in: path
@@ -2400,6 +3263,26 @@ paths:
       tags:
       - reviews
       summary: 補完と定義への移動
+      description: '処理の順:
+
+
+        1. `Origin` を確かめる
+
+        2. ワークスペースを起こし、101 で言語の仕組みにつなぐ
+
+
+        このルートだけの失敗:
+
+
+        - 403 `origin_mismatch`
+
+        - 503 `unavailable`'
+      x-steps:
+      - '`Origin` を確かめる'
+      - ワークスペースを起こし、101 で言語の仕組みにつなぐ
+      x-errors:
+      - 403 `origin_mismatch`
+      - 503 `unavailable`
       parameters:
       - name: nodeId
         in: path
@@ -2429,7 +3312,29 @@ paths:
       tags:
       - github
       summary: GitHub App の作り方を返す
-      description: 画面がこの manifest を GitHub に送る。
+      description: '画面がこの manifest を GitHub に送る。
+
+
+        処理の順:
+
+
+        1. 連携済みでないかを確かめる
+
+        2. セッションの署名の鍵で 10 分の `state` を作る
+
+        3. App の作り方と GitHub の URL を返す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 連携済み'
+      x-steps:
+      - 連携済みでないかを確かめる
+      - セッションの署名の鍵で 10 分の `state` を作る
+      - App の作り方と GitHub の URL を返す
+      x-errors:
+      - '409 `conflict`: 連携済み'
       security:
       - accessJwt: []
         session: []
@@ -2463,6 +3368,32 @@ paths:
       tags:
       - github
       summary: App の鍵を受け取る
+      description: '処理の順:
+
+
+        1. `state` の署名と期限を確かめる
+
+        2. `code` を鍵に替え、`vault` に暗号で置く
+
+        3. 監査ログ `github.app_created`
+
+        4. 302 で入れる画面へ
+
+
+        このルートだけの失敗:
+
+
+        - 403 `forbidden`: `state` が合わない
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - '`state` の署名と期限を確かめる'
+      - '`code` を鍵に替え、`vault` に暗号で置く'
+      - 監査ログ `github.app_created`
+      - 302 で入れる画面へ
+      x-errors:
+      - '403 `forbidden`: `state` が合わない'
+      - 502 `upstream_failed`
       parameters:
       - name: code
         in: query
@@ -2501,7 +3432,32 @@ paths:
       tags:
       - github
       summary: App を入れた事を記録する
-      description: クエリの名前は GitHub が決めた形のまま。
+      description: 'クエリの名前は GitHub が決めた形のまま。
+
+
+        処理の順:
+
+
+        1. `installation_id` が自分の App の物かを GitHub で確かめる
+
+        2. `vault` に置き、監査ログ `github.installed`
+
+        3. 302 で設定の画面へ
+
+
+        このルートだけの失敗:
+
+
+        - 403 `forbidden`: 自分の App の物でない
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - '`installation_id` が自分の App の物かを GitHub で確かめる'
+      - '`vault` に置き、監査ログ `github.installed`'
+      - 302 で設定の画面へ
+      x-errors:
+      - '403 `forbidden`: 自分の App の物でない'
+      - 502 `upstream_failed`
       parameters:
       - name: installation_id
         in: query
@@ -2535,6 +3491,20 @@ paths:
       tags:
       - github
       summary: 選んだリポジトリ
+      description: '処理の順:
+
+
+        1. インストールのリポジトリの一覧を GitHub から取る
+
+
+        このルートだけの失敗:
+
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - インストールのリポジトリの一覧を GitHub から取る
+      x-errors:
+      - 502 `upstream_failed`
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -2573,6 +3543,12 @@ paths:
       tags:
       - github
       summary: GitHub のルール
+      description: '処理の順:
+
+
+        1. `settings` の `github.rules` の最新の行を読む'
+      x-steps:
+      - '`settings` の `github.rules` の最新の行を読む'
       security:
       - accessJwt: []
         session: []
@@ -2605,7 +3581,32 @@ paths:
       tags:
       - github
       summary: GitHub のルールを変える
-      description: パスキーの確認が 15 分のうちに要る。
+      description: 'パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. `version` が今と同じかを確かめる
+
+        2. `settings` に足し、監査ログ `github.rules`
+
+        3. 公開のリポジトリのルールセットを掛け直す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - '`version` が今と同じかを確かめる'
+      - '`settings` に足し、監査ログ `github.rules`'
+      - 公開のリポジトリのルールセットを掛け直す
+      x-errors:
+      - 409 `conflict`
+      - 502 `upstream_failed`
       x-step-up: true
       requestBody:
         required: true
@@ -2656,7 +3657,35 @@ paths:
       tags:
       - github
       summary: GitHub の通知を受ける
-      description: 署名、時刻、配信の番号を確かめる。本文は GitHub の形で 5MB まで。1 分 60 回まで。
+      description: '署名、時刻、配信の番号を確かめる。本文は GitHub の形で 5MB まで。1 分 60 回まで。
+
+
+        処理の順:
+
+
+        1. 本文を 5MB まで読み、`X-Hub-Signature-256` を時間が一定の比べ方で確かめる
+
+        2. 5 分より古い通知と、`github_deliveries` に在る配信を捨てる
+
+        3. 通知の種類ごとに 3.5 のとおり渡す
+
+
+        このルートだけの失敗:
+
+
+        - 401 `unauthenticated`: 署名が無い、合わない
+
+        - 413 `payload_too_large`: 5MB を超える
+
+        - 429 `rate_limited`: 1 分 60 回を超える'
+      x-steps:
+      - 本文を 5MB まで読み、`X-Hub-Signature-256` を時間が一定の比べ方で確かめる
+      - 5 分より古い通知と、`github_deliveries` に在る配信を捨てる
+      - 通知の種類ごとに 3.5 のとおり渡す
+      x-errors:
+      - '401 `unauthenticated`: 署名が無い、合わない'
+      - '413 `payload_too_large`: 5MB を超える'
+      - '429 `rate_limited`: 1 分 60 回を超える'
       security: []
       responses:
         '204':
@@ -2675,6 +3704,12 @@ paths:
       tags:
       - services
       summary: サービスの一覧
+      description: '処理の順:
+
+
+        1. `services` を段階で絞って読む'
+      x-steps:
+      - '`services` を段階で絞って読む'
       parameters:
       - name: stage
         in: query
@@ -2729,6 +3764,15 @@ paths:
       tags:
       - services
       summary: 案を足す
+      description: '処理の順:
+
+
+        1. `services` に `idea` で 1 行、`service_events` に 1 行足す
+
+        2. 監査ログ `service.create`'
+      x-steps:
+      - '`services` に `idea` で 1 行、`service_events` に 1 行足す'
+      - 監査ログ `service.create`
       requestBody:
         required: true
         content:
@@ -2780,6 +3824,20 @@ paths:
       tags:
       - services
       summary: サービスの様子
+      description: '処理の順:
+
+
+        1. `services`、`service_events`、最新の `service_metrics`、受け継いだ設定を読む
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`'
+      x-steps:
+      - '`services`、`service_events`、最新の `service_metrics`、受け継いだ設定を読む'
+      x-errors:
+      - 404 `not_found`
       parameters:
       - name: serviceId
         in: path
@@ -2820,6 +3878,32 @@ paths:
       tags:
       - services
       summary: 段階を進める、見送る、閉じる
+      description: '処理の順:
+
+
+        1. 行を読み、今の段階から行ける段階かを確かめる
+
+        2. `study` は社長に調べるタスクを足す。本番へのデプロイはルールの条件を確かめる
+
+        3. `services.stage` を直し、`service_events` に足す
+
+        4. 監査ログ `service.advance`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 409 `conflict`: 行けない段階'
+      x-steps:
+      - 行を読み、今の段階から行ける段階かを確かめる
+      - '`study` は社長に調べるタスクを足す。本番へのデプロイはルールの条件を確かめる'
+      - '`services.stage` を直し、`service_events` に足す'
+      - 監査ログ `service.advance`
+      x-errors:
+      - 404 `not_found`
+      - '409 `conflict`: 行けない段階'
       parameters:
       - name: serviceId
         in: path
@@ -2876,7 +3960,35 @@ paths:
       tags:
       - services
       summary: 前のバージョンに戻す
-      description: パスキーの確認が 15 分のうちに要る。
+      description: 'パスキーの確認が 15 分のうちに要る。
+
+
+        処理の順:
+
+
+        1. Web アプリかを確かめる
+
+        2. そのリポジトリの `rollback.yml` を App で動かす
+
+        3. `service_events` に `rollback`、監査ログ `service.rollback`、通知
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 409 `conflict`: Web アプリでない
+
+        - 502 `upstream_failed`'
+      x-steps:
+      - Web アプリかを確かめる
+      - そのリポジトリの `rollback.yml` を App で動かす
+      - '`service_events` に `rollback`、監査ログ `service.rollback`、通知'
+      x-errors:
+      - 404 `not_found`
+      - '409 `conflict`: Web アプリでない'
+      - 502 `upstream_failed`
       x-step-up: true
       parameters:
       - name: serviceId
@@ -2936,7 +4048,23 @@ paths:
       tags:
       - settings
       summary: サービスの設定
-      description: 初期値に従っているかを inherited で返す。
+      description: '初期値に従っているかを inherited で返す。
+
+
+        処理の順:
+
+
+        1. `service_settings` の最新と office の初期値から受け継いだ値を作る
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`'
+      x-steps:
+      - '`service_settings` の最新と office の初期値から受け継いだ値を作る'
+      x-errors:
+      - 404 `not_found`
       parameters:
       - name: serviceId
         in: path
@@ -2981,6 +4109,32 @@ paths:
       tags:
       - settings
       summary: サービスの設定を変える
+      description: '処理の順:
+
+
+        1. `key` が 3.3 の項目かを確かめ、キーごとの Zod スキーマで値を確かめる
+
+        2. `version` が今と同じかを確かめる
+
+        3. `service_settings` に足し、監査ログ `service.setting`
+
+        4. ルールの判断に使う値を作り直す
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 項目が無い
+
+        - 409 `conflict`'
+      x-steps:
+      - '`key` が 3.3 の項目かを確かめ、キーごとの Zod スキーマで値を確かめる'
+      - '`version` が今と同じかを確かめる'
+      - '`service_settings` に足し、監査ログ `service.setting`'
+      - ルールの判断に使う値を作り直す
+      x-errors:
+      - '404 `not_found`: 項目が無い'
+      - 409 `conflict`
       parameters:
       - name: serviceId
         in: path
@@ -3039,6 +4193,12 @@ paths:
       tags:
       - settings
       summary: office の設定とサービスの初期値
+      description: '処理の順:
+
+
+        1. `settings` のキーごとの最新の行を読む'
+      x-steps:
+      - '`settings` のキーごとの最新の行を読む'
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -3077,6 +4237,29 @@ paths:
       tags:
       - settings
       summary: office の設定を変える
+      description: '処理の順:
+
+
+        1. `key` を確かめる。`guard.thresholds` と `github.rules` は専用のルートで変える
+
+        2. `version` が今と同じかを確かめる
+
+        3. `settings` に足し、監査ログ `setting.update`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 項目が無いか専用のルートの物
+
+        - 409 `conflict`'
+      x-steps:
+      - '`key` を確かめる。`guard.thresholds` と `github.rules` は専用のルートで変える'
+      - '`version` が今と同じかを確かめる'
+      - '`settings` に足し、監査ログ `setting.update`'
+      x-errors:
+      - '404 `not_found`: 項目が無いか専用のルートの物'
+      - 409 `conflict`
       parameters:
       - name: key
         in: path
@@ -3131,6 +4314,12 @@ paths:
       tags:
       - records
       summary: ダッシュボード
+      description: '処理の順:
+
+
+        1. 社員の状態、読んでいない通知、承認を待つ物、今日の `daily_totals`、今月の費用、止まっている物を集める'
+      x-steps:
+      - 社員の状態、読んでいない通知、承認を待つ物、今日の `daily_totals`、今月の費用、止まっている物を集める
       security:
       - accessJwt: []
         session: []
@@ -3164,6 +4353,12 @@ paths:
       tags:
       - records
       summary: 記録のまとめ
+      description: '処理の順:
+
+
+        1. 1 つの SQL で `work_entries` と `usage` をスコープごとと全体で数える'
+      x-steps:
+      - 1 つの SQL で `work_entries` と `usage` をスコープごとと全体で数える
       parameters:
       - name: from
         in: query
@@ -3218,6 +4413,12 @@ paths:
       tags:
       - records
       summary: 記録のまとめを CSV で
+      description: '処理の順:
+
+
+        1. `GET /api/v1/records/summary` と同じ数を CSV で返す'
+      x-steps:
+      - '`GET /api/v1/records/summary` と同じ数を CSV で返す'
       parameters:
       - name: from
         in: query
@@ -3262,6 +4463,12 @@ paths:
       tags:
       - records
       summary: 月の稼働率
+      description: '処理の順:
+
+
+        1. その月の `health_checks` の通った割合を部分ごとに出す'
+      x-steps:
+      - その月の `health_checks` の通った割合を部分ごとに出す
       parameters:
       - name: month
         in: query
@@ -3306,6 +4513,12 @@ paths:
       tags:
       - notices
       summary: 通知
+      description: '処理の順:
+
+
+        1. `notices` を新しい順に読む'
+      x-steps:
+      - '`notices` を新しい順に読む'
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -3344,6 +4557,20 @@ paths:
       tags:
       - notices
       summary: 通知を読んだ印
+      description: '処理の順:
+
+
+        1. `read_at` を入れる。入っていれば何もしない
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`'
+      x-steps:
+      - '`read_at` を入れる。入っていれば何もしない'
+      x-errors:
+      - 404 `not_found`
       parameters:
       - name: noticeId
         in: path
@@ -3371,6 +4598,12 @@ paths:
       tags:
       - guard
       summary: 蒸留の案
+      description: '処理の順:
+
+
+        1. `lessons` を状態で絞って読む'
+      x-steps:
+      - '`lessons` を状態で絞って読む'
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -3409,6 +4642,29 @@ paths:
       tags:
       - guard
       summary: 蒸留の案を承認か差し戻し
+      description: '処理の順:
+
+
+        1. 行を読み、決まっていないかを確かめる
+
+        2. 承認なら、説明文の案は `staff_prompts` に新しいバージョンを足し、ルールの案は開発担当にタスクを足す。基準の案は印だけで、入れるのは `PUT /api/v1/guard/thresholds`
+
+        3. `lessons` の状態を直し、監査ログ `lesson.decide`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 409 `conflict`: 決まっている'
+      x-steps:
+      - 行を読み、決まっていないかを確かめる
+      - 承認なら、説明文の案は `staff_prompts` に新しいバージョンを足し、ルールの案は開発担当にタスクを足す。基準の案は印だけで、入れるのは `PUT /api/v1/guard/thresholds`
+      - '`lessons` の状態を直し、監査ログ `lesson.decide`'
+      x-errors:
+      - 404 `not_found`
+      - '409 `conflict`: 決まっている'
       parameters:
       - name: lessonId
         in: path
@@ -3465,6 +4721,12 @@ paths:
       tags:
       - records
       summary: 見つけて直す仕組みの Issue
+      description: '処理の順:
+
+
+        1. `findings` を状態で絞って読む'
+      x-steps:
+      - '`findings` を状態で絞って読む'
       parameters:
       - name: status
         in: query
@@ -3517,6 +4779,12 @@ paths:
       tags:
       - extensions
       summary: 拡張の一覧
+      description: '処理の順:
+
+
+        1. 集めた拡張と、`settings` の入れたかどうかを返す'
+      x-steps:
+      - 集めた拡張と、`settings` の入れたかどうかを返す
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -3555,6 +4823,26 @@ paths:
       tags:
       - extensions
       summary: 拡張を入れる、切る
+      description: '処理の順:
+
+
+        1. 拡張が在るかを確かめる
+
+        2. `settings` に足し、監査ログ `extension.toggle`
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`
+
+        - 409 `conflict`'
+      x-steps:
+      - 拡張が在るかを確かめる
+      - '`settings` に足し、監査ログ `extension.toggle`'
+      x-errors:
+      - 404 `not_found`
+      - 409 `conflict`
       parameters:
       - name: extensionId
         in: path
@@ -3609,7 +4897,18 @@ paths:
       tags:
       - workspace-gate
       summary: 30 秒ごとのハートビート
-      description: 受け手がどの社員のワークスペースかを知っているので作業トークンは要らない。
+      description: '受け手がどの社員のワークスペースかを知っているので作業トークンは要らない。
+
+
+        処理の順:
+
+
+        1. 外向きの通信の受け手が社員を決める
+
+        2. `StaffDO.heartbeat(at)`'
+      x-steps:
+      - 外向きの通信の受け手が社員を決める
+      - '`StaffDO.heartbeat(at)`'
       requestBody:
         required: true
         content:
@@ -3643,7 +4942,29 @@ paths:
       tags:
       - workspace-gate
       summary: チェックポイントに届いた
-      description: nodeId が社員 DO の今のタスクと合う時だけ受ける。
+      description: 'nodeId が社員 DO の今のタスクと合う時だけ受ける。
+
+
+        処理の順:
+
+
+        1. `nodeId` が社員 DO の今のタスクと合うかを確かめる
+
+        2. `StaffDO.checkpoint(c)`
+
+        3. `node_events` に 1 行足す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 今のタスクと違う'
+      x-steps:
+      - '`nodeId` が社員 DO の今のタスクと合うかを確かめる'
+      - '`StaffDO.checkpoint(c)`'
+      - '`node_events` に 1 行足す'
+      x-errors:
+      - '409 `conflict`: 今のタスクと違う'
       requestBody:
         required: true
         content:
@@ -3677,7 +4998,32 @@ paths:
       tags:
       - workspace-gate
       summary: ツールを使ってよいかを聞く
-      description: フックが 5 秒で切れる形で呼ぶ。
+      description: 'フックが 5 秒で切れる形で呼ぶ。
+
+
+        処理の順:
+
+
+        1. 作業トークンを 3.3 の 1 で確かめる
+
+        2. `toOperation()` と `decide()` で判断する
+
+        3. `tool_calls` に 1 行足す
+
+        4. 断れば `guard.observe` に `rule_denied`
+
+
+        このルートだけの失敗:
+
+
+        - 409 `stopped`'
+      x-steps:
+      - 作業トークンを 3.3 の 1 で確かめる
+      - '`toOperation()` と `decide()` で判断する'
+      - '`tool_calls` に 1 行足す'
+      - 断れば `guard.observe` に `rule_denied`
+      x-errors:
+      - 409 `stopped`
       requestBody:
         required: true
         content:
@@ -3725,6 +5071,23 @@ paths:
       tags:
       - workspace-gate
       summary: 発言、ツールの結果、チェックポイント、エラー、終わり
+      description: '処理の順:
+
+
+        1. 作業トークンを確かめる
+
+        2. 種類ごとに渡す。発言は `messages` と `LiveDO`、ツールの結果は `guard.observe` の `command_result`、チェックポイントは `StaffDO.checkpoint`、エラーは `error_events`、終わりは `StaffDO` が作業トークンを失効させて `work_entries` を足す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: タスクが今の物と違う'
+      x-steps:
+      - 作業トークンを確かめる
+      - 種類ごとに渡す。発言は `messages` と `LiveDO`、ツールの結果は `guard.observe` の `command_result`、チェックポイントは `StaffDO.checkpoint`、エラーは `error_events`、終わりは `StaffDO` が作業トークンを失効させて `work_entries` を足す
+      x-errors:
+      - '409 `conflict`: タスクが今の物と違う'
       requestBody:
         required: true
         content:
@@ -3757,6 +5120,26 @@ paths:
       tags:
       - workspace-gate
       summary: 会話の記録の続き
+      description: '処理の順:
+
+
+        1. 作業トークンを確かめる
+
+        2. `seq` が前の続きかを確かめる
+
+        3. 3.6 のとおり暗号にして R2 に置き、`transcript_parts` に 1 行足す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: `seq` が飛んだ'
+      x-steps:
+      - 作業トークンを確かめる
+      - '`seq` が前の続きかを確かめる'
+      - 3.6 のとおり暗号にして R2 に置き、`transcript_parts` に 1 行足す
+      x-errors:
+      - '409 `conflict`: `seq` が飛んだ'
       requestBody:
         required: true
         content:
@@ -3789,7 +5172,35 @@ paths:
       tags:
       - workspace-gate
       summary: 社員のツール。入力はツールごとの Zod スキーマ
-      description: toolInput の形はツールごとに決め、ゲートウェイが確かめる。
+      description: 'toolInput の形はツールごとに決め、ゲートウェイが確かめる。
+
+
+        処理の順:
+
+
+        1. 作業トークンを確かめる
+
+        2. 社員の役で使えるツールかを確かめ、ツールごとの Zod スキーマで入力を確かめる
+
+        3. `decide()` で判断する
+
+        4. ゲートウェイがツールを行い、`tool_calls` と監査ログに残す
+
+
+        このルートだけの失敗:
+
+
+        - 404 `not_found`: 役に無いツール
+
+        - 409 `stopped`'
+      x-steps:
+      - 作業トークンを確かめる
+      - 社員の役で使えるツールかを確かめ、ツールごとの Zod スキーマで入力を確かめる
+      - '`decide()` で判断する'
+      - ゲートウェイがツールを行い、`tool_calls` と監査ログに残す
+      x-errors:
+      - '404 `not_found`: 役に無いツール'
+      - 409 `stopped`
       parameters:
       - name: toolName
         in: path
@@ -3844,6 +5255,12 @@ paths:
       tags:
       - workspace
       summary: ワークスペースが起きたか
+      description: '処理の順:
+
+
+        1. `/work` が書けるか、SDK を読み込めたかを返す'
+      x-steps:
+      - '`/work` が書けるか、SDK を読み込めたかを返す'
       security: []
       responses:
         '200':
@@ -3872,6 +5289,23 @@ paths:
       tags:
       - workspace
       summary: 会話の記録を戻す
+      description: '処理の順:
+
+
+        1. 走っている呼び出しが無いかを確かめる
+
+        2. 会話の記録を SDK の置き場に書く
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 走っている'
+      x-steps:
+      - 走っている呼び出しが無いかを確かめる
+      - 会話の記録を SDK の置き場に書く
+      x-errors:
+      - '409 `conflict`: 走っている'
       requestBody:
         required: true
         content:
@@ -3899,6 +5333,26 @@ paths:
       tags:
       - workspace
       summary: タスク 1 件の SDK の呼び出しを始める
+      description: '処理の順:
+
+
+        1. 走っている呼び出しが無いかを確かめる
+
+        2. 作業トークンを持ち、`query()` を始める
+
+        3. 202 を返し、進みは `/ws/v1/events` で送る
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 走っている'
+      x-steps:
+      - 走っている呼び出しが無いかを確かめる
+      - 作業トークンを持ち、`query()` を始める
+      - 202 を返し、進みは `/ws/v1/events` で送る
+      x-errors:
+      - '409 `conflict`: 走っている'
       requestBody:
         required: true
         content:
@@ -3928,6 +5382,20 @@ paths:
       tags:
       - workspace
       summary: 走っている呼び出しにオーナーの発言を足す
+      description: '処理の順:
+
+
+        1. 走っている呼び出しの入力の流れにオーナーの発言を足す
+
+
+        このルートだけの失敗:
+
+
+        - 409 `conflict`: 走っていない'
+      x-steps:
+      - 走っている呼び出しの入力の流れにオーナーの発言を足す
+      x-errors:
+      - '409 `conflict`: 走っていない'
       requestBody:
         required: true
         content:
@@ -3957,6 +5425,12 @@ paths:
       tags:
       - workspace
       summary: 新しい作業トークンに替える
+      description: '処理の順:
+
+
+        1. 持っている作業トークンを新しい物に替える'
+      x-steps:
+      - 持っている作業トークンを新しい物に替える
       requestBody:
         required: true
         content:
@@ -3984,6 +5458,15 @@ paths:
       tags:
       - workspace
       summary: 今の呼び出しを切る
+      description: '処理の順:
+
+
+        1. 今の呼び出しを切る
+
+        2. 会話の記録の残りを `/ws/v1/transcript-parts` に送る'
+      x-steps:
+      - 今の呼び出しを切る
+      - 会話の記録の残りを `/ws/v1/transcript-parts` に送る
       requestBody:
         required: true
         content:
