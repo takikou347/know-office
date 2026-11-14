@@ -37,7 +37,7 @@ export type AgentCall = {
   onSession(sessionId: string): void;
 };
 
-/** SDK を 1 回呼び、終わるまで待つ。abortController で止めると投げる。本物の SDK は tasks.md の 7.6 でつなぐ */
+/** SDK を 1 回呼び、終わるまで待つ。abortController で止めると投げる。本物は sdk.ts の sdkAgent */
 export type Agent = (call: AgentCall) => Promise<void>;
 
 /**
