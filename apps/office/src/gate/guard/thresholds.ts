@@ -1,6 +1,6 @@
-// 今の基準を settings の最新の行から読む。行が無い間は初期値をバージョン 0 として使う (自動停止の 3.1、3.3)
+// 今の基準を settings の最新の行から読み、基準のハッシュを作る。行が無い間は初期値をバージョン 0 として使う (自動停止の 3.1、3.3)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, DEFAULT_THRESHOLDS, Thresholds } from "@know-office/core";
+import { AppError, canonicalJson, DEFAULT_THRESHOLDS, sha256Hex, Thresholds } from "@know-office/core";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { settings } from "../db/main.ts";
@@ -18,4 +18,13 @@ export async function loadThresholds(db: D1Database): Promise<{ thresholds: Thre
   // 形の違う基準で数えると止めるべき物を見逃すので、読めない時は失敗にする
   if (!parsed.success) throw new AppError("internal", "guard.thresholds の形が違う");
   return { thresholds: parsed.data, version: row.version };
+}
+
+/**
+ * 基準のハッシュを作る。キーを並べ替えた JSON の SHA-256 なので、同じ値なら書いた順によらず同じになる
+ * @param value 基準の値。settings に置いた JSON を読んだ物をそのまま渡してもよい
+ * @returns 64 桁の 16 進数
+ */
+export function thresholdsHash(value: unknown): Promise<string> {
+  return sha256Hex(canonicalJson(value));
 }

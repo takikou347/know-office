@@ -7,6 +7,8 @@ import { RECENT_OPS } from "./staff-guard.ts";
 
 const OpenStops = z.record(z.string(), z.string());
 const Released = z.array(z.string());
+/** 基準のハッシュの形。SHA-256 の 16 進数 */
+const ThresholdHash = z.string().regex(/^[0-9a-f]{64}$/);
 /** GuardDO に置く、入れ直す鍵の今。世代は全体を止めるたびに 1 つ進む */
 const StoredKeyState = z.object({ held: z.boolean(), pending: z.array(KeyKind), generation: z.number().int().nonnegative() }).strict();
 
@@ -96,6 +98,30 @@ export class OfficeGuard {
       await this.storage.put("key_state", { held: pending.length > 0, pending, generation: now.generation });
       return { held: pending.length > 0, pending };
     });
+  }
+
+  /**
+   * 今の基準のハッシュを置き換える。基準を変えるルートだけが、settings と監査ログに書いた後に呼ぶ
+   * @param hash 基準の SHA-256 (64 桁の 16 進数)
+   * @returns 無し
+   * @throws validation_failed ハッシュの形が違う時
+   */
+  setThresholdHash(hash: unknown): Promise<null> {
+    const parsed = ThresholdHash.safeParse(hash);
+    if (!parsed.success) return Promise.reject(new AppError("validation_failed", "基準のハッシュの形が違う"));
+    return this.#serial(async () => {
+      await this.storage.put("threshold_hash", parsed.data);
+      return null;
+    });
+  }
+
+  /**
+   * 今の基準のハッシュを返す
+   * @returns ハッシュ。基準を一度も変えていなければ null
+   */
+  async thresholdHash(): Promise<string | null> {
+    const stored = await this.storage.get("threshold_hash");
+    return stored === undefined ? null : ThresholdHash.parse(stored);
   }
 
   /**

@@ -42,6 +42,10 @@ export interface Guard extends Rpc.DurableObjectBranded {
   keyState(): Promise<KeyState>;
   /** 入れ直した鍵の印を外す。読んだ世代が今と違えば何も変えない */
   releaseKeys(kind: KeyKind, generation: number): Promise<GuardKeys>;
+  /** 今の基準のハッシュを置き換える。基準を変えるルートだけが呼ぶ */
+  setThresholdHash(hash: string): Promise<null>;
+  /** 今の基準のハッシュ。基準を一度も変えていなければ null */
+  thresholdHash(): Promise<string | null>;
   /** その範囲と相手を止める権利を取る */
   claimStop(scope: string, target: string, stopId: string): Promise<boolean>;
   /** 止めた記録を再開する権利を取る */

@@ -2134,7 +2134,9 @@ paths:
 
         3. `settings` への追加と、`lessonId` の改善案を `applied` にする更新を 1 回のバッチで行う。どちらも `version` より新しい行が無く、改善案が承認済みのしきい値の案である時だけ書く
 
-        4. 監査ログに `guard.thresholds` を、変更前後の値と理由とともに記録する
+        4. 監査ログに `guard.thresholds` を、追加した `settings` の行を対象にし、変更前後の値と理由と新しい基準のハッシュとともに記録する
+
+        5. `GuardDO.setThresholdHash()` に新しい基準のハッシュを渡す
 
 
         このルート固有のエラー:
@@ -2149,7 +2151,8 @@ paths:
       - '`version` が現在と一致することを確認し、送った項目を今の値に重ねて基準の形に合うかを確かめる'
       - '`lessonId` があれば、改善案が存在することを確認する'
       - '`settings` への追加と、`lessonId` の改善案を `applied` にする更新を 1 回のバッチで行う。どちらも `version` より新しい行が無く、改善案が承認済みのしきい値の案である時だけ書く'
-      - 監査ログに `guard.thresholds` を、変更前後の値と理由とともに記録する
+      - 監査ログに `guard.thresholds` を、追加した `settings` の行を対象にし、変更前後の値と理由と新しい基準のハッシュとともに記録する
+      - '`GuardDO.setThresholdHash()` に新しい基準のハッシュを渡す'
       x-errors:
       - '404 `not_found`: `lessonId` の改善案が存在しない'
       - '409 `conflict`: バージョンが異なる、または改善案が承認済みのしきい値の案でない'

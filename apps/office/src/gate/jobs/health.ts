@@ -1,4 +1,4 @@
-// 5 分ごとの定期ジョブ。D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
+// 5 分ごとの定期ジョブ。D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
 import { type Clock, newId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -7,7 +7,7 @@ import type { Bindings } from "../env.ts";
 import { SHARED_TOKENS, vaultForge } from "../github/app.ts";
 import { retryMirrors } from "../github/mirror.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
-import { checkOverruns } from "../guard/observe.ts";
+import { checkOverruns, checkThresholds } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import { STORAGE_LIMIT_BYTES, storageUses } from "../ledger/storage.ts";
 import { pollBatches, type WeeklyDeps } from "./weekly.ts";
@@ -74,5 +74,9 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
   // 1 つのタスクの最長時間は 5 分ごとに見る。最長の 4 時間に比べて十分に細かい
   ctx.waitUntil(
     checkOverruns(env, clock.now(), UNCONNECTED_DEPS).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "overrun_check_failed", error }, clock)),
+  );
+  // 手順を通らずに変わった基準は、5 分のうちに見つけて全体を止める
+  ctx.waitUntil(
+    checkThresholds(env, clock.now(), UNCONNECTED_DEPS).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "threshold_check_failed", error }, clock)),
   );
 }

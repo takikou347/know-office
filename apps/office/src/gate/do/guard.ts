@@ -64,6 +64,24 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
   }
 
   /**
+   * 今の基準のハッシュを置き換える。基準を変えるルートだけが呼ぶ
+   * @param hash 基準の SHA-256
+   * @returns 無し
+   * @throws validation_failed ハッシュの形が違う時
+   */
+  setThresholdHash(hash: unknown): Promise<null> {
+    return this.#office.setThresholdHash(hash);
+  }
+
+  /**
+   * 今の基準のハッシュを返す
+   * @returns ハッシュ。基準を一度も変えていなければ null
+   */
+  thresholdHash(): Promise<string | null> {
+    return this.#office.thresholdHash();
+  }
+
+  /**
    * その範囲と相手を止める権利を取る
    * @param scope 範囲
    * @param target 相手

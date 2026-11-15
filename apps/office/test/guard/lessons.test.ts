@@ -105,7 +105,10 @@ describe("蒸留", () => {
     expect(await thresholds(world)).toMatchObject({ version: 1, values: { staffRuleDenied: 3 } });
     expect(await rows(world.d1.DB, "SELECT status, applied_at FROM lessons WHERE id = ?", lessonId)).toEqual([{ status: "applied", applied_at: world.clock.now() }]);
     expect(world.gate.audits.filter((a) => a.action === "guard.thresholds")).toEqual([
-      expect.objectContaining({ target: "guard.thresholds", detail: { before: { staffRuleDenied: 2 }, after: { staffRuleDenied: 3 }, version: 1, reason: "蒸留の案", lessonId } }),
+      expect.objectContaining({
+        target: (await rows(world.d1.DB, "SELECT id FROM settings WHERE key = 'guard.thresholds'"))[0]?.["id"],
+        detail: { before: { staffRuleDenied: 2 }, after: { staffRuleDenied: 3 }, version: 1, hash: expect.stringMatching(/^[0-9a-f]{64}$/) as unknown, reason: "蒸留の案", lessonId },
+      }),
     ]);
     // 社員のツールに基準を変える物は無い
     expect(world.gate.audits.filter((a) => a.action === "lesson.decide")).toEqual([expect.objectContaining({ actor: "owner", target: lessonId })]);

@@ -287,7 +287,9 @@ export const guardRoutes = router
   .openapi(updateThresholdsRoute, async (c) => {
     const input = c.req.valid("json");
     const changed = await updateThresholds(c.env, input, c.var.clock.now());
-    await audit(c, "guard.thresholds", "guard.thresholds", { before: changed.before, after: changed.after, version: changed.version, reason: input.reason, lessonId: input.lessonId });
+    // 5 分ごとの確かめが、settings の行とそれを入れた監査ログの行と GuardDO のハッシュを比べる。対象は足した行
+    await audit(c, "guard.thresholds", changed.id, { before: changed.before, after: changed.after, version: changed.version, hash: changed.hash, reason: input.reason, lessonId: input.lessonId });
+    await guardDo(c.env).setThresholdHash(changed.hash);
     return ok(c, { version: changed.version, values: changed.values });
   })
   .openapi(getEffectRoute, async (c) => ok(c, await guardEffect(c.env.DB, c.req.valid("query"))))

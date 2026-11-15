@@ -33,6 +33,14 @@ describe("止める仕組みの DO", () => {
     expect(await worker.guard("keysHeld")).toBe(false);
   });
 
+  it("全体のセキュリティ DO が基準のハッシュを持ち、形の違うハッシュは断る", async () => {
+    expect(await worker.guard("thresholdHash")).toBeNull();
+    await worker.guard("setThresholdHash", "a".repeat(64));
+    expect(await worker.guard("thresholdHash")).toBe("a".repeat(64));
+    await expect(worker.guard("setThresholdHash", "A".repeat(64))).rejects.toThrow(/ハッシュの形/);
+    expect(await worker.guard("thresholdHash")).toBe("a".repeat(64));
+  });
+
   it("同じ相手を止める権利と、同じ記録を再開する権利は 1 つだけが取れる", async () => {
     const claims = await Promise.all([worker.guard("claimStop", "staff", "builder", "s1"), worker.guard("claimStop", "staff", "builder", "s2")]);
     expect(claims.filter((c) => c === true)).toHaveLength(1);

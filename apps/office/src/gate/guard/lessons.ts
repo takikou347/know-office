@@ -11,7 +11,7 @@ import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
 import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated } from "../work/nodes.ts";
 import { notifyStaff } from "../work/loop.ts";
-import { loadThresholds } from "./thresholds.ts";
+import { loadThresholds, thresholdsHash } from "./thresholds.ts";
 
 const DAY = 24 * 60 * 60_000;
 
@@ -141,7 +141,7 @@ export async function decideLesson(env: Bindings, lessonId: string, decision: "a
  * @param env バインディング
  * @param input 版、変える項目、理由、入れる案
  * @param now 今の時刻
- * @returns 変えた後の版と値、変える前と後の項目
+ * @returns 足した settings の行の ID、変えた後の版と値とハッシュ、変える前と後の項目
  * @throws validation_failed 知らない項目か、基準の形に合わない値の時
  * @throws not_found 入れる案が無い時
  * @throws conflict 版が違う時、案が承認した基準の案でない時
@@ -150,7 +150,7 @@ export async function updateThresholds(
   env: Bindings,
   input: UpdateThresholdsInput,
   now: number,
-): Promise<{ version: number; values: Thresholds; before: Record<string, number>; after: Record<string, number> }> {
+): Promise<{ id: string; version: number; values: Thresholds; hash: string; before: Record<string, number>; after: Record<string, number> }> {
   const current = await loadThresholds(env.DB);
   if (current.version !== input.version) throw new AppError("conflict", "バージョンが違う");
   const merged = Thresholds.safeParse({ ...current.thresholds, ...input.values });
@@ -190,7 +190,7 @@ export async function updateThresholds(
   if (z.array(z.unknown()).parse(results[0]).length === 0) throw new AppError("conflict", "バージョンが違うか、承認した基準の案でない");
   const keys = Object.keys(input.values).filter((k) => Reflect.get(current.thresholds, k) !== Reflect.get(merged.data, k));
   const pick = (t: Thresholds) => Object.fromEntries(keys.map((k) => [k, Number(Reflect.get(t, k))]));
-  return { version: next, values: merged.data, before: pick(current.thresholds), after: pick(merged.data) };
+  return { id, version: next, values: merged.data, hash: await thresholdsHash(merged.data), before: pick(current.thresholds), after: pick(merged.data) };
 }
 
 /** 効き目を出す stops の行 */
