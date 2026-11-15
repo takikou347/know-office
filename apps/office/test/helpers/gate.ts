@@ -9,6 +9,7 @@ import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts"
 import type { Bindings } from "../../src/gate/env.ts";
 import type { ExtensionDefinition } from "../../src/gate/extensions/define.ts";
 import type { GuardDeps, ReviewAnswer } from "../../src/gate/guard/deps.ts";
+import { GENESIS_HASH, verifyChain } from "../../src/gate/ledger/audit.ts";
 import { OfficeGuard } from "../../src/gate/guard/office-guard.ts";
 import { StaffGuard } from "../../src/gate/guard/staff-guard.ts";
 import { createGate } from "../../src/gate/index.ts";
@@ -295,6 +296,13 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
       audits.push(input);
       return Promise.resolve({ id: String(audits.length), hash: "0".repeat(64) });
     },
+    // 記録 DO と同じく record_years の年の置き場を頭から確かめる。DO そのものは test/do/recorder.test.ts で確かめる
+    verify: overRpc(async (year: number) => {
+      const row = await options.d1.DB.prepare("SELECT first_hash FROM record_years WHERE year = ?").bind(year).first<{ first_hash: string | null }>();
+      const db = new Map([[2026, options.d1.REC_2026], [2027, options.d1.REC_2027]]).get(year);
+      if (!row || !db) throw new AppError("not_found", `${String(year)} 年の記録が無い`);
+      return verifyChain(db, row.first_hash ?? GENESIS_HASH);
+    }),
     size: () => Promise.resolve(Object.entries(storage).map(([binding, bytes]) => ({ binding, bytes }))),
     find: (_at: number, action: string, target: string) => {
       const found = audits.find((a) => a.action === action && a.target === target);

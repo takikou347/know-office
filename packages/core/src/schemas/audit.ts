@@ -36,3 +36,18 @@ export const AuditRow = z
 
 /** 監査ログの 1 行の型 */
 export type AuditRow = z.infer<typeof AuditRow>;
+
+/** ハッシュチェーンを確かめる年。記録は 2026 年から */
+export const VerifyAuditInput = z.object({ year: z.int().min(2026) }).strict().meta({ id: "VerifyAuditInput" });
+
+/** ハッシュチェーンを確かめる年の型 */
+export type VerifyAuditInput = z.infer<typeof VerifyAuditInput>;
+
+/** ハッシュチェーンを確かめた結果。brokenAt は最初に合わなかった行の ID */
+export const AuditVerification = z
+  .object({ ok: z.boolean(), brokenAt: z.string().nullable().meta({ description: "最初にハッシュが一致しなかった行の ID" }) })
+  .strict()
+  .meta({ id: "AuditVerification" });
+
+/** ハッシュチェーンを確かめた結果の型 */
+export type AuditVerification = z.infer<typeof AuditVerification>;

@@ -51,10 +51,13 @@ export default defineConfig({
   projects: [
     // 記録は 1 度だけ置き、ログインセッションはブラウザーごとに作る。クッキーの扱いがブラウザーで違うため
     { name: "records", testMatch: /records\.setup\.ts/ },
+    // 自動の攻撃のチェックはブラウザーを使わず要求だけを送るので、ブラウザーと幅ごとに回さず 1 度だけ流す
+    { name: "attack", testMatch: /attack\.spec\.ts/ },
     ...chosen.map((b) => ({ name: `${LOGIN_PROJECT}${b.name}`, testMatch: /login\.setup\.ts/, dependencies: ["records"], use: b.use })),
     ...chosen.flatMap((b, i) =>
       widths.map((w, j) => ({
         name: `${b.name}-${w.name}`,
+        testIgnore: /attack\.spec\.ts/,
         dependencies: [`${LOGIN_PROJECT}${b.name}`],
         use: { ...b.use, viewport: w.viewport, storageState: sessionState(b.name), extraHTTPHeaders: { "CF-Connecting-IP": sourceIp(i * widths.length + j) } },
       })),

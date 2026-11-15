@@ -101,6 +101,8 @@ export async function startOfficeWorker(): Promise<OfficeWorker> {
   let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
   try {
     copyFileSync(join(import.meta.dirname, "../../index.html"), join(assets, "index.html"));
+    // 画面のファイルのヘッダーは public/_headers が決め、vite build がそのまま写す
+    copyFileSync(join(import.meta.dirname, "../../public/_headers"), join(assets, "_headers"));
     worker = await unstable_startWorker({
       config: join(import.meta.dirname, "../../wrangler.jsonc"),
       assets,

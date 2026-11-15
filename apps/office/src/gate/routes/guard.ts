@@ -25,7 +25,7 @@ import {
 import { and, desc, eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
-import { requireStepUp } from "../auth/passkey.ts";
+import { requireStepUp, stepUpGate } from "../auth/passkey.ts";
 import { stops, stopUpdates } from "../db/main.ts";
 import { applyStop, guardDo, openStop, openStops, previewStop, resumeStop, type StopRowData, stopStates } from "../guard/actions.ts";
 import { decideLesson, guardEffect, listLessons, updateThresholds } from "../guard/lessons.ts";
@@ -128,6 +128,8 @@ const updateThresholdsRoute = createRoute({
   operationId: "updateThresholds",
   tags: ["guard"],
   "x-step-up": true,
+  // 基準を変えると止める判断が変わるので、強める時も弱める時もパスキーで確かめる
+  middleware: [stepUpGate] as const,
   request: { body: jsonBody(UpdateThresholdsInput) },
   responses: { 200: okResponse(GuardThresholds), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
@@ -283,8 +285,6 @@ export const guardRoutes = router
     return ok(c, { version, values: thresholds });
   })
   .openapi(updateThresholdsRoute, async (c) => {
-    // 基準を変えると止める判断が変わるので、強める時も弱める時もパスキーで確かめる
-    requireStepUp(c);
     const input = c.req.valid("json");
     const changed = await updateThresholds(c.env, input, c.var.clock.now());
     await audit(c, "guard.thresholds", "guard.thresholds", { before: changed.before, after: changed.after, version: changed.version, reason: input.reason, lessonId: input.lessonId });

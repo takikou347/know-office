@@ -60,6 +60,32 @@ function list(query: string): Promise<Response> {
   return gate.request(`/api/v1/audit-logs${query}`, { headers });
 }
 
+const Verification = z.object({ data: z.object({ ok: z.boolean(), brokenAt: z.string().nullable() }).strict() }).loose();
+
+/**
+ * 年のハッシュチェーンを確かめる
+ * @param year 年
+ * @returns 返事
+ */
+function verify(year: number): Promise<Response> {
+  return gate.request("/api/v1/audit-logs/verify", { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ year }) });
+}
+
+describe("書き換えられない記録", () => {
+  it("記録が書き換わる", async () => {
+    const [row] = (await d1.REC_2027.prepare("SELECT id FROM audit_log ORDER BY id LIMIT 1").all<{ id: string }>()).results;
+    // 書き換えはトリガーが断るので、トリガーを外して書き換えた事にする
+    await d1.REC_2027.prepare("DROP TRIGGER audit_log_no_update").run();
+    await d1.REC_2027.prepare("UPDATE audit_log SET target = 'changed' WHERE id = ?").bind(row?.id).run();
+    const res = await verify(2027);
+    expect(res.status).toBe(200);
+    expect(Verification.parse(await res.json()).data).toEqual({ ok: false, brokenAt: row?.id });
+    // つなぎが合わない事は確かな不正のシグナルで、全体を止める
+    const stops = await d1.DB.prepare("SELECT kind, scope, signal FROM stops").all();
+    expect(stops.results).toEqual([{ kind: "stop", scope: "office", signal: "certain_fraud" }]);
+  });
+});
+
 describe("記録の量", () => {
   it("前の年を読む", async () => {
     await stepUp();
@@ -81,6 +107,14 @@ describe("記録の量", () => {
     const second = AuditList.parse(await (await list(`?limit=3&cursor=${String(first.meta.next)}`)).json());
     expect(second.data.map((row) => row.action)).toEqual(["test.old"]);
     expect(second.meta.next).toBeNull();
+  });
+
+  it("年のハッシュチェーンを確かめ、合えば ok を返して何も止めない。置き場の無い年は 404", async () => {
+    const res = await verify(2027);
+    expect(res.status).toBe(200);
+    expect(Verification.parse(await res.json()).data).toEqual({ ok: true, brokenAt: null });
+    expect(await d1.DB.prepare("SELECT COUNT(*) AS n FROM stops").first("n")).toBe(0);
+    expect((await verify(2030)).status).toBe(404);
   });
 
   it("パスキーの確認が無ければ 401 step_up_required、期間が逆さなら 422", async () => {

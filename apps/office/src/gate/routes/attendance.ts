@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { createRouter } from "../app.ts";
-import { requireStepUp } from "../auth/passkey.ts";
+import { stepUpGate } from "../auth/passkey.ts";
 import { attendance } from "../db/main.ts";
 import type { GateEnv, Staff } from "../env.ts";
 import { audit } from "../ledger/record.ts";
@@ -36,6 +36,7 @@ const correctAttendanceRoute = createRoute({
   operationId: "correctAttendance",
   tags: ["records"],
   "x-step-up": true,
+  middleware: [stepUpGate] as const,
   request: {
     params: z.object({ attendanceId: z.uuid().openapi({ param: { name: "attendanceId", in: "path" }, description: "UUID v7" }) }).strict(),
     body: { required: true, content: { "application/json": { schema: CorrectAttendanceInput } } },
@@ -103,7 +104,6 @@ export const attendanceRoutes = router
     return ok(c, { summary, entries: entries.map(toEntry) });
   })
   .openapi(correctAttendanceRoute, async (c) => {
-    requireStepUp(c);
     const { attendanceId } = c.req.valid("param");
     const input = c.req.valid("json");
     const orm = drizzle(c.env.DB);

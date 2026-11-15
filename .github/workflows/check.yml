@@ -1,16 +1,21 @@
-# PR と main で、OpenSpec の仕様の形と、アプリの型、ビルド、単体のテスト、画面の通しを確かめる
+# PR と main で、OpenSpec の仕様の形と、アプリの型、ビルド、単体のテスト、画面の通し、動く入口への自動の攻撃を確かめる。依存の弱点は依存を変えた PR と週に 1 度の main で確かめる
 name: Check
 
 on:
   pull_request:
   push:
     branches: [main]
+  # 毎週月曜の 0 時 (協定世界時) に、main の依存に新しく公開された弱点が無いかを確かめる
+  schedule:
+    - cron: "0 0 * * 1"
 
 permissions:
   contents: read
 
 jobs:
   check:
+    # 週に 1 度の確かめは依存の弱点だけを見る
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -46,11 +51,13 @@ jobs:
       - run: pnpm build
 
   # 決まり、手順、仕様の文だけの変更ではコードが動かないので、test と e2e を飛ばす。main への push では必ず走らせる
+  # 依存 (package.json か pnpm-lock.yaml) を変えた PR だけ、依存の弱点を確かめる。週に 1 度の確かめは依存の弱点だけを見る
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      deps: ${{ steps.diff.outputs.deps }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,13 +65,34 @@ jobs:
           fetch-depth: 0
       - id: diff
         env:
+          EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eu
-          if [ -z "$BASE" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          code=$(git diff --name-only --no-renames "$BASE" "$HEAD" | { grep -vE '^(\.claude/(rules|skills|agents)/.*\.md$|openspec/.*\.md$|[^/]*\.md$)' || true; })
+          if [ "$EVENT" = "schedule" ]; then printf 'code=false\ndeps=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ -z "$BASE" ]; then printf 'code=true\ndeps=false\n' >> "$GITHUB_OUTPUT"; exit 0; fi
+          files=$(git diff --name-only --no-renames "$BASE" "$HEAD")
+          code=$(printf '%s\n' "$files" | { grep -vE '^(\.claude/(rules|skills|agents)/.*\.md$|openspec/.*\.md$|[^/]*\.md$)' || true; })
           if [ -n "$code" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; else echo "code=false" >> "$GITHUB_OUTPUT"; fi
+          deps=$(printf '%s\n' "$files" | { grep -E '^(pnpm-lock\.yaml|(.*/)?package\.json)$' || true; })
+          if [ -n "$deps" ]; then echo "deps=true" >> "$GITHUB_OUTPUT"; else echo "deps=false" >> "$GITHUB_OUTPUT"; fi
+
+  # 弱点の知られた依存を足すと落とす。high 以上を数え、low と moderate は落とさない (セキュリティの「弱点のチェック」)
+  vulnerabilities:
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm audit --audit-level high
 
   # 単体のテストと画面の通しは長いので、check と並べて別の機械で走らせる
   test:
@@ -100,6 +128,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @know-office/office exec playwright install --with-deps chromium webkit
+      # 画面の通しと一緒に、動く入口への自動の攻撃のチェック (e2e/attack.spec.ts) も流す
       - run: pnpm e2e
       # 落ちた時に、どの画面で何が出ていたかを後から読めるよう残す
       - if: failure()

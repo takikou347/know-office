@@ -1,6 +1,7 @@
 // パスキーの登録と確認の形と、パスキーの確認の要り方 (ログインと記録の 3.3)
 import { AppError } from "@know-office/core";
 import type { Context } from "hono";
+import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import type { GateEnv } from "../env.ts";
 
@@ -66,3 +67,13 @@ export function requireStepUp(c: Context<GateEnv>): void {
   const until = c.var.session?.stepUpUntil ?? null;
   if (until === null || until <= c.var.clock.now()) throw new AppError("step_up_required", "パスキーの確認が要る");
 }
+
+/**
+ * `x-step-up: true` のルートの createRoute の middleware に置き、入力を確かめる前にパスキーの確認を求める
+ * @throws step_up_required 確認が無いか、15 分を過ぎた時
+ */
+export const stepUpGate = createMiddleware<GateEnv>(async (c, next) => {
+  // 入力の検証より先に断り、確認の無い人に入力の形を探らせない。ログインと記録の 1 章
+  requireStepUp(c);
+  await next();
+});

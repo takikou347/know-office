@@ -1,19 +1,21 @@
-// 記録: 年ごとの置き場から読む監査ログと、置き場ごとの使った量 (ログインと記録の 3.5)
+// 記録: 年ごとの置き場から読む監査ログとハッシュチェーンの確かめ、置き場ごとの使った量 (ログインと記録の 3.4、3.5)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, AuditRow, jstDayStart, jstYear, RecordGroup, RecordSummary, StorageUse } from "@know-office/core";
+import { AppError, AuditRow, AuditVerification, jstDayStart, jstYear, RecordGroup, RecordSummary, StorageUse, VerifyAuditInput } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { and, desc, gte, lt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
-import { requireStepUp } from "../auth/passkey.ts";
+import { stepUpGate } from "../auth/passkey.ts";
 import { recordYears } from "../db/main.ts";
 import { auditLog } from "../db/records.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
+import { observe } from "../guard/observe.ts";
 import { storageUses } from "../ledger/storage.ts";
 import { type RecordDb, type SummaryRange, summarize, summaryCsv } from "../ledger/summary.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, ok } from "../respond.ts";
+import { rethrowRpc } from "../rpc.ts";
 
 const DAY = 24 * 60 * 60_000;
 const router = createRouter();
@@ -31,8 +33,18 @@ const listAuditLogsRoute = createRoute({
   operationId: "listAuditLogs",
   tags: ["system"],
   "x-step-up": true,
+  middleware: [stepUpGate] as const,
   request: { query: listQuery(router).extend({ from: Day("from"), to: Day("to") }) },
   responses: { 200: listResponse(AuditRow), ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+const verifyAuditLogsRoute = createRoute({
+  method: "post",
+  path: "/api/v1/audit-logs/verify",
+  operationId: "verifyAuditLogs",
+  tags: ["system"],
+  request: { body: { content: { "application/json": { schema: VerifyAuditInput } }, required: true } },
+  responses: { 200: okResponse(AuditVerification), ...problems(400, 401, 403, 404, 413, 415, 422, 429, 500) },
 });
 
 const listStorageRoute = createRoute({
@@ -105,10 +117,16 @@ function boundRecords(env: Bindings): RecordDb[] {
   });
 }
 
-/** 記録のルート: 監査ログの一覧、置き場ごとの使った量、記録の集計 */
+/** 記録のルート: 監査ログの確かめと一覧、置き場ごとの使った量、記録の集計 */
 export const recordRoutes = router
+  .openapi(verifyAuditLogsRoute, async (c) => {
+    const { year } = c.req.valid("json");
+    const check = await c.env.RECORDER.get(c.env.RECORDER.idFromName("recorder")).verify(year).catch(rethrowRpc);
+    // つなぎが合わない事は確かな不正なので、返す前に全体を止める。ログインと記録の 3.4 の 4
+    if (!check.ok) await observe(c.env, { type: "chain_broken", year }, c.var.clock.now(), c.var.guard, c.var.traceId);
+    return ok(c, { ok: check.ok, brokenAt: check.brokenAt });
+  })
   .openapi(listAuditLogsRoute, async (c) => {
-    requireStepUp(c);
     const { from, to, cursor, limit } = c.req.valid("query");
     if (from && to && from > to) throw new AppError("validation_failed", "from が to より後", { errors: [{ pointer: "#/query/from", detail: "to より前の日にする" }] });
     // 日本時間の日で受け、その日の 0 時から、to の次の日の 0 時の前までを読む

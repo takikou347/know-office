@@ -1,6 +1,7 @@
 // 本物の wrangler.jsonc の Worker を本物の workerd で起こし、/api/* だけが入口に来て、ほかの道は画面を返す事を確かめる
 import { Problem } from "@know-office/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CONTENT_SECURITY_POLICY } from "../../src/gate/headers.ts";
 import { type OfficeWorker, startOfficeWorker } from "../helpers/worker.ts";
 
 // 入口と画面の分かれ方は要求ごとに変わらないので、workerd は 1 度だけ起こす
@@ -50,5 +51,20 @@ describe("入口と画面の分かれ方 (wrangler.jsonc)", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("text/html");
     expect(await res.text()).toContain('<div id="root"></div>');
+  });
+});
+
+describe("画面と入力のセキュリティ", () => {
+  // ほかのサイトの枠に入れられると、ブラウザーは frame-ancestors 'none' を見て画面を出さない
+  it("埋め込み", async () => {
+    for (const path of ["/", "/dashboard"]) {
+      const res = await request(path, NAVIGATE);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Security-Policy")).toBe(CONTENT_SECURITY_POLICY);
+      expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+      expect(res.headers.get("Strict-Transport-Security")).toBe("max-age=63072000; includeSubDomains");
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+    }
   });
 });
