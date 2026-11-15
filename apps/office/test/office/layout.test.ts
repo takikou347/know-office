@@ -202,6 +202,26 @@ describe("オフィスの部屋", () => {
   it("同じ id の部屋は足せない", () => {
     expect(() => arrangeFloor([...OFFICE_ROOMS, { ...STUDY, id: "work" }])).toThrow(/work/);
   });
+
+  it("幅の外の出入り口は足せない", () => {
+    expect(() => arrangeFloor([...OFFICE_ROOMS, { ...STUDY, doors: [3] }])).toThrow(/study.*出入り口/);
+    expect(() => arrangeFloor([...OFFICE_ROOMS, { ...STUDY, doors: [-1] }])).toThrow(/study.*出入り口/);
+  });
+
+  it("出入り口を家具で塞ぐ部屋は足せない", () => {
+    const blocked = { ...STUDY, furniture: [...STUDY.furniture, { kind: "plant" as const, x: 0, z: 2, w: 1, d: 1, blocks: true }] };
+    expect(() => arrangeFloor([...OFFICE_ROOMS, blocked])).toThrow(/study.*出入り口/);
+  });
+
+  it("部屋からはみ出す家具は置けない", () => {
+    const outside = { ...STUDY, furniture: [{ kind: "desk" as const, x: 2, z: 1, w: 2, d: 1, blocks: true }] };
+    expect(() => arrangeFloor([...OFFICE_ROOMS, outside])).toThrow(/study.*はみ出す/);
+  });
+
+  it("同じ社員の席を 2 つの部屋に置けない", () => {
+    const twice = { ...STUDY, seats: { builder: { seat: { x: 1.5, z: 0.6, face: 0 }, handoff: { x: 1.5, z: 2.5, face: Math.PI } } } };
+    expect(() => arrangeFloor([...OFFICE_ROOMS, twice])).toThrow(/builder.*席/);
+  });
 });
 
 describe("社員の居る所", () => {

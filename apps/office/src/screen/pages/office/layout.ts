@@ -1,6 +1,6 @@
 // オフィスのフロアの配置。部屋の定義を廊下の奥と手前の 2 列に並べ、席と待つ所を決め、壁と家具を避けて部屋と廊下をまたぐ道を決める
 import type { Staff } from "../../mock.ts";
-import { type DeskSeat, type Furniture, OFFICE_ROOMS, type Point, type RoomDef, type Spot } from "./rooms.ts";
+import { type DeskSeat, type Furniture, OFFICE_ROOMS, checkRooms, type Point, type RoomDef, type Spot } from "./rooms.ts";
 
 export type { DeskSeat, Furniture, FurnitureKind, Point, Spot } from "./rooms.ts";
 
@@ -62,14 +62,10 @@ export function tileOf(p: Point): Point {
  * 部屋の定義をフロアに並べる。奥の列は廊下の奥の端にそろえ、手前の列は廊下の手前に置き、どちらも左から定義の順に詰める
  * @param defs 部屋の定義の並び
  * @returns 並べたフロア
- * @throws Error 同じ id の部屋がある時
+ * @throws Error 部屋の定義が並べられない形の時 (checkRooms)
  */
 export function arrangeFloor(defs: readonly RoomDef[]): Floor {
-  const seen = new Set<string>();
-  for (const d of defs) {
-    if (seen.has(d.id) || d.id === HALL) throw new Error(`部屋の id ${d.id} が重なる`);
-    seen.add(d.id);
-  }
+  checkRooms(defs, HALL);
   const back = defs.filter((d) => d.side === "back");
   const front = defs.filter((d) => d.side === "front");
   const hallZ = Math.max(0, ...back.map((d) => d.size.d));

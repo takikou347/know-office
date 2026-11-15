@@ -1,7 +1,7 @@
 // 子犬の社員の姿。手本 (ももたん) に合わせた 2 頭身のシーズー風の子犬を、ふわふわの毛の層を重ねた丸い形で組み、することごとの形を当てる
 import { CircleGeometry, type Color, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, type Vector3 } from "three";
 import { type Face, applyFace, buildFace } from "./face.ts";
-import { MAX_LAYERS, type Paint, type Puff, furGeometry, furMaterial, setFurLayers, solid } from "./fur.ts";
+import { MAX_LAYERS, PHONE_WIDTH, type Paint, type Puff, furGeometry, furMaterial, setFurLayers, solid } from "./fur.ts";
 import type { Pose } from "./motion.ts";
 import { type Prop, type PropColors, addProp } from "./props.ts";
 import type { OfficeTheme } from "./themes.ts";
@@ -13,8 +13,6 @@ export const PUPPY_SCALE = 1.6;
 
 /** 電話の幅で子犬を大きくする倍率 */
 const PHONE_PUPPY_SCALE = 2.1;
-/** これより狭い部屋を電話の幅と見る (CSS のピクセル) */
-const PHONE_WIDTH = 600;
 
 /**
  * 部屋の幅に合う子犬の大きさの倍率を返す。電話の幅では部屋が小さく見えるので、子犬を大きくする

@@ -2,12 +2,12 @@
 import { BufferAttribute, type BufferGeometry, Color, MeshStandardMaterial, SphereGeometry, Vector3 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-/** 広い幅で重ねる毛の層の数 */
-const WIDE_LAYERS = 7;
-/** 電話の幅で重ねる毛の層の数。子犬が小さく見えるので減らしても違いが見えず、描く重さが半分になる */
-const PHONE_LAYERS = 4;
-/** これより狭い部屋を電話の幅と見る (CSS のピクセル) */
-const PHONE_WIDTH = 600;
+/** 広い幅で重ねる毛の層の数。GPU の無い描き方でも 1 枚の重さが元の部屋に近くなるよう 5 にする */
+const WIDE_LAYERS = 5;
+/** 電話の幅で重ねる毛の層の数。子犬が小さく見えるので減らしても違いが見えない */
+const PHONE_LAYERS = 3;
+/** これより狭い部屋を電話の幅と見る (CSS のピクセル)。子犬の大きさと毛の層の数の両方がこの幅で切り替わる */
+export const PHONE_WIDTH = 600;
 /** 作る時に用意する層の数。描く層の数はこの中で変える */
 export const MAX_LAYERS = WIDE_LAYERS;
 
@@ -165,15 +165,15 @@ export function furMaterial(
       // 毛の中で散った光の分だけ、影の側も少し明るくし、綿のように柔らかく見せる
       .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * 0.16;")
       .replace(
-      "#include <color_fragment>",
-      `#include <color_fragment>
-      // 細かい筋はなめらかなノイズにし、格子の筋目が出ないようにする
-      float strand = furNoise(vFurPos * furDensity);
-      float tuft = furNoise(vFurPos * furDensity * 0.17 + 7.0);
-      float strandLen = strand * 0.75 + tuft * 0.45 - 0.08;
-      if (vShell > 0.0 && strandLen < vShell) discard;
-      diffuseColor.rgb *= mix(0.88, 1.05, vShell) * mix(0.95, 1.04, tuft);`,
-    );
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        // 細かい筋はなめらかなノイズにし、格子の筋目が出ないようにする
+        float strand = furNoise(vFurPos * furDensity);
+        float tuft = furNoise(vFurPos * furDensity * 0.17 + 7.0);
+        float strandLen = strand * 0.75 + tuft * 0.45 - 0.08;
+        if (vShell > 0.0 && strandLen < vShell) discard;
+        diffuseColor.rgb *= mix(0.88, 1.05, vShell) * mix(0.95, 1.04, tuft);`,
+      );
   };
   // 長さと細かさは値で渡すので、どの毛の材質も同じプログラムを使い回し、組み立ての重さを 1 回分にする
   material.customProgramCacheKey = () => "fur";

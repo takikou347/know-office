@@ -9,6 +9,12 @@ import { withoutWebgl } from "./helpers/webgl.ts";
 const heavy = /three|OfficeScene|pages\/office\/(room|figure|fur|face|props|walls|layout|furniture|marks|plan|vrm|themes)|codemirror|knowidea-ui_editor|editor-/i;
 
 /**
+ * 部屋の canvas が出るまで待つ上限 (ミリ秒)。GPU の無い headless では、幅 360 で開いてから canvas が見えるまで
+ * 2.6 から 3.0 秒かかり、2 workers で並べると既定の 5 秒に近づくため、canvas を待つ所だけを延ばす
+ */
+const CANVAS_TIMEOUT = 15_000;
+
+/**
  * 開いたページで出た要求の URL を貯める
  * @param page 見るページ
  * @returns 貯めた URL の並び
@@ -64,7 +70,7 @@ test.describe("画面の一覧", () => {
   test("オフィスから会話に移る", async ({ page }) => {
     await page.goto("/office");
     const room = roomOf(page);
-    await expect(room.locator("canvas")).toBeVisible();
+    await expect(room.locator("canvas")).toBeVisible({ timeout: CANVAS_TIMEOUT });
     // 社員の姿を覆う所を押す
     await room.getByRole("link", { name: /作る役/ }).click();
     await expect(page).toHaveURL(/\/staff\/builder$/);
@@ -82,7 +88,7 @@ test.describe("速さ", () => {
 
     // 確かめ方が効いている事: オフィスを開くと 3D のコードを読む
     await page.goto("/office");
-    await expect(roomOf(page).locator("canvas")).toBeVisible();
+    await expect(roomOf(page).locator("canvas")).toBeVisible({ timeout: CANVAS_TIMEOUT });
     expect(urls.some((u) => /three/.test(u))).toBe(true);
   });
 });
@@ -132,7 +138,7 @@ test.describe("オフィスの部屋", () => {
   test("動きを減らす設定では動かさない", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/office");
-    await expect(roomOf(page).locator("canvas")).toBeVisible();
+    await expect(roomOf(page).locator("canvas")).toBeVisible({ timeout: CANVAS_TIMEOUT });
     await expect(page.getByRole("list", { name: "社員の様子" })).toHaveCount(0);
     // 初めから動かさないので、止めるボタンは出さない
     await expect(page.getByRole("button", { name: "動きを止める" })).toHaveCount(0);
