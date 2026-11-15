@@ -10,6 +10,10 @@ import {
   PrOpenTool,
   ReviewSubmitTool,
   ServiceCloseRequestTool,
+  decideRepo,
+  missingConditions,
+  type RepoAction,
+  recordedText,
   type StaffId,
   StaffRequestTool,
   StudySubmitTool,
@@ -23,6 +27,9 @@ import type { Bindings } from "../env.ts";
 import type { ExtensionDefinition, ExtensionTool } from "../extensions/define.ts";
 import { INSTALLED } from "../extensions/installed.ts";
 import { enabledExtensions, extensionStore } from "../extensions/state.ts";
+import { repoScope } from "../github/rules.ts";
+import { type GuardDeps, UNCONNECTED_DEPS } from "../guard/deps.ts";
+import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
@@ -41,6 +48,8 @@ export type ToolCall = {
   now: number;
   /** 要求のトレース ID */
   traceId?: string;
+  /** 自動停止が外へ頼む口。ルールの外の操作を数える時に使う。無ければつないでいない口 */
+  guard?: GuardDeps;
 };
 
 type Run = (env: Bindings, forge: Forge, call: ToolCall, input: never) => Promise<unknown>;
@@ -232,6 +241,13 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
   // レビューを割り振れないなら、GitHub に出す前に断る
   await checkPair(env.DB, call.staffId, REVIEWER);
   const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
+  const refusal = await repoRefusal(env, forge, { action: "pull_request", repo: task.repo, branch });
+  if (refusal !== null) {
+    // ルールの外の操作として数える。触れない所に当たった時は、そのファイルへの書き込みとして数える
+    const op = refusal.path === undefined ? { operation: "office.tool" as const, target: `${task.repo} pull_request` } : { operation: "file.write" as const, target: `${task.repo}/${refusal.path}` };
+    await observe(env, { type: "rule_denied", staffId: call.staffId, nodeId: task.id, operation: op.operation, target: recordedText(op.target) }, call.now, call.guard ?? UNCONNECTED_DEPS, call.traceId);
+    throw new AppError("rule_denied", refusal.reason);
+  }
   const pr = await forge.openPull({ repo: task.repo, branch, title: input.title, body: input.body });
   // 出す間にオーナーが名前などを直すとバージョンが進むので、読み直して、まだこの社員の作業中の時だけ移す
   const fresh = await findNode(env.DB, task.id);
@@ -252,6 +268,52 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
   await leaveTask(env, call.staffId, "done", call.now);
   await notifyStaff(env, REVIEWER, call.now, false);
   return { number: pr.number, branch };
+}
+
+/**
+ * リポジトリへの操作をルールと照らす。触れるリポジトリ、手で止める、できる操作を先に見て、通る時だけ GitHub から変えたファイルを読んで触れない所を見る
+ * @param env バインディング
+ * @param forge GitHub
+ * @param req 操作、リポジトリ、ブランチ
+ * @param req.action 操作の種類
+ * @param req.repo リポジトリ
+ * @param req.branch 変えたブランチ
+ * @returns 断る理由と当たった道。通すなら null
+ * @throws upstream_failed 変えたファイルを GitHub から読めない時
+ */
+async function repoRefusal(env: Bindings, forge: Forge, req: { action: RepoAction; repo: string; branch: string }): Promise<{ reason: string; path?: string } | null> {
+  const scope = await repoScope(env.DB, req.repo);
+  const first = decideRepo({ action: req.action, repo: req.repo, paths: [] }, scope);
+  if (!first.allow) return { reason: first.reason };
+  const decision = decideRepo({ action: req.action, repo: req.repo, paths: await forge.changedPaths(req.repo, req.branch) }, scope);
+  if (decision.allow) return null;
+  return decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path };
+}
+
+/** main に入れられるかの答え。入れられない時は、ルールで断ったか条件を待つか */
+type MergeGate = { kind: "ready" } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string };
+
+/**
+ * 承認の後に main に入れられるかを決める。できる操作と触れない所をルールと照らし、main に入れる条件 (タスクとレビューの 3.4) がそろったかを見る
+ * @param env バインディング
+ * @param forge GitHub
+ * @param made 確かめたタスク
+ * @param review リポジトリ、ブランチ、プルリクエストの番号
+ * @param review.repo リポジトリ
+ * @param review.branch ブランチ
+ * @param review.prNumber プルリクエストの番号
+ * @returns 入れられるか、断ったか、待つ条件
+ * @throws upstream_failed GitHub から読めない時
+ */
+async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; prNumber: number }): Promise<MergeGate> {
+  const refusal = await repoRefusal(env, forge, { action: "merge", repo: review.repo, branch: review.branch });
+  if (refusal !== null) return { kind: "refused", reason: refusal.reason };
+  const { rules } = await repoScope(env.DB, review.repo);
+  const [row] = await drizzle(env.DB).select({ ownerVerdict: reviews.ownerVerdict }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
+  // チェックが分からない時は入れない。レビュー担当の承認はこの呼び出しが出した物
+  const checks = rules.mergeWhen.includes("checks") ? await forge.checksPassed(review.repo, review.prNumber) : true;
+  const missing = missingConditions(rules.mergeWhen, { checks, reviewer: true, owner: row?.ownerVerdict === "approve" });
+  return missing.length === 0 ? { kind: "ready" } : { kind: "waiting", reason: missing.join(",") };
 }
 
 /**
@@ -303,12 +365,13 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
     if (!(await moveNode(env.DB, made, "todo", call.now))) throw new AppError("conflict", "確かめるタスクが変わった");
     await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_rejected", detail: { summary: input.summary } }, actor);
   } else {
-    // main に入れる条件はチェックとレビュー担当の承認 (タスクとレビューの 3.4 の初期値)。チェックが分からない時は入れない
-    merged = await forge.checksPassed(review.repo, review.prNumber);
+    const gate = await mergeGate(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber });
+    merged = gate.kind === "ready";
     if (merged) await mergeMade(env, forge, made, { repo: review.repo, branch: review.branch }, call.now);
     await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } }, actor);
-    if (merged) await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch } }, actor);
-    else await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merge_waiting", detail: { reason: "checks" } }, actor);
+    if (gate.kind === "ready") await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch } }, actor);
+    else if (gate.kind === "refused") await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merge_refused", detail: { reason: gate.reason } }, actor);
+    else await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merge_waiting", detail: { reason: gate.reason } }, actor);
   }
   await orm.update(reviews).set({ reviewerVerdict: input.verdict, reviewerSummary: input.summary }).where(eq(reviews.nodeId, made.id));
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "review.submit", target: made.id, scope: made.scope, detail: { verdict: input.verdict, merged }, traceId: call.traceId });

@@ -6,8 +6,14 @@ import { z } from "./zod.ts";
 /** 社員が GitHub でできる操作。読む、ブランチを作る、push、プルリクエスト、main へのマージ、Issue */
 export const RepoAction = z.enum(["read", "branch", "push", "pull_request", "merge", "issue"]);
 
+/** 社員が GitHub でできる操作の型 */
+export type RepoAction = z.infer<typeof RepoAction>;
+
 /** main にマージする、本番にデプロイする条件の 1 つ。チェックの合格、レビュー担当の承認、オーナーの承認 */
 export const ReleaseCondition = z.enum(["checks", "reviewer", "owner"]);
+
+/** main にマージする、本番にデプロイする条件の型 */
+export type ReleaseCondition = z.infer<typeof ReleaseCondition>;
 
 // 条件は 1 つ以上で重ならない。空の条件は誰の確かめも無しに入るので断る
 const Conditions = z

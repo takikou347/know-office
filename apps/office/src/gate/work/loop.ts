@@ -1,5 +1,5 @@
 // タスクの繰り返し。社員が自分の山から 1 つ取り、空なら上司に求め、終えたら次を取る (タスクとレビューの 3.1)
-import { AppError, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
+import { AppError, type ReleaseCondition, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, staff } from "../db/main.ts";
@@ -14,6 +14,12 @@ export type Forge = {
   checksPassed(repo: string, pr: number): Promise<boolean>;
   /** main をブランチの先へ fast-forward で進める */
   merge(repo: string, branch: string): Promise<void>;
+  /** main からブランチまでに変わったファイル。動かしたファイルは前の道も入れる。多すぎて全部を読めない時は null */
+  changedPaths(repo: string, branch: string): Promise<string[] | null>;
+  /** 公開のリポジトリの既定のブランチに、main に入れる条件と同じルールセットを掛ける。非公開なら何もせず private を返す */
+  protectMain(repo: string, when: readonly ReleaseCondition[]): Promise<"applied" | "private">;
+  /** GitHub とつないでいるか。つないでいない間はルールセットを掛ける先が無い */
+  readonly connected: boolean;
 };
 
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
@@ -21,6 +27,9 @@ export const UNCONNECTED_FORGE: Forge = {
   openPull: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   checksPassed: () => Promise.resolve(false),
   merge: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  changedPaths: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  protectMain: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  connected: false,
 };
 
 /** 社員 DO の中で次のタスクを取るのに使う、勤務の本の口 */

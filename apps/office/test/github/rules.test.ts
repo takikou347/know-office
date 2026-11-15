@@ -275,7 +275,14 @@ describe("GitHub のルールの決まり", () => {
     expect(writes(world)).toEqual([]);
   });
 
-  it("変えたファイルが多すぎて全部を確かめられない時は断る", async () => {
+  it("変えたファイルが 299 件なら全部を確かめて通す", async () => {
+    await service(world, UI);
+    repoOnGitHub(world, UI, { private: false, files: Array.from({ length: 299 }, (_, i) => ({ filename: `src/f${String(i)}.ts` })) });
+    await buildTask(world, UI);
+    expect(await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+  });
+
+  it("変えたファイルが 300 件に届いて全部を確かめられない時は断る", async () => {
     await service(world, UI);
     repoOnGitHub(world, UI, { private: false, files: Array.from({ length: 300 }, (_, i) => ({ filename: `src/f${String(i)}.ts` })) });
     await buildTask(world, UI);

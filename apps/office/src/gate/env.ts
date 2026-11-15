@@ -6,6 +6,7 @@ import type { SessionRow } from "./auth/session.ts";
 import type { GuardDeps, Observed } from "./guard/deps.ts";
 import type { IssuedTicket, RenewedTicket, TicketCheck } from "./guard/staff-guard.ts";
 import type { ChainCheck } from "./ledger/audit.ts";
+import type { Forge } from "./work/loop.ts";
 
 /** 記録 DO の RPC。画面の型から DO のコードを読まないよう、ここに形だけを置く */
 export interface Recorder extends Rpc.DurableObjectBranded {
@@ -179,5 +180,7 @@ export type GateEnv = {
     fetch: Fetcher;
     /** 自動停止が外へ頼む口。テストは代わりの物を渡す */
     guard: GuardDeps;
+    /** GitHub を呼ぶ口。つなぐまでは呼ぶと断る */
+    forge: Forge;
   };
 };

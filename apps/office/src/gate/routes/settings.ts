@@ -6,6 +6,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
 import { requireStepUp } from "../auth/passkey.ts";
+import { MERGE_WHEN_KEY, protectRepos } from "../github/rules.ts";
 import { settings } from "../db/main.ts";
 import { loadThresholds } from "../guard/thresholds.ts";
 import { audit } from "../ledger/record.ts";
@@ -36,7 +37,7 @@ const updateServiceSettingRoute = createRoute({
   tags: ["settings"],
   "x-step-up": "conditional",
   request: { params: ServiceParam.extend(KeyParam.shape), body: jsonBody(UpdateSettingInput) },
-  responses: { 200: okResponse(Setting), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
+  responses: { 200: okResponse(Setting), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
 });
 
 const listSettingsRoute = createRoute({
@@ -55,7 +56,7 @@ const updateSettingRoute = createRoute({
   tags: ["settings"],
   "x-step-up": "conditional",
   request: { params: KeyParam, body: jsonBody(UpdateSettingInput) },
-  responses: { 200: okResponse(Setting), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
+  responses: { 200: okResponse(Setting), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
 });
 
 /**
@@ -101,6 +102,8 @@ export const settingRoutes = router
     const { version, value, reason } = c.req.valid("json");
     const setting = await updateServiceSetting(c.env.DB, { serviceId, key, value, version, now: c.var.clock.now() }, () => requireStepUp(c));
     await audit(c, "service.setting", serviceId, { key, value, version: setting.version, reason });
+    // 変えた設定と記録を残してから、公開のリポジトリのルールセットを掛け直す
+    if (key === "mergeWhen") await protectRepos(c.env, c.var.forge, serviceId);
     return ok(c, setting);
   })
   .openapi(listSettingsRoute, async (c) => {
@@ -119,5 +122,6 @@ export const settingRoutes = router
     const { version, value, reason } = c.req.valid("json");
     const setting = await updateOfficeDefault(c.env.DB, { key, value, version, reason, now: c.var.clock.now() }, () => requireStepUp(c));
     await audit(c, "setting.update", key, { value: setting.value, version: setting.version, reason });
+    if (key === MERGE_WHEN_KEY) await protectRepos(c.env, c.var.forge);
     return ok(c, setting);
   });

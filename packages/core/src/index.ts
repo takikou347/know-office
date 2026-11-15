@@ -20,6 +20,20 @@ export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/comm
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
 export { HeartbeatInput, RESTORE_BODY_BYTES, RESTORE_TRANSCRIPT_BYTES, RestoreInput, RunInput, TicketInput, TRANSCRIPT_PART_BYTES, TranscriptPartInput, WorkTicketClaims } from "./schemas/workspace.ts";
 export { DEFAULT_RULES, decide, type RuleContext, type RuleDecision } from "./rules/decide.ts";
+export { decideRepo, mainRuleset, missingConditions, type RepoDecision, type RepoRequest, type RepoScope, RULESET_NAME, type RulesetBody } from "./rules/repo.ts";
+export {
+  GitHubCheckRuns,
+  GitHubCompare,
+  GitHubPull,
+  GitHubRef,
+  GitHubRepo,
+  GitHubRules,
+  GitHubRulesValue,
+  GitHubRuleset,
+  GitHubRulesets,
+  RepoName,
+  UpdateGitHubRulesInput,
+} from "./schemas/github.ts";
 export { MAX_RECORDED, maskSecrets, OPERATION_KINDS, recordedText, toOperation, type Operation, type OperationKind } from "./rules/operation.ts";
 export {
   AttendanceKind,
