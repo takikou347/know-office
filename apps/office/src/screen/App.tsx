@@ -2,7 +2,7 @@ import type { Extension, Health } from "@know-office/core";
 import { AppBar, AppShell } from "knowidea-ui";
 import { withScreens } from "./extensions.ts";
 import { type Navigate, Page, type ToggleExtension } from "./pages.tsx";
-import { LiveNoticeBar, NoticeProvider } from "./parts/notices.tsx";
+import { LiveNoticeBar, NoticeHold, NoticeProvider } from "./parts/notices.tsx";
 import { bottomCurrentOf, bottomItems, morePath, screenOf, sideItemsWith } from "./routes.ts";
 
 export interface AppProps {
@@ -37,15 +37,17 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
           </>
         }
       >
-        <Page
-          screen={more ? "more" : screen.id}
-          pathname={pathname}
-          query={searchParams}
-          health={health}
-          navigate={navigate}
-          extensions={extensions}
-          toggleExtension={toggleExtension}
-        />
+        <NoticeHold>
+          <Page
+            screen={more ? "more" : screen.id}
+            pathname={pathname}
+            query={searchParams}
+            health={health}
+            navigate={navigate}
+            extensions={extensions}
+            toggleExtension={toggleExtension}
+          />
+        </NoticeHold>
       </AppShell>
     </NoticeProvider>
   );

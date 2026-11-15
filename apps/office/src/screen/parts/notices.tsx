@@ -8,6 +8,9 @@ import { jstTime } from "../format.ts";
 /** 通知を読み直す間。起きてから 5 分以内に画面に出すので、それより短くする */
 export const NOTICE_POLL_MS = 60_000;
 
+/** 開いた時に、初めの通知を待って中身を隠しておく長さの上限。帯が後から差し込まれて、押そうとした物がずれないようにする */
+export const NOTICE_HOLD_MS = 1_000;
+
 /** 1 度に読む通知の数 */
 const NOTICE_LIMIT = 20;
 
@@ -21,6 +24,8 @@ type NoticesState = {
   state: "loading" | "ok" | "error";
   /** 通知を既読にする */
   markRead: (id: string) => void;
+  /** 初めの通知を待って、中身を隠しているか */
+  holding: boolean;
 };
 
 /** 読んだ通知と、読めたか */
@@ -59,7 +64,7 @@ export function watchNotices(pull: () => void, view: NoticeView | null): () => v
   };
 }
 
-const NoticesContext = createContext<NoticesState>({ notices: [], state: "loading", markRead: () => {} });
+const NoticesContext = createContext<NoticesState>({ notices: [], state: "loading", markRead: () => {}, holding: false });
 
 export interface NoticeProviderProps {
   /** 通知を使う画面 */
@@ -74,18 +79,24 @@ export interface NoticeProviderProps {
 export function NoticeProvider({ children }: NoticeProviderProps) {
   const api = useContext(ApiContext);
   const [loaded, setLoaded] = useState<Loaded>({ notices: [], state: "loading" });
+  // 入口を呼ぶ口が無い時は読まないので、待たない
+  const [holding, setHolding] = useState(api !== null);
   useEffect(() => {
     let live = true;
     const pull = () => {
       if (!api) return;
       void fetchNotices(api).then((value) => {
-        if (live) setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
+        if (!live) return;
+        setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
+        setHolding(false);
       });
     };
     const stop = watchNotices(pull, typeof document === "undefined" ? null : document);
+    const hold = setTimeout(() => setHolding(false), NOTICE_HOLD_MS);
     return () => {
       live = false;
       stop();
+      clearTimeout(hold);
     };
   }, [api]);
   const markRead = useCallback(
@@ -104,7 +115,22 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
     },
     [api],
   );
-  return <NoticesContext value={{ ...loaded, markRead }}>{children}</NoticesContext>;
+  return <NoticesContext value={{ ...loaded, markRead, holding }}>{children}</NoticesContext>;
+}
+
+export interface NoticeHoldProps {
+  /** 隠す中身 */
+  children: ReactNode;
+}
+
+/**
+ * 開いた時に、初めの通知が届くまで (長くて NOTICE_HOLD_MS) 中身を隠し、帯と一緒に出す。隠す間も場所は取る
+ * @param props 中身
+ * @returns 中身
+ */
+export function NoticeHold({ children }: NoticeHoldProps) {
+  const { holding } = useContext(NoticesContext);
+  return <div style={{ display: "contents", visibility: holding ? "hidden" : undefined }}>{children}</div>;
 }
 
 export interface NoticeBarProps {
