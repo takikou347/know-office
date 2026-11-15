@@ -66,6 +66,17 @@ export const admission = createMiddleware<GateEnv>(async (c, next) => {
 });
 
 /**
+ * GitHub の通知を 1 分 60 回に絞る。GitHub の送り元は決まらないので、送り元でなく通知の全体で数える
+ * @throws rate_limited 1 分の数を超えた時。Retry-After に秒数を入れる
+ */
+export const hookAdmission = createMiddleware<GateEnv>(async (c, next) => {
+  c.set("ip", c.req.header("CF-Connecting-IP") ?? "unknown");
+  const { retryAfter } = await guardOf(c).admit("hooks:github", "hook", c.var.clock.now());
+  if (retryAfter !== null) throw new AppError("rate_limited", "要求が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
+  await next();
+});
+
+/**
  * Access の証明を確かめ、メールアドレスを置く。失敗はロックアウトの数に足す
  * @throws unauthenticated 証明が無いか合わない時
  * @throws forbidden オーナーでない時
@@ -88,8 +99,11 @@ export const accessProof = createMiddleware<GateEnv>(async (c, next) => {
   await next();
 });
 
-/** ログインセッションを確かめないルート。セッションを作る所と、D1 が止まっても答える稼働確認 */
-const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health"]);
+/**
+ * ログインセッションを確かめないルート。セッションを作る所、D1 が止まっても答える稼働確認、GitHub から戻る所
+ * ログインセッションのクッキーは SameSite=Strict なので、github.com から戻る時には付かない。戻る所は Access と、署名した state か GitHub への問い合わせで確かめる
+ */
+const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health", "GET /api/v1/github/callback", "GET /api/v1/github/installed"]);
 
 /**
  * ログインセッションのクッキーを確かめ、今のセッションを置く

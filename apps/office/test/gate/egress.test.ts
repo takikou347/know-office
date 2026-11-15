@@ -112,15 +112,18 @@ describe("鍵はゲートウェイだけが持つ", () => {
       ["https", "api.anthropic.com", caller],
       ["https", "api.github.com", caller],
       ["http", "gate.internal", caller],
+      ["https", "github.com", caller],
     ]);
-    expect(WORKSPACE_EGRESS).toEqual({ http: ["gate.internal"], https: ["api.anthropic.com", "api.github.com"] });
+    expect(WORKSPACE_EGRESS).toEqual({ http: ["gate.internal"], https: ["api.anthropic.com", "api.github.com", "github.com"] });
     // Claude と GitHub の呼び出しはゲートウェイが作業トークンを確かめる。無ければ外へ出ずに断る
     w.clock.advance(jst(9, 1) - w.clock.now());
     for (const [url, header] of [
       ["https://api.anthropic.com/v1/messages", "x-api-key"],
       ["https://api.github.com/repos/o/r/pulls", "authorization"],
+      ["https://github.com/o/r.git/git-receive-pack", "authorization"],
     ] as const) {
-      const res = await send(url, { method: "POST", headers: { [header]: "sk-ant-not-a-ticket" }, body: "{}" });
+      const value = url.startsWith("https://github.com/") ? `Basic ${btoa("x-access-token:sk-ant-not-a-ticket")}` : "sk-ant-not-a-ticket";
+      const res = await send(url, { method: "POST", headers: { [header]: value }, body: "{}" });
       expect(res.status).toBe(401);
     }
     await startWork(w, "builder");

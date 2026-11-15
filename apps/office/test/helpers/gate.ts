@@ -4,6 +4,7 @@ import { createFakeAccess, type FakeAccess } from "../../dev/access.ts";
 import { createFakeClaude, type FakeClaude } from "../../dev/claude.ts";
 import { createFakeGitHub, type FakeGitHub } from "../../dev/github.ts";
 import { endpoints } from "../../src/gate/endpoints.ts";
+import { TokenCache } from "../../src/gate/github/app.ts";
 import { type GitHubAccess, httpForge, type Permissions } from "../../src/gate/github/forge.ts";
 import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts";
 import type { Bindings } from "../../src/gate/env.ts";
@@ -42,6 +43,8 @@ export type TestGate = {
   fetch: Fetcher;
   /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル */
   github: FakeGitHub & { files: { filename: string; previous_filename?: string }[] };
+  /** vault の App の鍵から作った 1 時間の鍵をためる所。テストごとに別にする */
+  githubCache: TokenCache;
   /** GitHub の鍵を出した先と権限 */
   githubTokens: { repo: string; permissions: Permissions }[];
   /** ゲートウェイと同じ、GitHub を呼ぶ口。github を付けて起こした時だけ代わりの GitHub につなぐ */
@@ -189,7 +192,8 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
-  const github: TestGate["github"] = Object.assign(createFakeGitHub(), { files: [] });
+  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now() }), { files: [] });
+  const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];
   const githubAccess: GitHubAccess = {
     appId: 1234,
@@ -333,6 +337,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     clock: options.clock,
     fetch: fetcher,
     guard: deps,
+    githubTokens: githubCache,
     ...(options.extensions ? { extensions: options.extensions } : {}),
     ...(options.github === true ? { github: githubAccess } : {}),
   });
@@ -346,6 +351,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     fetch: fetcher,
     github,
     githubTokens,
+    githubCache,
     forge,
     certs,
     audits,

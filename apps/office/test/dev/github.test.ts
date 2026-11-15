@@ -1,14 +1,37 @@
 // 開発環境の代わりの GitHub を確かめる。ログインと記録の 3.9
-import { createHmac } from "node:crypto";
+import { createHmac, createPrivateKey, generateKeyPairSync } from "node:crypto";
+import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { createFakeGitHub, sendWebhook } from "../../dev/github.ts";
+import { z } from "zod";
+import { createFakeGitHub, deliveryId, sendWebhook } from "../../dev/github.ts";
+
+/**
+ * git の Basic の合言葉に鍵を入れたヘッダー
+ * @param t 鍵
+ * @returns ヘッダー
+ */
+const basic = (t: string) => ({ authorization: `Basic ${btoa(`x-access-token:${t}`)}` });
 
 describe("開発環境の代わりの物", () => {
-  it("代わりの GitHub はインストールのトークンを返す", async () => {
+  it("代わりの GitHub は App を作り、入れ、App の JWT でリポジトリを絞った鍵を返す", async () => {
     const github = createFakeGitHub();
-    const res = await github.app.request("/app/installations/1/access_tokens", { method: "POST", headers: { authorization: "Bearer app-jwt" } });
-    expect(res.status).toBe(201);
-    expect(await res.json()).toMatchObject({ token: expect.stringMatching(/^ghs_/) as unknown, expires_at: expect.any(String) as unknown });
+    const manifest = { name: "ko", url: "http://localhost", redirect_url: "http://localhost/cb", setup_url: "http://localhost/installed", hook_attributes: { url: "http://localhost/hooks" }, public: false, default_permissions: { contents: "write", metadata: "read" }, default_events: [] };
+    const made = await github.app.request("/web/settings/apps/new?state=s1", { method: "POST", body: new URLSearchParams({ manifest: JSON.stringify(manifest) }) });
+    const back = new URL(made.headers.get("location") ?? "");
+    expect(back.searchParams.get("state")).toBe("s1");
+    const conversion = z.object({ id: z.number(), slug: z.string(), pem: z.string() }).loose().parse(await (await github.app.request(`/app-manifests/${back.searchParams.get("code") ?? ""}/conversions`, { method: "POST" })).json());
+    expect(conversion.pem).toContain("BEGIN RSA PRIVATE KEY");
+    const installed = new URL((await github.app.request(`/web/apps/${conversion.slug}/installations/new`)).headers.get("location") ?? "");
+    const installation = installed.searchParams.get("installation_id") ?? "";
+    const key = createPrivateKey(conversion.pem);
+    const jwt = await new SignJWT({}).setProtectedHeader({ alg: "RS256" }).setIssuer(String(conversion.id)).setIssuedAt().setExpirationTime("9m").sign(key);
+    const minted = await github.app.request(`/app/installations/${installation}/access_tokens`, { method: "POST", headers: { authorization: `Bearer ${jwt}` }, body: JSON.stringify({ repositories: ["knowidea-ui"], permissions: { contents: "write" } }) });
+    expect(minted.status).toBe(201);
+    const token = z.object({ token: z.string() }).loose().parse(await minted.json()).token;
+    expect((await github.app.request("/git/example/knowidea-ui.git/git-receive-pack", { method: "POST", headers: basic(token) })).status).toBe(200);
+    expect((await github.app.request("/git/example/know-office.git/git-receive-pack", { method: "POST", headers: basic(token) })).status).toBe(403);
+    const other = await new SignJWT({}).setProtectedHeader({ alg: "RS256" }).setIssuer(String(conversion.id)).setIssuedAt().setExpirationTime("9m").sign(generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey);
+    expect((await github.app.request(`/app/installations/${installation}/access_tokens`, { method: "POST", headers: { authorization: `Bearer ${other}` } })).status).toBe(401);
   });
 
   it("代わりの GitHub は積んだ返事を返し、無い物は 404 で返す", async () => {
@@ -37,6 +60,13 @@ describe("開発環境の代わりの物", () => {
     const body = (await req?.text()) ?? "";
     expect(req?.headers.get("x-github-event")).toBe("pull_request");
     expect(req?.headers.get("x-hub-signature-256")).toBe(`sha256=${createHmac("sha256", "s3cret").update(body).digest("hex")}`);
-    expect(req?.headers.get("x-github-delivery")).toMatch(/^[0-9a-f-]{36}$/);
+    // GitHub の配信 ID は時刻の入った UUID (版 1)
+    expect(req?.headers.get("x-github-delivery")).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-1[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it("代わりの GitHub の配信 ID は時刻を 100 ナノ秒の数で持つ", () => {
+    const [low = "", mid = "", high = ""] = deliveryId(Date.UTC(2026, 11, 1)).split("-");
+    const ticks = (BigInt(`0x${high.slice(1)}`) << 48n) | (BigInt(`0x${mid}`) << 32n) | BigInt(`0x${low}`);
+    expect(Number((ticks - 0x01b21dd213814000n) / 10_000n)).toBe(Date.UTC(2026, 11, 1));
   });
 });

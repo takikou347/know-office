@@ -1,12 +1,14 @@
 // ワークスペースの外向きの通信の受け手。コンテナから出る要求は宛先ごとにここへ回り、ゲートウェイが作業トークンを確かめる (社員が考えるの 1.2、3.1)
 import { createRoute } from "@hono/zod-openapi";
-import { AppError, CheckpointInput, type Clock, type Fetcher, HeartbeatInput, TranscriptPartInput } from "@know-office/core";
+import { AppError, CheckpointInput, type Clock, type Fetcher, fromBase64, HeartbeatInput, TranscriptPartInput } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import { createApp } from "./app.ts";
 import { bodyShape } from "./body.ts";
 import type { Bindings, GateEnv } from "./env.ts";
 import type { ExtensionDefinition } from "./extensions/define.ts";
 import { INSTALLED } from "./extensions/installed.ts";
+import type { TokenCache } from "./github/app.ts";
+import { relayGit, relayGitHubApi } from "./github/git.ts";
 import { staffOf } from "./guard/actions.ts";
 import type { GuardDeps } from "./guard/deps.ts";
 import { problems } from "./openapi.ts";
@@ -19,7 +21,7 @@ import { authenticateTicket, bearer, type Caller, renewTicket, ticketTask } from
 export type { Caller } from "./work/ticket.ts";
 
 /** コンテナから受け手に回す宛先。ほかの宛先はコンテナの外向きの通信を切って届かなくする */
-export const WORKSPACE_EGRESS = { http: ["gate.internal"], https: ["api.anthropic.com", "api.github.com"] } as const;
+export const WORKSPACE_EGRESS = { http: ["gate.internal"], https: ["api.anthropic.com", "api.github.com", "github.com"] } as const;
 
 /** 作業トークンを要らないルート。プロキシが送ったコンテナから社員を決める (ルートの一覧の 1.15) */
 const OPEN_PATHS = new Set(["/ws/v1/heartbeat", "/ws/v1/checkpoints"]);
@@ -32,6 +34,8 @@ export type EgressOptions = {
   guard: GuardDeps;
   /** 外への fetch。テストは代わりの Claude API に回す */
   fetch?: Fetcher;
+  /** GitHub の 1 時間の鍵をためる所。無ければ入口で共にためる所 */
+  githubTokens?: TokenCache;
   /** 差し込む拡張。無ければ extensions/ から読み込んだ物 */
   extensions?: readonly ExtensionDefinition[];
 };
@@ -60,14 +64,29 @@ const transcriptRoute = createRoute({
 });
 
 /**
- * 作業トークンを見る所を返す。Claude は x-api-key、ほかは Authorization の Bearer に入る
+ * 作業トークンを見る所を返す。Claude は x-api-key、git は Basic の合言葉、ほかは Authorization の Bearer に入る
  * @param headers 要求のヘッダー
  * @param host 宛先
  * @returns 作業トークン。無ければ空
  */
 function ticketOf(headers: Headers, host: string): string {
   if (host === "api.anthropic.com") return headers.get("x-api-key") ?? "";
+  if (host === "github.com") return basicPassword(headers.get("authorization"));
   return bearer(headers.get("authorization"));
+}
+
+/**
+ * Basic の合言葉を取り出す。git はユーザー名を x-access-token にして、合言葉に作業トークンを入れる
+ * @param header Authorization の値
+ * @returns 合言葉。無いか形が違えば空
+ */
+function basicPassword(header: string | null): string {
+  const encoded = /^Basic ([A-Za-z0-9+/]+=*)$/.exec(header ?? "")?.[1];
+  const bytes = encoded === undefined ? null : fromBase64(encoded);
+  if (!bytes) return "";
+  const text = new TextDecoder().decode(bytes);
+  const colon = text.indexOf(":");
+  return colon < 0 ? "" : text.slice(colon + 1);
 }
 
 /**
@@ -77,7 +96,7 @@ function ticketOf(headers: Headers, host: string): string {
  * @returns /ws/v1/ と、Claude と GitHub の宛先を受ける Hono
  */
 function createWorkspaceGate(caller: Caller, options: EgressOptions) {
-  const app = createApp({ clock: options.clock, guard: options.guard, ...(options.fetch ? { fetch: options.fetch } : {}) });
+  const app = createApp({ clock: options.clock, guard: options.guard, ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.githubTokens ? { githubTokens: options.githubTokens } : {}) });
   // 作業トークンの要るルートは、ルートの有る無しより先に確かめる。作業トークン無しでルートを探れないようにする
   app.use(
     "*",
@@ -94,6 +113,8 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
         const ticket = await authenticateTicket(c.env, token, caller, c.var.clock.now(), c.var.guard);
         // Claude のプロキシは Anthropic の形のままで、ゲートウェイのルートに入れない (社員が考えるの 1.2)
         if (host === "api.anthropic.com") return relayClaude(c, ticket);
+        if (host === "github.com") return relayGit(c, ticket);
+        if (host === "api.github.com") return relayGitHubApi(c, ticket);
       }
       return next();
     }),
@@ -123,8 +144,7 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
   decisionRoutes(app, caller, options.extensions ?? INSTALLED);
   app.all("*", (c) => {
     const host = new URL(c.req.url).hostname;
-    // GitHub のプロキシ (tasks.md の 8.4) をつなぐまでは、作業トークンを確かめた後に断る
-    if (host !== "gate.internal") throw new AppError("unavailable", `${host} へのプロキシはまだ無い`);
+    if (host !== "gate.internal") throw new AppError("unavailable", `${host} へのプロキシは無い`);
     throw new AppError("not_found", `${c.req.path} は存在しない`);
   });
   return app;

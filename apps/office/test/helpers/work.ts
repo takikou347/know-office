@@ -64,7 +64,7 @@ function fakeForge(): FakeForge {
     checksPassed: () => Promise.resolve(forge.checks),
     changedPaths: () => Promise.resolve([]),
     protectMain: () => Promise.resolve("applied"),
-    connected: true,
+    connected: () => Promise.resolve(true),
     merge: async (_repo, branch) => {
       await forge.during.merge?.();
       forge.merged.push(branch);

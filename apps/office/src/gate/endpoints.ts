@@ -19,6 +19,10 @@ export type Endpoints = {
   anthropic: string;
   /** GitHub の REST API */
   github: string;
+  /** GitHub の画面。App の作成とインストール */
+  githubWeb: string;
+  /** GitHub の git の受け口 */
+  githubGit: string;
 };
 
 const TEAM = /^[a-z0-9-]+$/;
@@ -27,7 +31,7 @@ const LOCAL = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
 /**
  * 外の宛先を返す。development でない時と ENVIRONMENT が無い時は本物の宛先
  * @param env 変数
- * @returns Access の公開鍵、Claude API、GitHub の宛先
+ * @returns Access の公開鍵、Claude API、GitHub の REST API と画面と git の宛先
  * @throws internal ACCESS_TEAM の形が違う時、development なのに代わりの物が手元に無い時
  */
 export function endpoints(env: EndpointEnv): Endpoints {
@@ -37,10 +41,18 @@ export function endpoints(env: EndpointEnv): Endpoints {
       accessCerts: `https://${env.ACCESS_TEAM}.cloudflareaccess.com/cdn-cgi/access/certs`,
       anthropic: "https://api.anthropic.com",
       github: "https://api.github.com",
+      githubWeb: "https://github.com",
+      githubGit: "https://github.com",
     };
   }
   const base = env.DEV_FAKES_URL ?? "";
   // 開発環境でも、手元でない宛先を代わりの物として信じない
   if (!LOCAL.test(base)) throw new AppError("internal", "DEV_FAKES_URL が手元の宛先でない");
-  return { accessCerts: `${base}/access/cdn-cgi/access/certs`, anthropic: `${base}/anthropic`, github: `${base}/github` };
+  return {
+    accessCerts: `${base}/access/cdn-cgi/access/certs`,
+    anthropic: `${base}/anthropic`,
+    github: `${base}/github`,
+    githubWeb: `${base}/github/web`,
+    githubGit: `${base}/github/git`,
+  };
 }

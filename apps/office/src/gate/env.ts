@@ -6,6 +6,7 @@ import type { SessionRow } from "./auth/session.ts";
 import type { GuardDeps, Observed } from "./guard/deps.ts";
 import type { IssuedTicket, RenewedTicket, TicketCheck } from "./guard/staff-guard.ts";
 import type { ChainCheck } from "./ledger/audit.ts";
+import type { TokenDeps } from "./github/app.ts";
 import type { Forge } from "./work/loop.ts";
 
 /** 記録 DO の RPC。画面の型から DO のコードを読まないよう、ここに形だけを置く */
@@ -184,5 +185,7 @@ export type GateEnv = {
     guard: GuardDeps;
     /** GitHub を呼ぶ口。つなぐまでは呼ぶと断る */
     forge: Forge;
+    /** GitHub の 1 時間の鍵を作るのに使う、fetch、時刻、ためる所 */
+    github: TokenDeps;
   };
 };

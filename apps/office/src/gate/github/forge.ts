@@ -18,9 +18,9 @@ import type { ZodType } from "zod";
 import type { Forge } from "../work/loop.ts";
 
 /** 鍵に付ける権限。GitHub App の権限の名前と、読むか書くか */
-export type Permissions = Partial<Record<"contents" | "pull_requests" | "checks" | "administration" | "metadata", "read" | "write">>;
+export type Permissions = Partial<Record<"contents" | "pull_requests" | "issues" | "checks" | "statuses" | "administration" | "metadata", "read" | "write">>;
 
-/** GitHub App の鍵の出し手。8.4 で vault の元の鍵から 1 時間の鍵を作る物につなぐ */
+/** GitHub App の鍵の出し手。本番は github/app.ts の vault の元の鍵から 1 時間の鍵を作る物 */
 export type GitHubAccess = {
   /** GitHub App の ID。ルールセットで main を進めてよい者に入れる */
   appId: number;
@@ -91,7 +91,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
 
   const read: Permissions = { metadata: "read" };
   return {
-    connected: true,
+    connected: () => Promise.resolve(true),
     openPull: async (input) => {
       const pull = await call(input.repo, { pull_requests: "write" }, { method: "POST", path: "/pulls" }, GitHubPull, { title: input.title, head: input.branch, base: "main", body: input.body });
       return { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };

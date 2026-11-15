@@ -1,8 +1,8 @@
 // 実行中に作る鍵を D1 の vault に、MASTER_KEY から作った vault 用の鍵の AES-GCM で暗号にして置く (データの 2.1 の vault、04-detail.md の 3.5)
-import { AppError, type Clock, deriveKey, fromBase64, toBase64 } from "@know-office/core";
+import { AppError, type Clock, deriveKey, fromBase64, Secret, toBase64 } from "@know-office/core";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { vault } from "../db/main.ts";
 
 /** vault に置く鍵の名前 */
@@ -42,6 +42,91 @@ export async function vaultKey(db: D1Database, name: VaultName, master: string, 
   const ciphertext = fromBase64(stored.ciphertext);
   if (!iv || !ciphertext) throw new AppError("internal", "vault の鍵の形が違う");
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext));
+}
+
+/** 外から受けて置く鍵の名前。GitHub App の元の鍵と、インストール */
+export type StoredName = "github_app" | "github_installation";
+
+/** 置いた鍵の今の値 */
+export type Stored = {
+  /** まだ使える最新の版の中身 (JSON の文字)。無いか、復号できなければ null */
+  value: Secret | null;
+  /** まだ使える最新の版。無ければ null */
+  version: number | null;
+  /** 取り消した物も入れた、いちばん大きい版。無ければ 0。次に書く時に比べる */
+  top: number;
+};
+
+/**
+ * 外から受けて置いた鍵を読み、復号する
+ * @param db 今の状態の D1
+ * @param name 鍵の名前
+ * @param master MASTER_KEY
+ * @returns まだ使える最新の版の中身と、いちばん大きい版
+ */
+export async function readStored(db: D1Database, name: StoredName, master: string): Promise<Stored> {
+  const all = await drizzle(db).select().from(vault).where(eq(vault.name, name)).orderBy(desc(vault.version));
+  const top = all[0]?.version ?? 0;
+  const live = all.find((row) => row.revokedAt === null);
+  if (!live) return { value: null, version: null, top };
+  const iv = fromBase64(live.iv);
+  const ciphertext = fromBase64(live.ciphertext);
+  if (!iv || !ciphertext) return { value: null, version: live.version, top };
+  try {
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, await deriveKey(master, "vault"), ciphertext);
+    return { value: new Secret(new TextDecoder().decode(plain)), version: live.version, top };
+  } catch {
+    // 全体を止めた時に乱数へ取り替えた鍵も、復号できても中身の形で断られる。ここでは読めない物を無い物とする
+    return { value: null, version: live.version, top };
+  }
+}
+
+/**
+ * 外から受けた鍵を、読んだ時のいちばん大きい版の次に置く文を作る。同じ版から書いた 2 つは片方だけが入る。前の版はすべて取り消す
+ * 呼ぶ側が 1 回の batch に入れ、1 つ目の文の書けた件数で入ったかを決める
+ * @param db 今の状態の D1
+ * @param input 名前、中身、読んだ版、時刻、書く時の条件
+ * @param input.name 鍵の名前
+ * @param input.value 中身
+ * @param input.top 読んだ時のいちばん大きい版
+ * @param input.now 今の時刻
+ * @param input.master MASTER_KEY
+ * @param input.when 足す条件の SQL と値。WHERE に AND でつなぐ
+ * @param input.when.sql 条件の SQL
+ * @param input.when.args 条件の値
+ * @returns 入れる文と、前の版を取り消す文
+ */
+export async function storeStatements(
+  db: D1Database,
+  input: { name: StoredName; value: Secret; top: number; now: number; master: string; when?: { sql: string; args: unknown[] } },
+): Promise<[D1PreparedStatement, D1PreparedStatement]> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deriveKey(input.master, "vault"), new TextEncoder().encode(input.value.reveal()));
+  const when = input.when ?? { sql: "1 = 1", args: [] };
+  const next = input.top + 1;
+  return [
+    db
+      .prepare(
+        `INSERT INTO vault (name, ciphertext, iv, version, created_at, revoked_at) SELECT ?, ?, ?, ?, ?, NULL WHERE (SELECT COALESCE(MAX(version), 0) FROM vault WHERE name = ?) = ? AND (${when.sql})`,
+      )
+      .bind(input.name, toBase64(ciphertext), toBase64(iv), next, input.now, input.name, input.top, ...when.args),
+    db
+      // 新しい版が入った時だけ前の版を取り消す。入らなかった時は、入れた側が同じ事をしている
+      .prepare("UPDATE vault SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL AND version < ? AND EXISTS (SELECT 1 FROM vault WHERE name = ? AND version = ?)")
+      .bind(input.now, input.name, next, input.name, next),
+  ];
+}
+
+/**
+ * 置いた鍵の 1 つの版を取り消す文を作る
+ * @param db 今の状態の D1
+ * @param name 鍵の名前
+ * @param version 取り消す版
+ * @param now 今の時刻
+ * @returns 取り消す文。まだ使える時だけ書く
+ */
+export function revokeStatement(db: D1Database, name: StoredName, version: number, now: number): D1PreparedStatement {
+  return db.prepare("UPDATE vault SET revoked_at = ? WHERE name = ? AND version = ? AND revoked_at IS NULL").bind(now, name, version);
 }
 
 /**

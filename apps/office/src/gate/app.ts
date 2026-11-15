@@ -3,16 +3,16 @@ import { OpenAPIHono, type Hook } from "@hono/zod-openapi";
 import { AppError, type Clock, type Fetcher, type FieldError, systemClock } from "@know-office/core";
 import { HTTPException } from "hono/http-exception";
 import type { ZodError } from "zod";
-import { accessProof, admission, loginSession, sameOrigin } from "./auth/middleware.ts";
+import { accessProof, admission, hookAdmission, loginSession, sameOrigin } from "./auth/middleware.ts";
 import { bodyShape } from "./body.ts";
 import { securityHeaders } from "./headers.ts";
 import type { GateEnv } from "./env.ts";
 import { endpoints } from "./endpoints.ts";
+import { SHARED_TOKENS, type TokenCache, vaultForge } from "./github/app.ts";
 import { type GitHubAccess, httpForge } from "./github/forge.ts";
 import { type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
 import { trace } from "./trace.ts";
-import { UNCONNECTED_FORGE } from "./work/loop.ts";
 
 const TARGET_PREFIX: Record<string, string> = { json: "#", query: "#/query", param: "#/path", header: "#/header", cookie: "#/cookie" };
 
@@ -59,10 +59,11 @@ export function createRouter() {
  * @param options.clock 今の時刻
  * @param options.fetch 外への fetch
  * @param options.guard 自動停止が外へ頼む口
- * @param options.github GitHub App の鍵の出し手。無ければ GitHub とつないでいない
+ * @param options.github GitHub App の鍵の出し手。テストが決まった鍵を渡す。無ければ vault の App の鍵から作る
+ * @param options.githubTokens GitHub の 1 時間の鍵をためる所。無ければ Worker の中で共にためる所
  * @returns ルートを足す前のゲートウェイ
  */
-export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps; github?: GitHubAccess } = {}) {
+export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps; github?: GitHubAccess; githubTokens?: TokenCache } = {}) {
   const clock = options.clock ?? systemClock;
   // Workers の fetch は this を持たずに呼ぶと落ちるので、包んで渡す
   const fetcher: Fetcher = options.fetch ?? ((input, init) => fetch(input, init));
@@ -72,7 +73,10 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
     c.set("fetch", fetcher);
     c.set("guard", options.guard ?? UNCONNECTED_DEPS);
     const github = options.github;
-    c.set("forge", github ? httpForge(endpoints(c.env).github, fetcher, github) : UNCONNECTED_FORGE);
+    const tokens = { fetcher, clock, cache: options.githubTokens ?? SHARED_TOKENS };
+    c.set("github", tokens);
+    // vault はルートが GitHub を呼ぶ時に初めて読む
+    c.set("forge", github ? httpForge(endpoints(c.env).github, fetcher, github) : vaultForge(c.env, tokens));
     await next();
   });
   app.use("*", trace);
@@ -83,6 +87,9 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
   app.use("/api/*", loginSession);
   app.use("/api/*", sameOrigin);
   app.use("/api/*", bodyShape);
+  // GitHub の通知は Access とログインセッションを通らず、署名で確かめる (API の決まりの 3.6)
+  app.use("/hooks/*", securityHeaders);
+  app.use("/hooks/*", hookAdmission);
   app.notFound((c) => {
     const allowed = allowedMethods(app, c.req.path);
     if (allowed.length > 0) {

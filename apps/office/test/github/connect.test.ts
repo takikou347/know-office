@@ -1,0 +1,182 @@
+// GitHub App の連携。ボタン 1 つで App を作って入れ、外されたら連携を切る (タスクとレビューの 3.2)
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { MINUTE, rows, useWork } from "../helpers/work.ts";
+import { browse, connect, createGitHubApp, FAKES, hook, onGitHub, returnFromGitHub, stepUp, wrapDb } from "../helpers/github.ts";
+
+const world = useWork();
+
+const Problem = z.object({ code: z.string() }).loose();
+
+/**
+ * vault のまだ使える行を名前ごとに数える
+ * @returns 名前から行の数
+ */
+async function liveVault(): Promise<Record<string, number>> {
+  const found = await rows(world.d1.DB, "SELECT name, COUNT(*) AS n FROM vault WHERE revoked_at IS NULL AND name LIKE 'github_%' GROUP BY name");
+  return Object.fromEntries(found.map((r) => [String(r["name"]), Number(r["n"])]));
+}
+
+/**
+ * 監査ログの操作を並べる
+ * @returns GitHub の連携の操作
+ */
+function githubAudits(): string[] {
+  return world.gate.audits.map((a) => a.action).filter((a) => a.startsWith("github."));
+}
+
+describe("ボタン 1 つで連携する", () => {
+  it("連携する", async () => {
+    await stepUp(world);
+    const res = await world.gate.request("/api/v1/github/connect", { method: "POST", headers: world.headers });
+    expect(res.status).toBe(200);
+    const data = z.object({ data: z.object({ action: z.string(), manifest: z.record(z.string(), z.unknown()), state: z.string() }) }).parse(await res.json()).data;
+    expect(data.action).toBe(`${FAKES}/github/web/settings/apps/new?state=${data.state}`);
+    // 非公開で、workflows の権限を持たない
+    expect(data.manifest).toMatchObject({
+      public: false,
+      url: "http://localhost",
+      redirect_url: "http://localhost/api/v1/github/callback",
+      setup_url: "http://localhost/api/v1/github/installed",
+      hook_attributes: { url: "http://localhost/hooks/v1/github", active: true },
+      default_permissions: { contents: "write", pull_requests: "write", issues: "write", checks: "read", statuses: "read", administration: "write", metadata: "read" },
+    });
+    expect(Object.keys(z.record(z.string(), z.unknown()).parse(data.manifest["default_permissions"]))).not.toContain("workflows");
+
+    // GitHub の画面で「作成」を押す
+    const made = await onGitHub(world, data.action, { method: "POST", body: new URLSearchParams({ manifest: JSON.stringify(data.manifest) }) });
+    const toInstall = await returnFromGitHub(world, made.headers.get("location") ?? "");
+    expect(toInstall.status).toBe(302);
+    const app = [...world.gate.github.apps.values()][0];
+    expect(toInstall.headers.get("location")).toBe(`${FAKES}/github/web/apps/${app?.slug ?? ""}/installations/new`);
+    // GitHub の画面で「インストール」を押す
+    const installed = await onGitHub(world, toInstall.headers.get("location") ?? "");
+    const done = await returnFromGitHub(world, installed.headers.get("location") ?? "");
+    expect({ status: done.status, location: done.headers.get("location") }).toEqual({ status: 302, location: "/settings" });
+
+    const repos = await browse(world, "/api/v1/github/repos");
+    expect(await repos.json()).toMatchObject({ data: [{ fullName: "example/knowidea-ui", private: false }, { fullName: "example/know-office", private: false }], meta: { next: null } });
+    // 元の鍵は暗号にして置き、平文を残さない
+    expect(await liveVault()).toEqual({ github_app: 1, github_installation: 1 });
+    const stored = await rows(world.d1.DB, "SELECT ciphertext FROM vault WHERE name = 'github_app'");
+    expect(JSON.stringify(stored)).not.toContain("PRIVATE KEY");
+    expect(JSON.stringify(stored)).not.toContain(app?.webhookSecret ?? "");
+    expect(githubAudits()).toEqual(["github.app_created", "github.installed"]);
+    expect(JSON.stringify(world.gate.audits)).not.toContain(app?.webhookSecret ?? "");
+  });
+
+  it("やめる", async () => {
+    const { installationId, webhookSecret } = await connect(world);
+    world.gate.github.uninstall(installationId);
+    const res = await hook(world, { event: "installation", payload: { action: "deleted", installation: { id: installationId } }, secret: webhookSecret });
+    expect(res.status).toBe(204);
+    expect(await liveVault()).toEqual({ github_app: 1 });
+    const repos = await browse(world, "/api/v1/github/repos");
+    expect({ status: repos.status, body: Problem.parse(await repos.json()).code }).toEqual({ status: 502, body: "upstream_failed" });
+    expect(githubAudits()).toContain("github.uninstalled");
+  });
+
+  it("通知が届かなくても、鍵を作る時の 404 で連携を切る", async () => {
+    const { installationId } = await connect(world);
+    world.gate.github.uninstall(installationId);
+    expect((await browse(world, "/api/v1/github/repos")).status).toBe(502);
+    expect(await liveVault()).toEqual({ github_app: 1 });
+    expect(githubAudits()).toEqual(["github.app_created", "github.installed", "github.uninstalled"]);
+  });
+
+  it("外した後にもう一度連携できる", async () => {
+    const { installationId, webhookSecret } = await connect(world);
+    world.gate.github.uninstall(installationId);
+    await hook(world, { event: "installation", payload: { action: "deleted", installation: { id: installationId } }, secret: webhookSecret });
+    await connect(world);
+    expect(await liveVault()).toEqual({ github_app: 1, github_installation: 1 });
+    expect((await browse(world, "/api/v1/github/repos")).status).toBe(200);
+  });
+
+  it("連携を始めるにはパスキーの確認が要る", async () => {
+    const res = await world.gate.request("/api/v1/github/connect", { method: "POST", headers: world.headers });
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 401, code: "step_up_required" });
+  });
+
+  it("連携した後にもう一度押すと 409", async () => {
+    await connect(world);
+    const res = await world.gate.request("/api/v1/github/connect", { method: "POST", headers: world.headers });
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 409, code: "conflict" });
+  });
+
+  it("state はちょうど 10 分で切れる", async () => {
+    await stepUp(world);
+    const early = await createGitHubApp(world);
+    const late = await createGitHubApp(world);
+    world.clock.advance(10 * MINUTE - 1);
+    expect((await returnFromGitHub(world, early)).status).toBe(302);
+    world.clock.advance(1);
+    // 1 つ目で App を置いたので、ここで 409 にならないよう外してから確かめる
+    await world.d1.DB.prepare("DELETE FROM vault WHERE name = 'github_app'").run();
+    const res = await returnFromGitHub(world, late);
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 403, code: "forbidden" });
+  });
+
+  it("書き換えた state と形の違う code は断る", async () => {
+    await stepUp(world);
+    const url = new URL(await createGitHubApp(world));
+    const state = url.searchParams.get("state") ?? "";
+    const forged = new URL(url);
+    forged.searchParams.set("state", `${state.slice(0, -2)}${state.endsWith("AA") ? "BB" : "AA"}`);
+    expect((await returnFromGitHub(world, forged.toString())).status).toBe(403);
+    const odd = new URL(url);
+    odd.searchParams.set("code", "../../app/installations");
+    expect((await returnFromGitHub(world, odd.toString())).status).toBe(422);
+    expect(world.gate.github.requests.filter((r) => r.route.includes("conversions"))).toEqual([]);
+    expect(await liveVault()).toEqual({});
+  });
+
+  it("同じ時に 2 つ戻ってきても、App の鍵は 1 つだけ置く", async () => {
+    await stepUp(world);
+    const first = await createGitHubApp(world);
+    const second = await createGitHubApp(world);
+    // 1 つ目が vault に書く直前に、2 つ目を最後まで通す
+    const held: { second: Promise<Response> | null } = { second: null };
+    const restore = wrapDb(world, {
+      batch: async (real, statements) => {
+        if (held.second === null) {
+          held.second = returnFromGitHub(world, second);
+          await held.second;
+        }
+        return real(statements);
+      },
+    });
+    const one = await returnFromGitHub(world, first);
+    restore();
+    const other = await (held.second ?? Promise.reject(new Error("2 つ目が走っていない")));
+    expect([one.status, other.status].toSorted((a, b) => a - b)).toEqual([302, 409]);
+    expect(await liveVault()).toEqual({ github_app: 1 });
+    expect(githubAudits()).toEqual(["github.app_created"]);
+  });
+
+  it("GitHub が code を鍵に替えられなければ何も置かない", async () => {
+    await stepUp(world);
+    const url = new URL(await createGitHubApp(world));
+    url.searchParams.set("code", "unknown-code");
+    const res = await returnFromGitHub(world, url.toString());
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 502, code: "upstream_failed" });
+    expect(await liveVault()).toEqual({});
+    expect(githubAudits()).toEqual([]);
+  });
+
+  it("ほかの App のインストールは 403 で、置かない", async () => {
+    await stepUp(world);
+    await returnFromGitHub(world, await createGitHubApp(world));
+    const res = await returnFromGitHub(world, "/api/v1/github/installed?installation_id=987654&setup_action=install");
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 403, code: "forbidden" });
+    expect(await liveVault()).toEqual({ github_app: 1 });
+  });
+
+  it("同じインストールが 2 度戻っても 1 度だけ記録する", async () => {
+    const { installationId } = await connect(world);
+    const again = await returnFromGitHub(world, `/api/v1/github/installed?installation_id=${String(installationId)}&setup_action=update`);
+    expect(again.status).toBe(302);
+    expect(await liveVault()).toEqual({ github_app: 1, github_installation: 1 });
+    expect(githubAudits()).toEqual(["github.app_created", "github.installed"]);
+  });
+});

@@ -103,7 +103,7 @@ export async function repoScope(db: D1Database, repo: string): Promise<{ repos: 
  * @throws upstream_failed GitHub が失敗を返した時、返事の形が違う時
  */
 export async function protectRepos(env: Bindings, forge: Forge, serviceId?: string): Promise<string[]> {
-  if (!forge.connected) return [];
+  if (!(await forge.connected())) return [];
   const orm = drizzle(env.DB);
   const rules = await loadGitHubRules(env.DB);
   const owned = await orm

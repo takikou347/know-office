@@ -6,11 +6,15 @@ const REAL = {
   accessCerts: "https://team.cloudflareaccess.com/cdn-cgi/access/certs",
   anthropic: "https://api.anthropic.com",
   github: "https://api.github.com",
+  githubWeb: "https://github.com",
+  githubGit: "https://github.com",
 };
 const FAKES = {
   accessCerts: "http://localhost:5199/access/cdn-cgi/access/certs",
   anthropic: "http://localhost:5199/anthropic",
   github: "http://localhost:5199/github",
+  githubWeb: "http://localhost:5199/github/web",
+  githubGit: "http://localhost:5199/github/git",
 };
 
 describe("開発環境の代わりの物", () => {

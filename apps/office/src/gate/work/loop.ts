@@ -6,7 +6,7 @@ import { nodes, staff } from "../db/main.ts";
 import type { Bindings, Staff } from "../env.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
-/** GitHub を呼ぶ口。鍵の付け方と本物の呼び出しは 8.4 でつなぐ (タスクとレビューの 3.3、3.4) */
+/** GitHub を呼ぶ口。鍵は github/app.ts が vault の App の鍵から作る (タスクとレビューの 3.3、3.4) */
 export type Forge = {
   /** ブランチから main へのプルリクエストを出す */
   openPull(input: { repo: string; branch: string; title: string; body: string }): Promise<{ number: number; baseSha: string; headSha: string }>;
@@ -18,8 +18,8 @@ export type Forge = {
   changedPaths(repo: string, branch: string): Promise<string[] | null>;
   /** 公開のリポジトリの既定のブランチに、main に入れる条件と同じルールセットを掛ける。非公開なら何もせず private を返す */
   protectMain(repo: string, when: readonly ReleaseCondition[]): Promise<"applied" | "private">;
-  /** GitHub とつないでいるか。つないでいない間はルールセットを掛ける先が無い */
-  readonly connected: boolean;
+  /** GitHub とつないでいるか。つないでいない間はルールセットを掛ける先が無い。vault を読むまで分からないので待つ */
+  connected(): Promise<boolean>;
 };
 
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
@@ -29,7 +29,7 @@ export const UNCONNECTED_FORGE: Forge = {
   merge: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   changedPaths: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   protectMain: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
-  connected: false,
+  connected: () => Promise.resolve(false),
 };
 
 /** 社員 DO の中で次のタスクを取るのに使う、勤務の本の口 */

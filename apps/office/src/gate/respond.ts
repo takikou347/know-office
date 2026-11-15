@@ -43,3 +43,14 @@ export function created<T>(c: Context<GateEnv>, data: T, location: string) {
 export function noContent(c: Context<GateEnv>) {
   return c.body(null, 204);
 }
+
+/**
+ * 302 で別の URL へ移す。GitHub の画面との行き来だけに使う
+ * @param c 要求の文脈
+ * @param location 移す先
+ * @returns 本文の無い 302
+ */
+export function redirect(c: Context<GateEnv>, location: string) {
+  c.header("Location", location);
+  return c.body(null, 302);
+}

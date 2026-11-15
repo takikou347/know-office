@@ -3516,14 +3516,14 @@ paths:
       operationId: connectGitHub
       tags:
       - github
-      summary: GitHub App の作成情報を返す
-      description: '画面がこの manifest を GitHub に送信する。
+      summary: GitHub App の作成情報を返す。パスキーの確認が必要
+      description: '15 分以内のパスキーの確認が必要。画面がこの manifest を GitHub に送信する。
 
 
         処理の流れ:
 
 
-        1. まだ連携していないことを確認する
+        1. パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
 
         2. ログインセッションの署名鍵で、10 分間有効な `state` を生成する
 
@@ -3535,11 +3535,12 @@ paths:
 
         - 409 `conflict`: すでに連携済み'
       x-steps:
-      - まだ連携していないことを確認する
+      - パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
       - ログインセッションの署名鍵で、10 分間有効な `state` を生成する
       - GitHub App の manifest と GitHub の URL を返す
       x-errors:
       - '409 `conflict`: すでに連携済み'
+      x-step-up: true
       security:
       - accessJwt: []
         session: []
@@ -3563,6 +3564,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -3573,31 +3576,40 @@ paths:
       tags:
       - github
       summary: GitHub App の鍵を受け取る
-      description: '処理の流れ:
+      description: 'GitHub の画面から戻る所。ログインセッションのクッキーは SameSite=Strict で github.com から戻る時には付かないので、Access の証明と `state` で確かめ、ログインセッションは見ない。
+
+
+        処理の流れ:
 
 
         1. `state` の署名と有効期限を検証する
 
-        2. `code` を App の鍵に交換し、暗号化して `vault` に保存する
+        2. まだ連携していないことを確認する
 
-        3. 監査ログに `github.app_created` を記録する
+        3. `code` を App の鍵に交換し、暗号化して `vault` に保存する。読んだ時から `github_app` の版が進んでいれば保存しない
 
-        4. 302 で App のインストール画面にリダイレクトする
+        4. 監査ログに `github.app_created` を記録する
+
+        5. 302 で App のインストール画面にリダイレクトする
 
 
         このルート固有のエラー:
 
 
-        - 403 `forbidden`: `state` が一致しない
+        - 403 `forbidden`: `state` が一致しない、または期限を過ぎた
+
+        - 409 `conflict`: すでに連携済み、または同じ時に別の App を保存した
 
         - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
       - '`state` の署名と有効期限を検証する'
-      - '`code` を App の鍵に交換し、暗号化して `vault` に保存する'
+      - まだ連携していないことを確認する
+      - '`code` を App の鍵に交換し、暗号化して `vault` に保存する。読んだ時から `github_app` の版が進んでいれば保存しない'
       - 監査ログに `github.app_created` を記録する
       - 302 で App のインストール画面にリダイレクトする
       x-errors:
-      - '403 `forbidden`: `state` が一致しない'
+      - '403 `forbidden`: `state` が一致しない、または期限を過ぎた'
+      - '409 `conflict`: すでに連携済み、または同じ時に別の App を保存した'
       - '502 `upstream_failed`: GitHub がエラーを返した'
       parameters:
       - name: code
@@ -3612,7 +3624,6 @@ paths:
           type: string
       security:
       - accessJwt: []
-        session: []
       responses:
         '302':
           description: GitHub App のインストール画面にリダイレクトする
@@ -3626,6 +3637,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableContent'
         '429':
@@ -3640,7 +3653,7 @@ paths:
       tags:
       - github
       summary: GitHub App のインストールを記録する
-      description: 'クエリパラメーター名は GitHub の仕様のまま。
+      description: 'クエリパラメーター名は GitHub の仕様のまま。GitHub の画面から戻る所なので、ログインセッションは見ない。
 
 
         処理の流れ:
@@ -3648,23 +3661,29 @@ paths:
 
         1. `installation_id` が自分の App のものかを GitHub に問い合わせる
 
-        2. `vault` に保存し、監査ログに `github.installed` を記録する
+        2. 同じインストールがすでに記録されていれば、書かずに 302 で設定画面にリダイレクトする
 
-        3. 302 で設定画面にリダイレクトする
+        3. 読んだ時の App の版がまだ使える時だけ `vault` に保存し、監査ログに `github.installed` を記録する
+
+        4. 302 で設定画面にリダイレクトする
 
 
         このルート固有のエラー:
 
 
-        - 403 `forbidden`: 自分の App のインストールではない
+        - 403 `forbidden`: 自分の App のインストールではない、または App を作っていない
+
+        - 409 `conflict`: 同じ時に連携が変わった
 
         - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
       - '`installation_id` が自分の App のものかを GitHub に問い合わせる'
-      - '`vault` に保存し、監査ログに `github.installed` を記録する'
+      - 同じインストールがすでに記録されていれば、書かずに 302 で設定画面にリダイレクトする
+      - 読んだ時の App の版がまだ使える時だけ `vault` に保存し、監査ログに `github.installed` を記録する
       - 302 で設定画面にリダイレクトする
       x-errors:
-      - '403 `forbidden`: 自分の App のインストールではない'
+      - '403 `forbidden`: 自分の App のインストールではない、または App を作っていない'
+      - '409 `conflict`: 同じ時に連携が変わった'
       - '502 `upstream_failed`: GitHub がエラーを返した'
       parameters:
       - name: installation_id
@@ -3672,9 +3691,18 @@ paths:
         required: true
         schema:
           type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+      - name: setup_action
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - install
+          - update
       security:
       - accessJwt: []
-        session: []
       responses:
         '302':
           description: 設定画面にリダイレクトする
@@ -3688,12 +3716,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
   /api/v1/github/repos:
     get:
       operationId: listGitHubRepos
@@ -3703,17 +3735,23 @@ paths:
       description: '処理の流れ:
 
 
-        1. インストール先のリポジトリ一覧を GitHub から取得する
+        1. インストールで選んだすべてのリポジトリに届く、メタデータを読むだけの 1 時間の鍵を作る
+
+        2. インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号
 
 
         このルート固有のエラー:
 
 
-        - 502 `upstream_failed`: GitHub がエラーを返した'
+        - 422 `validation_failed`: `cursor` の形が違う
+
+        - 502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した'
       x-steps:
-      - インストール先のリポジトリ一覧を GitHub から取得する
+      - インストールで選んだすべてのリポジトリに届く、メタデータを読むだけの 1 時間の鍵を作る
+      - インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号
       x-errors:
-      - '502 `upstream_failed`: GitHub がエラーを返した'
+      - '422 `validation_failed`: `cursor` の形が違う'
+      - '502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した'
       parameters:
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
@@ -3738,14 +3776,20 @@ paths:
                 - data
                 - meta
                 additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
   /api/v1/github/rules:
     get:
       operationId: getGitHubRules
@@ -3868,39 +3912,47 @@ paths:
       tags:
       - github
       summary: GitHub の Webhook を受信する
-      description: '署名、時刻、配信 ID を検証する。本文は GitHub の形式で 5MB まで、1 分あたり 60 回まで。
+      description: '署名、時刻、配信 ID を検証する。本文は GitHub の形式で 5MB まで、1 分あたり 60 回まで。捨てる通知も 204 を返す。
 
 
         処理の流れ:
 
 
-        1. 本文を 5MB まで読み、`X-Hub-Signature-256` をタイミング攻撃に強い比較で検証する
+        1. 本文を 5MB まで読み、`vault` の通知の秘密で `X-Hub-Signature-256` をタイミング攻撃に強い比較で検証する
 
-        2. 5 分より古い通知と、`github_deliveries` にある配信 ID の通知は捨てる
+        2. `X-GitHub-Delivery` (時刻の入った UUID 版 1) の時刻が今から 5 分より離れた通知と、ほかのインストールの通知は捨てる
 
-        3. イベントの種類ごとに、チェック結果、レビュー、Issue の処理に渡す
+        3. イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` にある配信 ID の通知では何も直さない
+
+        4. Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければ配信 ID を消す
 
 
         このルート固有のエラー:
 
 
-        - 401 `unauthenticated`: 署名がない、または一致しない
+        - 400 `malformed_request`: 配信 ID か種類か本文の形が違う
+
+        - 401 `unauthenticated`: 連携していない、署名がない、または一致しない
 
         - 413 `payload_too_large`: 本文が 5MB を超える
 
         - 429 `rate_limited`: 1 分あたり 60 回を超えた'
       x-steps:
-      - 本文を 5MB まで読み、`X-Hub-Signature-256` をタイミング攻撃に強い比較で検証する
-      - 5 分より古い通知と、`github_deliveries` にある配信 ID の通知は捨てる
-      - イベントの種類ごとに、チェック結果、レビュー、Issue の処理に渡す
+      - 本文を 5MB まで読み、`vault` の通知の秘密で `X-Hub-Signature-256` をタイミング攻撃に強い比較で検証する
+      - '`X-GitHub-Delivery` (時刻の入った UUID 版 1) の時刻が今から 5 分より離れた通知と、ほかのインストールの通知は捨てる'
+      - イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` にある配信 ID の通知では何も直さない
+      - Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければ配信 ID を消す
       x-errors:
-      - '401 `unauthenticated`: 署名がない、または一致しない'
+      - '400 `malformed_request`: 配信 ID か種類か本文の形が違う'
+      - '401 `unauthenticated`: 連携していない、署名がない、または一致しない'
       - '413 `payload_too_large`: 本文が 5MB を超える'
       - '429 `rate_limited`: 1 分あたり 60 回を超えた'
       security: []
       responses:
         '204':
           description: 成功。レスポンス本文なし
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -7866,7 +7918,7 @@ components:
           format: uri
         manifest:
           type: object
-          additionalProperties: true
+          additionalProperties: {}
         state:
           type: string
       required:

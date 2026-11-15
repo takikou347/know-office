@@ -77,3 +77,127 @@ export const GitHubPull = z.object({ number: z.number().int().positive(), base: 
 
 /** GET /repos/{o}/{r}/git/ref/{ref} の返事のうち使う所 */
 export const GitHubRef = z.object({ object: z.object({ sha: Sha }).loose() }).loose();
+
+/** GitHub の数の ID (App、インストール)。JavaScript の数で正しく持てる範囲だけを受ける */
+export const GitHubId = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+
+/** App の URL に入る名前。小文字の英数字とハイフン */
+export const AppSlug = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/);
+
+/** POST /api/v1/github/connect の返す形。画面は action へ manifest を form で送る */
+export const GitHubManifest = z
+  .object({
+    action: z.url(),
+    manifest: z.record(z.string(), z.unknown()),
+    state: z.string(),
+  })
+  .strict()
+  .meta({ id: "GitHubManifest" });
+
+/** GitHub App の manifest の返す形の型 */
+export type GitHubManifest = z.infer<typeof GitHubManifest>;
+
+/** 連携したリポジトリ */
+export const Repo = z.object({ fullName: z.string(), private: z.boolean() }).strict().meta({ id: "Repo" });
+
+/** 連携したリポジトリの型 */
+export type Repo = z.infer<typeof Repo>;
+
+/** GET /api/v1/github/callback のクエリ。code は GitHub の道に入れるので、英数字とハイフンと下線だけを受ける */
+export const GitHubCallbackQuery = z
+  .object({
+    code: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),
+    state: z.string().regex(/^[A-Za-z0-9_-]{1,200}\.[A-Za-z0-9_-]{43}$/),
+  })
+  .strict();
+
+/** GET /api/v1/github/installed のクエリ。名前は GitHub の決まりのまま */
+export const GitHubInstalledQuery = z
+  .object({
+    installation_id: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    setup_action: z.enum(["install", "update"]).optional(),
+  })
+  .strict();
+
+/** POST /app-manifests/{code}/conversions の返事のうち使う所 */
+export const GitHubAppConversion = z
+  .object({
+    id: GitHubId,
+    slug: AppSlug,
+    pem: z.string().min(100).max(10_000),
+    webhook_secret: z.string().min(16).max(200),
+  })
+  .loose();
+
+/** GET /app/installations/{id} の返事のうち使う所 */
+export const GitHubInstallation = z.object({ id: GitHubId, app_id: GitHubId }).loose();
+
+/** POST /app/installations/{id}/access_tokens の返事のうち使う所 */
+export const GitHubAccessToken = z
+  .object({
+    token: z.string().regex(/^ghs_[A-Za-z0-9_]{1,255}$/),
+    expires_at: z.iso.datetime(),
+    permissions: z.record(z.string(), z.enum(["read", "write"])),
+    repositories: z.array(z.object({ full_name: RepoName }).loose()).optional(),
+  })
+  .loose();
+
+/** GET /installation/repositories の返事のうち使う所 */
+export const GitHubInstallationRepos = z
+  .object({
+    total_count: z.number().int().nonnegative(),
+    repositories: z.array(z.object({ full_name: RepoName, private: z.boolean() }).loose()).max(100),
+  })
+  .loose();
+
+/** vault の github_app に置く値。App の元の鍵 */
+export const GitHubAppKeys = z
+  .object({
+    appId: GitHubId,
+    slug: AppSlug,
+    privateKey: z.string().min(100).max(10_000),
+    webhookSecret: z.string().min(16).max(200),
+  })
+  .strict();
+
+/** vault の github_installation に置く値 */
+export const GitHubInstallationKey = z.object({ id: GitHubId }).strict();
+
+/** X-GitHub-Delivery。GitHub は時刻の入った UUID (版 1) を送る */
+export const DeliveryId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-1[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+/** X-Hub-Signature-256 */
+export const HubSignature = z.string().regex(/^sha256=[0-9a-f]{64}$/);
+
+/** X-GitHub-Event */
+export const GitHubEventName = z.string().regex(/^[a-z_]{1,64}$/);
+
+/** 通知の本文のうち、どの通知にもある所 */
+export const GitHubWebhookHead = z
+  .object({
+    action: z.string().max(64).optional(),
+    installation: z.object({ id: GitHubId }).loose().optional(),
+    repository: z.object({ full_name: RepoName }).loose().optional(),
+  })
+  .loose();
+
+/** check_run の通知のうち使う所 */
+export const CheckRunEvent = z
+  .object({
+    check_run: z.object({ name: z.string().min(1).max(255), status: z.string().max(64), conclusion: z.string().max(64).nullable(), head_sha: Sha }).loose(),
+  })
+  .loose();
+
+/** check_suite の通知のうち使う所 */
+export const CheckSuiteEvent = z.object({ check_suite: z.object({ head_sha: Sha }).loose() }).loose();
+
+/** pull_request の通知のうち使う所 */
+export const PullRequestEvent = z.object({ pull_request: z.object({ number: z.number().int().positive(), head: z.object({ sha: Sha }).loose() }).loose() }).loose();
+
+/** issues の通知のうち使う所。プルリクエストも issues で届くので pull_request で見分ける */
+export const IssuesEvent = z
+  .object({
+    issue: z.object({ number: z.number().int().positive(), title: z.string().min(1).max(256), body: z.string().max(65_536).nullable().optional(), pull_request: z.unknown().optional() }).loose(),
+    sender: z.object({ type: z.string().max(64) }).loose().optional(),
+  })
+  .loose();
