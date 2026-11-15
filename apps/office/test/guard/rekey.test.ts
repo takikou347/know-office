@@ -197,11 +197,22 @@ describe("再開", () => {
   it("同時に入れ直しても、置く鍵は 1 つ", async () => {
     const linked = await connect(world);
     await stopOffice();
-    const statuses = await Promise.all([
-      call("PUT", "/api/v1/guard/keys/claude", { apiKey: NEW_CLAUDE_KEY }),
-      call("PUT", "/api/v1/guard/keys/claude", { apiKey: `sk-ant-api03-${"m".repeat(40)}` }),
-    ]);
-    expect(statuses.map((r) => r.status).toSorted((a, b) => a - b)).toEqual([200, 409]);
+    // 2 つを並べて送るだけでは、片方が終わってからもう片方が読む順になる事がある。先の 1 つが書く直前に、もう 1 つを通して重ねる
+    const first: number[] = [];
+    let overlapped = false;
+    const restoreClaude = wrapDb(world, {
+      batch: async (real, statements) => {
+        if (!overlapped) {
+          overlapped = true;
+          first.push((await call("PUT", "/api/v1/guard/keys/claude", { apiKey: `sk-ant-api03-${"m".repeat(40)}` })).status);
+        }
+        return real(statements);
+      },
+    });
+    const second = await call("PUT", "/api/v1/guard/keys/claude", { apiKey: NEW_CLAUDE_KEY });
+    restoreClaude();
+    expect(first).toEqual([200]);
+    expect(await answer(second)).toEqual({ status: 409, body: "conflict" });
     expect(await rows(world.d1.DB, "SELECT COUNT(*) AS n FROM vault WHERE name = 'claude_api_key' AND revoked_at IS NULL")).toEqual([{ n: 1 }]);
 
     // GitHub App の鍵は、App とインストールの 2 つを 1 回のバッチで置く。書く直前に別の入れ直しを通しても、片方だけを残さない
