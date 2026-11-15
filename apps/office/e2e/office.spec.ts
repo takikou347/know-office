@@ -131,7 +131,7 @@ test.describe("オフィスの部屋", () => {
     await page.goto("/office");
     const list = page.getByRole("list", { name: "社員の様子" });
     await expect(list.getByRole("link", { name: /作る役/ })).toBeVisible();
-    await expect(page.getByRole("status")).toHaveText("直近の出来事はまだありません");
+    await expect(page.getByRole("main").getByRole("status")).toHaveText("直近の出来事はまだありません");
     await expect(page.locator("canvas")).toHaveCount(0);
     expect(urls.filter((u) => /three/.test(u))).toEqual([]);
     await list.getByRole("link", { name: /作る役/ }).click();
