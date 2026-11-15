@@ -204,7 +204,14 @@ function changes(env: Bindings, hook: Hook): D1PreparedStatement[] {
     const pull = PullRequestEvent.safeParse(hook.payload);
     if (!pull.success) return [];
     const { number, head } = pull.data.pull_request;
-    return [db.prepare(`UPDATE reviews SET head_sha = ?, checks = '[]' WHERE repo = ? AND pr_number = ? AND ${FRESH}`).bind(head.sha, hook.repo, number, hook.digest)];
+    // 先が進んだら、前の先に出た承認は新しい先を確かめていないので、同じ文で消して待ち直す。同じ先の通知がもう一度届いた時は消さない
+    return [
+      db
+        .prepare(
+          `UPDATE reviews SET owner_verdict = CASE WHEN head_sha = ? THEN owner_verdict ELSE NULL END, reviewer_verdict = CASE WHEN head_sha = ? THEN reviewer_verdict ELSE NULL END, head_sha = ?, checks = '[]' WHERE repo = ? AND pr_number = ? AND ${FRESH}`,
+        )
+        .bind(head.sha, head.sha, head.sha, hook.repo, number, hook.digest),
+    ];
   }
   const installation = hook.link.installation;
   if (hook.event === "installation" && installation && (hook.action === "deleted" || hook.action === "suspend")) {

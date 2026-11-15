@@ -24,7 +24,7 @@ async function reviewState(task: string): Promise<{ verdict: unknown; notes: unk
 describe("GitHub に写す", () => {
   it("レビュー担当の判断も App の名前で GitHub に写る", async () => {
     const { forge } = await openReview(world);
-    const res = await runTool(world.gate.env, forge, { staffId: "reviewer", tool: "review_submit", input: { verdict: "reject", summary: "空の日の表のテストが無い" }, now: world.clock.now(), guard: world.gate.deps });
+    const res = await runTool(world.gate.env, forge, { staffId: "reviewer", tool: "review_submit", input: { verdict: "reject", summary: "空の日の表のテストが無い", headSha: "b".repeat(40) }, now: world.clock.now(), guard: world.gate.deps });
     expect(res.isError).toBe(false);
     expect(postedTo(world, "reviews")[0]).toEqual({ event: "REQUEST_CHANGES", body: marked("空の日の表のテストが無い"), commit_id: HEAD });
   });

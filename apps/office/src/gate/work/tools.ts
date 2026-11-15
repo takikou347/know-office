@@ -31,7 +31,7 @@ import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, updateNode } from "./nodes.ts";
-import { findReview, madeTaskOf, mergeIfReady, repoRefusal } from "./review.ts";
+import { backToTodo, findReview, madeTaskOf, mergeIfReady, repoRefusal } from "./review.ts";
 
 /** 呼び出し 1 回 */
 export type ToolCall = {
@@ -274,7 +274,7 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
  * @param call 呼び出し
  * @param input ReviewSubmitTool
  * @returns main に入れたか
- * @throws conflict 今のタスクがレビューでない時、確かめるタスクが無いか review でない時、確かめるタスクが読んだ後に変わった時
+ * @throws conflict 今のタスクがレビューでない時、確かめるタスクが無いか review でない時、読んだ先 (headSha) がレビューの今の先と違う時、確かめるタスクが読んだ後に変わった時
  */
 async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: ReviewSubmitTool): Promise<{ merged: boolean }> {
   const review = await currentTask(env, call);
@@ -283,20 +283,31 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
   if (!made) throw new AppError("conflict", "確かめるタスクが無い");
   // 見送られたタスクや、もう入れたタスクを main に入れない
   if (made.status !== "review") throw new AppError("conflict", "確かめるタスクがレビューを待っていない");
+  const row = await findReview(env.DB, made.id);
+  const clock = clockAt(call.now);
+  const db = env.DB;
+  // 読んだ先がレビューの今の先のままで、確かめるタスクがまだレビューを待つ時だけ、判断、GitHub に写す順番待ち、差し戻しならタスクを todo に戻す事を 1 回のバッチで書く
+  const when = { sql: "EXISTS (SELECT 1 FROM reviews WHERE id = ? AND head_sha = ?) AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND status = 'review')", args: [row.id, input.headSha, made.id] };
+  const mirror = enqueueMirror(env, row.id, { kind: "review", payload: { event: input.verdict === "approve" ? "APPROVE" : "REQUEST_CHANGES", body: input.summary, commitId: input.headSha } }, clock, when);
+  const statements = [
+    db
+      .prepare("UPDATE reviews SET reviewer_verdict = ?, reviewer_summary = ? WHERE id = ? AND head_sha = ? AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND status = 'review')")
+      .bind(input.verdict, input.summary, row.id, input.headSha, made.id),
+    mirror.statement,
+  ];
+  if (input.verdict === "reject") statements.push(backToTodo(db, made.id, call.now, when));
+  const [updated] = await db.batch(statements);
+  if ((updated?.meta.changes ?? 0) === 0) throw new AppError("conflict", "確かめた後に変更が足されたか、確かめるタスクが変わった");
+  // 出来事の node_events は年ごとの記録の D1 にあり、同じバッチに入れられないので、書けた後に足す
   const actor = actorOf(call);
   let merged = false;
   if (input.verdict === "reject") {
-    if (!(await moveNode(env.DB, made, "todo", call.now))) throw new AppError("conflict", "確かめるタスクが変わった");
     await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_rejected", detail: { summary: input.summary } }, actor);
   } else {
     const approved = { staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } };
-    merged = await mergeIfReady(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: true }, approved, actor);
+    // 承認は書いた行から読む。書いた後に先が進んでいれば、その通知が承認を消している
+    merged = await mergeIfReady(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: null }, approved, actor);
   }
-  // 判断と、GitHub に写す順番待ちを一緒に書く
-  const row = await findReview(env.DB, made.id);
-  const clock = clockAt(call.now);
-  const mirror = enqueueMirror(env, row.id, { kind: "review", payload: { event: input.verdict === "approve" ? "APPROVE" : "REQUEST_CHANGES", body: input.summary, commitId: row.headSha } }, clock);
-  await env.DB.batch([env.DB.prepare("UPDATE reviews SET reviewer_verdict = ?, reviewer_summary = ? WHERE id = ?").bind(input.verdict, input.summary, row.id), mirror.statement]);
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "review.submit", target: made.id, scope: made.scope, detail: { verdict: input.verdict, merged }, traceId: call.traceId });
   await finishTask(env, call.staffId, review.id, call.now);
   if (input.verdict === "reject" && made.assignee !== null) await notifyStaff(env, made.assignee, call.now, false);

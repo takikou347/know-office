@@ -123,8 +123,8 @@ export const reviewRoutes = router
     if (refusal !== null) throw new AppError("rule_denied", refusal.reason);
     // GitHub の側でブランチの先が進んでいれば、force を付けないので conflict で断られる
     const sha = await c.var.forge.commitFile(review.repo, review.branch, { parent: input.baseSha, path: input.path, content: input.content, message: input.message });
-    // 同じ push の synchronize の通知が先に届いていれば、もう新しい先になっている
-    await c.env.DB.prepare("UPDATE reviews SET head_sha = ?, checks = '[]' WHERE id = ? AND head_sha = ?").bind(sha, review.id, input.baseSha).run();
+    // 同じ push の synchronize の通知が先に届いていれば、もう新しい先になっている。先が進むので、前の先に出た承認は同じ文で消して待ち直す
+    await c.env.DB.prepare("UPDATE reviews SET head_sha = ?, checks = '[]', owner_verdict = NULL, reviewer_verdict = NULL WHERE id = ? AND head_sha = ?").bind(sha, review.id, input.baseSha).run();
     await audit(c, "review.commit", nodeId, { repo: review.repo, sha, path: input.path });
     return created(c, { sha }, `/api/v1/reviews/${nodeId}/commits/${sha}`);
   });

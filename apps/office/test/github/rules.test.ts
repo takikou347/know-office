@@ -4,7 +4,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { services } from "../../src/gate/db/main.ts";
-import { createNode } from "../../src/gate/work/nodes.ts";
+import { createNode, findNode } from "../../src/gate/work/nodes.ts";
+import { mergeIfReady } from "../../src/gate/work/review.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
 import { api, clockIn, MINUTE, purposeAndGoal, rows, staffOf, useWork, type WorkWorld } from "../helpers/work.ts";
 
@@ -117,7 +118,7 @@ describe("GitHub のルール", () => {
     await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
 
-    const answer = await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" });
+    const answer = await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: SHA.head });
     expect(JSON.parse(answer.content)).toEqual({ merged: false });
     expect(writes(world).filter((r) => r.includes("/git/refs/heads/main"))).toEqual([]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
@@ -175,7 +176,7 @@ describe("ブランチの保護をルールから掛ける", () => {
     const task = await buildTask(world, OFFICE);
     await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
-    expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).content)).toEqual({ merged: false });
+    expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: SHA.head })).content)).toEqual({ merged: false });
     expect(writes(world).filter((r) => r.includes("/git/refs/heads/main"))).toEqual([]);
     expect((await events(world, task)).find((e) => e.kind === "merge_waiting")).toEqual({ kind: "merge_waiting", detail: { reason: "owner" } });
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
@@ -302,7 +303,7 @@ describe("GitHub のルールの決まり", () => {
     await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
     world.gate.github.files = [{ filename: ".github/workflows/ci.yml" }];
-    expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).content)).toEqual({ merged: false });
+    expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: SHA.head })).content)).toEqual({ merged: false });
     expect(writes(world).filter((r) => r.includes("/git/refs/heads/main"))).toEqual([]);
     expect((await events(world, task)).find((e) => e.kind === "merge_refused")).toEqual({ kind: "merge_refused", detail: { reason: "ルールで触れない所: .github/workflows/ci.yml" } });
   });
@@ -319,10 +320,37 @@ describe("GitHub のルールの決まり", () => {
     world.gate.github.set(`GET /repos/${UI}/commits/${reviewed}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] });
     world.gate.github.set(`GET /repos/${UI}/commits/${SHA.head}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "failure" }] });
 
-    expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).content)).toEqual({ merged: true });
+    expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: reviewed })).content)).toEqual({ merged: true });
     const routes = world.gate.github.requests.map((r) => r.route);
     expect(routes).toContain(`GET /repos/${UI}/compare/main...${reviewed}`);
     expect(routes.filter((r) => r.includes("/git/ref/heads/"))).toEqual([]);
     expect(world.gate.github.requests.filter((r) => r.route === `PATCH /repos/${UI}/git/refs/heads/main`).map((r) => r.body)).toEqual([{ sha: reviewed, force: false }]);
+  });
+
+  for (const bad of ["", "zzz", "B".repeat(40), `${"b".repeat(39)}/`]) {
+    it(`確かめたコミットの形が違う (${JSON.stringify(bad)}) 時は main を進めず merge_refused を残す`, async () => {
+      await service(world, UI);
+      repoOnGitHub(world, UI, { private: false });
+      const task = await buildTask(world, UI);
+      await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+      await world.d1.DB.prepare("UPDATE reviews SET head_sha = ?, reviewer_verdict = 'approve'").bind(bad).run();
+      const made = await findNode(world.d1.DB, task);
+      const before = world.gate.github.requests.length;
+      const merged = await mergeIfReady(world.gate.env, world.gate.forge, made, { repo: UI, branch: made.branch ?? "", prNumber: 1, reviewer: null }, { staffId: "reviewer", kind: "review_approved", detail: {} }, { by: "reviewer", now: world.clock.now() });
+      expect(merged).toBe(false);
+      expect(writes(world).filter((r) => r.includes("/git/refs/heads/main"))).toEqual([]);
+      // プルリクエストを出した後は、GitHub に何も聞かない
+      expect(world.gate.github.requests.slice(before)).toEqual([]);
+      expect((await events(world, task)).find((e) => e.kind === "merge_refused")).toEqual({ kind: "merge_refused", detail: { reason: "確かめたコミットが分からない" } });
+      expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
+    });
+  }
+
+  it("GitHub を呼ぶ口は、40 字の 16 進数でない SHA でチェックを読まず main も進めない", async () => {
+    for (const bad of ["../../hooks", "b".repeat(39), "B".repeat(40), `${"b".repeat(40)}?x=1`]) {
+      await expect(world.gate.forge.checksPassed(UI, bad)).rejects.toMatchObject({ code: "internal" });
+      await expect(world.gate.forge.merge(UI, { branch: "ko/x", sha: bad })).rejects.toMatchObject({ code: "internal" });
+    }
+    expect(world.gate.github.requests).toEqual([]);
   });
 });

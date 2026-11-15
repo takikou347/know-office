@@ -18,7 +18,7 @@ describe("別のモデルによる確認", () => {
     await staffOf(world, "reviewer").pull(world.clock.now());
 
     await advance(world, at(9, 40));
-    expect(await tool(world, "reviewer", "review_submit", { verdict: "reject", summary: "空の日の表のテストが無い" })).toMatchObject({ isError: false });
+    expect(await tool(world, "reviewer", "review_submit", { verdict: "reject", summary: "空の日の表のテストが無い", headSha: "b".repeat(40) })).toMatchObject({ isError: false });
     expect(world.forge.merged).toEqual([]);
     const detail = z.object({ events: z.array(z.object({ kind: z.string(), staffId: z.string().nullable(), detail: z.record(z.string(), z.unknown()) })) }).loose().parse(await api(world, "GET", `/api/v1/nodes/${task}`));
     expect(detail.events.find((e) => e.kind === "review_rejected")).toEqual({ kind: "review_rejected", staffId: "reviewer", detail: { summary: "空の日の表のテストが無い" } });

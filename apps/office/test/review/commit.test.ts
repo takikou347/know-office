@@ -53,6 +53,15 @@ describe("その場で直す", () => {
     expect(world.gate.audits.find((a) => a.action === "review.commit")).toMatchObject({ actor: "owner", target: task, detail: { repo: REPO, sha, path: CHANGE.path } });
   });
 
+  it("直してコミットすると先が進むので、オーナーとレビュー担当の承認を消して待ち直す", async () => {
+    const { task } = await openReview(world);
+    const branch = z.object({ branch: z.string() }).parse((await rows(world.d1.DB, "SELECT branch FROM reviews WHERE node_id = ?", task))[0]).branch;
+    world.gate.github.heads.set(`${REPO}:${branch}`, HEAD);
+    await world.d1.DB.prepare("UPDATE reviews SET owner_verdict = 'approve', reviewer_verdict = 'approve' WHERE node_id = ?").bind(task).run();
+    const { sha } = z.object({ sha: z.string() }).parse(await api(world, "POST", `/api/v1/reviews/${task}/commits`, CHANGE, 201));
+    expect(await rows(world.d1.DB, "SELECT head_sha, owner_verdict, reviewer_verdict FROM reviews WHERE node_id = ?", task)).toEqual([{ head_sha: sha, owner_verdict: null, reviewer_verdict: null }]);
+  });
+
   it("触れない所を書き換えるコミットは 403 で断る", async () => {
     const { task } = await openReview(world);
     expect(await api(world, "POST", `/api/v1/reviews/${task}/commits`, { ...CHANGE, path: ".github/workflows/ci.yml" }, 403)).toMatchObject({ code: "rule_denied" });

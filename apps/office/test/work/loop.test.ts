@@ -165,7 +165,7 @@ describe("タスクの繰り返し", () => {
     // 手の空いていたレビュー担当は、足されたレビューのタスクをすぐに取る
     expect(await tasksOf(world, "reviewer")).toEqual([{ title: "レビュー: 勤怠の表をつなぐ", task_kind: "review", status: "doing" }]);
     await advance(world, at(10, 30));
-    expect(await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "テストと型を確かめた。未確認の所は無い" })).toMatchObject({ isError: false });
+    expect(await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "テストと型を確かめた。未確認の所は無い", headSha: "b".repeat(40) })).toMatchObject({ isError: false });
     expect(world.forge.merged).toEqual([branch]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "done" }]);
     expect(await rows(world.d1.DB, "SELECT reviewer_verdict, reviewer_summary FROM reviews WHERE node_id = ?", first)).toEqual([
@@ -185,7 +185,7 @@ describe("タスクの繰り返しの決まり", () => {
     await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
     world.forge.checks = false;
-    await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" });
+    await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: "b".repeat(40) });
     expect(world.forge.merged).toEqual([]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", tasks[0])).toEqual([{ status: "review" }]);
   });
@@ -288,7 +288,7 @@ describe("タスクの繰り返しの決まり", () => {
   it("見送ったタスクは、承認されても main に入れない", async () => {
     const first = await openedPull(world);
     expect(await ownerPatch(world, first, { status: "dropped" })).toBe(200);
-    await expect(tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).rejects.toMatchObject({ code: "conflict" });
+    await expect(tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: "b".repeat(40) })).rejects.toMatchObject({ code: "conflict" });
     expect(world.forge.merged).toEqual([]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "dropped" }]);
   });
@@ -298,7 +298,7 @@ describe("タスクの繰り返しの決まり", () => {
     world.forge.during.merge = async () => {
       await ownerPatch(world, first, { title: "勤怠の表を本物の記録につなぐ" });
     };
-    expect(await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).toMatchObject({ isError: false });
+    expect(await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: "b".repeat(40) })).toMatchObject({ isError: false });
     expect(world.forge.merged).toHaveLength(1);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "done" }]);
   });
