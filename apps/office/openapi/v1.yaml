@@ -635,13 +635,16 @@ paths:
         このルート固有のエラー:
 
 
-        - 404 `not_found`: 指定した年のデータベースがない'
+        - 404 `not_found`: 指定した年のデータベースがない
+
+        - 429 `rate_limited`: 同じ送信元から 1 分に 2 回目'
       x-steps:
       - '`RecorderDO.verify(year)` を呼ぶ'
       - ハッシュが一致しなければ、`guard.observe` に `chain_broken` を渡して全体を停止する
       - 結果 `ok` と、最初に一致しなかった行を返す
       x-errors:
       - '404 `not_found`: 指定した年のデータベースがない'
+      - '429 `rate_limited`: 同じ送信元から 1 分に 2 回目'
       requestBody:
         required: true
         content:
