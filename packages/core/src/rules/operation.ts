@@ -69,8 +69,14 @@ const SECRET_TEXT = SECRET_SHAPES.map((s) => s.pattern);
 const GUARD_TEXT = /\/(?:api|ws)\/v\d+\/(?:guard|stops)\b/;
 const STAFF_TEXT = /\/(?:api|ws)\/v\d+\/staff\b/;
 
-// 鍵らしい名前 (x-api-key、authorization、password、token、secret、api_key、access_token など)。前後の語の続きも名前に含める
-const KEY_NAME = String.raw`[\w-]*(?:api[_-]?key|token|secret|password|passwd|authorization)[\w-]*`;
+// 鍵らしい名前 (x-api-key、authorization、password、token、secret、api_key、access_token など) に入る語
+const KEY_WORD = String.raw`(?:api[_-]?key|token|secret|password|passwd|authorization)`;
+// 英数字、_、- の続き 1 つを、戻らずに終わりまで読む。先読みで取った物をそのまま当てるので、短くして試し直さない
+const RUN = String.raw`(?=(?<run>[\w-]+))\k<run>`;
+// 鍵らしい名前。続きの頭からだけ始め、鍵らしい語を含む続きの全体を名前にする。続きの途中から始めたり、名前を短くして試し直したりしないので、長い続きでも字数に比例した時間で終わる
+const KEY_NAME = String.raw`(?<![\w-])(?=[\w-]*?${KEY_WORD})${RUN}`;
+// - の後ろに鍵らしい語がある続き (--token、--with-token、foo-api-key)。最初の - より後ろだけを探す
+const KEY_FLAG = String.raw`(?<![\w-])(?=\w*-[\w-]*?${KEY_WORD})${RUN}`;
 // 引用符で囲んだ値。空白を含めて閉じる引用符まで、閉じていなければ行の終わりまで
 const QUOTED = String.raw`"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)`;
 
@@ -94,14 +100,14 @@ type Mask = readonly [RegExp, string | ((match: string, ...groups: string[]) => 
 
 /** 記録に入れる前に伏せる形。伏せるだけの形の後に、判断と同じ鍵の形をつなぐ。モジュールの頭で 1 度だけ作る */
 const MASKS: readonly Mask[] = [
-  // URL の userinfo (user:pass@)
-  [/\b([a-z][a-z\d+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1***@"],
+  // URL の userinfo (user:pass@)。:// を見つけてから、スキームを後ろ向きに確かめる。語の境目ごとにスキームを読み直さない
+  [/:\/\/(?<=\b[a-z][a-z\d+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "://***@"],
   // --token 値 の形の引数
-  [new RegExp(String.raw`(-${KEY_NAME})(\s+)(?!-)(?:${QUOTED}|[^\s"'&;|]+)`, "gim"), maskValue(([name = "", space = ""]) => `${name}${space}`)],
+  [new RegExp(String.raw`(${KEY_FLAG}\s+)(?!-)(?:${QUOTED}|[^\s"'&;|]+)`, "gim"), maskValue(([head = ""]) => head)],
   // 名前 = 値 と 名前: 値。JSON の "名前": "値" と、authorization の Bearer と Basic も含める
   [new RegExp(String.raw`(${KEY_NAME}["']?\s*[:=]\s*)(?:${QUOTED}|(?:(?:Bearer|Basic|Token)\s+)?[^\s"'&,;}]+)`, "gim"), maskValue(([head = ""]) => head)],
-  // JWT
-  [/eyJ[\w-]+\.[\w-]+\.[\w-]*/g, "***"],
+  // JWT。続きの頭から最初の eyJ だけを試す。同じ続きの後ろの eyJ は、終わりが同じなので結果も同じ
+  [/(?<![\w-])(?=(?<pre>[\w-]*?)eyJ)\k<pre>eyJ(?=(?<seg>[\w-]+))\k<seg>\.[\w-]+\.[\w-]*/g, "$<pre>***"],
   // AWS のアクセスキー
   [/AKIA[\dA-Z]{16}/g, "***"],
   // Slack のトークン

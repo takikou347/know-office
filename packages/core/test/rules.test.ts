@@ -230,6 +230,32 @@ describe("補助: 記録に残す文から鍵を伏せる maskSecrets と record
     expect(toOperation("Bash", { command: "echo SK-ANT-api03-x" }).kind).toBe("secret.read");
   });
 
+  it("続きの途中の名前、スキーム、JWT も、今までどおり伏せる", () => {
+    expect(maskSecrets("foo-token abc x foo-api-key 'a b' y")).toBe("foo-token *** x foo-api-key '***' y");
+    expect(maskSecrets("token-token-token=abc _token_=1")).toBe("token-token-token=*** _token_=***");
+    expect(maskSecrets("1.https://u:p@h/x ftp+ssh://a:b@c pre://u:p@h://u2:p2@h2")).toBe("1.https://***@h/x ftp+ssh://***@c pre://***@h://***@h2");
+    expect(maskSecrets("XeyJa.b.c abc.eyJx.y.z eyJeyJa.b.c x-eyJa.b.c")).toBe("X*** abc.*** *** x-***");
+  });
+
+  describe("長い文でも、字数に比例した時間で伏せ終わる", () => {
+    // 同じ形を並べた文。正規表現が続きの途中から読み直すと、字数の 2 乗、3 乗の時間が掛かる
+    const seeds = ["token-", "-token", "token", "token=", "token='", "--token ", "eyJ", "eyJa.", "eyJa.b", "sk-", "ghp_", "xoxb-", "AKIA", "Bearer ", "$KEY", "a-", "a.", "-", "_", "://", "a://", "a://b:", "http", "env ", "/proc/", " ", "'"];
+    it.each([4800, 50_000])("%d 字の文を 50ms 以内に伏せる", (length) => {
+      for (const seed of seeds) {
+        const body = seed.repeat(Math.ceil(length / seed.length));
+        // 機械が混んでいる時の揺れを除くため、3 回のうち最も速い時間で見る
+        const took = Math.min(
+          ...[0, 1, 2].map(() => {
+            const start = performance.now();
+            maskSecrets(body);
+            return performance.now() - start;
+          }),
+        );
+        expect({ seed, ok: took <= 50 }).toEqual({ seed, ok: true });
+      }
+    });
+  });
+
   it("伏せてから 500 字で切り、サロゲートペアを割らない", () => {
     const long = `${"a".repeat(495)} sk-ant-${"x".repeat(100)}`;
     expect(recordedText(long)).toBe(`${"a".repeat(495)} ***`);
