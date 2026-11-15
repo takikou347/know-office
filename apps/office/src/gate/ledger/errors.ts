@@ -26,8 +26,10 @@ export const CLAUDE_FAILED = "claude_failed";
 /** 自分の通知を持つので、同じエラーの続き (error_burst) の通知を出さない code */
 const OWN_NOTICE_CODES: ReadonlySet<string> = new Set([CLAUDE_FAILED]);
 
-const BURST_LIMIT = 3;
-const BURST_WINDOW_MS = 5 * 60 * 1000;
+/** 同じ原因のエラーが続いたとみなす、5 分の回数。これを超えたら知らせ、急ぐ故障として調べる */
+export const BURST_LIMIT = 3;
+/** 同じ原因のエラーを数える間 */
+export const BURST_WINDOW_MS = 5 * 60 * 1000;
 
 /**
  * 残す文を作る。エラーの名前と、鍵を伏せた 200 字までの文

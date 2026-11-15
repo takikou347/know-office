@@ -126,16 +126,85 @@ export async function addStop(w: WorkWorld, input: { at: number; signal: string;
  * @param input.count 件数
  * @param input.route ルート
  * @param input.message エラーの文
+ * @param input.level error か warn
+ * @param input.code 失敗の種類
  */
-export async function addErrors(w: WorkWorld, input: { at: number; fingerprint: string; count: number; route?: string; message?: string }): Promise<void> {
-  const db = new Date(input.at + 9 * 60 * 60_000).getUTCFullYear() === 2027 ? w.d1.REC_2027 : w.d1.REC_2026;
+export async function addErrors(
+  w: WorkWorld,
+  input: { at: number; fingerprint: string; count: number; route?: string; message?: string; level?: "error" | "warn"; code?: string },
+): Promise<void> {
+  const db = recordDb(w, input.at);
   if (input.count === 0) return;
   const statements = Array.from({ length: input.count }, (_, i) =>
     db
-      .prepare("INSERT INTO error_events (id, at, source, level, code, message, route, status, fingerprint, trace_id) VALUES (?, ?, 'gate', 'error', 'internal', ?, ?, 500, ?, NULL)")
-      .bind(newId(clockAt(input.at + i * 60_000)), input.at + i * 60_000, input.message ?? "TypeError: undefined を読んだ", input.route ?? "/api/v1/nodes", input.fingerprint),
+      .prepare("INSERT INTO error_events (id, at, source, level, code, message, route, status, fingerprint, trace_id) VALUES (?, ?, 'gate', ?, ?, ?, ?, 500, ?, NULL)")
+      .bind(
+        newId(clockAt(input.at + i * 60_000)),
+        input.at + i * 60_000,
+        input.level ?? "error",
+        input.code ?? "internal",
+        input.message ?? "TypeError: undefined を読んだ",
+        input.route ?? "/api/v1/nodes",
+        input.fingerprint,
+      ),
   );
   await db.batch(statements);
+}
+
+/**
+ * その時刻の年の記録の D1 を返す
+ * @param w テストの物
+ * @param at 時刻
+ * @returns REC_2026 か REC_2027
+ */
+function recordDb(w: WorkWorld, at: number) {
+  return new Date(at + 9 * 60 * 60_000).getUTCFullYear() === 2027 ? w.d1.REC_2027 : w.d1.REC_2026;
+}
+
+/**
+ * ツールの呼び出しを tool_calls に置く。1 件ごとに 1 分ずらす
+ * @param w テストの物
+ * @param input 時刻、ツール、かかった時間の並び、相手
+ * @param input.at 最初の時刻
+ * @param input.tool ツールの名前
+ * @param input.ms 1 件ずつのかかった時間
+ * @param input.target 相手
+ */
+export async function addToolCalls(w: WorkWorld, input: { at: number; tool: string; ms: number[]; target?: string }): Promise<void> {
+  const db = recordDb(w, input.at);
+  if (input.ms.length === 0) return;
+  await db.batch(
+    input.ms.map((ms, i) =>
+      db
+        .prepare("INSERT INTO tool_calls (id, at, staff_id, node_id, scope, tool, op_kind, target, allowed, reason, ms, trace_id) VALUES (?, ?, 'builder', NULL, 'office', ?, 'shell.run', ?, 1, NULL, ?, NULL)")
+        .bind(newId(clockAt(input.at + i * 60_000)), input.at + i * 60_000, input.tool, input.target ?? `pnpm test ${String(i)}`, ms),
+    ),
+  );
+}
+
+/**
+ * Claude の呼び出しの使った量を usage に置く。1 件ごとに 1 分ずらす
+ * @param w テストの物
+ * @param input 時刻、社員、件数、1 件の入力と読み直しの割引のトークン、1 件の費用
+ * @param input.at 最初の時刻
+ * @param input.staffId 社員
+ * @param input.count 件数
+ * @param input.input 割引の無い入力のトークン
+ * @param input.cacheRead 読み直しの割引で読んだトークン
+ * @param input.costMicroUsd 1 件の費用
+ */
+export async function addUsage(w: WorkWorld, input: { at: number; staffId: string; count: number; input: number; cacheRead: number; costMicroUsd: number }): Promise<void> {
+  const db = recordDb(w, input.at);
+  if (input.count === 0) return;
+  await db.batch(
+    Array.from({ length: input.count }, (_, i) =>
+      db
+        .prepare(
+          "INSERT INTO usage (id, at, staff_id, node_id, scope, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micro_usd, request_id, waited_ms, trace_id) VALUES (?, ?, ?, NULL, 'office', 'claude-sonnet-5-5', ?, 100, ?, 0, ?, NULL, NULL, NULL)",
+        )
+        .bind(newId(clockAt(input.at + i * 60_000)), input.at + i * 60_000, input.staffId, input.input, input.cacheRead, input.costMicroUsd),
+    ),
+  );
 }
 
 /**

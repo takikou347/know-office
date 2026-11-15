@@ -1,13 +1,12 @@
-// 週に 1 度のバッチ処理。前の週の記録をまとめて Claude のバッチ処理に送り、5 分ごとに終わりを見て結果を入れる (サービスと拡張の 3.6、3.7)
+// 週に 1 度のバッチ処理と、見つけた時に調べる急ぐ故障のバッチ処理。記録をまとめて Claude のバッチ処理に送り、5 分ごとに終わりを見て結果を入れる (サービスと拡張の 3.6、3.7)
 import { type Clock, type Fetcher, jstDay, jstDayStart, newId } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
-import { syncIssues } from "../findings/scan.ts";
+import { FINDINGS_JOB, syncIssues, URGENT_JOB, urgentBatches } from "../findings/scan.ts";
 import type { IssueTracker } from "../findings/tracker.ts";
+import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
 import { batchEnded, type BatchRequest, type BatchResult, batchResults, submitBatch } from "./claude-batch.ts";
-import { DISTILL_JOB } from "../guard/distill.ts";
-import { FINDINGS_JOB } from "../findings/scan.ts";
 
 /** 日本時間の月曜 3 時。Cron は協定世界時で書くので日曜の 18 時になる。蒸留を始める */
 export const DISTILL_CRON = "0 18 * * 0";
@@ -26,8 +25,8 @@ const WEEKLY_CRONS = new Map<string, BatchKind>([
 /** 始めた印を、送れずに残った物とみなすまでの間 */
 const STALE_PENDING_MS = 30 * 60_000;
 
-/** 週のバッチ処理の種類 */
-export type BatchKind = "distill" | "findings";
+/** バッチ処理の種類。urgent は急ぐ故障で、週でなく日と原因ごとに 1 つ */
+export type BatchKind = "distill" | "findings" | "urgent";
 
 /** 週のバッチ処理が外へ頼む口 */
 export type WeeklyDeps = {
@@ -70,9 +69,9 @@ export type WeeklyJob = {
   apply(env: Bindings, deps: WeeklyDeps, row: BatchRow, results: BatchResult[], now: number): Promise<void>;
 };
 
-const JOBS: Record<BatchKind, WeeklyJob> = { distill: DISTILL_JOB, findings: FINDINGS_JOB };
+const JOBS: Record<BatchKind, WeeklyJob> = { distill: DISTILL_JOB, findings: FINDINGS_JOB, urgent: URGENT_JOB };
 
-const Pending = z.object({ id: z.string(), kind: z.enum(["distill", "findings"]), week: z.string(), batch_id: z.string(), detail: z.string().nullable(), created_at: z.number() });
+const Pending = z.object({ id: z.string(), kind: z.enum(["distill", "findings", "urgent"]), week: z.string(), batch_id: z.string(), detail: z.string().nullable(), created_at: z.number() });
 
 /**
  * 今の時刻から前の週を出す。今が月曜でなくても、今の週の前の週を返す
@@ -109,12 +108,28 @@ export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDep
   const range = previousWeek(now);
   const prepared = await JOBS[kind].prepare(env, range);
   if (!prepared || prepared.requests.length === 0) return null;
+  return submitOnce(env, kind, range.week, prepared, deps, now);
+}
+
+/**
+ * 種類と鍵で 1 つだけのバッチを送る。もう始めた鍵は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
+ * @param env バインディング
+ * @param kind 種類
+ * @param key 週の始めの日。急ぐ故障は日と指紋
+ * @param prepared 送る要求と、結果を入れる時に使う中身
+ * @param prepared.requests 送る要求
+ * @param prepared.detail 結果を入れる時に使う中身
+ * @param deps 外へ頼む口
+ * @param now 今の時刻
+ * @returns 始めた batches の行の ID。始めなかった時は null
+ */
+async function submitOnce(env: Bindings, kind: BatchKind, key: string, prepared: { requests: BatchRequest[]; detail: unknown }, deps: WeeklyDeps, now: number): Promise<string | null> {
   const id = newId(clockOf(now));
   // 送る前に落ちて残った印は、時間がたてば取り直せるようにする
-  await env.DB.prepare("DELETE FROM batches WHERE kind = ? AND week = ? AND status = 'pending' AND created_at < ?").bind(kind, range.week, now - STALE_PENDING_MS).run();
-  // 種類と週で 1 行だけを持てるので、同時に始めた 2 つの片方だけが送る
+  await env.DB.prepare("DELETE FROM batches WHERE kind = ? AND week = ? AND status = 'pending' AND created_at < ?").bind(kind, key, now - STALE_PENDING_MS).run();
+  // 種類と鍵で 1 行だけを持てるので、同時に始めた 2 つの片方だけが送る
   const claimed = await env.DB.prepare("INSERT INTO batches (id, kind, week, batch_id, status, detail, created_at, ended_at) VALUES (?, ?, ?, NULL, 'pending', ?, ?, NULL) ON CONFLICT (kind, week) DO NOTHING")
-    .bind(id, kind, range.week, JSON.stringify(prepared.detail), now)
+    .bind(id, kind, key, JSON.stringify(prepared.detail), now)
     .run();
   if (claimed.meta.changes !== 1) return null;
   try {
@@ -151,6 +166,8 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
   }
   // 前の回に作れなかった Issue を作り直す
   await syncIssues(env, deps.tracker, now);
+  // 急ぐ故障は週を待たずに調べる。結果は次の 5 分で入れる
+  for (const urgent of await urgentBatches(env, now)) await submitOnce(env, "urgent", urgent.key, urgent, deps, now);
 }
 
 /**

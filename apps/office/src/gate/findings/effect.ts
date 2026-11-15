@@ -1,4 +1,4 @@
-// 直した Issue の効き目を確かめる。直した後の 7 日と前の 7 日のエラーの回数を比べて Issue に書き、効かなければ戻すタスクを足す (サービスと拡張の 3.7)
+// 直した Issue の効き目を確かめる。直した後の 7 日と前の 7 日の回数 (エラー、目安を超えた呼び出し、割引が当たらなかった呼び出し) を比べて Issue に書き、効かなければ戻すタスクを足す (サービスと拡張の 3.7)
 import { type Clock, FindingEffect } from "@know-office/core";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -9,13 +9,14 @@ import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { notifyStaff } from "../work/loop.ts";
 import { intakeProject, newNodeRow, recordCreated } from "../work/nodes.ts";
-import { recordDbs } from "./scan.ts";
+import { recordDbs } from "./records.ts";
+import { countSignal } from "./slow-cost.ts";
 import { type IssueTracker, publicTracker } from "./tracker.ts";
 
 /** 比べる間 */
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 
-const Fixed = z.object({ id: z.string(), fingerprint: z.string(), repo: z.string(), issue_number: z.number().int(), fixed_at: z.number() });
+const Fixed = z.object({ id: z.string(), fingerprint: z.string(), kind: z.enum(["error", "slow", "cost"]), repo: z.string(), issue_number: z.number().int(), fixed_at: z.number() });
 
 /**
  * 直した PR が入って Issue が閉じた事を残す。開いている Issue だけを直した事にする
@@ -31,18 +32,22 @@ export async function markFixed(env: Bindings, repo: string, issueNumber: number
 }
 
 /**
- * その指紋のエラーを、期間にかかる年の記録から数える
+ * その原因の回数を、期間にかかる年の記録から数える。エラーは起きた回数、遅い所は目安を超えた呼び出し、無駄な費用は割引が当たらなかった呼び出し
  * @param env バインディング
- * @param fingerprint 指紋
+ * @param row 直した物
+ * @param row.kind 原因の種類
+ * @param row.fingerprint 指紋
  * @param from 始め
  * @param to 終わり。含まない
  * @returns 回数
  */
-async function countErrors(env: Bindings, fingerprint: string, from: number, to: number): Promise<number> {
+async function countFinding(env: Bindings, row: { kind: "error" | "slow" | "cost"; fingerprint: string }, from: number, to: number): Promise<number> {
+  if (row.kind !== "error") return countSignal(env, row.kind, row.fingerprint, from, to);
+  const fingerprint = row.fingerprint;
   let total = 0;
   for (const db of recordDbs(env, from, to)) {
-    const row = await db.prepare("SELECT count(*) AS n FROM error_events WHERE fingerprint = ? AND at >= ? AND at < ?").bind(fingerprint, from, to).first<{ n: number }>();
-    total += row?.n ?? 0;
+    const counted = await db.prepare("SELECT count(*) AS n FROM error_events WHERE fingerprint = ? AND at >= ? AND at < ?").bind(fingerprint, from, to).first<{ n: number }>();
+    total += counted?.n ?? 0;
   }
   return total;
 }
@@ -58,7 +63,7 @@ export async function checkEffects(env: Bindings, issues: IssueTracker, now: num
   const tracker = publicTracker(issues);
   // 先に前の回の書き残しを書く。この回に書けなかった物は次の回に回し、同じ回で 2 度試さない
   await renote(env, tracker, now, clock);
-  const { results } = await env.DB.prepare("SELECT id, fingerprint, repo, issue_number, fixed_at FROM findings WHERE status = 'fixed' AND fixed_at <= ? ORDER BY id")
+  const { results } = await env.DB.prepare("SELECT id, fingerprint, kind, repo, issue_number, fixed_at FROM findings WHERE status = 'fixed' AND fixed_at <= ? ORDER BY id")
     .bind(now - WEEK_MS)
     .all();
   for (const raw of results) {
@@ -146,8 +151,8 @@ async function note(
  */
 async function checkOne(env: Bindings, tracker: IssueTracker, row: z.infer<typeof Fixed>, now: number): Promise<void> {
   const effect = FindingEffect.parse({
-    before: await countErrors(env, row.fingerprint, row.fixed_at - WEEK_MS, row.fixed_at),
-    after: await countErrors(env, row.fingerprint, row.fixed_at, row.fixed_at + WEEK_MS),
+    before: await countFinding(env, row, row.fixed_at - WEEK_MS, row.fixed_at),
+    after: await countFinding(env, row, row.fixed_at, row.fixed_at + WEEK_MS),
   });
   const worked = effect.after === 0 || effect.after < effect.before;
   const actor = { by: "system", now };
@@ -162,7 +167,7 @@ async function checkOne(env: Bindings, tracker: IssueTracker, row: z.infer<typeo
           parentId: (await intakeProject(env, "office", actor)).id,
           scope: "office",
           title: `戻す: #${String(row.issue_number)} の直し`,
-          body: `直した後の 7 日のエラーが ${String(effect.after)} 回で、直す前の ${String(effect.before)} 回から減らなかった。直した PR を戻す。`,
+          body: `直した後の 7 日の回数が ${String(effect.after)} 回で、直す前の ${String(effect.before)} 回から減らなかった。直した PR を戻す。`,
           taskKind: "fix",
           assignee: "builder",
           repo: row.repo,
