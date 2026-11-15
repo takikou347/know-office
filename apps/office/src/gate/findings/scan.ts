@@ -154,16 +154,19 @@ async function apply(env: Bindings, deps: WeeklyDeps, row: BatchRow, results: Ba
       .bind(newId(clockAt(now + i)), needs, g.fingerprint, JSON.stringify({ fingerprint: g.fingerprint, reason: answers.get(g.fingerprint)?.reason ?? "" }), now, row.id, needs, g.fingerprint);
     return [upsert, ask];
   });
-  // Issue の無い原因には同じ 1 回で作る印を付ける。結果を入れた方が答えの手順で作り、その間に作り直しに来た定期ジョブは印を見て待つ
+  // Issue の無い原因には同じ 1 回で作る印を付ける。結果を入れた方が答えの手順で作り、その間に作り直しに来た定期ジョブは印を見て待つ。
+  // 定期ジョブが先に印を持っている (新しい印がある) 原因は奪わず、その定期ジョブに作らせる
   const claim = db
     .prepare(
-      `UPDATE findings SET claimed_at = ? WHERE fingerprint IN (${groups.map(() => "?").join(", ")}) AND issue_number IS NULL AND repo IS NOT NULL AND ${still}`,
+      `UPDATE findings SET claimed_at = ? WHERE fingerprint IN (${groups.map(() => "?").join(", ")}) AND issue_number IS NULL AND repo IS NOT NULL
+       AND (claimed_at IS NULL OR claimed_at < ?) AND ${still}`,
     )
-    .bind(now, ...groups.map((g) => g.fingerprint), row.id);
+    .bind(now, ...groups.map((g) => g.fingerprint), now - STALE_CLAIM_MS, row.id);
+  // usage は年ごとの記録の D1 にあり、batches と同じ 1 回の batch に入れられない。先に重ねない形で残し、落ちたら applied にせず次に読み直す
+  await recordBatchUsage(env, row.batchId, results, row.createdAt);
   const done = db.prepare("UPDATE batches SET status = 'applied', ended_at = ? WHERE id = ? AND status = 'submitted'").bind(now, row.id);
   const written = await db.batch([...statements, claim, done]);
   if (written.at(-1)?.meta.changes !== 1) return;
-  await recordBatchUsage(env, row.batchId, results, now);
   const after = await findingsOf(env, groups.map((g) => g.fingerprint));
   for (const g of groups) {
     const finding = after.get(g.fingerprint);

@@ -11,4 +11,5 @@ CREATE TABLE `batches` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `batches_kind_week` ON `batches` (`kind`,`week`);--> statement-breakpoint
 ALTER TABLE `lessons` ADD `staff_id` text;--> statement-breakpoint
-ALTER TABLE `findings` ADD `claimed_at` integer;
+ALTER TABLE `findings` ADD `claimed_at` integer;--> statement-breakpoint
+ALTER TABLE `findings` ADD `noted_at` integer;

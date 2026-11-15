@@ -158,10 +158,12 @@ export async function runBatch(w: WorkWorld, kind: BatchKind, answer: (customId:
  * 次の DB の batch を包む。wrangler の手元のバインディングは差し替えを受けないので、要求が読む env の側を包み、1 度呼んだら戻す
  * @param w テストの物
  * @param around 元の batch を受け、その前後に挟む動き
+ * @param binding 包む D1。初期値は DB
  */
-export function onNextBatch(w: WorkWorld, around: (run: () => Promise<unknown>) => Promise<unknown>): void {
+export function onNextBatch(w: WorkWorld, around: (run: () => Promise<unknown>) => Promise<unknown>, binding: "DB" | "REC_2026" = "DB"): void {
   const env = w.gate.env;
-  const original = env.DB;
+  const original = env[binding];
+  if (!original) throw new Error(`${binding} が無い`);
   const wrapped = new Proxy(original, {
     get(target, prop): unknown {
       const value: unknown = Reflect.get(target, prop);
@@ -171,7 +173,7 @@ export function onNextBatch(w: WorkWorld, around: (run: () => Promise<unknown>) 
         return bound;
       }
       return (...args: unknown[]): Promise<unknown> => {
-        Object.assign(env, { DB: original });
+        Object.assign(env, { [binding]: original });
         return around(async () => {
           const out: unknown = await Reflect.apply(value, target, args);
           return out;
@@ -179,7 +181,7 @@ export function onNextBatch(w: WorkWorld, around: (run: () => Promise<unknown>) 
       };
     },
   });
-  Object.assign(env, { DB: wrapped });
+  Object.assign(env, { [binding]: wrapped });
 }
 
 /**

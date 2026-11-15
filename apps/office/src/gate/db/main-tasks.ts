@@ -166,6 +166,8 @@ export const findings = sqliteTable("findings", {
   fixedAt: time("fixed_at"),
   effect: json("effect"),
   claimedAt: time("claimed_at"),
+  /** 効き目を Issue に書いた (書いている) 時刻。書けなければ NULL に戻し、次の回に書き直す */
+  notedAt: time("noted_at"),
 });
 
 /** 送った Claude のバッチ処理。種類と週ごとに 1 行で、同じ週を 2 度送らない */

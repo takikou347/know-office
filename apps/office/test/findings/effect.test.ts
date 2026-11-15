@@ -79,6 +79,40 @@ describe("効き目の確かめ方", () => {
     expect(tracker.issues[0]?.comments).toHaveLength(1);
   });
 
+  it("Issue に書けなかった効き目は失敗を残し、次の回に書き直す", async () => {
+    const tracker = await openIssue(world);
+    const fixed = dec(8, 12);
+    await markFixed(world.gate.env, REPO, 1, fixed);
+    await addErrors(world, { at: fixed + DAY, fingerprint: SAME, count: 13 });
+    tracker.down = true;
+    await checkEffects(world.gate.env, tracker, fixed + 7 * DAY);
+    expect(await rows(world.d1.DB, "SELECT status FROM findings")).toEqual([{ status: "reverted" }]);
+    expect(tracker.issues[0]?.comments).toEqual([]);
+    expect(await rows(world.d1.REC_2026, "SELECT count(*) AS n FROM error_events WHERE code = 'finding_effect_failed'")).toEqual([{ n: 1 }]);
+    // 次の日は届く。比べ直さず、残した効き目を書く。戻すタスクは重ねない
+    tracker.down = false;
+    await checkEffects(world.gate.env, tracker, fixed + 8 * DAY);
+    expect(tracker.issues[0]?.comments).toHaveLength(1);
+    expect(tracker.issues[0]?.comments[0]).toContain("直す前の 7 日は 12 回、直した後の 7 日は 13 回。効かなかったので");
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM nodes WHERE kind = 'task'")).toEqual([{ n: 1 }]);
+    // 書けた後は書かない
+    await checkEffects(world.gate.env, tracker, fixed + 9 * DAY);
+    expect(tracker.issues[0]?.comments).toHaveLength(1);
+  });
+
+  it("書けなかった効いた直しは、次の回に書いて閉じる", async () => {
+    const tracker = await openIssue(world);
+    const fixed = dec(8, 12);
+    await markFixed(world.gate.env, REPO, 1, fixed);
+    tracker.down = true;
+    await checkEffects(world.gate.env, tracker, fixed + 7 * DAY);
+    expect(tracker.issues[0]?.closed).toBe(false);
+    tracker.down = false;
+    await Promise.all([checkEffects(world.gate.env, tracker, fixed + 8 * DAY), checkEffects(world.gate.env, tracker, fixed + 8 * DAY)]);
+    expect(tracker.issues[0]?.comments).toHaveLength(1);
+    expect(tracker.issues[0]?.closed).toBe(true);
+  });
+
   it("開いていない Issue と知らない Issue は直した事にしない", async () => {
     await openIssue(world);
     expect(await markFixed(world.gate.env, REPO, 99, dec(8))).toBe(false);

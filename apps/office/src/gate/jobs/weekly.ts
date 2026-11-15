@@ -48,7 +48,7 @@ export type WeekRange = {
 };
 
 /** batches の行のうち、結果を入れるのに使う所 */
-export type BatchRow = { id: string; kind: BatchKind; week: string; batchId: string; detail: unknown };
+export type BatchRow = { id: string; kind: BatchKind; week: string; batchId: string; createdAt: number; detail: unknown };
 
 /** 種類ごとの、送る物を作る口と結果を入れる口 */
 export type WeeklyJob = {
@@ -72,7 +72,7 @@ export type WeeklyJob = {
 
 const JOBS: Record<BatchKind, WeeklyJob> = { distill: DISTILL_JOB, findings: FINDINGS_JOB };
 
-const Pending = z.object({ id: z.string(), kind: z.enum(["distill", "findings"]), week: z.string(), batch_id: z.string(), detail: z.string().nullable() });
+const Pending = z.object({ id: z.string(), kind: z.enum(["distill", "findings"]), week: z.string(), batch_id: z.string(), detail: z.string().nullable(), created_at: z.number() });
 
 /**
  * 今の時刻から前の週を出す。今が月曜でなくても、今の週の前の週を返す
@@ -135,7 +135,7 @@ export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDep
  * @param now 今の時刻
  */
 export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number): Promise<void> {
-  const { results } = await env.DB.prepare("SELECT id, kind, week, batch_id, detail FROM batches WHERE status = 'submitted' ORDER BY id").all();
+  const { results } = await env.DB.prepare("SELECT id, kind, week, batch_id, detail, created_at FROM batches WHERE status = 'submitted' ORDER BY id").all();
   for (const raw of results) {
     const parsed = Pending.safeParse(raw);
     if (!parsed.success) continue;
@@ -143,7 +143,7 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
     try {
       if (!(await batchEnded(env, deps.fetch, p.batch_id))) continue;
       const answers = await batchResults(env, deps.fetch, p.batch_id);
-      const row: BatchRow = { id: p.id, kind: p.kind, week: p.week, batchId: p.batch_id, detail: p.detail === null ? null : (JSON.parse(p.detail) as unknown) };
+      const row: BatchRow = { id: p.id, kind: p.kind, week: p.week, batchId: p.batch_id, createdAt: p.created_at, detail: p.detail === null ? null : (JSON.parse(p.detail) as unknown) };
       await JOBS[p.kind].apply(env, deps, row, answers, now);
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: `${p.kind}_apply_failed`, error }, clockOf(now));

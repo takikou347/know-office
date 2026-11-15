@@ -125,6 +125,29 @@ describe("同じ原因の Issue", () => {
     expect(await rows(world.d1.DB, "SELECT count, issue_number, claimed_at FROM findings")).toEqual([{ count: 12, issue_number: 1, claimed_at: null }]);
   });
 
+  it("作り直しの定期ジョブが印を持っている間に次の週の結果が入っても、1 つの原因に Issue は 1 件", async () => {
+    useRepo(world);
+    await addErrors(world, { at: dec(1, 10), fingerprint: SAME, count: 12 });
+    const tracker = fakeTracker();
+    tracker.down = true;
+    await runBatch(world, "findings", () => ANSWER, tracker, dec(7, 4));
+    expect(await rows(world.d1.DB, "SELECT issue_number FROM findings")).toEqual([{ issue_number: null }]);
+    tracker.down = false;
+    await addErrors(world, { at: dec(8, 10), fingerprint: SAME, count: 3 });
+    const deps = { fetch: world.gate.fetch, tracker };
+    await startBatch(world.gate.env, "findings", deps, dec(14, 4));
+    world.gate.claude.endBatch(world.gate.claude.batches.at(-1)?.id ?? "", () => ANSWER);
+    // 定期ジョブが印を付けて Issue を作っている間に、次の週の結果が入る
+    tracker.beforeCreate = async () => {
+      tracker.beforeCreate = null;
+      await pollBatches(world.gate.env, deps, dec(14, 4, 5));
+    };
+    await syncIssues(world.gate.env, tracker, dec(14, 4, 1));
+    // 前の週に作れなかった失敗も記録のエラーとして数えるので、SAME の分だけを見る
+    expect(tracker.issues.filter((i) => i.body.includes(fingerprintMark(SAME)))).toHaveLength(1);
+    expect(await rows(world.d1.DB, "SELECT count, claimed_at FROM findings WHERE fingerprint = ? AND issue_number IS NOT NULL", SAME)).toEqual([{ count: 15, claimed_at: null }]);
+  });
+
   it("Claude が答えなかった原因も回数を数え、手順の無い Issue にする", async () => {
     useRepo(world);
     await addErrors(world, { at: dec(1, 10), fingerprint: SAME, count: 3 });

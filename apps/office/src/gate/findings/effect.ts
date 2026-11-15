@@ -48,16 +48,18 @@ async function countErrors(env: Bindings, fingerprint: string, from: number, to:
 }
 
 /**
- * 直してから 7 日たった物の効き目を確かめる。読んだ時に fixed のままの物だけを書き、同時に確かめた 2 つの片方だけが Issue に書く
+ * 直してから 7 日たった物の効き目を確かめる。読んだ時に fixed のままの物だけを書き、同時に確かめた 2 つの片方だけが Issue に書く。前の回に Issue へ書けなかった物も書き直す
  * @param env バインディング
  * @param tracker GitHub の Issue
  * @param now 今の時刻
  */
 export async function checkEffects(env: Bindings, tracker: IssueTracker, now: number): Promise<void> {
+  const clock: Clock = { now: () => now };
+  // 先に前の回の書き残しを書く。この回に書けなかった物は次の回に回し、同じ回で 2 度試さない
+  await renote(env, tracker, now, clock);
   const { results } = await env.DB.prepare("SELECT id, fingerprint, repo, issue_number, fixed_at FROM findings WHERE status = 'fixed' AND fixed_at <= ? ORDER BY id")
     .bind(now - WEEK_MS)
     .all();
-  const clock: Clock = { now: () => now };
   for (const raw of results) {
     const row = Fixed.safeParse(raw);
     if (!row.success) continue;
@@ -66,6 +68,71 @@ export async function checkEffects(env: Bindings, tracker: IssueTracker, now: nu
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: "finding_effect_failed", error }, clock);
     }
+  }
+}
+
+/**
+ * 前の回に Issue へ書けなかった物を、残した効き目で書き直す。比べ直さず、戻すタスクも重ねない。印を付けた方だけが書く
+ * @param env バインディング
+ * @param tracker GitHub の Issue
+ * @param now 今の時刻
+ * @param clock 失敗を残す時刻
+ */
+async function renote(env: Bindings, tracker: IssueTracker, now: number, clock: Clock): Promise<void> {
+  const { results: unnoted } = await env.DB.prepare(
+    "SELECT id, repo, issue_number, status, effect FROM findings WHERE status IN ('verified', 'reverted') AND noted_at IS NULL AND effect IS NOT NULL ORDER BY id",
+  ).all();
+  for (const raw of unnoted) {
+    const row = Unnoted.safeParse(raw);
+    if (!row.success) continue;
+    try {
+      const claimed = await env.DB.prepare("UPDATE findings SET noted_at = ? WHERE id = ? AND noted_at IS NULL").bind(now, row.data.id).run();
+      if (claimed.meta.changes !== 1) continue;
+      await note(env, tracker, { id: row.data.id, repo: row.data.repo, issueNumber: row.data.issue_number, worked: row.data.status === "verified", effect: row.data.effect }, now);
+    } catch (error) {
+      await recordError(env, { source: "job", level: "error", code: "finding_effect_failed", error }, clock);
+    }
+  }
+}
+
+const Unnoted = z.object({
+  id: z.string(),
+  repo: z.string(),
+  issue_number: z.number().int(),
+  status: z.enum(["verified", "reverted"]),
+  effect: z
+    .string()
+    .transform((s): unknown => JSON.parse(s))
+    .pipe(FindingEffect),
+});
+
+/**
+ * 効き目を Issue に書き、効いた物は閉じる。印 (noted_at = now) を持った方だけが呼ぶ。書けなければ印を外し、次の回に書き直させる
+ * @param env バインディング
+ * @param tracker GitHub の Issue
+ * @param target 書く物
+ * @param target.id findings の ID
+ * @param target.repo リポジトリ
+ * @param target.issueNumber Issue の番号
+ * @param target.worked 効いたか
+ * @param target.effect 効き目
+ * @param now 今の時刻。印の値
+ * @throws Error GitHub に届かない時
+ */
+async function note(
+  env: Bindings,
+  tracker: IssueTracker,
+  target: { id: string; repo: string; issueNumber: number; worked: boolean; effect: FindingEffect },
+  now: number,
+): Promise<void> {
+  const text = `直す前の 7 日は ${String(target.effect.before)} 回、直した後の 7 日は ${String(target.effect.after)} 回。`;
+  try {
+    await tracker.comment(target.repo, target.issueNumber, target.worked ? `${text}効いたので閉じる。` : `${text}効かなかったので、直しを戻すタスクを足した。`);
+    if (target.worked) await tracker.close(target.repo, target.issueNumber);
+  } catch (error) {
+    // 書き足しの後に閉じるのが落ちた時も印を外す。次の回は同じ文をもう 1 度書く
+    await env.DB.prepare("UPDATE findings SET noted_at = NULL WHERE id = ? AND noted_at = ?").bind(target.id, now).run();
+    throw error;
   }
 }
 
@@ -106,7 +173,7 @@ async function checkOne(env: Bindings, tracker: IssueTracker, row: z.infer<typeo
   // 戻すタスクは状態の更新と同じ 1 回で、読んだ時に fixed のままの時だけ書く
   const update = orm
     .update(findings)
-    .set({ status: worked ? "verified" : "reverted", effect })
+    .set({ status: worked ? "verified" : "reverted", effect, notedAt: now })
     .where(stillFixed)
     .returning({ id: findings.id });
   const results: unknown[] = task
@@ -117,9 +184,7 @@ async function checkOne(env: Bindings, tracker: IssueTracker, row: z.infer<typeo
     await recordCreated(env, task, actor);
     await notifyStaff(env, "builder", now, false);
   }
-  const text = `直す前の 7 日は ${String(effect.before)} 回、直した後の 7 日は ${String(effect.after)} 回。`;
-  await tracker.comment(row.repo, row.issue_number, worked ? `${text}効いたので閉じる。` : `${text}効かなかったので、直しを戻すタスクを足した。`);
-  if (worked) await tracker.close(row.repo, row.issue_number);
+  await note(env, tracker, { id: row.id, repo: row.repo, issueNumber: row.issue_number, worked, effect }, now);
 }
 
 /**

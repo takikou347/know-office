@@ -161,22 +161,26 @@ export async function batchResults(env: Bindings, fetch: Fetcher, batchId: strin
 }
 
 /**
- * バッチ処理の使った量を office の範囲で usage に残す。レビュー担当のモデルで、1 件ずつの半額で数える
+ * バッチ処理の使った量を office の範囲で usage に残す。レビュー担当のモデルで、1 件ずつの半額で数える。
+ * 同じバッチを読み直して 2 度呼んでも、結果ごとに 1 行だけ残す
  * @param env バインディング
  * @param batchId バッチの ID
  * @param results バッチの結果
- * @param now 今の時刻
+ * @param at 残す時刻。読み直しても変わらないよう、batches の行を作った時刻を渡す
  */
-export async function recordBatchUsage(env: Bindings, batchId: string, results: BatchResult[], now: number): Promise<void> {
-  const db = recordsOf(env, now);
+export async function recordBatchUsage(env: Bindings, batchId: string, results: BatchResult[], at: number): Promise<void> {
+  const db = recordsOf(env, at);
   const statements = results.flatMap((r, i) => {
     if (!r.usage) return [];
+    const requestId = `${batchId}:${r.customId}`;
+    // usage_at の索引で引けるよう、時刻と要求の ID の両方で重なりを見る
     return [
       db
         .prepare(
-          "INSERT INTO usage (id, at, staff_id, node_id, scope, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micro_usd, request_id, waited_ms, trace_id) VALUES (?, ?, 'reviewer', NULL, 'office', ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+          `INSERT INTO usage (id, at, staff_id, node_id, scope, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micro_usd, request_id, waited_ms, trace_id)
+           SELECT ?, ?, 'reviewer', NULL, 'office', ?, ?, ?, ?, ?, ?, ?, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM usage WHERE at = ? AND request_id = ?)`,
         )
-        .bind(newId(clockAt(now + i)), now, OPUS, r.usage.inputTokens, r.usage.outputTokens, r.usage.cacheReadTokens, r.usage.cacheWriteTokens, batchCostMicroUsd(OPUS, r.usage), `${batchId}:${r.customId}`),
+        .bind(newId(clockAt(at + i)), at, OPUS, r.usage.inputTokens, r.usage.outputTokens, r.usage.cacheReadTokens, r.usage.cacheWriteTokens, batchCostMicroUsd(OPUS, r.usage), requestId, at, requestId),
     ];
   });
   if (statements.length > 0) await db.batch(statements);

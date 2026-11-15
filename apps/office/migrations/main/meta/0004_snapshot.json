@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9ff53d02-4c4b-44a9-afe9-1c4cbe007a97",
+  "id": "12ba7328-32ea-4ac0-b8b6-e94f09aa3c49",
   "prevId": "28378447-8f56-423a-a592-98b3a77b7ea1",
   "tables": {
     "health_checks": {
@@ -1422,6 +1422,13 @@
         },
         "claimed_at": {
           "name": "claimed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "noted_at": {
+          "name": "noted_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

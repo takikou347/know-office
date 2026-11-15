@@ -99,10 +99,10 @@ async function apply(env: Bindings, _deps: WeeklyDeps, row: BatchRow, results: B
         .bind(newId(clockAt(now + i)), now, p.kind, group.cause, p.proposal, p.staffId, JSON.stringify(group.stopIds), row.id),
     );
   });
+  // usage は年ごとの記録の D1 にあり、batches と同じ 1 回の batch に入れられない。先に重ねない形で残し、落ちたら applied にせず次に読み直す
+  await recordBatchUsage(env, row.batchId, results, row.createdAt);
   const done = db.prepare("UPDATE batches SET status = 'applied', ended_at = ? WHERE id = ? AND status = 'submitted'").bind(now, row.id);
-  const written = await db.batch([...inserts, done]);
-  if (written.at(-1)?.meta.changes !== 1) return;
-  await recordBatchUsage(env, row.batchId, results, now);
+  await db.batch([...inserts, done]);
 }
 
 /** 蒸留の週のバッチ処理 */

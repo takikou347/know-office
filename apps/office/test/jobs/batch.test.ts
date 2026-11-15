@@ -149,6 +149,32 @@ describe("週のバッチ処理", () => {
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM lessons")).toEqual([{ n: 1 }]);
   });
 
+  it("使った量を残すのが落ちたら結果を入れず、次に読み直して両方を 1 度ずつ残す", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    const deps = { fetch: world.gate.fetch, tracker: fakeTracker() };
+    await startBatch(world.gate.env, "distill", deps, dec(7, 3));
+    world.gate.claude.endBatch(world.gate.claude.batches[0]?.id ?? "", () => PROPOSAL);
+    onNextBatch(world, () => Promise.reject(new Error("記録の D1 が落ちた")), "REC_2026");
+    await pollBatches(world.gate.env, deps, dec(7, 3, 5));
+    expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "submitted" }]);
+    expect(await rows(world.d1.REC_2026, "SELECT count(*) AS n FROM usage")).toEqual([{ n: 0 }]);
+    await pollBatches(world.gate.env, deps, dec(7, 3, 10));
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM lessons")).toEqual([{ n: 1 }]);
+    expect(await rows(world.d1.REC_2026, "SELECT count(*) AS n FROM usage")).toEqual([{ n: 1 }]);
+  });
+
+  it("使った量を残した後で結果を入れるのが落ちても、次に読み直した時に使った量を重ねない", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    const deps = { fetch: world.gate.fetch, tracker: fakeTracker() };
+    await startBatch(world.gate.env, "distill", deps, dec(7, 3));
+    world.gate.claude.endBatch(world.gate.claude.batches[0]?.id ?? "", () => PROPOSAL);
+    onNextBatch(world, () => Promise.reject(new Error("D1 が落ちた")));
+    await pollBatches(world.gate.env, deps, dec(7, 3, 5));
+    await pollBatches(world.gate.env, deps, dec(7, 3, 10));
+    expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "applied" }]);
+    expect(await rows(world.d1.REC_2026, "SELECT count(*) AS n FROM usage")).toEqual([{ n: 1 }]);
+  });
+
   it("Claude が返したバッチの ID の形が違えば使わない", async () => {
     await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
     const forged = { fetch: () => Promise.resolve(Response.json({ id: "../../v1/files", type: "message_batch", processing_status: "in_progress" })), tracker: fakeTracker() };

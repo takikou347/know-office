@@ -121,20 +121,21 @@ describe("蒸留", () => {
     await addStop(world, { at: applied + 2 * DAY, signal: "staff_rule_denied", verdict: "correct" });
     await addStop(world, { at: applied - 2 * DAY, signal: "token_rate", verdict: "correct" });
     await addStop(world, { at: applied + DAY, signal: "token_rate" });
-    // 近かった記録と、7 日より前の止めた記録は対策の比べに入れない
+    // 近かった記録と、入れる 7 日より前と入れてちょうど 7 日後の止めた記録は対策の比べに入れない
     await addStop(world, { at: applied - DAY, signal: "staff_rule_denied", kind: "near" });
     await addStop(world, { at: applied - 8 * DAY, signal: "staff_rule_denied" });
+    await addStop(world, { at: applied + 7 * DAY, signal: "staff_rule_denied" });
     const lessonId = await lesson(world, { kind: "threshold", status: "applied", appliedAt: applied });
     await lesson(world, { kind: "rule_tool", status: "proposed" });
     await advance(world, dec(20, 9));
 
     const effect = await api(world, "GET", "/api/v1/guard/effect");
     expect(effect).toEqual({
-      stops: 8,
+      stops: 9,
       // 判定した 5 件のうち 2 件を誤って止めた
       falseRatio: 0.4,
       topCauses: [
-        { signal: "staff_rule_denied", count: 6 },
+        { signal: "staff_rule_denied", count: 7 },
         { signal: "token_rate", count: 2 },
       ],
       measures: [{ lessonId, before: 4, after: 1 }],

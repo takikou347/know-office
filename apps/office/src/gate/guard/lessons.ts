@@ -195,6 +195,7 @@ export async function updateThresholds(
 
 /** 効き目を出す stops の行 */
 const EffectStop = z.object({ at: z.number(), signal: z.string(), verdict: z.string().nullable() });
+const Measure = z.object({ lessonId: z.string(), before: z.number().int(), after: z.number().int() });
 
 /**
  * 自動停止の効き目を出す。止めた回数、判定した物のうち誤って止めた割合、多い原因、入れた対策の前後 7 日の止めた回数
@@ -215,11 +216,11 @@ export async function guardEffect(db: D1Database, range: { from?: string | undef
   const { results } = await db
     .prepare(
       `SELECT s.at, s.signal, (SELECT u.verdict FROM stop_updates u WHERE u.stop_id = s.id AND u.kind = 'verdict' ORDER BY u.at DESC, u.id DESC LIMIT 1) AS verdict
-       FROM stops s WHERE s.kind = 'stop' ORDER BY s.at`,
+       FROM stops s WHERE s.kind = 'stop' AND s.at >= ? AND s.at < ? ORDER BY s.at`,
     )
+    .bind(start, end)
     .all();
-  const all = z.array(EffectStop).parse(results);
-  const inRange = all.filter((s) => s.at >= start && s.at < end);
+  const inRange = z.array(EffectStop).parse(results);
   const judged = inRange.filter((s) => s.verdict === "correct" || s.verdict === "false");
   const counts = new Map<string, number>();
   for (const s of inRange) counts.set(s.signal, (counts.get(s.signal) ?? 0) + 1);
@@ -227,15 +228,17 @@ export async function guardEffect(db: D1Database, range: { from?: string | undef
     .toSorted(([a, x], [b, y]) => y - x || a.localeCompare(b))
     .slice(0, TOP_CAUSES)
     .map(([signal, count]) => ({ signal, count }));
-  const applied = await drizzle(db)
-    .select()
-    .from(lessons)
-    .where(sql`${lessons.appliedAt} IS NOT NULL`)
-    .orderBy(lessons.appliedAt);
-  const measures = applied.map((l) => {
-    const at = l.appliedAt ?? 0;
-    const same = all.filter((s) => s.signal === l.cause);
-    return { lessonId: l.id, before: same.filter((s) => s.at >= at - MEASURE_MS && s.at < at).length, after: same.filter((s) => s.at >= at && s.at < at + MEASURE_MS).length };
-  });
+  // 対策ごとに、同じ原因で止めた行だけを入れた時刻の前後 7 日で数える
+  const same = "SELECT count(*) FROM stops s WHERE s.kind = 'stop' AND s.signal = l.cause";
+  const { results: measured } = await db
+    .prepare(
+      `SELECT l.id AS lessonId,
+         (${same} AND s.at >= l.applied_at - ? AND s.at < l.applied_at) AS before,
+         (${same} AND s.at >= l.applied_at AND s.at < l.applied_at + ?) AS after
+       FROM lessons l WHERE l.applied_at IS NOT NULL ORDER BY l.applied_at, l.id`,
+    )
+    .bind(MEASURE_MS, MEASURE_MS)
+    .all();
+  const measures = z.array(Measure).parse(measured);
   return { stops: inRange.length, falseRatio: judged.length === 0 ? 0 : judged.filter((s) => s.verdict === "false").length / judged.length, topCauses, measures };
 }
