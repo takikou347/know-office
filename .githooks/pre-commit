@@ -1,0 +1,3 @@
+#!/bin/sh
+# 作者とメールアドレスの確かめ。中身は scripts/pre-commit.ts
+exec node "$(git rev-parse --show-toplevel)/scripts/pre-commit.ts"

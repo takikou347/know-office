@@ -11,7 +11,8 @@
     "verify": "node scripts/verify.ts",
     "dev": "pnpm --filter @know-office/office dev",
     "e2e": "pnpm --filter @know-office/office e2e",
-    "clean": "rm -rf apps/*/dist apps/*/.wrangler apps/*/test-results apps/*/playwright-report"
+    "clean": "rm -rf apps/*/dist apps/*/.wrangler apps/*/test-results apps/*/playwright-report",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
