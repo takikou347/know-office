@@ -1,4 +1,4 @@
-# PR と main で、OpenSpec の仕様の形と、アプリの型、テスト、ビルドを確かめる
+# PR と main で、OpenSpec の仕様の形と、アプリの型、ビルド、単体のテスト、画面の通しを確かめる
 name: Check
 
 on:
@@ -45,8 +45,31 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
 
+  # 決まり、手順、仕様の文だけの変更ではコードが動かないので、test と e2e を飛ばす。main への push では必ず走らせる
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          if [ -z "$BASE" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          code=$(git diff --name-only "$BASE" "$HEAD" | { grep -vE '^(\.claude/(rules|skills|agents)/|openspec/.*\.md$|[^/]*\.md$)' || true; })
+          if [ -n "$code" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; else echo "code=false" >> "$GITHUB_OUTPUT"; fi
+
   # 単体のテストと画面の通しは長いので、check と並べて別の機械で走らせる
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -62,6 +85,8 @@ jobs:
       - run: pnpm test
 
   e2e:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
