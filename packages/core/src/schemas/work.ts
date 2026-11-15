@@ -152,6 +152,19 @@ export const ApprovalKind = z.enum(["staff_add", "role_change", "prompt_rule", "
 /** オーナーの承認の種類の型 */
 export type ApprovalKind = z.infer<typeof ApprovalKind>;
 
+/** オーナーの承認の種類の名前。通知と画面に出す */
+export const APPROVAL_KIND_LABEL: Record<ApprovalKind, string> = {
+  staff_add: "社員の追加",
+  role_change: "役の変更",
+  prompt_rule: "説明文の決まり",
+  external_integration: "外部連携",
+  cost_increase: "費用の増える事",
+  merge: "main へのマージ",
+  deploy: "本番へのデプロイ",
+  service_close: "サービスを閉じる",
+  guard_change: "守りの変更",
+};
+
 /** オーナーの承認の状態 */
 export const ApprovalStatus = z.enum(["pending", "approved", "rejected"]);
 

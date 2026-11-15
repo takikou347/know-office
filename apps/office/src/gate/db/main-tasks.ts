@@ -111,6 +111,13 @@ export const githubStates = sqliteTable("github_states", {
   expiresAt: time("expires_at").notNull(),
 });
 
+/** 同じ時に 1 つだけ動かす操作の錠。holder が取った者、until を過ぎた錠はほかが取り直せる */
+export const locks = sqliteTable("locks", {
+  name: text("name").primaryKey(),
+  holder: text("holder").notNull(),
+  until: time("until").notNull(),
+});
+
 // 2.6 サービス、設定、通知、拡張
 
 /** サービス */

@@ -50,6 +50,24 @@ describe("開発環境の代わりの物", () => {
     expect((await github.app.request(path, { headers: { authorization: `Bearer ${await jwtOf(fresh)}` } })).status).toBe(200);
   });
 
+  it("代わりの GitHub は画面の通しから、秘密鍵の作り直しと、次の 1 度だけの失敗を受ける", async () => {
+    const github = createFakeGitHub();
+    const manifest = { name: "ko", url: "http://localhost", redirect_url: "http://localhost/cb", setup_url: "http://localhost/installed", hook_attributes: { url: "http://localhost/hooks" }, public: false, default_permissions: { contents: "write" }, default_events: [] };
+    const made = await github.app.request("/web/settings/apps/new?state=s1", { method: "POST", body: new URLSearchParams({ manifest: JSON.stringify(manifest) }) });
+    const code = new URL(made.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    const conversion = z.object({ id: z.number(), slug: z.string() }).loose().parse(await (await github.app.request(`/app-manifests/${code}/conversions`, { method: "POST" })).json());
+    const key = await github.app.request(`/web/settings/apps/${conversion.slug}/keys`, { method: "POST" });
+    expect(key.status).toBe(200);
+    expect(await key.text()).toContain("BEGIN RSA PRIVATE KEY");
+    expect((await github.app.request("/web/settings/apps/no-such/keys", { method: "POST" })).status).toBe(404);
+
+    const failed = await github.app.request("/__fake/failures", { method: "POST", body: JSON.stringify({ route: "GET /installation/repositories", status: 502 }) });
+    expect(failed.status).toBe(204);
+    expect((await github.app.request("/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(502);
+    // 失敗は 1 度だけで、次は鍵を確かめる
+    expect((await github.app.request("/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(401);
+  });
+
   it("代わりの GitHub は積んだ返事を返し、無い物は 404 で返す", async () => {
     const github = createFakeGitHub();
     github.set("GET /repos/o/r/pulls", [{ number: 1, title: "PR" }]);

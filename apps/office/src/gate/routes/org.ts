@@ -5,15 +5,17 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
-import { approvals, staff, staffPrompts } from "../db/main.ts";
+import { approvals, nodes, staff, staffPrompts } from "../db/main.ts";
 import { createRouter } from "../app.ts";
+import { requireStepUp } from "../auth/passkey.ts";
+import { recordError } from "../ledger/errors.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, ok } from "../respond.ts";
 import { closableService, closeStatements, stillAt } from "../services/flow.ts";
 import { clockAt } from "../work/attendance.ts";
 import { notifyStaff } from "../work/loop.ts";
-import { appendNodeEvent, findNode, moveNode } from "../work/nodes.ts";
+import { appendNodeEvent } from "../work/nodes.ts";
 import { loadOrg } from "../work/org.ts";
 
 const router = createRouter();
@@ -54,6 +56,8 @@ const decideApprovalRoute = createRoute({
   path: "/api/v1/approvals/{approvalId}/decision",
   operationId: "decideApproval",
   tags: ["org"],
+  // 外部連携と費用の増える事の承認だけ、読んだ行の種類で確かめる
+  "x-step-up": "conditional",
   request: { params: ApprovalParam, body: jsonBody(DecisionInput) },
   responses: { 200: okResponse(Approval), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
@@ -63,11 +67,19 @@ const Payload = z.record(z.string(), z.unknown());
 const RoleChange = z.object({ target: StaffId, role: z.string().min(1), bossId: StaffId.nullable() }).loose();
 const Waiting = z.object({ nodeId: z.uuid() }).loose();
 
+/** 承認する前にパスキーで確かめる種類。お金が増える事と外とのつながりが増える事 */
+const STEP_UP_KINDS: ReadonlySet<string> = new Set(["external_integration", "cost_increase"]);
+/** 承認を残すだけで、ほかを書かない種類。社員は 3 人に決まっていて、外へは送らない */
+const RECORD_ONLY_KINDS: ReadonlySet<string> = new Set(["staff_add", "external_integration", "cost_increase"]);
+/** ここで承認できる種類。merge、deploy、prompt_rule、guard_change はレビューか守りの画面で決める */
+const DECIDABLE_KINDS: ReadonlySet<string> = new Set(["role_change", "service_close", ...RECORD_ONLY_KINDS]);
+
 /** approvals の行 */
 type ApprovalRow = typeof approvals.$inferSelect;
 
 const CloseRequest = z.object({ reason: z.string().min(1) }).loose();
 const Decided = z.array(z.object({ id: z.string() }));
+const Moved = z.array(z.object({ id: z.string(), assignee: z.string().nullable() }));
 
 /** 承認と同じ batch に入れる中身。before は承認を書く前、after は書いた後に置き、guard は承認を書く条件に足す */
 type Effects = { before: BatchItem<"sqlite">[]; after: BatchItem<"sqlite">[]; guard: SQL | undefined };
@@ -82,6 +94,7 @@ type Effects = { before: BatchItem<"sqlite">[]; after: BatchItem<"sqlite">[]; gu
  * @throws conflict 閉じる案のサービスが閉じられる段階にない時
  */
 async function approvedEffects(db: D1Database, row: ApprovalRow, now: number): Promise<Effects> {
+  if (RECORD_ONLY_KINDS.has(row.kind)) return { before: [], after: [], guard: undefined };
   if (row.kind === "service_close") {
     const close = CloseRequest.safeParse(row.payload);
     if (!close.success) throw new AppError("validation_failed", "閉じる案の中身の形が違う");
@@ -181,9 +194,10 @@ export const orgRoutes = router
     const orm = drizzle(c.env.DB);
     const [row] = await orm.select().from(approvals).where(eq(approvals.id, approvalId)).limit(1);
     if (!row) throw new AppError("not_found", "承認の項目が無い");
+    // 確かめるかは送られた物でなく、D1 から読んだ種類で決める。差し戻しは守りを弱めないので確かめない
+    if (decision === "approve" && STEP_UP_KINDS.has(row.kind)) requireStepUp(c);
     if (row.status !== "pending") throw new AppError("conflict", "もう決めた");
-    // TODO(#53): 役の変更と閉じる案のほかの種類の承認の中身を作る。作るまでは承認を断り、承認を待ったままにする
-    if (decision === "approve" && row.kind !== "role_change" && row.kind !== "service_close") throw new AppError("conflict", "この種類の承認はまだ扱えない");
+    if (decision === "approve" && !DECIDABLE_KINDS.has(row.kind)) throw new AppError("conflict", "この種類はレビューか守りの画面で決める");
     const status = decision === "approve" ? "approved" : "rejected";
     const effects: Effects = decision === "approve" ? await approvedEffects(c.env.DB, row, now) : { before: [], after: [], guard: undefined };
     const decide = orm
@@ -191,20 +205,32 @@ export const orgRoutes = router
       .set({ status, decidedAt: now, reason })
       .where(and(eq(approvals.id, approvalId), eq(approvals.status, "pending"), effects.guard))
       .returning({ id: approvals.id });
-    // 承認の中身は承認と同じ 1 回で書く。まだ決めていない時だけ書き、同時に決めた 2 つの片方を断る
-    const batch: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [decide, ...effects.after];
+    // 答えを待っていたタスクは、承認でも差し戻しでも todo に戻し、社員が答えを読んで続ける。書けた決定の時だけ戻す
+    const waiting = Waiting.safeParse(row.payload);
+    const decided = sql`EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${approvalId} AND ${approvals.status} = ${status} AND ${approvals.decidedAt} = ${now})`;
+    const back = waiting.success
+      ? [
+          orm
+            .update(nodes)
+            .set({ status: "todo", version: sql`${nodes.version} + 1`, updatedAt: now })
+            .where(and(eq(nodes.id, waiting.data.nodeId), eq(nodes.status, "waiting_owner"), decided))
+            .returning({ id: nodes.id, assignee: nodes.assignee }),
+        ]
+      : [];
+    // 承認の中身とタスクの戻しは承認と同じ 1 回で書く。まだ決めていない時だけ書き、同時に決めた 2 つの片方を断る
+    const batch: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [decide, ...effects.after, ...back];
     batch.unshift(...effects.before);
     const results: readonly unknown[] = await orm.batch(batch);
-    const decided = Decided.parse(results.at(effects.before.length));
-    if (decided.length === 0) throw new AppError("conflict", "もう決めたか、承認の対象が変わった");
-    // 答えを待っていたタスクは、承認でも差し戻しでも todo に戻し、社員が理由を読んで続ける
-    const waiting = Waiting.safeParse(row.payload);
-    if (waiting.success) {
-      const node = await findNode(c.env.DB, waiting.data.nodeId).catch(() => null);
-      if (node?.status === "waiting_owner") {
-        await moveNode(c.env.DB, node, "todo", now);
-        await appendNodeEvent(c.env, { nodeId: node.id, staffId: null, kind: "approval_decided", detail: { approvalId, decision, reason } }, { by: "owner", now, traceId: c.var.traceId });
-        if (node.assignee !== null) await notifyStaff(c.env, node.assignee, now, false);
+    const written = Decided.parse(results.at(effects.before.length));
+    if (written.length === 0) throw new AppError("conflict", "もう決めたか、承認の対象が変わった");
+    const [moved] = back.length > 0 ? Moved.parse(results.at(-1)) : [];
+    if (moved) {
+      // 出来事は記録の D1 にあって同じバッチに入らない。落ちても決定とタスクの戻しは残り、社員は承認の行から答えを読む
+      try {
+        await appendNodeEvent(c.env, { nodeId: moved.id, staffId: null, kind: "approval_decided", detail: { approvalId, decision, reason } }, { by: "owner", now, traceId: c.var.traceId });
+        if (moved.assignee !== null) await notifyStaff(c.env, moved.assignee, now, false);
+      } catch (error) {
+        await recordError(c.env, { source: "gate", level: "warn", code: "approval_follow_failed", error, route: c.req.routePath, traceId: c.var.traceId }, c.var.clock);
       }
     }
     await audit(c, "approval.decide", approvalId, { kind: row.kind, decision });

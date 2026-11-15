@@ -9,6 +9,27 @@ import { send } from "../../src/screen/parts/load.tsx";
 const problem = (status: number, code: string) =>
   new Response(JSON.stringify({ status, code, traceId: "a".repeat(32) }), { status, headers: { "Content-Type": "application/problem+json" } });
 
+const NOW = Date.UTC(2026, 10, 15, 3, 0, 0);
+
+/**
+ * 呼んだ道を覚える口を作る。/me は stepUpUntil を返し、確認は認証器が無くて落ちる
+ * @param stepUpUntil /me が返す確認の期限
+ * @returns 口と、呼んだ道
+ */
+const recording = (stepUpUntil: string | null) => {
+  const calls: string[] = [];
+  const api = createApi("http://localhost", (input, init) => {
+    const path = new URL(input instanceof Request ? input.url : input).pathname;
+    calls.push(`${init?.method ?? "GET"} ${path}`);
+    if (path === "/api/v1/me") return Promise.resolve(Response.json({ data: { email: "o@example.com", sessionId: crypto.randomUUID(), stepUpUntil, hasPasskey: true }, meta: { traceId: "b".repeat(32) } }));
+    if (path === "/api/v1/passkeys/options") return Promise.resolve(Response.json({ data: { challenge: "c" }, meta: { traceId: "b".repeat(32) } }));
+    return Promise.resolve(Response.json({ data: { version: 1, values: {} }, meta: { traceId: "b".repeat(32) } }));
+  });
+  return { api, calls };
+};
+const put = (api: ReturnType<typeof createApi>) => () => api.api.v1.guard.thresholds.$put({ json: { version: 0, values: {}, reason: "確かめ" } });
+
+
 describe("セキュリティの画面の基準", () => {
   it("基準の項目は、core の基準のキーと同じで、抜けも余りも無い", () => {
     expect(THRESHOLD_ITEMS.map((i) => i.key).toSorted()).toEqual(Object.keys(DEFAULT_THRESHOLDS).toSorted());
@@ -77,5 +98,31 @@ describe("画面からゲートウェイへ送る", () => {
     const sent = await send(api, () => api.api.v1.guard.thresholds.$put({ json: { version: 0, values: {}, reason: "確かめ" } }));
     expect(sent).toEqual({ ok: false, failure: { code: "step_up_failed", traceId: null } });
     expect(calls).toEqual(["PUT /api/v1/guard/thresholds", "POST /api/v1/passkeys/options"]);
+  });
+
+  describe("必ず確認を求める操作は、切れていると分かれば先に確かめる", () => {
+    it("切れていれば、送る前に確かめ、確かめられなければ送らない", async () => {
+      const { api, calls } = recording(new Date(NOW - 1).toISOString());
+      expect(await send(api, put(api), { required: true, now: () => NOW })).toEqual({ ok: false, failure: { code: "step_up_failed", traceId: null } });
+      expect(calls).toEqual(["GET /api/v1/me", "POST /api/v1/passkeys/options"]);
+    });
+
+    it("一度も確かめていなければ、送る前に確かめる", async () => {
+      const { api, calls } = recording(null);
+      await send(api, put(api), { required: true, now: () => NOW });
+      expect(calls).toEqual(["GET /api/v1/me", "POST /api/v1/passkeys/options"]);
+    });
+
+    it("効いていれば、そのまま送る", async () => {
+      const { api, calls } = recording(new Date(NOW + 60_000).toISOString());
+      expect(await send(api, put(api), { required: true, now: () => NOW })).toMatchObject({ ok: true });
+      expect(calls).toEqual(["GET /api/v1/me", "PUT /api/v1/guard/thresholds"]);
+    });
+
+    it("確認が要るか決まっていない操作は、先に確かめない", async () => {
+      const { api, calls } = recording(null);
+      expect(await send(api, put(api))).toMatchObject({ ok: true });
+      expect(calls).toEqual(["PUT /api/v1/guard/thresholds"]);
+    });
   });
 });

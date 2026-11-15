@@ -37,7 +37,7 @@ export function Thresholds() {
     setBusy(true);
     setFailure(undefined);
     setDone(undefined);
-    const sent = await send(api, () => api.api.v1.guard.thresholds.$put({ json: { version, values: { [item.key]: storedValue(item.unit, entered) }, reason: reason.trim() } }));
+    const sent = await send(api, () => api.api.v1.guard.thresholds.$put({ json: { version, values: { [item.key]: storedValue(item.unit, entered) }, reason: reason.trim() } }), { required: true });
     setBusy(false);
     // 断られた時も、ほかの所で変わった今の値を読み直す
     setTick((t) => t + 1);

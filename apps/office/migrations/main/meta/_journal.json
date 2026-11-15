@@ -57,6 +57,13 @@
       "when": 1794724407075,
       "tag": "0007_github_mirrors",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794784928895,
+      "tag": "0008_locks",
+      "breakpoints": true
     }
   ]
 }

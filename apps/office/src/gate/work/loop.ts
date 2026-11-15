@@ -1,8 +1,8 @@
 // タスクの繰り返し。社員が自分の山から 1 つ取り、空なら上司に求め、終えたら次を取る (タスクとレビューの 3.1)
 import { AppError, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { nodes, staff } from "../db/main.ts";
+import { approvals, nodes, staff } from "../db/main.ts";
 import type { Bindings, Staff } from "../env.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
@@ -105,7 +105,7 @@ function taskOf(row: NodeRow): StaffTask {
 }
 
 /**
- * タスクを doing にしてから社員に渡し、始めた時の役目の説明文の版を出来事に残す。役目の説明文は次のタスクから効くので、版はここで決まる
+ * タスクを doing にしてから社員に渡し、始めた時の役目の説明文の版と直近の承認の答えを出来事に残す。役目の説明文は次のタスクから効くので、版はここで決まる
  * @param env バインディング
  * @param staffId 社員 ID
  * @param row 読んだ時のタスクの行
@@ -124,8 +124,17 @@ async function start(env: Bindings, staffId: string, row: NodeRow, now: number, 
     if (!handed) await revertNode(env.DB, claimed.id, "doing", "todo", now);
   }
   if (!handed) return false;
-  const [who] = await drizzle(env.DB).select({ promptVersion: staff.promptVersion }).from(staff).where(eq(staff.id, staffId)).limit(1);
-  await appendNodeEvent(env, { nodeId: row.id, staffId, kind: "started", detail: { promptVersion: who?.promptVersion ?? null } }, { by: staffId, now });
+  const orm = drizzle(env.DB);
+  const [who] = await orm.select({ promptVersion: staff.promptVersion }).from(staff).where(eq(staff.id, staffId)).limit(1);
+  // 承認を待って戻ったタスクは、直近の答え (承認か差し戻しと理由) をタスクの文脈に入れ、社員が読んで続ける
+  const [answer] = await orm
+    .select({ id: approvals.id, kind: approvals.kind, status: approvals.status, reason: approvals.reason })
+    .from(approvals)
+    .where(and(sql`json_extract(${approvals.payload}, '$.nodeId') = ${row.id}`, inArray(approvals.status, ["approved", "rejected"])))
+    .orderBy(desc(approvals.decidedAt), desc(approvals.id))
+    .limit(1);
+  const detail = { promptVersion: who?.promptVersion ?? null, ...(answer ? { approval: answer } : {}) };
+  await appendNodeEvent(env, { nodeId: row.id, staffId, kind: "started", detail }, { by: staffId, now });
   return true;
 }
 

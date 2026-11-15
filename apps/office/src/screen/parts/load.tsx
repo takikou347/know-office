@@ -3,7 +3,7 @@ import { Alert } from "knowidea-ui";
 import { useContext, useEffect, useState } from "react";
 import { z } from "zod";
 import { type Api, ApiContext } from "../api.ts";
-import { withStepUp } from "./step-up.ts";
+import { type StepUpOptions, withStepUp } from "./step-up.ts";
 
 const Failure = z.object({ code: z.string(), traceId: z.string() }).loose();
 
@@ -62,19 +62,26 @@ export function useLoad<T>(schema: z.ZodType<T>, read: (api: Api) => Promise<Rep
  * 入口へ送り、パスキーの確認を求められたら確かめてから 1 度だけ送り直す。つながらない時とパスキーを確かめられなかった時も失敗にして返す
  * @param api 入口を呼ぶ口
  * @param call 送る操作
+ * @param options 必ずパスキーの確認を求める操作なら required
  * @returns 成功の返事か、失敗の理由
  */
-export async function send<R extends Reply>(api: Api, call: () => Promise<R & Response>): Promise<{ ok: true; res: R } | { ok: false; failure: Failed }> {
+export async function send<R extends Reply>(api: Api, call: () => Promise<R & Response>, options: StepUpOptions = {}): Promise<{ ok: true; res: R } | { ok: false; failure: Failed }> {
   let started = 0;
   let finished = 0;
-  const res = await withStepUp(api, async () => {
-    started += 1;
-    const reply = await call();
-    finished += 1;
-    return reply;
-  }).catch(() => null);
-  // 1 度目の返事を受けた後、送り直す前に投げられたのは、パスキーの確認の途中だけ。ほかは入口につながらなかった
-  if (!res) return { ok: false, failure: { code: started === 1 && finished === 1 ? "step_up_failed" : "network", traceId: null } };
+  let checking = options.required === true;
+  const res = await withStepUp(
+    api,
+    async () => {
+      checking = false;
+      started += 1;
+      const reply = await call();
+      finished += 1;
+      return reply;
+    },
+    options,
+  ).catch(() => null);
+  // 送る前の確認の途中か、1 度目の返事を受けた後で送り直す前に投げられたのは、パスキーの確認の途中だけ。ほかは入口につながらなかった
+  if (!res) return { ok: false, failure: { code: checking || (started === 1 && finished === 1) ? "step_up_failed" : "network", traceId: null } };
   if (!res.ok) return { ok: false, failure: await failureOf(res) };
   // withStepUp は呼んだ操作の返事をそのまま返す
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion

@@ -1,5 +1,6 @@
 // 8 画面と「その他」と入れた拡張の画面を、道に合わせて選ぶ。中身は screen/pages/<画面>/ に画面ごとに置く
 import type { Extension, Health } from "@know-office/core";
+import { ApprovalsPage } from "./pages/approvals/ApprovalsPage.tsx";
 import { DashboardPage } from "./pages/dashboard/DashboardPage.tsx";
 import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { GuardPage } from "./pages/guard/GuardPage.tsx";
@@ -32,6 +33,8 @@ export function Page({ screen, pathname, query, health, navigate, extensions, to
   if (isExtensionScreen(screen)) return <ExtensionPage id={screen.slice("ext:".length)} />;
   switch (screen) {
     case "dashboard":
+      // 承認を決める画面はダッシュボードの承認を待つ物から移る先で、切り替えには出さない
+      if (pathname === "/approvals" || pathname.startsWith("/approvals/")) return <ApprovalsPage pathname={pathname} />;
       return <DashboardPage health={health} />;
     case "staff":
       return <StaffPage pathname={pathname} query={query} navigate={navigate} />;

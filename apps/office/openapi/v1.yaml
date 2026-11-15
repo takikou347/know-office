@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.14.1
+  version: 1.15.0
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -3033,38 +3033,48 @@ paths:
       tags:
       - org
       summary: 承認または差し戻しを行う
-      description: '処理の流れ:
+      description: '外部連携と費用の増える事を承認する場合のみ、15 分以内のパスキーの確認が必要。
+
+
+        処理の流れ:
 
 
         1. 承認の項目を取得し、未決定であることを確認する
 
-        2. 承認の場合は種類を確かめる。今は役割の変更とサービスを閉じる案を扱う。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる
+        2. 承認の時、読んだ行の種類が `external_integration` か `cost_increase` ならパスキーの確認を求める。差し戻しは求めない
 
-        3. `approvals` を更新する。役割の変更の承認は、未決定の時だけ `staff` を更新し、承認と 1 回のバッチで書く。閉じる案の承認は、サービスが読んだ段階のままの時だけ承認を書き、同じバッチで `services.stage` を `closed` にして `service_events` に追加する
+        3. 承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は増えず、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る
 
-        4. 待機していたタスクを `todo` に戻す
+        4. `approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら `staff` を、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す
 
-        5. 監査ログに `approval.decide` を記録する
+        5. タスクに `approval_decided` の出来事を残し、担当の社員に知らせる。ここが失敗しても決定は残り、エラーログに残す
+
+        6. 監査ログに `approval.decide` を記録する
 
 
         このルート固有のエラー:
 
 
+        - 401 `step_up_required`: 外部連携か費用の増える事の承認で、パスキーの確認がない。承認は未決定のまま
+
         - 404 `not_found`: 承認の項目が存在しない
 
-        - 409 `conflict`: すでに決定済み、役割の変更と閉じる案のほかの種類を承認しようとした (差し戻しは受ける)、閉じる案のサービスが閉じられる段階にない、または承認を読んだ後に閉じる案のサービスの段階が変わった。どれも承認は未決定のまま
+        - 409 `conflict`: すでに決定済み、ほかの画面で決める種類を承認しようとした (差し戻しは受ける)、閉じる案のサービスが閉じられる段階にない、または承認を読んだ後に閉じる案のサービスの段階が変わった。どれも承認は未決定のまま
 
         - 422 `validation_failed`: 役割の変更の `payload` の形が違う。承認は未決定のまま'
       x-steps:
       - 承認の項目を取得し、未決定であることを確認する
-      - 承認の場合は種類を確かめる。今は役割の変更とサービスを閉じる案を扱う。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる
-      - '`approvals` を更新する。役割の変更の承認は、未決定の時だけ `staff` を更新し、承認と 1 回のバッチで書く。閉じる案の承認は、サービスが読んだ段階のままの時だけ承認を書き、同じバッチで `services.stage` を `closed` にして `service_events` に追加する'
-      - 待機していたタスクを `todo` に戻す
-      - 監査ログに `approval.decide` を記録する
+      - '承認の時、読んだ行の種類が `external_integration` か `cost_increase` ならパスキーの確認を求める。差し戻しは求めない'
+      - '承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は増えず、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る'
+      - '`approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら `staff` を、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す'
+      - 'タスクに `approval_decided` の出来事を残し、担当の社員に知らせる。ここが失敗しても決定は残り、エラーログに残す'
+      - '監査ログに `approval.decide` を記録する'
       x-errors:
+      - '401 `step_up_required`: 外部連携か費用の増える事の承認で、パスキーの確認がない。承認は未決定のまま'
       - '404 `not_found`: 承認の項目が存在しない'
-      - '409 `conflict`: すでに決定済み、役割の変更と閉じる案のほかの種類を承認しようとした (差し戻しは受ける)、閉じる案のサービスが閉じられる段階にない、または承認を読んだ後に閉じる案のサービスの段階が変わった。どれも承認は未決定のまま'
+      - '409 `conflict`: すでに決定済み、ほかの画面で決める種類を承認しようとした (差し戻しは受ける)、閉じる案のサービスが閉じられる段階にない、または承認を読んだ後に閉じる案のサービスの段階が変わった。どれも承認は未決定のまま'
       - '422 `validation_failed`: 役割の変更の `payload` の形が違う。承認は未決定のまま'
+      x-step-up: conditional
       parameters:
       - name: approvalId
         in: path
@@ -3972,6 +3982,51 @@ paths:
           $ref: '#/components/responses/InternalError'
         '502':
           $ref: '#/components/responses/BadGateway'
+  /api/v1/github/link:
+    get:
+      operationId: getGitHubLink
+      tags:
+      - github
+      summary: GitHub と連携した今
+      description: '設定の画面の GitHub のカードが、未連携、App を作ってインストールする前、連携済みを分けるのに読む。鍵は返さない。
+
+
+        処理の流れ:
+
+
+        1. `vault` から GitHub App とインストールのまだ使える行を読む
+
+        2. インストールがあれば `installed`、App だけあれば `app_created`、どちらも無ければ `none` を返す'
+      x-steps:
+      - '`vault` から GitHub App とインストールのまだ使える行を読む'
+      - 'インストールがあれば `installed`、App だけあれば `app_created`、どちらも無ければ `none` を返す'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GitHubLink'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/github/repos:
     get:
       operationId: listGitHubRepos
@@ -4146,6 +4201,76 @@ paths:
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
           $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+  /api/v1/github/rules/apply:
+    post:
+      operationId: applyGitHubRules
+      tags:
+      - github
+      summary: ルールセットを掛け直す
+      description: '15 分以内のパスキーの確認が必要。設定は変えず、今の main に入れる条件のルールセットを掛け直す。
+
+
+        処理の流れ:
+
+
+        1. パスキーの確認を求める
+
+        2. GitHub と連携していなければ断る
+
+        3. 同じ時の掛け直しを 1 つにする錠を取る。取れなければ断る
+
+        4. 今の設定のまま、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を掛ける。同じ名前のルールセットがあれば置き換え、2 つ作らない
+
+        5. 監査ログに `github.rules_apply` を、掛けたリポジトリと失敗したリポジトリとともに記録し、錠を外す
+
+
+        このルート固有のエラー:
+
+
+        - 409 `conflict`: GitHub と連携していない、または同じ時に別の掛け直しが動いている
+
+        - 502 `upstream_failed`: GitHub がエラーを返した。それまでに掛けたリポジトリは掛かったままで、監査ログは残る。押し直すと残りを掛ける'
+      x-steps:
+      - パスキーの確認を求める
+      - GitHub と連携していなければ断る
+      - 同じ時の掛け直しを 1 つにする錠を取る。取れなければ断る
+      - 今の設定のまま、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を掛ける。同じ名前のルールセットがあれば置き換え、2 つ作らない
+      - '監査ログに `github.rules_apply` を、掛けたリポジトリと失敗したリポジトリとともに記録し、錠を外す'
+      x-errors:
+      - '409 `conflict`: GitHub と連携していない、または同じ時に別の掛け直しが動いている'
+      - '502 `upstream_failed`: GitHub がエラーを返した。それまでに掛けたリポジトリは掛かったままで、監査ログは残る。押し直すと残りを掛ける'
+      x-step-up: true
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GitHubRulesApplied'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -8245,6 +8370,19 @@ components:
       required:
       - sha
       additionalProperties: false
+    GitHubLink:
+      type: object
+      properties:
+        state:
+          type: string
+          enum:
+          - none
+          - app_created
+          - installed
+          description: none は未連携、app_created は App を作ってインストールする前、installed は連携済み
+      required:
+      - state
+      additionalProperties: false
     GitHubManifest:
       type: object
       properties:
@@ -8275,6 +8413,19 @@ components:
       required:
       - fullName
       - private
+      additionalProperties: false
+    GitHubRulesApplied:
+      type: object
+      properties:
+        applied:
+          type: array
+          items:
+            type: string
+            maxLength: 140
+            pattern: ^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.{1,2}$)[\w.-]{1,100}$
+          description: ルールセットを掛けたリポジトリ。非公開のリポジトリはゲートウェイの判断で守るので入らない
+      required:
+      - applied
       additionalProperties: false
     GitHubRules:
       type: object

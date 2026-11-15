@@ -1,9 +1,10 @@
 // 設定の画面。外の鍵の入れ直し、全体のルールとサービスの初期値、GitHub、セッションとパスキー、拡張。どれもゲートウェイから読む
 import type { Extension } from "@know-office/core";
-import { Button, Card, List } from "knowidea-ui";
+import { Button, List } from "knowidea-ui";
 import { useState } from "react";
 import type { ToggleExtension } from "../../parts/navigate.ts";
 import { Part, Section } from "../../parts/section.tsx";
+import { GitHubCard } from "./GitHubCard.tsx";
 import { KeyReentry } from "./KeyReentry.tsx";
 import { OfficeRules } from "./OfficeRules.tsx";
 import { Passkey } from "./Passkey.tsx";
@@ -22,9 +23,7 @@ export function SettingsPage({ extensions, toggleExtension }: SettingsPageProps)
     <Section>
       <KeyReentry />
       <OfficeRules />
-      <Card title="GitHub" headingLevel={2} actions={<Button disabled>連携する</Button>}>
-        アプリの中のボタン 1 つで繋ぐ。まだ動かない
-      </Card>
+      <GitHubCard />
       <Part title="セッションと鍵">
         <Sessions />
         <Passkey />

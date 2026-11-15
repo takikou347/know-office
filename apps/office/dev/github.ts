@@ -10,6 +10,8 @@ import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, 
 export type { FakeApp, FakeGitHub, FakeGitHubOptions, FakeToken, GitHubRequest } from "./github-types.ts";
 
 const FakeRoute = z.object({ route: z.string(), body: z.unknown() });
+/** 次の 1 度だけ失敗を返す道と、返すステータス */
+const FakeFailure = z.object({ route: z.string(), status: z.number().int().min(400).max(599) });
 
 const TokenRequest = z.object({ repositories: z.array(z.string()).optional(), permissions: z.record(z.string(), Permission).optional() }).strict();
 
@@ -144,6 +146,12 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       return c.body(null, 204);
     })
     .get("/__fake/requests", (c) => c.json(requests))
+    // 次の 1 度だけ、その道に失敗を返す。画面の通しで GitHub の失敗を出すのに使う
+    .post("/__fake/failures", async (c) => {
+      const { route, status } = FakeFailure.parse(await c.req.json());
+      failures.set(route, status);
+      return c.body(null, 204);
+    })
     // 画面: オーナーが「作成」を押すと App ができ、manifest の redirect_url に code と state を付けて戻す
     .post("/web/settings/apps/new", async (c) => {
       const form = await c.req.parseBody();
@@ -160,6 +168,12 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       url.searchParams.set("code", code);
       url.searchParams.set("state", c.req.query("state") ?? "");
       return c.redirect(url.toString(), 302);
+    })
+    // 画面: オーナーが App の設定で「Generate a private key」を押すと、新しい秘密鍵の PEM が落ちてくる
+    .post("/web/settings/apps/:slug/keys", (c) => {
+      const found = [...apps.values()].find((a) => a.slug === c.req.param("slug"));
+      if (!found) return c.text("Not Found", 404);
+      return c.text(renewAppKey(found), 200, { "content-type": "application/x-pem-file" });
     })
     // 画面: オーナーが「インストール」を押すと、pick のリポジトリに入れ、setup_url に installation_id を付けて戻す
     .get("/web/apps/:slug/installations/new", (c) => {
@@ -259,6 +273,11 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     .get("/installation/repositories", (c) => {
       const token = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
       remember("GET /installation/repositories", "", token);
+      const failure = failures.get("GET /installation/repositories");
+      if (failure !== undefined) {
+        failures.delete("GET /installation/repositories");
+        return new Response(JSON.stringify({ message: "fake failure" }), { status: failure, headers: { "content-type": "application/json" } });
+      }
       const t = live(token);
       if (!t) return c.json({ message: "Bad credentials" }, 401);
       const all = (installations.get(t.installationId)?.repos ?? []).filter((r) => reaches(t, r));

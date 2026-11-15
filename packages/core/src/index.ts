@@ -58,6 +58,8 @@ export {
   GitHubRef,
   GitHubRepo,
   GitHubRules,
+  GitHubLink,
+  GitHubRulesApplied,
   GitHubRulesValue,
   GitHubRuleset,
   GitHubRulesets,
@@ -139,6 +141,7 @@ export {
 } from "./schemas/guard.ts";
 export {
   Approval,
+  APPROVAL_KIND_LABEL,
   ApprovalKind,
   ApprovalStatus,
   CreateNodeInput,

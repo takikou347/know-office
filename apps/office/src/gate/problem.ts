@@ -3,6 +3,7 @@ import { AppError, type ErrorCode, type FieldError, log, PROBLEMS, type Problem,
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import type { GateEnv } from "./env.ts";
 import { recordError } from "./ledger/errors.ts";
+import { audit } from "./ledger/record.ts";
 
 /**
  * problem+json の本文を作る
@@ -54,8 +55,25 @@ export const onError: ErrorHandler<GateEnv> = async (err, c) => {
     log("error", "request_failed", { traceId, route: c.req.routePath, status, code: known.code, stack: err instanceof Error ? err.stack : undefined });
     await recordError(c.env, { source: "gate", level: "error", code: known.code, error: err, route: c.req.routePath, status, traceId }, c.get("clock") ?? systemClock);
   }
+  if (known.code === "step_up_required") await recordDenied(c);
   return problemResponse(c, known);
 };
+
+/**
+ * パスキーの確認が無くて断った操作を監査ログに残す。ルート、メソッド、パスの値、ログインセッションだけを残し、本文は入れない。
+ * ログインセッションの無い要求は残さない。監査ログに書けなくても断る返事は変えず、エラーログに残す
+ * @param c 要求の文脈
+ */
+async function recordDenied(c: Context<GateEnv>): Promise<void> {
+  const session = c.get("session");
+  if (!session) return;
+  const params: Record<string, string> = c.req.param();
+  try {
+    await audit(c, "step_up.denied", Object.values(params)[0] ?? null, { method: c.req.method, route: c.req.routePath, params, sessionId: session.id });
+  } catch (error) {
+    await recordError(c.env, { source: "gate", level: "warn", code: "step_up_denied_audit_failed", error, route: c.req.routePath, traceId: c.get("traceId") }, c.get("clock") ?? systemClock);
+  }
+}
 
 /**
  * 無いルートは 404 の problem+json

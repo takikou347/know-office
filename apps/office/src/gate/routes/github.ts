@@ -1,6 +1,6 @@
 // GitHub 連携のルート。App を作って入れ、連携したリポジトリを読み、ルールを読み書きし、通知を受ける (ルートの一覧の 1.10、タスクとレビューの 3.2 から 3.5)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, GitHubCallbackQuery, GitHubInstallationRepos, GitHubInstalledQuery, GitHubManifest, GitHubRules, Repo, Secret, UpdateGitHubRulesInput } from "@know-office/core";
+import { AppError, GitHubCallbackQuery, GitHubInstallationRepos, GitHubInstalledQuery, GitHubLink, GitHubManifest, GitHubRules, GitHubRulesApplied, newId, Repo, Secret, UpdateGitHubRulesInput } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { storeStatements } from "../auth/vault.ts";
@@ -8,7 +8,8 @@ import { endpoints } from "../endpoints.ts";
 import { appExists, appManifest, callGitHub, checkInstallation, consumeState, DROP_GONE_APP, exchangeCode, githubToken, loadLink, NOT_LINKED, parseGitHub, signState } from "../github/app.ts";
 import { guardDo } from "../guard/actions.ts";
 import { receiveHook } from "../github/hooks.ts";
-import { loadGitHubRules, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
+import { claimLock, releaseLock } from "../db/locks.ts";
+import { loadGitHubRules, protectEach, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, noContent, ok, redirect } from "../respond.ts";
@@ -49,6 +50,14 @@ const receiveGitHubInstallRoute = createRoute({
   responses: { 302: redirectResponse("設定画面にリダイレクトする"), ...problems(400, 401, 403, 409, 422, 429, 500, 502) },
 });
 
+const getGitHubLinkRoute = createRoute({
+  method: "get",
+  path: "/api/v1/github/link",
+  operationId: "getGitHubLink",
+  tags: ["github"],
+  responses: { 200: okResponse(GitHubLink), ...problems(401, 403, 429, 500) },
+});
+
 const listGitHubReposRoute = createRoute({
   method: "get",
   path: "/api/v1/github/repos",
@@ -86,6 +95,21 @@ const updateGitHubRulesRoute = createRoute({
   request: { body: { content: { "application/json": { schema: UpdateGitHubRulesInput } }, required: true } },
   responses: { 200: okResponse(GitHubRules), ...problems(400, 401, 403, 409, 413, 415, 422, 429, 500, 502) },
 });
+
+const applyGitHubRulesRoute = createRoute({
+  method: "post",
+  path: "/api/v1/github/rules/apply",
+  operationId: "applyGitHubRules",
+  tags: ["github"],
+  "x-step-up": true,
+  // GitHub の側のルールセットを書き換えるので、変える時と同じくパスキーで確かめる
+  middleware: [stepUpGate] as const,
+  responses: { 200: okResponse(GitHubRulesApplied), ...problems(401, 403, 409, 429, 500, 502) },
+});
+
+/** 掛け直しの錠の名前と長さ。GitHub を呼ぶ口の時間切れ 10 秒をリポジトリの数だけ待っても切れない長さにする */
+const APPLY_LOCK = "github.rules_apply";
+const APPLY_LOCK_MS = 5 * 60_000;
 
 /** GitHub のルート。連携、リポジトリ、ルール */
 export const githubRoutes = router
@@ -147,6 +171,11 @@ export const githubRoutes = router
     await guardDo(c.env).releaseKeys("github_app", generation);
     return redirect(c, "/settings");
   })
+  .openapi(getGitHubLinkRoute, async (c) => {
+    const link = await loadLink(c.env);
+    if (link.installation) return ok(c, { state: "installed" as const });
+    return ok(c, { state: link.app ? ("app_created" as const) : ("none" as const) });
+  })
   .openapi(listGitHubReposRoute, async (c) => {
     const { cursor, limit } = c.req.valid("query");
     const parsed = PageCursor.safeParse(cursor ?? "1");
@@ -171,6 +200,20 @@ export const githubRoutes = router
     // 変えたルールと記録を残してから掛け直す。GitHub が失敗してもゲートウェイの判断は新しいルールで守る
     await protectRepos(c.env, c.var.forge);
     return ok(c, rules);
+  })
+  .openapi(applyGitHubRulesRoute, async (c) => {
+    if (!(await c.var.forge.connected())) throw new AppError("conflict", "GitHub と連携していない");
+    const holder = newId(c.var.clock);
+    // 同じ時の掛け直しが 2 つとも「無い」と読んで 2 つ作らないよう、1 つずつにする
+    if (!(await claimLock(c.env.DB, { name: APPLY_LOCK, holder, now: c.var.clock.now(), ttlMs: APPLY_LOCK_MS }))) throw new AppError("conflict", "ほかの掛け直しが動いている");
+    try {
+      const result = await protectEach(c.env, c.var.forge);
+      await audit(c, "github.rules_apply", RULES_KEY, { applied: result.applied, ...(result.failed ? { failed: result.failed.repo } : {}) });
+      if (result.failed) throw result.failed.error;
+      return ok(c, { applied: result.applied });
+    } finally {
+      await releaseLock(c.env.DB, APPLY_LOCK, holder);
+    }
   });
 
 /** GitHub の通知のルート。Access とログインセッションの外に置き、署名で確かめる */

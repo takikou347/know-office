@@ -37,12 +37,39 @@ async function stepUp(api: Api): Promise<Response | null> {
 }
 
 /**
- * 呼んで、パスキーの確認が切れていればパスキーで確かめてから 1 度だけ呼び直す
+ * 今のログインセッションのパスキーの確認がまだ効いているかを、ゲートウェイの今の値で見る
+ * @param api 入口を呼ぶ口
+ * @param now 今の時刻
+ * @returns 効いていれば true。読めない時は分からないので true にし、断られてから確かめる
+ */
+async function stillVerified(api: Api, now: number): Promise<boolean> {
+  const res = await api.api.v1.me.$get().catch(() => null);
+  if (!res?.ok) return true;
+  const until = (await res.json()).data.stepUpUntil;
+  return until !== null && Date.parse(until) > now;
+}
+
+/** withStepUp の使い方 */
+export type StepUpOptions = {
+  /** 送る操作が必ずパスキーの確認を求めるか。求めるなら、切れていると分かる時は先に確かめてから送る */
+  required?: boolean;
+  /** 今の時刻。テストで決める */
+  now?: () => number;
+};
+
+/**
+ * 呼んで、パスキーの確認が切れていればパスキーで確かめてから 1 度だけ呼び直す。
+ * 必ず確認を求める操作は、切れていると分かれば先に確かめる。断られた試みを監査ログに残さないため
  * @param api 入口を呼ぶ口
  * @param call 呼ぶ操作
+ * @param options 必ず確認を求める操作か
  * @returns 最後の返事。確かめられなければ確認の失敗の返事
  */
-export async function withStepUp(api: Api, call: () => Promise<Response>): Promise<Response> {
+export async function withStepUp(api: Api, call: () => Promise<Response>, options: StepUpOptions = {}): Promise<Response> {
+  if (options.required === true && !(await stillVerified(api, (options.now ?? Date.now)()))) {
+    const failed = await stepUp(api);
+    if (failed) return failed;
+  }
   const first = await call();
   if (!(await stepUpRequired(first))) return first;
   const failed = await stepUp(api);

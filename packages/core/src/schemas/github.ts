@@ -22,6 +22,24 @@ const Repos = z
 /** 設定 `github.rules` の値。触れるリポジトリ */
 export const GitHubRulesValue = z.object({ repos: Repos }).strict();
 
+/** ルールセットを掛け直した結果。掛けたのは公開のリポジトリだけ */
+export const GitHubRulesApplied = z
+  .object({ applied: z.array(RepoName).openapi({ description: "ルールセットを掛けたリポジトリ。非公開のリポジトリはゲートウェイの判断で守るので入らない" }) })
+  .strict()
+  .meta({ id: "GitHubRulesApplied" });
+
+/** ルールセットを掛け直した結果の型 */
+export type GitHubRulesApplied = z.infer<typeof GitHubRulesApplied>;
+
+/** GitHub と連携した今。none は未連携、app_created は App を作ってインストールする前、installed は連携済み */
+export const GitHubLink = z
+  .object({ state: z.enum(["none", "app_created", "installed"]).openapi({ description: "none は未連携、app_created は App を作ってインストールする前、installed は連携済み" }) })
+  .strict()
+  .meta({ id: "GitHubLink" });
+
+/** GitHub と連携した今の型 */
+export type GitHubLink = z.infer<typeof GitHubLink>;
+
 /** GitHub のルール。version は変える時に送るバージョン */
 export const GitHubRules = z
   .object({

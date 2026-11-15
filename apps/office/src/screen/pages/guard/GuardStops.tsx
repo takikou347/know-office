@@ -65,12 +65,13 @@ export function StoppedList({ tick, onChanged }: GuardStopsProps) {
   if (state.state === "loading") return <p role="status">止めている物を読んでいます</p>;
   if (state.state === "failed") return <FailedAlert title="止めている物を読めませんでした" failure={state} />;
 
-  const resume = async (stopId: string, name: string) => {
+  const resume = async (stopId: string, name: string, scope: string) => {
     if (!api) return;
     setBusy(stopId);
     setDone(undefined);
     setFailure(undefined);
-    const sent = await send(api, () => api.api.v1.guard.stops[":stopId"].resume.$post({ param: { stopId } }));
+    // サービスと全体の再開は必ずパスキーで確かめるので、切れていれば先に確かめる
+    const sent = await send(api, () => api.api.v1.guard.stops[":stopId"].resume.$post({ param: { stopId } }), { required: scope === "service" || scope === "office" });
     setBusy(null);
     if (sent.ok) {
       const { resumedAt } = z.object({ data: Resumption }).loose().parse(await sent.res.json()).data;
@@ -95,7 +96,7 @@ export function StoppedList({ tick, onChanged }: GuardStopsProps) {
             subtitle={`${jstDateTime(s.since)} から`}
             badge={<Status kind="stopped" label="止めている" />}
             actions={
-              <Button aria-label={`${name}を再開する`} loading={busy === s.stopId} disabled={busy !== null && busy !== s.stopId} onClick={() => void resume(s.stopId, name)}>
+              <Button aria-label={`${name}を再開する`} loading={busy === s.stopId} disabled={busy !== null && busy !== s.stopId} onClick={() => void resume(s.stopId, name, s.scope)}>
                 再開する
               </Button>
             }

@@ -64,7 +64,7 @@ export function KeyReentry() {
   const send = async (kind: KeyKind, call: () => Promise<Response>) => {
     setBusy(kind);
     setFailure(undefined);
-    const res = await withStepUp(api, call).catch(() => null);
+    const res = await withStepUp(api, call, { required: true }).catch(() => null);
     setBusy(null);
     if (!res) {
       setFailure({ kind, code: "step_up_failed", traceId: "" });

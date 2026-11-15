@@ -103,8 +103,8 @@ describe("オーナーに上げる事", () => {
     // 止まったタスクを離れ、開発担当は次のタスクを取る
     expect((await world.gate.staff.builder.book.status(world.clock.now())).nodeId).not.toBe(first);
 
-    // 外部連携の承認の中身はまだ作っていないので、承認は断り、タスクは待ったままにする
-    expect(await api(world, "POST", `/api/v1/approvals/${String(approval?.id)}/decision`, { decision: "approve", reason: "つないでよい" }, 409)).toMatchObject({ code: "conflict" });
+    // 外部連携の承認はパスキーで確かめるまで決まらず、タスクは待ったままにする
+    expect(await api(world, "POST", `/api/v1/approvals/${String(approval?.id)}/decision`, { decision: "approve", reason: "つないでよい" }, 401)).toMatchObject({ code: "step_up_required" });
     expect(await rows(world.d1.DB, "SELECT status FROM approvals WHERE id = ?", approval?.id)).toEqual([{ status: "pending" }]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", first)).toEqual([{ status: "waiting_owner" }]);
     await api(world, "POST", `/api/v1/approvals/${String(approval?.id)}/decision`, { decision: "reject", reason: "今はつながない" });

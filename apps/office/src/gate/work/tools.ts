@@ -1,5 +1,6 @@
 // 社員のツールの中身。役ごとに使えるツールを決め、入力を確かめてからゲートウェイが動かす (タスクとレビューの 1.2、3.1)
 import {
+  APPROVAL_KIND_LABEL,
   AppError,
   AskBossTool,
   AskOwnerTool,
@@ -17,9 +18,13 @@ import {
   StudySubmitTool,
   type ToolResult,
 } from "@know-office/core";
+import { and, desc, eq, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
-import type { ZodType } from "zod";
-import { reviews } from "../db/main.ts";
+import { z, type ZodType } from "zod";
+import { approvals, nodes, notices, reviews, staff } from "../db/main.ts";
+
+const Moved = z.array(z.object({ id: z.string() }));
 import type { Bindings } from "../env.ts";
 import type { ExtensionDefinition, ExtensionTool } from "../extensions/define.ts";
 import { INSTALLED } from "../extensions/installed.ts";
@@ -83,36 +88,64 @@ async function currentTask(env: Bindings, call: ToolCall): Promise<NodeRow> {
   return findNode(env.DB, nodeId);
 }
 
+/** 承認を求めたツールの答え。承認済みと差し戻しは新しい承認を立てずに答えを返す */
+type Asked = { approvalId: string; status: "pending" | "approved" | "rejected"; reason?: string | null };
+
 /**
- * オーナーの承認を求め、今のタスクを waiting_owner にして離れる
+ * オーナーの承認を求め、今のタスクを waiting_owner にして離れる。同じタスク、種類、対象の承認がもうあれば、新しく立てずにその答えを返す
  * @param env バインディング
  * @param call 呼び出し
  * @param approval 承認の種類、対象、中身
  * @param approval.kind 種類
  * @param approval.target 対象
  * @param approval.payload 中身
- * @returns 承認の ID
+ * @returns 承認の ID と、今の答え。承認済みと差し戻しなら理由も
  * @throws conflict 今のタスクが無い時、読んだ後にタスクが変わった時
  */
-async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff_add" | "role_change" | "external_integration" | "cost_increase" | "service_close"; target: string; payload: Record<string, unknown> }): Promise<{ approvalId: string }> {
+async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff_add" | "role_change" | "external_integration" | "cost_increase" | "service_close"; target: string; payload: Record<string, unknown> }): Promise<Asked> {
   const task = await currentTask(env, call);
-  const id = newId(clockAt(call.now));
-  // 承認を足す事とタスクを waiting_owner にする事を 1 回のバッチで書き、片方だけを残さない。読んだ版のまま、この社員の作業中の時だけ書く
-  // 承認を先に足し、タスクの移しは足した承認がある時だけにする。同じ版を読んだ 2 つ目は承認もタスクも書けない
-  const [added] = await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO approvals (id, kind, target, payload, status, requested_by, requested_at) SELECT ?, ?, ?, ?, 'pending', ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'doing' AND assignee = ?)",
-    ).bind(id, approval.kind, approval.target, JSON.stringify({ ...approval.payload, nodeId: task.id }), call.staffId, call.now, task.id, task.version, call.staffId),
-    env.DB.prepare(
-      "UPDATE nodes SET status = 'waiting_owner', version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND EXISTS (SELECT 1 FROM approvals WHERE id = ?)",
-    ).bind(call.now, task.id, task.version, id),
-  ]);
-  if ((added?.meta.changes ?? 0) === 0) throw new AppError("conflict", "タスクが変わった");
+  const orm = drizzle(env.DB);
+  const sameNode = sql`json_extract(${approvals.payload}, '$.nodeId') = ${task.id}`;
+  const [before] = await orm
+    .select({ id: approvals.id, status: approvals.status, reason: approvals.reason })
+    .from(approvals)
+    .where(and(eq(approvals.kind, approval.kind), eq(approvals.target, approval.target), sameNode))
+    .orderBy(desc(approvals.requestedAt), desc(approvals.id))
+    .limit(1);
+  // 答えの出た承認は輪にしない。承認済みなら進め、差し戻しなら理由を読んで直す
+  if (before?.status === "approved" || before?.status === "rejected") return { approvalId: before.id, status: before.status, reason: before.reason };
+  const id = before?.id ?? newId(clockAt(call.now));
+  // 直前の移しがこのバッチで 1 行を変えた時だけ足す。同じ版を読んだ 2 つ目は、1 つ目が移した後の行を見ても足さない
+  const moved = sql`changes() = 1`;
+  const statements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
+    orm
+      .update(nodes)
+      .set({ status: "waiting_owner", version: task.version + 1, updatedAt: call.now })
+      // 読んだ版のまま、この社員の作業中の時だけ待たせる
+      .where(and(eq(nodes.id, task.id), eq(nodes.version, task.version), eq(nodes.status, "doing"), eq(nodes.assignee, call.staffId)))
+      .returning({ id: nodes.id }),
+  ];
+  if (!before) {
+    // タスクを待たせられた時だけ承認と通知を書く。3 つを 1 回で書き、途中で落ちても片方だけ残さない
+    const payload = JSON.stringify({ ...approval.payload, nodeId: task.id });
+    statements.push(
+      orm
+        .insert(approvals)
+        .select(sql`SELECT ${id}, ${approval.kind}, ${approval.target}, ${payload}, 'pending', ${call.staffId}, ${call.now}, NULL, NULL WHERE ${moved}`),
+      orm
+        .insert(notices)
+        .select(
+          sql`SELECT ${newId(clockAt(call.now))}, ${call.now}, 'info', 'approval_requested', ${`承認を待っています: ${APPROVAL_KIND_LABEL[approval.kind]}`}, (SELECT ${staff.role} FROM ${staff} WHERE ${staff.id} = ${call.staffId}) || ': ' || ${approval.target}, ${task.scope}, NULL WHERE EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${id})`,
+        ),
+    );
+  }
+  const results: readonly unknown[] = await orm.batch(statements);
+  if (Moved.parse(results[0]).length === 0) throw new AppError("conflict", "タスクが変わった");
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "waiting_owner", detail: { approvalId: id, kind: approval.kind } }, actorOf(call));
-  await auditFrom(env, { at: call.now, actor: call.staffId, action: "approval.request", target: id, scope: task.scope, detail: { kind: approval.kind, target: approval.target }, traceId: call.traceId });
+  if (!before) await auditFrom(env, { at: call.now, actor: call.staffId, action: "approval.request", target: id, scope: task.scope, detail: { kind: approval.kind, target: approval.target }, traceId: call.traceId });
   // 答えを待つ間は次のタスクを進める
   await leaveTask(env, call.staffId, "handed_back", call.now);
-  return { approvalId: id };
+  return { approvalId: id, status: "pending" };
 }
 
 /**
@@ -151,9 +184,9 @@ async function nodeAssign(env: Bindings, _forge: Forge, call: ToolCall, input: N
  * @param _forge 使わない
  * @param call 呼び出し
  * @param input StaffRequestTool
- * @returns 承認の ID
+ * @returns 承認の ID と今の答え
  */
-function staffRequest(env: Bindings, _forge: Forge, call: ToolCall, input: StaffRequestTool): Promise<{ approvalId: string }> {
+function staffRequest(env: Bindings, _forge: Forge, call: ToolCall, input: StaffRequestTool): Promise<Asked> {
   return waitOwner(env, call, { kind: input.kind, target: input.kind === "staff_add" ? input.role : input.target, payload: { ...input } });
 }
 
@@ -163,9 +196,9 @@ function staffRequest(env: Bindings, _forge: Forge, call: ToolCall, input: Staff
  * @param _forge 使わない
  * @param call 呼び出し
  * @param input AskOwnerTool
- * @returns 承認の ID
+ * @returns 承認の ID と今の答え
  */
-function askOwner(env: Bindings, _forge: Forge, call: ToolCall, input: AskOwnerTool): Promise<{ approvalId: string }> {
+function askOwner(env: Bindings, _forge: Forge, call: ToolCall, input: AskOwnerTool): Promise<Asked> {
   return waitOwner(env, call, { kind: input.kind, target: input.target, payload: { reason: input.reason } });
 }
 
@@ -203,10 +236,10 @@ async function studySubmit(env: Bindings, _forge: Forge, call: ToolCall, input: 
  * @param _forge 使わない
  * @param call 呼び出し
  * @param input ServiceCloseRequestTool
- * @returns 承認の ID
+ * @returns 承認の ID と今の答え
  * @throws conflict サービスか運用の段階でない時
  */
-async function serviceCloseRequest(env: Bindings, _forge: Forge, call: ToolCall, input: ServiceCloseRequestTool): Promise<{ approvalId: string }> {
+async function serviceCloseRequest(env: Bindings, _forge: Forge, call: ToolCall, input: ServiceCloseRequestTool): Promise<Asked> {
   await closableService(env.DB, input.serviceId);
   return waitOwner(env, call, { kind: "service_close", target: input.serviceId, payload: { reason: input.reason } });
 }
