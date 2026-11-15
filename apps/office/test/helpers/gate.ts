@@ -29,6 +29,9 @@ const MASTER_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 /** テストのオーナー */
 export const OWNER = "owner@example.com";
 
+/** 代わりの GitHub の compare が 1 ページに返すファイルの数。GitHub と同じ */
+const COMPARE_PAGE = 300;
+
 /** 代わりの GitHub の compare が返す 1 ファイル。GitHub の形 */
 export type CompareFile = { filename: string; previous_filename?: string; status?: string; patch?: string };
 
@@ -176,8 +179,13 @@ function namespace<T>(stub: T) {
  * @returns そのまま送る道
  */
 function githubPath(github: TestGate["github"], path: string): string {
-  const compare = /^\/repos\/[^/]+\/[^/]+\/compare\/([^?]+)/.exec(path);
-  if (compare) github.set(`GET ${path.split("?")[0] ?? path}`, { files: github.compares.get(decodeURIComponent(compare[1] ?? "")) ?? github.files });
+  const compare = /^\/repos\/[^/]+\/[^/]+\/compare\/([^?]+)(?:\?(.*))?$/.exec(path);
+  if (compare) {
+    // GitHub と同じく、1 ページに 300 ファイルまでを返し、page で続きを返す
+    const page = Number(new URLSearchParams(compare[2] ?? "").get("page") ?? "1");
+    const all = github.compares.get(decodeURIComponent(compare[1] ?? "")) ?? github.files;
+    github.set(`GET ${path.split("?")[0] ?? path}`, { files: all.slice((page - 1) * COMPARE_PAGE, page * COMPARE_PAGE) });
+  }
   // contents は道が同じで ref だけが違うので、問いの ref ごとに置いた中身を返す
   const file = /^(\/repos\/[^/]+\/[^/]+\/contents\/([^?]+))\?ref=([0-9a-f]{40})$/.exec(path);
   if (file) {

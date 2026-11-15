@@ -20,7 +20,7 @@ import {
   RepoName,
   RULESET_NAME,
 } from "@know-office/core";
-import type { ZodType } from "zod";
+import type { output, ZodType } from "zod";
 import type { ChangedFile, Forge } from "../work/loop.ts";
 
 /** 鍵に付ける権限。GitHub App の権限の名前と、読むか書くか */
@@ -36,6 +36,9 @@ export type GitHubAccess = {
 
 /** compare API が 1 回で返すファイルの上限。届いたら残りがあるとみる */
 const COMPARE_FILES = 300;
+
+/** レビューで読む compare のページの上限。3,000 ファイルまで読む */
+const COMPARE_PAGES = 10;
 
 /** その場の直しのコミットの作者と入れた者。公開のリポジトリにオーナーの名前を残さない */
 const COMMITTER = { name: "KNOW IDEA", email: "noreply@knowidea.invalid" };
@@ -193,8 +196,15 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
   const writeContents: Permissions = { contents: "write" };
   return {
     compare: async (repo, from, to) => {
-      const compare = await call(repo, readContents, { method: "GET", path: `/compare/${from}...${to}` }, GitHubCompare);
-      return compare.files.map((f) => ({
+      const files: output<typeof GitHubCompare>["files"] = [];
+      // 1 ページは 300 ファイルまで。満ちていれば続きを読み、上限のページまで満ちていれば読み切れないとして断る
+      for (let page = 1; ; page += 1) {
+        const compare = await call(repo, readContents, { method: "GET", path: `/compare/${from}...${to}?page=${String(page)}` }, GitHubCompare);
+        files.push(...compare.files);
+        if (compare.files.length < COMPARE_FILES) break;
+        if (page === COMPARE_PAGES) throw new AppError("upstream_failed", "変えたファイルが多すぎて読み切れない");
+      }
+      return files.map((f) => ({
         path: f.filename,
         ...(f.previous_filename === undefined ? {} : { previousPath: f.previous_filename }),
         status: FILE_STATUS[f.status ?? ""] ?? "modified",

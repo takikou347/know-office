@@ -186,6 +186,22 @@ describe("レビューを読む", () => {
     expect(await api(world, "GET", `/api/v1/reviews/${task}/file?path=src%2Fnone.ts&ref=head`, undefined, 404)).toMatchObject({ code: "not_found" });
   });
 
+  it("300 ファイルを超える変更は、compare の続きのページまで読む", async () => {
+    const { task } = await openReview(world);
+    compareOf(world, `${BASE}...${HEAD}`, Array.from({ length: 301 }, (_, i) => ({ filename: `src/f${String(i)}.ts`, status: "added" })));
+    const head = Head.parse(await api(world, "GET", `/api/v1/reviews/${task}`));
+    expect(head.files).toHaveLength(301);
+    expect(head.files.at(-1)).toEqual({ path: "src/f300.ts", status: "added", seen: false });
+    expect(compared(world).filter((r) => r.startsWith(`${BASE}...${HEAD}`))).toEqual([`${BASE}...${HEAD}`, `${BASE}...${HEAD}`]);
+  });
+
+  it("3,000 ファイルを超える変更は、読み切れないので 502", async () => {
+    const { task } = await openReview(world);
+    compareOf(world, `${BASE}...${HEAD}`, Array.from({ length: 3001 }, (_, i) => ({ filename: `src/f${String(i)}.ts`, status: "added" })));
+    expect(await api(world, "GET", `/api/v1/reviews/${task}`, undefined, 502)).toMatchObject({ code: "upstream_failed" });
+    expect(compared(world).filter((r) => r.startsWith(`${BASE}...${HEAD}`))).toHaveLength(10);
+  });
+
   it("GitHub が失敗したら 502", async () => {
     const { task } = await openReview(world);
     world.gate.github.failNext(`GET /repos/${REPO}/compare/${BASE}...${HEAD}`, 500);
