@@ -20,3 +20,6 @@ paths:
 - テストは互いに独立させ、1 つ 5 秒以内
 - 画面の通しは Chrome と Safari、幅 360、1,024、1,280 で、axe の critical と serious を 0 にする
 - 走らせる時は 1 ファイルずつ (`pnpm --filter <パッケージ> exec vitest run <ファイル>`)。全部は push の前の `pnpm verify` で
+- 「済み」は、要件のシナリオが入口 (画面の操作、Cron、通知、社員のツール) から画面に出るまで、代わりの Claude と GitHub と Access の上でつながって動く事。単体のテストが通るだけでは済みにしない。つながりは `apps/office/e2e/flows/<利用場面>.spec.ts` で確かめ、ここでは `page.route` でゲートウェイの返事を差し替えない
+- 画面は `src/screen/mock.ts` を読まない。v1.yaml のルートは全部作る。残っている物は `test/screen/no-mock.test.ts` の `STILL_MOCK` と `test/gate/openapi.test.ts` の `UNBUILT` に Issue の番号と並べ、作ったら消す。足さない
+- 代わりの Claude と GitHub は、本物が断る物 (違う鍵、User-Agent の無い要求、上限) を同じように断る。本物の返事を記録した見本があれば、同じ Zod の形に両方を通す

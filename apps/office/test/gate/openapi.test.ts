@@ -1,5 +1,5 @@
 // コードのルートが v1.yaml と合う事、v1.yaml が OpenAPI 3.1 として正しい事を確かめる。API の決まりの 3.5
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "@hono/zod-openapi";
 import { describe, expect, it } from "vitest";
@@ -73,6 +73,56 @@ function withoutDescription(value: unknown): unknown {
   return value;
 }
 
+/**
+ * v1.yaml にあってコードにまだ無いルートと、受け持つ Issue。作ったら消す。デプロイの前に空にする
+ */
+const UNBUILT: Record<string, string> = {
+  "DELETE /api/v1/staff/{staffId}/orders/{orderId}": "#107",
+  "GET /api/v1/dashboard": "#76",
+  "GET /api/v1/errors": "#111",
+  "GET /api/v1/live": "#76",
+  "GET /api/v1/records/attendance": "#107",
+  "GET /api/v1/records/uptime": "#107",
+  "GET /api/v1/reviews/{nodeId}/lsp": "#110",
+  "GET /api/v1/staff": "#107",
+  "GET /api/v1/staff/{staffId}/messages": "#107",
+  "GET /api/v1/traces/{traceId}": "#111",
+  "POST /api/v1/live/tickets": "#76",
+  "POST /api/v1/services/{serviceId}/rollback": "#109",
+  "POST /api/v1/staff/{staffId}/messages": "#107",
+  "POST /api/v1/staff/{staffId}/orders": "#107",
+  "POST /v1/abort": "#105",
+  "POST /v1/messages": "#105",
+  "POST /ws/v1/events": "#105",
+  "POST /ws/v1/tools/{toolName}": "#103",
+};
+
+/**
+ * ディレクトリの下の .ts の中身をすべて読む
+ * @param dir 読むディレクトリ
+ * @returns 中身をつないだ文
+ */
+function sources(dir: string): string {
+  return readdirSync(dir, { recursive: true, encoding: "utf8" })
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => readFileSync(join(dir, name), "utf8"))
+    .join("\n");
+}
+const gateSource = sources(join(import.meta.dirname, "../../src/gate"));
+const workspaceSource = sources(join(import.meta.dirname, "../../../workspace/src"));
+
+/**
+ * ゲートウェイの OpenAPI の文書に入らないルート (ワークスペースからの /ws/v1/ と、ワークスペースの /v1/) が作られているか
+ * @param key 「メソッド パス」
+ * @returns /ws/v1/ は createRoute の path、/v1/ はワークスペースのサーバーの「メソッド パス」が書かれていれば true
+ */
+function builtElsewhere(key: string): boolean {
+  const [, path = ""] = key.split(" ");
+  if (path.startsWith("/ws/v1/")) return gateSource.includes(`path: "${path}"`);
+  if (path.startsWith("/v1/")) return workspaceSource.includes(`"${key}"`);
+  return false;
+}
+
 describe("OpenAPI の文書", () => {
   const ours = operations(code);
   const spec = operations(v1);
@@ -89,6 +139,16 @@ describe("OpenAPI の文書", () => {
         }),
       );
     expect(shapes(ours)).toEqual(shapes(spec));
+  });
+
+  it("v1.yaml のルートはどれもコードにあるか、まだ作っていない物として Issue と並べてある", () => {
+    const missing = [...spec.keys()].filter((key) => !ours.has(key) && !builtElsewhere(key)).toSorted((a, b) => a.localeCompare(b));
+    expect(missing).toEqual(Object.keys(UNBUILT).toSorted((a, b) => a.localeCompare(b)));
+  });
+
+  it("デプロイの時は、まだ作っていないルートが残っていない", () => {
+    if (process.env["RELEASE"] !== "1") return;
+    expect(Object.keys(UNBUILT)).toEqual([]);
   });
 
   it("コードが登録したスキーマは v1.yaml の同じ名前のスキーマと同じ", () => {
