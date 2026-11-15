@@ -1,5 +1,6 @@
 // 開発環境の代わりの Claude API を確かめる。ログインと記録の 3.9
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createFakeClaude } from "../../dev/claude.ts";
 
 const HEADERS = { "x-api-key": "test-key", "anthropic-version": "2023-06-01", "content-type": "application/json" };
@@ -70,5 +71,33 @@ describe("開発環境の代わりの物", () => {
     const res = await claude.app.request("/v1/messages/count_tokens", { method: "POST", headers: HEADERS, body: BODY });
     expect(await res.json()).toEqual({ input_tokens: expect.any(Number) as unknown });
     expect(claude.keys).toEqual(["test-key"]);
+  });
+
+  it("代わりの Claude API はバッチ処理を受け、終えた後に custom_id ごとの結果を JSONL で返す", async () => {
+    const claude = createFakeClaude();
+    const body = JSON.stringify({ requests: [{ custom_id: "c0", params: REQUEST }, { custom_id: "c1", params: REQUEST }] });
+    const created = await claude.app.request("/v1/messages/batches", { method: "POST", headers: HEADERS, body });
+    const batch = z.object({ id: z.string(), processing_status: z.string() }).loose().parse(await created.json());
+    expect(batch).toMatchObject({ type: "message_batch", processing_status: "in_progress" });
+    expect(batch.id).toMatch(/^msgbatch_[A-Za-z0-9]+$/);
+    // 終える前は結果を返さない
+    expect((await claude.app.request(`/v1/messages/batches/${batch.id}/results`, { headers: HEADERS })).status).toBe(400);
+    claude.endBatch(batch.id, (id) => (id === "c0" ? { content: [{ type: "text", text: "案" }] } : "errored"));
+    const status = await claude.app.request(`/v1/messages/batches/${batch.id}`, { headers: HEADERS });
+    expect(await status.json()).toMatchObject({ id: batch.id, processing_status: "ended", request_counts: { succeeded: 1, errored: 1 } });
+    const results = await claude.app.request(`/v1/messages/batches/${batch.id}/results`, { headers: HEADERS });
+    const lines = (await results.text()).trim().split("\n").map((l) => JSON.parse(l) as unknown);
+    expect(lines).toEqual([
+      { custom_id: "c0", result: { type: "succeeded", message: expect.objectContaining({ content: [{ type: "text", text: "案" }] }) as unknown } },
+      { custom_id: "c1", result: { type: "errored", error: expect.any(Object) as unknown } },
+    ]);
+    expect(claude.batches[0]?.requests.map((r) => r.custom_id)).toEqual(["c0", "c1"]);
+    // 1 件ずつの Messages API には何も届かない
+    expect(claude.requests).toEqual([]);
+  });
+
+  it("代わりの Claude API は知らないバッチを 404 で返す", async () => {
+    const res = await createFakeClaude().app.request("/v1/messages/batches/msgbatch_none", { headers: HEADERS });
+    expect(res.status).toBe(404);
   });
 });

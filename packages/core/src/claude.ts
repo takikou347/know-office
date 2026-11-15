@@ -62,14 +62,34 @@ export function allowedModels(staffId: StaffId): readonly ClaudeModel[] {
  * @returns 百万分の 1 ドル
  */
 export function costMicroUsd(model: ClaudeModel, usage: ClaudeUsage): number {
+  return Math.ceil(milliMicroUsd(model, usage) / 1000);
+}
+
+/**
+ * バッチ処理で使ったトークンから費用を出す。単価は 1 件ずつの半分で、半分にした後で端数を切り上げる
+ * @param model モデル
+ * @param usage 使ったトークン
+ * @returns 百万分の 1 ドル
+ */
+export function batchCostMicroUsd(model: ClaudeModel, usage: ClaudeUsage): number {
+  return Math.ceil(milliMicroUsd(model, usage) / 2000);
+}
+
+/**
+ * 使ったトークンの費用を、百万分の 1 ドルの千分の 1 で出す
+ * @param model モデル
+ * @param usage 使ったトークン
+ * @returns 百万分の 1 ドルの千分の 1
+ */
+function milliMicroUsd(model: ClaudeModel, usage: ClaudeUsage): number {
   const prompt = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
   const price = model === HAIKU ? (prompt > HAIKU_LONG_PROMPT ? HAIKU_LONG : HAIKU_SHORT) : PRICES[model];
   const hour = usage.cacheWrite1hTokens ?? 0;
-  const milli =
+  return (
     usage.inputTokens * price.input +
     usage.outputTokens * price.output +
     usage.cacheReadTokens * price.cacheRead +
     (usage.cacheWriteTokens - hour) * price.cacheWrite +
-    hour * price.cacheWrite1h;
-  return Math.ceil(milli / 1000);
+    hour * price.cacheWrite1h
+  );
 }

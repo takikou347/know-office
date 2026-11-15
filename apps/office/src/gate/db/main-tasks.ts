@@ -1,5 +1,5 @@
 // D1 の DB のうち、タスク、承認、レビュー、GitHub、サービス、設定、通知、拡張のテーブル。データの 2.5 と 2.6
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { id, json, time } from "./columns.ts";
 
 // 2.5 タスク、承認、レビュー、GitHub
@@ -165,7 +165,24 @@ export const findings = sqliteTable("findings", {
   status: text("status").notNull(),
   fixedAt: time("fixed_at"),
   effect: json("effect"),
+  claimedAt: time("claimed_at"),
 });
+
+/** 送った Claude のバッチ処理。種類と週ごとに 1 行で、同じ週を 2 度送らない */
+export const batches = sqliteTable(
+  "batches",
+  {
+    id: id(),
+    kind: text("kind", { enum: ["distill", "findings"] }).notNull(),
+    week: text("week").notNull(),
+    batchId: text("batch_id"),
+    status: text("status", { enum: ["pending", "submitted", "applied"] }).notNull(),
+    detail: json("detail"),
+    createdAt: time("created_at").notNull(),
+    endedAt: time("ended_at"),
+  },
+  (t) => [uniqueIndex("batches_kind_week").on(t.kind, t.week)],
+);
 
 /** オーナーの情報。項目ごとに暗号にする */
 export const ownerData = sqliteTable("owner_data", {

@@ -1,4 +1,4 @@
-// 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、届いた要求と鍵を残す
+// 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、届いた要求と鍵を残す。バッチ処理は受けた後にテストが終えさせる
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -18,6 +18,19 @@ type ScriptedError = { error: { status: 429 | 529 | 500; type: string } };
 
 const MessagesRequest = z.looseObject({ model: z.string().optional(), stream: z.boolean().optional() });
 
+/** バッチ処理の要求の本文 */
+const BatchRequest = z.object({ requests: z.array(z.object({ custom_id: z.string(), params: MessagesRequest })).min(1) });
+
+/** 受けたバッチ処理 */
+export type FakeBatch = {
+  /** msgbatch_ で始まる ID */
+  id: string;
+  /** 受けた要求 */
+  requests: z.infer<typeof BatchRequest>["requests"];
+  /** 終えたら custom_id ごとの答え。errored は失敗として返す */
+  answers: Map<string, ScriptedMessage | "errored"> | null;
+};
+
 /** 代わりの Claude API */
 export type FakeClaude = {
   /** `/v1/messages` と `/__fake/` を持つ Hono */
@@ -30,6 +43,10 @@ export type FakeClaude = {
   push(message: ScriptedMessage): void;
   /** 失敗を積む */
   pushError(status: 429 | 529 | 500, type: string): void;
+  /** 受けたバッチ処理 */
+  batches: FakeBatch[];
+  /** バッチ処理を終えさせる。answer は custom_id ごとの答えを返す */
+  endBatch(id: string, answer: (customId: string) => ScriptedMessage | "errored"): void;
 };
 
 /**
@@ -60,6 +77,23 @@ export function createFakeClaude(): FakeClaude {
   const queue: (ScriptedMessage | ScriptedError)[] = [];
   const requests: z.infer<typeof MessagesRequest>[] = [];
   const keys: string[] = [];
+  const batches: FakeBatch[] = [];
+  const toBatch = (b: FakeBatch) => {
+    const values = b.answers ? [...b.answers.values()] : [];
+    return {
+      id: b.id,
+      type: "message_batch",
+      processing_status: b.answers ? "ended" : "in_progress",
+      request_counts: {
+        processing: b.answers ? 0 : b.requests.length,
+        succeeded: values.filter((v) => v !== "errored").length,
+        errored: values.filter((v) => v === "errored").length,
+        canceled: 0,
+        expired: 0,
+      },
+      results_url: b.answers ? `https://api.anthropic.com/v1/messages/batches/${b.id}/results` : null,
+    };
+  };
 
   const app = new Hono()
     .use("/v1/*", async (c, next) => {
@@ -67,6 +101,32 @@ export function createFakeClaude(): FakeClaude {
       if (!key) return c.json({ type: "error", error: { type: "authentication_error", message: "x-api-key が無い" } }, 401);
       keys.push(key);
       return next();
+    })
+    .post("/v1/messages/batches", async (c) => {
+      const body = BatchRequest.parse(await c.req.json());
+      const batch: FakeBatch = { id: `msgbatch_fake${String(batches.length + 1)}`, requests: body.requests, answers: null };
+      batches.push(batch);
+      return c.json(toBatch(batch));
+    })
+    .get("/v1/messages/batches/:id", (c) => {
+      const batch = batches.find((b) => b.id === c.req.param("id"));
+      if (!batch) return c.json({ type: "error", error: { type: "not_found_error", message: "バッチが無い" } }, 404);
+      return c.json(toBatch(batch));
+    })
+    .get("/v1/messages/batches/:id/results", (c) => {
+      const batch = batches.find((b) => b.id === c.req.param("id"));
+      if (!batch) return c.json({ type: "error", error: { type: "not_found_error", message: "バッチが無い" } }, 404);
+      const answers = batch.answers;
+      if (!answers) return c.json({ type: "error", error: { type: "invalid_request_error", message: "まだ終わっていない" } }, 400);
+      const lines = batch.requests.map((r, i) => {
+        const answer = answers.get(r.custom_id) ?? "errored";
+        const result =
+          answer === "errored"
+            ? { type: "errored", error: { type: "error", error: { type: "api_error", message: "代わりの Claude API が積んだ失敗" } } }
+            : { type: "succeeded", message: toMessage(answer, r.params.model, i + 1) };
+        return JSON.stringify({ custom_id: r.custom_id, result });
+      });
+      return c.body(`${lines.join("\n")}\n`, 200, { "content-type": "application/binary" });
     })
     // 数えるだけの呼び出しは積んだ返事を使わず、本文の長さから決まった数を返す
     .post("/v1/messages/count_tokens", async (c) => c.json({ input_tokens: Math.ceil((await c.req.text()).length / 4) }))
@@ -111,5 +171,11 @@ export function createFakeClaude(): FakeClaude {
     keys,
     push: (message) => queue.push(message),
     pushError: (status, type) => queue.push({ error: { status, type } }),
+    batches,
+    endBatch: (id, answer) => {
+      const batch = batches.find((b) => b.id === id);
+      if (!batch) throw new Error(`バッチ ${id} が無い`);
+      batch.answers = new Map(batch.requests.map((r) => [r.custom_id, answer(r.custom_id)]));
+    },
   };
 }

@@ -68,7 +68,7 @@ describe("共通のヘッダー", () => {
     expect(getRoutes.length).toBeGreaterThan(0);
     const results = await Promise.all(
       getRoutes.map(async (path) => {
-        // そのパスに無いメソッドを 1 つ選ぶ。PUT を受けるパス (拡張のメモ、GitHub のルール) もある
+        // そのパスに無いメソッドを 1 つ選ぶ。PUT を受けるパス (拡張のメモ、GitHub のルール、基準) もある
         const method = ["PUT", "PATCH", "DELETE"].find((m) => !allowOf(path).split(", ").includes(m)) ?? "PATCH";
         const res = await call(path, { method });
         return [path, res.status, res.headers.get("Allow")];

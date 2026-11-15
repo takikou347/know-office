@@ -141,6 +141,7 @@ export const lessons = sqliteTable("lessons", {
   kind: text("kind", { enum: ["prompt_rule", "threshold", "rule_tool"] }).notNull(),
   cause: text("cause").notNull(),
   proposal: text("proposal").notNull(),
+  staffId: text("staff_id"),
   stopIds: json("stop_ids"),
   status: text("status").notNull(),
   appliedAt: time("applied_at"),

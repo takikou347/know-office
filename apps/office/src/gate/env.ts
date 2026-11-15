@@ -158,8 +158,10 @@ export type Bindings = {
   MASTER_KEY: string;
   /** 会話の記録、社員が作ったファイル、D1 の毎日の写しを置く R2 */
   FILES: R2Bucket;
-  /** Claude API の鍵。シークレットで入れ、Claude のプロキシだけが Secret に包んで使う */
+  /** Claude API の鍵。シークレットで入れ、Claude のプロキシと週のバッチ処理だけが Secret に包んで使う */
   ANTHROPIC_API_KEY?: string;
+  /** know-office 自身のリポジトリ (owner/name)。見つけて直す仕組みが Issue を置く。無い間は数えるだけ */
+  OFFICE_REPO?: string;
 } & Partial<Record<RecordBinding, D1Database>>;
 
 /** ゲートウェイの Hono に渡す型。バインディングとミドルウェアが置く値の型を持つ */

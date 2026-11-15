@@ -55,11 +55,28 @@ export async function migrate(db: D1Database, folder: "main" | "ledger"): Promis
  * @param db 空にする DB
  */
 export async function resetMain(db: D1Database): Promise<void> {
+  await reset(db, "main");
+}
+
+/**
+ * REC_<年> のテーブルを全部消し、ledger のマイグレーションを流し直す。記録を読むテストが、前のテストの記録を数えないようにする
+ * @param db 空にする REC_<年>
+ */
+export async function resetLedger(db: D1Database): Promise<void> {
+  await reset(db, "ledger");
+}
+
+/**
+ * テーブルを全部消し、マイグレーションを流し直す
+ * @param db 空にする D1
+ * @param folder main か ledger
+ */
+async function reset(db: D1Database, folder: "main" | "ledger"): Promise<void> {
   const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all<{ name: string }>();
   // 往復を減らすため、消すのと作るのをそれぞれ 1 つの batch で流す
   const drops = tables.results.map((t) => db.prepare(`DROP TABLE IF EXISTS "${t.name}"`));
   if (drops.length > 0) await db.batch(drops);
-  await db.batch(statements("main").map((sql) => db.prepare(sql)));
+  await db.batch(statements(folder).map((sql) => db.prepare(sql)));
 }
 
 /**

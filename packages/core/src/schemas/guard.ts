@@ -242,3 +242,78 @@ export const StopUpdate = z
 
 /** 再開した時刻 */
 export const Resumption = z.object({ resumedAt: z.iso.datetime() }).strict().meta({ id: "Resumption" });
+
+/** 蒸留の案の種類。役目の説明文に足す決まり、基準の直し、ルールやツールの直し */
+export const LessonKind = z.enum(["prompt_rule", "threshold", "rule_tool"]);
+
+/** 蒸留の案の状態。説明文の案は承認で applied、基準の案は基準を変えた時に applied */
+export const LessonStatus = z.enum(["proposed", "approved", "rejected", "applied"]);
+
+/** 蒸留の案 */
+export const Lesson = z
+  .object({
+    id: Uuid,
+    createdAt: z.iso.datetime(),
+    kind: LessonKind,
+    cause: z.string(),
+    proposal: z.string(),
+    staffId: StaffId.nullable().openapi({ description: "説明文に決まりを足す社員。説明文の案だけが持つ" }),
+    stopIds: z.array(Uuid),
+    status: LessonStatus,
+  })
+  .strict()
+  .meta({ id: "Lesson" });
+
+/** 蒸留の案の型 */
+export type Lesson = z.infer<typeof Lesson>;
+
+/** 蒸留でレビュー担当が返す答え。原因ごとに案を 3 件まで */
+export const DistillAnswer = z
+  .object({
+    proposals: z
+      .array(
+        z.union([
+          z.object({ kind: z.literal("prompt_rule"), staffId: StaffId, proposal: z.string().min(1).max(2000) }).strict(),
+          z.object({ kind: z.enum(["threshold", "rule_tool"]), staffId: z.null(), proposal: z.string().min(1).max(2000) }).strict(),
+        ]),
+      )
+      .max(3),
+  })
+  .strict();
+
+/** 蒸留の答えの型 */
+export type DistillAnswer = z.infer<typeof DistillAnswer>;
+
+/** 版の付いた今の基準 */
+export const GuardThresholds = z
+  .object({ version: z.number().int(), values: z.record(z.string(), z.number()) })
+  .strict()
+  .meta({ id: "GuardThresholds" });
+
+/** 基準を変える入力。values は変える項目だけを送り、ほかは今の値を使う */
+export const UpdateThresholdsInput = z
+  .object({
+    version: z.number().int().openapi({ description: "取得した時点のバージョン。現在と異なる場合は 409 conflict" }),
+    values: z.record(z.string(), z.number()),
+    reason: z.string().max(2000),
+    lessonId: Uuid.optional().openapi({ description: "入れる基準の案。承認した基準の案だけを applied にする" }),
+  })
+  .strict()
+  .meta({ id: "UpdateThresholdsInput" });
+
+/** 基準を変える入力の型 */
+export type UpdateThresholdsInput = z.infer<typeof UpdateThresholdsInput>;
+
+/** 自動停止の効き目。止めた回数、誤って止めた割合、多い原因、入れた対策の前後 7 日 */
+export const GuardEffect = z
+  .object({
+    stops: z.number().int(),
+    falseRatio: z.number(),
+    topCauses: z.array(z.object({ signal: z.string(), count: z.number().int() }).strict()),
+    measures: z.array(z.object({ lessonId: Uuid, before: z.number().int(), after: z.number().int() }).strict()),
+  })
+  .strict()
+  .meta({ id: "GuardEffect" });
+
+/** 自動停止の効き目の型 */
+export type GuardEffect = z.infer<typeof GuardEffect>;

@@ -1,6 +1,6 @@
 // Claude のモデルの単価、役ごとのモデル、鍵の入れ物を確かめる (社員が考えるの 3.3)
 import { describe, expect, it } from "vitest";
-import { allowedModels, costMicroUsd, Secret } from "../src/index.ts";
+import { allowedModels, batchCostMicroUsd, costMicroUsd, Secret } from "../src/index.ts";
 
 describe("Claude の単価", () => {
   it("入力、出力、読み直し、書き込みのトークンから百万分の 1 ドルを出す", () => {
@@ -28,6 +28,17 @@ describe("Claude の単価", () => {
     expect(costMicroUsd("claude-haiku-5-5", usage)).toBe(250 + 200);
     // 入力の合計が 10 万を超えると 0.625 と 1 ドル / 百万
     expect(costMicroUsd("claude-haiku-5-5", { ...usage, cacheWriteTokens: 200_000, cacheWrite1hTokens: 100_000 })).toBe(62_500 + 100_000);
+  });
+
+  it("バッチ処理は半額で、端数は半分にした後で切り上げる", () => {
+    // 4 と 20 ドル / 百万の半分
+    expect(batchCostMicroUsd("claude-opus-5-5", { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 })).toBe(2000 + 2000);
+    // 0.1 ドル / 百万の半分の 0.05 を切り上げて 1
+    expect(batchCostMicroUsd("claude-haiku-5-5", { inputTokens: 1, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })).toBe(1);
+    // 1 件ずつなら 1.5 を切り上げて 2。半分にしてから切り上げるので 1 で、先に切り上げた 2 の半分ではない
+    expect(batchCostMicroUsd("claude-haiku-5-5", { inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 })).toBe(1);
+    expect(batchCostMicroUsd("claude-sonnet-5-5", { inputTokens: 3, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })).toBe(3);
+    expect(batchCostMicroUsd("claude-haiku-5-5", { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })).toBe(0);
   });
 });
 

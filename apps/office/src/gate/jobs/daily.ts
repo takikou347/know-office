@@ -1,7 +1,9 @@
-// 毎日 0 時 5 分の定期ジョブ。前の日の日ごとの集計を、社員 DO を通して作り直す (社員と勤怠の 3.6)
+// 毎日 0 時 5 分の定期ジョブ。前の日の日ごとの集計を、社員 DO を通して作り直し、直した Issue の効き目を確かめる (社員と勤怠の 3.6、サービスと拡張の 3.7)
 import { type Clock, jstDay, jstDayStart, StaffId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
+import { checkEffects } from "../findings/effect.ts";
 import { recordError } from "../ledger/errors.ts";
+import type { WeeklyDeps } from "./weekly.ts";
 
 /** 日本時間の 0 時 5 分。Cron は協定世界時で書くので 15 時 5 分になる。wrangler.jsonc の triggers.crons に同じ文字列を置く */
 export const DAILY_CRON = "5 15 * * *";
@@ -20,13 +22,18 @@ export async function rebuildYesterday(env: Bindings, clock: Clock): Promise<voi
 
 /**
  * 0 時 5 分の定期ジョブを走らせる。失敗は投げずにエラーログに残す。次の日の 0 時 5 分か、出勤や訂正でまた作り直す
+ * 週のバッチ処理の口を渡した時は、直してから 7 日たった Issue の効き目も確かめる (サービスと拡張の 3.7)
  * @param env バインディング
  * @param ctx 返事の後も処理を続けさせる waitUntil
  * @param ctx.waitUntil 待たせる Promise を渡す
  * @param clock 時刻
+ * @param weekly 週のバッチ処理が外へ頼む口
  */
-export function runDaily(env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }, clock: Clock): void {
+export function runDaily(env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }, clock: Clock, weekly?: WeeklyDeps): void {
   ctx.waitUntil(
     rebuildYesterday(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "daily_totals_rebuild_failed", error }, clock)),
   );
+  if (weekly) {
+    ctx.waitUntil(checkEffects(env, weekly.tracker, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "finding_effect_failed", error }, clock)));
+  }
 }

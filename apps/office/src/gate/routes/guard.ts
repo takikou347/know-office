@@ -1,13 +1,34 @@
-// 自動停止: 停止中の対象、止めた記録の一覧と 1 件、手で止める、判定、再開、止める前の確認 (ルートの一覧の 1.5、自動停止の 3.6、3.7)
+// 自動停止: 停止中の対象、止めた記録の一覧と 1 件、手で止める、判定、再開、止める前の確認、基準、効き目、蒸留の案 (ルートの一覧の 1.5、自動停止の 3.6、3.7、サービスと拡張の 3.6)
 import type { D1Database } from "@cloudflare/workers-types";
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, CreateStopInput, newId, GuardScope, GuardState, Resumption, Stop, StopDetail, StopPreview, StopRow, StopTargetInput, StopUpdate, StopVerdict, VerdictInput } from "@know-office/core";
+import {
+  AppError,
+  CreateStopInput,
+  DecisionInput,
+  GuardEffect,
+  GuardScope,
+  GuardState,
+  GuardThresholds,
+  Lesson,
+  newId,
+  Resumption,
+  Stop,
+  StopDetail,
+  StopPreview,
+  StopRow,
+  StopTargetInput,
+  StopUpdate,
+  StopVerdict,
+  UpdateThresholdsInput,
+  VerdictInput,
+} from "@know-office/core";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
 import { requireStepUp } from "../auth/passkey.ts";
 import { stops, stopUpdates } from "../db/main.ts";
 import { applyStop, guardDo, openStop, openStops, previewStop, resumeStop, type StopRowData, stopStates } from "../guard/actions.ts";
+import { decideLesson, guardEffect, listLessons, updateThresholds } from "../guard/lessons.ts";
 import { loadThresholds } from "../guard/thresholds.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
@@ -88,6 +109,57 @@ const previewStopRoute = createRoute({
   tags: ["guard"],
   request: { body: jsonBody(StopTargetInput) },
   responses: { 200: okResponse(StopPreview), ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
+});
+
+const LessonParam = z.object({ lessonId: z.uuid().openapi({ param: { name: "lessonId", in: "path" }, description: "UUID v7" }) }).strict();
+const Day = (name: string) => z.iso.date().optional().openapi({ param: { name, in: "query" }, description: "日本時間の日付 YYYY-MM-DD" });
+
+const getThresholdsRoute = createRoute({
+  method: "get",
+  path: "/api/v1/guard/thresholds",
+  operationId: "getThresholds",
+  tags: ["guard"],
+  responses: { 200: okResponse(GuardThresholds), ...problems(401, 403, 429, 500) },
+});
+
+const updateThresholdsRoute = createRoute({
+  method: "put",
+  path: "/api/v1/guard/thresholds",
+  operationId: "updateThresholds",
+  tags: ["guard"],
+  "x-step-up": true,
+  request: { body: jsonBody(UpdateThresholdsInput) },
+  responses: { 200: okResponse(GuardThresholds), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
+});
+
+const getEffectRoute = createRoute({
+  method: "get",
+  path: "/api/v1/guard/effect",
+  operationId: "getGuardEffect",
+  tags: ["guard"],
+  request: { query: z.object({ from: Day("from"), to: Day("to") }).strict() },
+  responses: { 200: okResponse(GuardEffect), ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+const listLessonsRoute = createRoute({
+  method: "get",
+  path: "/api/v1/guard/lessons",
+  operationId: "listLessons",
+  tags: ["guard"],
+  request: {
+    // カーソルは案の ID なので、UUID の形だけを受ける
+    query: listQuery(router).extend({ cursor: z.uuid().optional().openapi({ param: { name: "cursor", in: "query" }, description: "前のレスポンスの meta.next" }) }),
+  },
+  responses: { 200: listResponse(Lesson), ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+const decideLessonRoute = createRoute({
+  method: "post",
+  path: "/api/v1/guard/lessons/{lessonId}/decision",
+  operationId: "decideLesson",
+  tags: ["guard"],
+  request: { params: LessonParam, body: jsonBody(DecisionInput) },
+  responses: { 200: okResponse(Lesson), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
 
 const iso = (at: number) => new Date(at).toISOString();
@@ -205,4 +277,29 @@ export const guardRoutes = router
   .openapi(previewStopRoute, async (c) => {
     const { scope, target } = c.req.valid("json");
     return ok(c, await previewStop(c.env.DB, scope, target));
+  })
+  .openapi(getThresholdsRoute, async (c) => {
+    const { thresholds, version } = await loadThresholds(c.env.DB);
+    return ok(c, { version, values: thresholds });
+  })
+  .openapi(updateThresholdsRoute, async (c) => {
+    // 基準を変えると止める判断が変わるので、強める時も弱める時もパスキーで確かめる
+    requireStepUp(c);
+    const input = c.req.valid("json");
+    const changed = await updateThresholds(c.env, input, c.var.clock.now());
+    await audit(c, "guard.thresholds", "guard.thresholds", { before: changed.before, after: changed.after, version: changed.version, reason: input.reason, lessonId: input.lessonId });
+    return ok(c, { version: changed.version, values: changed.values });
+  })
+  .openapi(getEffectRoute, async (c) => ok(c, await guardEffect(c.env.DB, c.req.valid("query"))))
+  .openapi(listLessonsRoute, async (c) => {
+    const { cursor, limit } = c.req.valid("query");
+    const { items, next } = await listLessons(c.env.DB, cursor, limit);
+    return list(c, items, next);
+  })
+  .openapi(decideLessonRoute, async (c) => {
+    const { lessonId } = c.req.valid("param");
+    const { decision, reason } = c.req.valid("json");
+    const { lesson } = await decideLesson(c.env, lessonId, decision, { by: "owner", now: c.var.clock.now(), traceId: c.var.traceId });
+    await audit(c, "lesson.decide", lessonId, { kind: lesson.kind, decision, status: lesson.status, reason });
+    return ok(c, lesson);
   });

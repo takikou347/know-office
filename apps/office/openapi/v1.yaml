@@ -1898,7 +1898,7 @@ paths:
                 type: object
                 properties:
                   data:
-                    $ref: '#/components/schemas/Thresholds'
+                    $ref: '#/components/schemas/GuardThresholds'
                   meta:
                     $ref: '#/components/schemas/Meta'
                 required:
@@ -1924,26 +1924,32 @@ paths:
         処理の流れ:
 
 
-        1. `version` が現在と一致することを確認する
+        1. `version` が現在と一致することを確認し、送った項目を今の値に重ねて基準の形に合うかを確かめる
 
-        2. `settings` に追加する
+        2. `lessonId` があれば、改善案が存在することを確認する
 
-        3. 監査ログに `guard.thresholds` を、変更前後の値と理由とともに記録する
+        3. `settings` への追加と、`lessonId` の改善案を `applied` にする更新を 1 回のバッチで行う。どちらも `version` より新しい行が無く、改善案が承認済みのしきい値の案である時だけ書く
 
-        4. `GuardDO` に新しいハッシュを渡す
+        4. 監査ログに `guard.thresholds` を、変更前後の値と理由とともに記録する
 
 
         このルート固有のエラー:
 
 
-        - 409 `conflict`: バージョンが異なる'
+        - 404 `not_found`: `lessonId` の改善案が存在しない
+
+        - 409 `conflict`: バージョンが異なる、または改善案が承認済みのしきい値の案でない
+
+        - 422 `validation_failed`: 未知の項目か、基準の形に合わない値'
       x-steps:
-      - '`version` が現在と一致することを確認する'
-      - '`settings` に追加する'
+      - '`version` が現在と一致することを確認し、送った項目を今の値に重ねて基準の形に合うかを確かめる'
+      - '`lessonId` があれば、改善案が存在することを確認する'
+      - '`settings` への追加と、`lessonId` の改善案を `applied` にする更新を 1 回のバッチで行う。どちらも `version` より新しい行が無く、改善案が承認済みのしきい値の案である時だけ書く'
       - 監査ログに `guard.thresholds` を、変更前後の値と理由とともに記録する
-      - '`GuardDO` に新しいハッシュを渡す'
       x-errors:
-      - '409 `conflict`: バージョンが異なる'
+      - '404 `not_found`: `lessonId` の改善案が存在しない'
+      - '409 `conflict`: バージョンが異なる、または改善案が承認済みのしきい値の案でない'
+      - '422 `validation_failed`: 未知の項目か、基準の形に合わない値'
       x-step-up: true
       requestBody:
         required: true
@@ -1963,7 +1969,7 @@ paths:
                 type: object
                 properties:
                   data:
-                    $ref: '#/components/schemas/Thresholds'
+                    $ref: '#/components/schemas/GuardThresholds'
                   meta:
                     $ref: '#/components/schemas/Meta'
                 required:
@@ -1976,6 +1982,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -1997,12 +2005,20 @@ paths:
       description: '処理の流れ:
 
 
-        1. `stops` と `stop_updates` を集計する
+        1. 期間の `stops` のうち停止した物を数え、`stop_updates` の最後の判定から誤って止めた割合を、シグナルごとの数から多い原因を出す
 
-        2. 改善策を入れる前後 7 日間を比較する'
+        2. `applied_at` のある改善策ごとに、同じ原因の停止を入れる前後 7 日間で比較する
+
+
+        このルート固有のエラー:
+
+
+        - 422 `validation_failed`: `from` が `to` より後'
       x-steps:
-      - '`stops` と `stop_updates` を集計する'
-      - 改善策を入れる前後 7 日間を比較する
+      - 期間の `stops` のうち停止した物を数え、`stop_updates` の最後の判定から誤って止めた割合を、シグナルごとの数から多い原因を出す
+      - '`applied_at` のある改善策ごとに、同じ原因の停止を入れる前後 7 日間で比較する'
+      x-errors:
+      - '422 `validation_failed`: `from` が `to` より後'
       parameters:
       - name: from
         in: query
@@ -4903,11 +4919,18 @@ paths:
       description: '処理の流れ:
 
 
-        1. `lessons` を状態で絞り込んで取得する'
+        1. `lessons` を新しい順に取得する。案は週に 1 度の蒸留のバッチ処理が `proposed` で入れる'
       x-steps:
-      - '`lessons` を状態で絞り込んで取得する'
+      - '`lessons` を新しい順に取得する。案は週に 1 度の蒸留のバッチ処理が `proposed` で入れる'
       parameters:
-      - $ref: '#/components/parameters/Cursor'
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+          description: 前のレスポンスの meta.next
+        description: 前のレスポンスの meta.next
       - $ref: '#/components/parameters/Limit'
       security:
       - accessJwt: []
@@ -4930,10 +4953,14 @@ paths:
                 - data
                 - meta
                 additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -4949,9 +4976,11 @@ paths:
 
         1. 改善案を取得し、未決定であることを確認する
 
-        2. 承認の場合、指示文の案は `staff_prompts` に新しいバージョンを追加し、ルールの案は開発担当にタスクを追加する。しきい値の案は承認の記録だけを残し、反映は `PUT /api/v1/guard/thresholds` で行う
+        2. 承認の場合、指示文の案は `staffId` の社員の `staff_prompts` に案を足した新しいバージョンを追加して `staff.prompt_version` を進め、案を `applied` にする。ルールの案は開発担当に `fix` のタスクを追加して `approved` にする。しきい値の案は `approved` にするだけで、反映は `PUT /api/v1/guard/thresholds` で行う
 
-        3. `lessons` の状態を更新し、監査ログに `lesson.decide` を記録する
+        3. 2 の書き込みと `lessons` の状態の更新を 1 回のバッチで行う。どれも改善案が未決定で、読んだ指示文のバージョンのままの時だけ書く
+
+        4. 監査ログに `lesson.decide` を記録する
 
 
         このルート固有のエラー:
@@ -4959,14 +4988,15 @@ paths:
 
         - 404 `not_found`: 改善案が存在しない
 
-        - 409 `conflict`: すでに決定済み'
+        - 409 `conflict`: すでに決定済み、または決める間に指示文が変わった'
       x-steps:
       - 改善案を取得し、未決定であることを確認する
-      - 承認の場合、指示文の案は `staff_prompts` に新しいバージョンを追加し、ルールの案は開発担当にタスクを追加する。しきい値の案は承認の記録だけを残し、反映は `PUT /api/v1/guard/thresholds` で行う
-      - '`lessons` の状態を更新し、監査ログに `lesson.decide` を記録する'
+      - 承認の場合、指示文の案は `staffId` の社員の `staff_prompts` に案を足した新しいバージョンを追加して `staff.prompt_version` を進め、案を `applied` にする。ルールの案は開発担当に `fix` のタスクを追加して `approved` にする。しきい値の案は `approved` にするだけで、反映は `PUT /api/v1/guard/thresholds` で行う
+      - 2 の書き込みと `lessons` の状態の更新を 1 回のバッチで行う。どれも改善案が未決定で、読んだ指示文のバージョンのままの時だけ書く
+      - 監査ログに `lesson.decide` を記録する
       x-errors:
       - '404 `not_found`: 改善案が存在しない'
-      - '409 `conflict`: すでに決定済み'
+      - '409 `conflict`: すでに決定済み、または決める間に指示文が変わった'
       parameters:
       - name: lessonId
         in: path
@@ -5029,9 +5059,9 @@ paths:
       description: '処理の流れ:
 
 
-        1. `findings` を状態で絞り込んで取得する'
+        1. `findings` を状態で絞り込み、新しい順に取得する。原因の指紋ごとに 1 行で、週に 1 度の調べのバッチ処理が数え、Issue を作る'
       x-steps:
-      - '`findings` を状態で絞り込んで取得する'
+      - '`findings` を状態で絞り込み、新しい順に取得する。原因の指紋ごとに 1 行で、週に 1 度の調べのバッチ処理が数え、Issue を作る'
       parameters:
       - name: status
         in: query
@@ -5043,7 +5073,14 @@ paths:
           - fixed
           - verified
           - reverted
-      - $ref: '#/components/parameters/Cursor'
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+          description: 前のレスポンスの meta.next
+        description: 前のレスポンスの meta.next
       - $ref: '#/components/parameters/Limit'
       security:
       - accessJwt: []
@@ -7112,7 +7149,7 @@ components:
       required:
       - resumedAt
       additionalProperties: false
-    Thresholds:
+    GuardThresholds:
       type: object
       properties:
         version:
@@ -7137,6 +7174,11 @@ components:
             type: number
         reason:
           type: string
+          maxLength: 2000
+        lessonId:
+          type: string
+          format: uuid
+          description: 入れる基準の案。承認した基準の案だけを applied にする
       required:
       - version
       - values
@@ -7206,6 +7248,16 @@ components:
           type: string
         proposal:
           type: string
+        staffId:
+          type:
+          - string
+          - 'null'
+          enum:
+          - president
+          - builder
+          - reviewer
+          - null
+          description: 説明文に決まりを足す社員。説明文の案だけが持つ
         stopIds:
           type: array
           items:
@@ -7225,6 +7277,7 @@ components:
       - kind
       - cause
       - proposal
+      - staffId
       - stopIds
       - status
       additionalProperties: false
@@ -8267,9 +8320,15 @@ components:
           format: uuid
           description: UUID v7
         repo:
-          type: string
+          type:
+          - string
+          - 'null'
+          description: Issue を置くリポジトリ。決まっていない間は null
         issueNumber:
-          type: integer
+          type:
+          - integer
+          - 'null'
+          description: Issue の番号。作れていない間は null
         kind:
           type: string
           enum:

@@ -2,7 +2,7 @@
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
-export { allowedModels, type ClaudeModel, type ClaudeUsage, costMicroUsd, HAIKU, OPUS, SONNET } from "./claude.ts";
+export { allowedModels, batchCostMicroUsd, type ClaudeModel, type ClaudeUsage, costMicroUsd, HAIKU, OPUS, SONNET } from "./claude.ts";
 export { Secret } from "./secret.ts";
 export { CONTAINER_CA, WORKSPACE_KEY_ENV } from "./container.ts";
 export { keyedId, newId } from "./id.ts";
@@ -54,14 +54,21 @@ export {
   WorkResult,
   WorkSchedule,
 } from "./schemas/workday.ts";
+export { Finding, FindingAnswer, FindingEffect, FindingKind, FindingNeeds, FindingStatus, Fingerprint } from "./schemas/findings.ts";
 export {
   CreateStopInput,
   DEFAULT_THRESHOLDS,
+  DistillAnswer,
+  GuardEffect,
   GuardEvent,
   GuardScope,
   GuardSignal,
   GuardState,
+  GuardThresholds,
   type Judgment,
+  Lesson,
+  LessonKind,
+  LessonStatus,
   Resumption,
   Stop,
   StopDetail,
@@ -71,6 +78,7 @@ export {
   StopUpdate,
   StopVerdict,
   Thresholds,
+  UpdateThresholdsInput,
   VerdictInput,
 } from "./schemas/guard.ts";
 export {

@@ -9,6 +9,7 @@ import { registerComponents } from "./openapi.ts";
 import { attendanceRoutes } from "./routes/attendance.ts";
 import { extensionRoutes } from "./routes/extensions.ts";
 import { githubRoutes } from "./routes/github.ts";
+import { findingRoutes } from "./routes/findings.ts";
 import { guardRoutes } from "./routes/guard.ts";
 import { nodeRoutes } from "./routes/nodes.ts";
 import { noticeRoutes } from "./routes/notices.ts";
@@ -38,7 +39,8 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
     .route("/", settingRoutes)
     .route("/", noticeRoutes)
     .route("/", extensionRoutes(options.extensions ?? INSTALLED))
-    .route("/", githubRoutes);
+    .route("/", githubRoutes)
+    .route("/", findingRoutes);
   registerComponents(app);
   return app;
 }
