@@ -39,6 +39,11 @@ TORSO = Vector((0.0, 0.02, 0.23))
 EYE = Vector((0.12, 0.0, -0.025))
 # metaball の楕円の大きさと、できる形の半径の比。1 つの球の時、半径 1 の場は size の 0.564 倍の所に面ができる
 META_SURFACE = 0.564
+# 耳の縦の房の真ん中 (左の耳、x は外向き)。耳の外回りに前から後ろへ並べ、房ごとに長さを変える
+EAR_LOCKS = [
+    (0.25 + 0.05 * math.cos(a), -0.05 + 0.105 * math.sin(a), z)
+    for a, z in zip([math.radians(d) for d in (-90, -60, -30, 0, 30, 60, 90)], (0.5, 0.445, 0.48, 0.425, 0.47, 0.44, 0.5))
+]
 STARTED = time.monotonic()
 
 
@@ -83,29 +88,25 @@ def parts():
     ears = {}
     for side, name in ((1, "ear.L"), (-1, "ear.R")):
         s = side
-        # 頭の横の上から、顎の下まで垂れる長い房。下の縁は小さな房を並べ、毛先の束に見せる
+        # 頭の横の上から、顎の下まで垂れる長い房。耳の外回りに縦の房を並べ、下の縁を房ごとの毛先に見せる
         ears[name] = {
             "bone": name,
             "balls": [
                 ball((0.17 * s, -0.04, 0.79), (0.09, 0.12, 0.06)),
                 ball((0.21 * s, -0.05, 0.74), (0.085, 0.125, 0.07)),
-                ball((0.25 * s, -0.05, 0.66), (0.095, 0.14, 0.1)),
-                # 縦に並ぶ毛の束。束ごとに長さを変え、下の縁を房に見せる
-                *[
-                    ball((0.272 * s, y, z), (0.08, 0.036, 0.13), stiffness=5.0)
-                    for y, z in ((-0.13, 0.53), (-0.085, 0.5), (-0.04, 0.49), (0.005, 0.5), (0.05, 0.52))
-                ],
+                ball((0.24 * s, -0.05, 0.62), (0.07, 0.11, 0.12)),
+                *[ball((x * s, y, z), (0.058, 0.044, 0.15), stiffness=5.0) for x, y, z in EAR_LOCKS],
             ],
-            "length": 0.075,
+            "length": 0.08,
             "height": 0.008,
         }
     legs = {}
-    for name, x, y in (("leg.FL", 0.095, -0.12), ("leg.FR", -0.095, -0.12), ("leg.BL", 0.105, 0.13), ("leg.BR", -0.105, 0.13)):
+    for name, x, y in (("leg.FL", 0.105, -0.12), ("leg.FR", -0.105, -0.12), ("leg.BL", 0.115, 0.13), ("leg.BR", -0.115, 0.13)):
         legs[name] = {
             "bone": name,
             "balls": [
-                ball((x, y, 0.1), (0.068, 0.068, 0.085)),
-                ball((x, y - 0.025, 0.035), (0.072, 0.082, 0.042)),
+                ball((x, y, 0.1), (0.072, 0.072, 0.085)),
+                ball((x, y - 0.025, 0.035), (0.075, 0.085, 0.042)),
             ],
             "length": 0.028,
             "height": 0.006,
@@ -117,14 +118,16 @@ def parts():
                 # 横に広く前後に浅い頭。顔は平たく、口元だけ前へ出す
                 ball(h + Vector((0, 0.03, 0.04)), (0.295, 0.245, 0.225)),
                 ball(h + Vector((0, 0.04, 0.17)), (0.225, 0.19, 0.12)),
-                # 頭の上の毛の房。輪郭に柔らかな凹凸を出す
-                ball(h + Vector((0, -0.02, 0.25)), (0.07, 0.06, 0.05)),
-                ball(h + Vector((0.09, 0.0, 0.24)), (0.065, 0.06, 0.045)),
-                ball(h + Vector((-0.09, 0.0, 0.24)), (0.065, 0.06, 0.045)),
-                ball(h + Vector((0.0, 0.09, 0.23)), (0.07, 0.06, 0.045)),
+                # 頭頂から放射状に立つ毛の房。輪郭に房ごとの凹凸を出す
+                ball(h + Vector((0, 0.03, 0.27)), (0.08, 0.075, 0.05), stiffness=3.0),
+                *[
+                    ball(h + Vector((0.15 * math.cos(a), 0.03 + 0.12 * math.sin(a), 0.225 + 0.02 * math.sin(a * 3))), (0.058, 0.058, 0.05), stiffness=3.0)
+                    for a in [math.pi * (i / 4 + 0.125) for i in range(8)]
+                ],
                 ball(h + Vector((0.12, -0.1, -0.09)), (0.125, 0.095, 0.09)),
                 ball(h + Vector((-0.12, -0.1, -0.09)), (0.125, 0.095, 0.09)),
-                ball(h + Vector((0, -0.235, -0.075)), (0.08, 0.075, 0.058)),
+                # 前へ出た口元。横から見て鼻先が顔から出る
+                ball(h + Vector((0, -0.265, -0.072)), (0.085, 0.085, 0.062)),
                 ball(h + Vector((0, -0.09, -0.15)), (0.125, 0.09, 0.06)),
             ],
             "length": 0.034,
@@ -134,10 +137,13 @@ def parts():
         "body": {
             "bone": "body",
             "balls": [
-                ball(TORSO, (0.17, 0.19, 0.145)),
-                ball((0, -0.1, 0.25), (0.158, 0.11, 0.15)),
-                ball((0, 0.13, 0.215), (0.155, 0.11, 0.13)),
-                ball((0, -0.08, 0.36), (0.14, 0.11, 0.09)),
+                ball(TORSO, (0.195, 0.2, 0.165)),
+                ball((0, -0.1, 0.25), (0.175, 0.12, 0.16)),
+                ball((0, 0.13, 0.215), (0.172, 0.12, 0.14)),
+                ball((0, -0.08, 0.36), (0.15, 0.11, 0.09)),
+                # 胸の前のよだれかけのような毛のふくらみ。下の縁を房に分ける
+                ball((0, -0.19, 0.3), (0.12, 0.075, 0.1), stiffness=3.0),
+                *[ball((x, -0.205, 0.21), (0.05, 0.055, 0.065), stiffness=3.0) for x in (-0.07, 0.0, 0.07)],
             ],
             "length": 0.04,
             "height": 0.009,
@@ -235,11 +241,16 @@ def flow(part, p, n):
     one = np.ones(len(p))
     if part == "head":
         # 顔の前は鼻から外へ広がり、上と横は真ん中の分け目から横へ垂れる
-        nose = np.array(HEAD) + np.array((0, -0.25, -0.06))
+        nose = np.array(HEAD) + np.array((0, -0.28, -0.06))
         face = p - nose
         side = np.stack([sx * 0.9, one * 0.35, -one * 0.6], 1)
         front = smooth(-0.15, -0.6, n[:, 1])[:, None]
-        return side * (1 - front) + face * front * 6
+        d = side * (1 - front) + face * front * 6
+        # 頭頂は真ん中から放射状に外へ流す
+        top = crown(p, n)[:, None]
+        out = p - (np.array(HEAD) + np.array((0, 0.03, 0.3)))
+        out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-6)
+        return d * (1 - top) + out * top * 4
     if part.startswith("ear"):
         return np.stack([sx * 0.12, one * 0.04, -one], 1)
     if part == "body":
@@ -250,6 +261,21 @@ def flow(part, p, n):
     if part == "tail":
         return p - np.array((0, 0.25, 0.3))
     return np.stack([0 * one, -one * 0.15, -one], 1)
+
+
+def crown(p, n):
+    """頭頂の立つ毛の所を 1 で返す"""
+    return smooth(0.45, 0.85, n[:, 2]) * smooth(HEAD.z + 0.12, HEAD.z + 0.2, p[:, 2])
+
+
+def ear_lock(p):
+    """耳の毛の根元が属す縦の房の番号と、房の真ん中からの横のずれ (0 は真ん中、1 は房の境) を返す"""
+    q = np.stack([np.abs(p[:, 0]), p[:, 1]], 1)
+    centres = np.array([(x, y) for x, y, _ in EAR_LOCKS])
+    dist = np.linalg.norm(q[:, None, :] - centres[None, :, :], axis=2)
+    order = np.argsort(dist, axis=1)
+    near, second = dist[np.arange(len(p)), order[:, 0]], dist[np.arange(len(p)), order[:, 1]]
+    return order[:, 0], np.clip(2 * near / np.maximum(near + second, 1e-6), 0, 1)
 
 
 def sample_surface(co, nor, tris, count, rng):
@@ -276,12 +302,22 @@ def grow(part, spec, co, nor, tris, rng, density, points=6):
     d = flow(part, p, n)
     d -= n * np.sum(d * n, axis=1, keepdims=True)
     d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-6)
-    length = spec["length"] * (0.75 + 0.5 * rng.random(count))
+    ear = part.startswith("ear")
+    # 耳は毛先の長さをばらつかせ、下の縁を房ごとの毛先に見せる
+    length = spec["length"] * ((0.6 + 0.8 * rng.random(count)) if ear else (0.75 + 0.5 * rng.random(count)))
     s = np.linspace(0, 1, points)
+    # 頭頂の毛は高く立てる
+    height = spec["height"] * (1 + 2.5 * crown(p, n)) if part == "head" else np.full(count, spec["height"])
     # 根元は面の少し内から立ち上がり、毛先は面へ寝る
-    lift = -0.008 + (0.008 + spec["height"]) * (1 - (1 - s) ** 3) - 0.6 * spec["height"] * s**3
-    curve = p[:, None, :] + n[:, None, :] * lift[None, :, None] + d[:, None, :] * (length[:, None] * s)[:, :, None]
+    lift = -0.008 + (0.008 + height[:, None]) * (1 - (1 - s[None, :]) ** 3) - 0.6 * height[:, None] * s[None, :] ** 3
+    curve = p[:, None, :] + n[:, None, :] * lift[:, :, None] + d[:, None, :] * (length[:, None] * s)[:, :, None]
     curve[:, :, 2] -= (length[:, None] * 0.18 * s**2)
+    if ear:
+        # 毛先を房の真ん中の線へ寄せ、房の間に溝を作る
+        lock, edge = ear_lock(p)
+        centres = np.array([(x, y) for x, y, _ in EAR_LOCKS])[lock] * np.stack([np.sign(p[:, 0]), np.ones(count)], 1)
+        pull = (0.45 * s**1.5)[None, :, None]
+        curve[:, :, :2] = curve[:, :, :2] * (1 - pull) + (centres[:, None, :] * 0.35 + curve[:, :, :2] * 0.65) * pull
     # 束: 近くの束の真ん中の毛へ毛先を寄せる
     clumps = max(8, count // 14)
     tree = KDTree(clumps)
@@ -292,9 +328,11 @@ def grow(part, spec, co, nor, tris, rng, density, points=6):
     pull = (0.55 * s**2)[None, :, None]
     curve = curve * (1 - pull) + curve[owner] * pull
     mask = coat_mask(part, p)
-    # 房ごとに明るさを変える。耳は長い房の筋が見えるよう、差を大きくする
-    spread = 0.2 if part.startswith("ear") else 0.1
+    # 房ごとに明るさを変える。耳は縦の房ごとに変え、房の境を暗くして溝に見せる
+    spread = 0.2 if ear else 0.1
     tone = 1.0 - spread + spread * rng.random(clumps)[owner] + 0.05 * rng.random(count)
+    if ear:
+        tone = 0.85 + 0.15 * rng.random(len(EAR_LOCKS))[lock] + 0.08 * rng.random(count) - 0.35 * smooth(0.55, 1.0, edge)
     shade = tone[:, None] * (0.8 + 0.2 * s[None, :])
     color = np.zeros((count, points, 4))
     color[:, :, 0] = mask[:, None]
@@ -446,7 +484,7 @@ def write_textures(images, out):
         dark = np.clip(1 - shade, 0, 1)
         color = (cream * (1 - mask) + base * mask) * (1 - dark * np.array([0.7, 0.95, 1.25]))
         save_webp(out / f"{coat}.webp", to_srgb(color), 80)
-    save_webp(out / "normal.webp", images["NORMAL"][:, :, :3], 72)
+    save_webp(out / "normal.webp", images["NORMAL"][:, :, :3], 66)
 
 
 # ---------------------------------------------------------------- 顔
@@ -528,8 +566,8 @@ def build_face(bvh):
     b = Builder()
     unit, faces = sphere(24, 14)
     for side in (1, -1):
-        c, u, v, w = surface_frame(bvh, EYE.x * side, HEAD.z + EYE.z, back=0.016)
-        a, bb, d = 0.058, 0.064, 0.028
+        c, u, v, w = surface_frame(bvh, EYE.x * side, HEAD.z + EYE.z, back=0.019)
+        a, bb, d = 0.058, 0.064, 0.025
         verts, sleepy, trouble = [], [], []
         for q in unit:
             verts.append(c + u * q.x * a + v * q.y * bb + w * q.z * d)
@@ -618,10 +656,10 @@ BONES = {
     "head": ((0, -0.1, 0.4), (0, -0.1, 0.55), "body"),
     "ear.L": ((0.215, -0.06, 0.73), (0.275, -0.05, 0.42), "head"),
     "ear.R": ((-0.215, -0.06, 0.73), (-0.275, -0.05, 0.42), "head"),
-    "leg.FL": ((0.095, -0.12, 0.17), (0.095, -0.12, 0.0), "body"),
-    "leg.FR": ((-0.095, -0.12, 0.17), (-0.095, -0.12, 0.0), "body"),
-    "leg.BL": ((0.105, 0.13, 0.17), (0.105, 0.13, 0.0), "body"),
-    "leg.BR": ((-0.105, 0.13, 0.17), (-0.105, 0.13, 0.0), "body"),
+    "leg.FL": ((0.105, -0.12, 0.17), (0.105, -0.12, 0.0), "body"),
+    "leg.FR": ((-0.105, -0.12, 0.17), (-0.105, -0.12, 0.0), "body"),
+    "leg.BL": ((0.115, 0.13, 0.17), (0.115, 0.13, 0.0), "body"),
+    "leg.BR": ((-0.115, 0.13, 0.17), (-0.115, 0.13, 0.0), "body"),
     "tail": ((0, 0.2, 0.3), (0, 0.24, 0.44), "body"),
 }
 
