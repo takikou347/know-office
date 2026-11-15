@@ -1,11 +1,11 @@
 // タスク: 目的、目標、プロジェクト、タスクの木を読む、作る、変える (ルートの一覧の 1.7、タスクとレビューの 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
-import { CreateNodeInput, Node, NodeDetail, NodeStatus, NodeTree, UpdateNodeInput } from "@know-office/core";
+import { CreateNodeInput, Node, NodeDetail, NodeStatus, NodeTree, StaffId, UpdateNodeInput } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, ok } from "../respond.ts";
 import { notifyStaff } from "../work/loop.ts";
-import { createNode, loadDetail, loadTrees, toNode, updateNode } from "../work/nodes.ts";
+import { createNode, loadAssigned, loadDetail, loadTrees, toNode, updateNode } from "../work/nodes.ts";
 
 const router = createRouter();
 
@@ -29,6 +29,7 @@ const listNodesRoute = createRoute({
         .min(1)
         .optional()
         .openapi({ param: { name: "scope", in: "query" } }),
+      assignee: StaffId.optional().openapi({ param: { name: "assignee", in: "query" } }),
     }),
   },
   responses: { 200: listResponse(NodeTree), ...problems(400, 401, 403, 422, 429, 500) },
@@ -67,7 +68,8 @@ const updateNodeRoute = createRoute({
 /** タスクの木のルート */
 export const nodeRoutes = router
   .openapi(listNodesRoute, async (c) => {
-    const { trees, next } = await loadTrees(c.env.DB, c.req.valid("query"));
+    const query = c.req.valid("query");
+    const { trees, next } = query.assignee === undefined ? await loadTrees(c.env.DB, query) : await loadAssigned(c.env.DB, { ...query, assignee: query.assignee });
     return list(c, trees, next);
   })
   .openapi(createNodeRoute, async (c) => {

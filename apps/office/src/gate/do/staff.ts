@@ -6,6 +6,7 @@ import type { Bindings, Staff, WorkspaceContainer } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
 import { type IssuedTicket, type RenewedTicket, StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
 import { type Pulled, pullNext } from "../work/loop.ts";
+import { announce } from "../live/publish.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
 import { appendTranscript, loadTranscript, resumeRun, type TranscriptStore } from "../work/transcript.ts";
 
@@ -15,6 +16,8 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   #guard: StaffGuard | undefined;
   /** 操作を 1 つずつ流す鎖。前の操作が断られても次へ進む */
   #chain: Promise<unknown> = Promise.resolve();
+  // 前に画面に配った「状態/今のタスク」。起き直した後は null から始め、1 回目は必ず配る
+  #published: string | null = null;
 
   /**
    * 次の出来事を処理し、次の alarm を掛ける。alarm は本物の時刻で鳴る
@@ -32,7 +35,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   wake(now: number): Promise<null> {
-    return this.#run((book) => book.wake(now));
+    return this.#run((book) => book.wake(now), now);
   }
 
   /**
@@ -50,7 +53,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   heartbeat(at: number): Promise<null> {
-    return this.#run((book) => book.heartbeat(at));
+    return this.#run((book) => book.heartbeat(at), at);
   }
 
   /**
@@ -61,7 +64,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @throws conflict 今のタスクと違う時
    */
   checkpoint(input: unknown, now: number): Promise<null> {
-    return this.#run((book) => book.checkpoint(input, now));
+    return this.#run((book) => book.checkpoint(input, now), now);
   }
 
   /**
@@ -72,7 +75,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 取ったか
    */
   take(task: unknown, medianMs: number | null, now: number): Promise<{ taken: boolean }> {
-    return this.#serial((book) => book.take(task, medianMs, now));
+    return this.#serial((book) => book.take(task, medianMs, now), now);
   }
 
   /**
@@ -82,7 +85,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   finish(result: unknown, now: number): Promise<null> {
-    return this.#run((book) => book.finish(result, now));
+    return this.#run((book) => book.finish(result, now), now);
   }
 
   /**
@@ -91,7 +94,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 取ったか。nodeId は取ったか、もう持っていたタスク
    */
   pull(now: number): Promise<Pulled> {
-    return this.#serial((book) => pullNext(this.env, book, now));
+    return this.#serial((book) => pullNext(this.env, book, now), now);
   }
 
   /**
@@ -101,7 +104,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   order(order: unknown, now: number): Promise<null> {
-    return this.#run((book) => book.order(order, now));
+    return this.#run((book) => book.order(order, now), now);
   }
 
   /**
@@ -111,7 +114,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   call(task: unknown, now: number): Promise<null> {
-    return this.#run((book) => book.call(task, now));
+    return this.#run((book) => book.call(task, now), now);
   }
 
   /**
@@ -121,7 +124,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   waitStart(reason: unknown, now: number): Promise<null> {
-    return this.#run((book) => book.waitStart(reason, now));
+    return this.#run((book) => book.waitStart(reason, now), now);
   }
 
   /**
@@ -130,7 +133,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 待っていた時間。上限で待っていなければ null
    */
   async waitEnd(now: number): Promise<{ waitedMs: number | null }> {
-    return { waitedMs: await this.#serial((book) => book.waitEnd(now)) };
+    return { waitedMs: await this.#serial((book) => book.waitEnd(now), now) };
   }
 
   /**
@@ -139,7 +142,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   stop(now: number): Promise<null> {
-    return this.#run((book) => book.stop(now));
+    return this.#run((book) => book.stop(now), now);
   }
 
   /**
@@ -148,7 +151,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   resume(now: number): Promise<null> {
-    return this.#run((book) => book.resume(now));
+    return this.#run((book) => book.resume(now), now);
   }
 
   /**
@@ -183,7 +186,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   dropTask(nodeId: string, now: number): Promise<null> {
-    return this.#serial(() => this.#guardOf().then((g) => g.dropTask(nodeId, now)));
+    return this.#serial(() => this.#guardOf().then((g) => g.dropTask(nodeId, now)), now);
   }
 
   /**
@@ -192,7 +195,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   halt(now: number): Promise<null> {
-    return this.#serial(() => this.#guardOf().then((g) => g.halt(now)));
+    return this.#serial(() => this.#guardOf().then((g) => g.halt(now)), now);
   }
 
   /**
@@ -284,7 +287,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @throws conflict 通し番号が前回の続きでない時
    */
   appendTranscript(nodeId: string, input: unknown, now: number): Promise<null> {
-    return this.#run((book) => appendTranscript(this.#transcripts(), book.staffId, nodeId, input, now));
+    return this.#run((book) => appendTranscript(this.#transcripts(), book.staffId, nodeId, input, now), now);
   }
 
   /**
@@ -324,16 +327,17 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @throws validation_failed 日の形が違う時
    */
   rebuildDay(day: unknown, now: number): Promise<null> {
-    return this.#run((book) => book.rebuildDay(day, now));
+    return this.#run((book) => book.rebuildDay(day, now), now);
   }
 
   /**
    * 記憶を変える操作を流し、何も返さない
    * @param step StaffBook の操作
+   * @param now 操作の時刻。状態が変わったら画面に配る
    * @returns 無し
    */
-  async #run(step: (book: StaffBook) => Promise<void>): Promise<null> {
-    await this.#serial(step);
+  async #run(step: (book: StaffBook) => Promise<void>, now: number): Promise<null> {
+    await this.#serial(step, now);
     return null;
   }
 
@@ -341,12 +345,16 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * 操作を 1 つずつ順に流す。D1 を待つ間に alarm やほかの呼び出しが割り込むと、開いている区分が割れる
    * blockConcurrencyWhile の中で投げると DO が作り直されるので使わない。断られた操作は鎖の外で投げ、鎖は次へ進める
    * @param step StaffBook の操作
+   * @param now 記憶を変える操作の時刻。渡した時は、状態か今のタスクが変わったら画面に配る
    * @returns 操作の答え
    */
-  async #serial<T>(step: (book: StaffBook) => Promise<T>): Promise<T> {
+  async #serial<T>(step: (book: StaffBook) => Promise<T>, now?: number): Promise<T> {
     const settled = this.#chain.then(async () => {
       try {
-        return { ok: true as const, value: await step(await this.#open()) };
+        const book = await this.#open();
+        const value = await step(book);
+        if (now !== undefined) await this.#announce(book, now);
+        return { ok: true as const, value };
       } catch (error) {
         return { ok: false as const, error };
       }
@@ -355,6 +363,20 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
     const result = await settled;
     if (result.ok) return result.value;
     throw result.error;
+  }
+
+  /**
+   * 状態か今のタスクが前に配った物と変わっていれば、画面に配る。起き直した後の 1 回目は、変わっていなくても配る
+   * @param book StaffBook
+   * @param now 今の時刻
+   */
+  async #announce(book: StaffBook, now: number): Promise<void> {
+    const s = await book.status(now);
+    const key = `${s.state}/${s.nodeId ?? ""}`;
+    if (key === this.#published) return;
+    this.#published = key;
+    // 配れなくても勤務の操作は止めない。announce がエラーログに残す
+    await announce(this.env, { type: "staff", staff: { id: s.id, state: s.state, nodeId: s.nodeId } }, { now: () => now });
   }
 
   /**

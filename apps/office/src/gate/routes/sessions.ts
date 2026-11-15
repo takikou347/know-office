@@ -10,6 +10,7 @@ import { vaultKey } from "../auth/vault.ts";
 import { notices, passkeys, sessions } from "../db/main.ts";
 import type { GateEnv } from "../env.ts";
 import { observe } from "../guard/observe.ts";
+import { announceNotice, closeLive } from "../live/publish.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, noContent, ok } from "../respond.ts";
@@ -100,8 +101,9 @@ async function noticeUnusualLogin(c: Context<GateEnv>, row: SessionRow): Promise
   await observe(c.env, { type: "login", country: row.country ?? "XX", newCountry }, row.createdAt, c.var.guard, c.var.traceId);
   const reasons = [...(newCountry ? [`新しい国 (${row.country ?? "不明"}) からのログイン`] : []), ...(hour < 6 ? ["日本時間の 0 時から 6 時のログイン"] : [])];
   if (reasons.length === 0) return;
+  const id = newId(c.var.clock);
   await orm.insert(notices).values({
-    id: newId(c.var.clock),
+    id,
     at: row.createdAt,
     level: "warn",
     kind: "unusual_login",
@@ -109,6 +111,7 @@ async function noticeUnusualLogin(c: Context<GateEnv>, row: SessionRow): Promise
     body: `${reasons.join("、")}。送信元 ${row.ip}`,
     scope: "office",
   });
+  await announceNotice(c.env, id, c.var.clock);
 }
 
 /** 認証のルート: ログインセッションとログイン中の人 */
@@ -148,6 +151,8 @@ export const sessionRoutes = router
       .set({ endedAt: c.var.clock.now() })
       .where(and(isNull(sessions.endedAt), ne(sessions.id, current.id)));
     await audit(c, "session.end_others", current.id);
+    // 切ったセッションの配信を開いたままにしない
+    await closeLive(c.env, c.var.clock, (live) => live.closeAll(current.id));
     return noContent(c);
   })
   .openapi(deleteSessionRoute, async (c) => {
@@ -159,6 +164,7 @@ export const sessionRoutes = router
     // 今のセッションを切った時は、ブラウザーにもクッキーを消させる
     if (row.id === currentSession(c).id) c.header("Set-Cookie", cookieHeader("", 0));
     await audit(c, "session.end", row.id);
+    await closeLive(c.env, c.var.clock, (live) => live.closeSession(row.id));
     return noContent(c);
   })
   .openapi(getMeRoute, async (c) => {

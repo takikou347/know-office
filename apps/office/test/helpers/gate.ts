@@ -19,6 +19,8 @@ import { type Forge, pullNext, UNCONNECTED_FORGE } from "../../src/gate/work/loo
 import { appendTranscript, loadTranscript, type TranscriptStore } from "../../src/gate/work/transcript.ts";
 import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/work/staff-book.ts";
 import type { TestD1 } from "./d1.ts";
+import { fakeLive, type TestLive } from "./live.ts";
+import { overRpc } from "./rpc.ts";
 
 const FAKES = "http://localhost:5199";
 /** テストのゲートウェイの origin。app.request は http://localhost に要求を出す */
@@ -70,6 +72,8 @@ export type TestGate = {
   staff: Record<StaffId, TestStaff>;
   /** 社員ごとのワークスペースの代わり。差し替えた作業トークンを並べ、down なら届かない */
   workspaces: Record<StaffId, TestWorkspace>;
+  /** 配信 DO の代わり。配った出来事と、出した作業トークン */
+  live: TestLive;
   /** 自動停止が外へ頼む口の代わり。戻したサービスと、レビュー担当の答え */
   deps: GuardDeps & { rollbacks: string[]; answer: ReviewAnswer | null };
   /** 要求を出す */
@@ -130,22 +134,6 @@ function testStaff(staffId: StaffId, d1: TestD1): TestStaff {
   const storage = staffStorage();
   const book = new StaffBook(staffId, storage, d1.DB, workspace);
   return { book, guard: new StaffGuard(staffId, storage, d1.DB, book), workspace: calls };
-}
-
-/**
- * workerd の RPC と同じく、DO の中で投げた AppError を、code を持った別の Error にして投げ直す。ゲートウェイは instanceof に頼れない
- * @param call DO のメソッド
- * @returns RPC を越えた形で投げるメソッド
- */
-function overRpc<A extends unknown[], R>(call: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
-  return async (...args) => {
-    try {
-      return await call(...args);
-    } catch (error) {
-      if (!(error instanceof AppError)) throw error;
-      throw Object.assign(new Error(error.message), { name: error.name, code: error.code, remote: true });
-    }
-  };
 }
 
 /**
@@ -283,6 +271,10 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
         await book.finish(result, now);
         return null;
       }),
+      order: overRpc(async (order: unknown, now: number) => {
+        await book.order(order, now);
+        return null;
+      }),
       call: overRpc(async (task: unknown, now: number) => {
         await book.call(task, now);
         return null;
@@ -318,6 +310,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
       loadTranscript: overRpc((nodeId: string) => loadTranscript(transcripts, id, nodeId)),
     };
   };
+  const { live, liveDo } = fakeLive();
   const transcripts: TranscriptStore = { db: options.d1.DB, files: options.d1.FILES, master: MASTER_KEY };
   const recorder = {
     append: (input: AuditInput) => {
@@ -348,6 +341,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     GUARD: namespace(guardDo),
     STAFF: { idFromName: (name: StaffId) => name, get: (id: StaffId) => staffDo(id) },
     RECORDER: namespace(recorder),
+    LIVE: namespace(liveDo),
     WORKSPACE: { idFromName: (name: StaffId) => ({ toString: () => `ws-${name}`, name }), get: (id: { name: StaffId }) => workspaceDo(id.name) },
     ENVIRONMENT: "development",
     DEV_FAKES_URL: FAKES,
@@ -384,6 +378,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     office,
     staff,
     deps,
+    live,
     workspaces,
     request,
     signIn: async () => {

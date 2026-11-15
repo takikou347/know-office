@@ -6,6 +6,7 @@ import { routeEgress } from "../egress.ts";
 import type { Bindings, WorkspaceContainer } from "../env.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import type { Caller } from "../work/ticket.ts";
+import { announceNotice } from "../live/publish.ts";
 import { type ContainerLike, noticeWorkspaceDown, WorkspaceBox } from "../work/workspace-box.ts";
 
 /** ワークスペースのサーバーの鍵を置く、記憶の鍵の名前 */
@@ -131,7 +132,10 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
     this.#held = new WorkspaceBox(like, (props) => this.ctx.exports.WorkspaceEgress({ props }), caller, {
       wait: sleep,
       keys,
-      notifyDown: () => noticeWorkspaceDown(this.env.DB, parsed.data, systemClock.now()),
+      notifyDown: async () => {
+        const id = await noticeWorkspaceDown(this.env.DB, parsed.data, systemClock.now());
+        if (id !== null) await announceNotice(this.env, id, systemClock);
+      },
     });
     return this.#held;
   }

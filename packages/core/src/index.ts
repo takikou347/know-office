@@ -13,8 +13,9 @@ export { jstClock, jstDay, jstDayStart, jstYear } from "./time.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
 export { AuditInput, AuditRow, AuditVerification, VerifyAuditInput } from "./schemas/audit.ts";
 export { Notice, NoticeLevel, NoticeLink } from "./schemas/notices.ts";
+export { codePoints, CreateMessageInput, headChars, LiveEvent, LiveTicket, Message, MESSAGE_INLINE_CHARS, MESSAGE_MAX_CHARS } from "./schemas/conversation.ts";
 export { StorageUse } from "./schemas/storage.ts";
-export { RecordGroup, RecordSummary, RecordTotals } from "./schemas/records.ts";
+export { AttendanceQuery, Dashboard, RecordGroup, RecordSummary, RecordTotals } from "./schemas/records.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
@@ -98,8 +99,11 @@ export {
   DayAttendance,
   DaySummary,
   DEFAULT_SCHEDULE,
+  CreateOrderInput,
+  Order,
   OrderKind,
   StaffId,
+  StaffOverview,
   StaffState,
   StaffStatus,
   StaffTask,

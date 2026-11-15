@@ -93,6 +93,59 @@ export const StaffStatus = z
 /** 社員の今の状態の型 */
 export type StaffStatus = z.infer<typeof StaffStatus>;
 
+/** 社員の一覧の 1 人。今の状態に、組織図の役の名前とモデルを足した物 */
+export const StaffOverview = z
+  .object({
+    id: StaffId,
+    role: z.string(),
+    model: z.string(),
+    state: StaffState,
+    nodeId: z.string().nullable(),
+    nodeTitle: z.string().nullable(),
+    workedMsToday: z.number().int(),
+  })
+  .strict()
+  .meta({ id: "StaffOverview" });
+
+/** 社員の一覧の 1 人の型 */
+export type StaffOverview = z.infer<typeof StaffOverview>;
+
+/** その日だけの指示を出す入力。extend と leave_early は日本時間の終わりの時刻 until が要り、off は持たない */
+export const CreateOrderInput = z
+  .object({
+    day: z.iso.date().openapi({ description: "日本時間の日付 YYYY-MM-DD" }),
+    kind: OrderKind,
+    until: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+      .optional()
+      .openapi({ description: "extend と leave_early の時は必須。日本時間の HH:MM" }),
+  })
+  .strict()
+  .refine((v) => (v.kind === "off") === (v.until === undefined), { message: "extend と leave_early は until が要り、off は持たない", path: ["until"] })
+  .meta({ id: "CreateOrderInput" });
+
+/** その日だけの指示を出す入力の型 */
+export type CreateOrderInput = z.infer<typeof CreateOrderInput>;
+
+/** その日だけの指示。until は日本時間の HH:MM、cancelledAt は取り消した時刻 */
+export const Order = z
+  .object({
+    id: z.uuid().openapi({ description: "UUID v7" }),
+    staffId: StaffId,
+    day: z.iso.date().openapi({ description: "日本時間の日付 YYYY-MM-DD" }),
+    kind: OrderKind,
+    until: z.string().nullable(),
+    source: z.enum(["button", "chat"]),
+    cancelledAt: z.iso.datetime().nullable(),
+    createdAt: z.iso.datetime(),
+  })
+  .strict()
+  .meta({ id: "Order" });
+
+/** その日だけの指示の型 */
+export type Order = z.infer<typeof Order>;
+
 /** 1 日の勤怠のまとめ。daily_totals の行を返す形にした物。時刻は RFC 3339 の協定世界時 */
 export const DaySummary = z
   .object({

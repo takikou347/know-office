@@ -1,4 +1,7 @@
 // 記録の集計の返す形。scope ごとか社員ごとの内訳と全体 (サービスと拡張の 3.4)
+import { Notice } from "./notices.ts";
+import { Approval, Node } from "./work.ts";
+import { StaffId, StaffOverview } from "./workday.ts";
 import { z } from "./zod.ts";
 
 /** 集計の分け方。service は office とサービスごと、staff は社員ごと */
@@ -42,3 +45,27 @@ export const RecordSummary = z
 
 /** 記録の集計の型 */
 export type RecordSummary = z.infer<typeof RecordSummary>;
+
+/** 勤怠の履歴を読むクエリ。日は日本時間、cursor は前のページの最後の「<日>.<社員 ID>」 */
+export const AttendanceQuery = z
+  .object({
+    from: z.iso.date().optional().openapi({ param: { name: "from", in: "query" }, description: "日本時間の日付 YYYY-MM-DD" }),
+    to: z.iso.date().optional().openapi({ param: { name: "to", in: "query" }, description: "日本時間の日付 YYYY-MM-DD" }),
+    staffId: StaffId.optional().openapi({ param: { name: "staffId", in: "query" }, description: "社員 ID。役割ごとに固定" }),
+  })
+  .strict();
+
+/** ダッシュボード。社員、承認待ち、今日のタスク、日本時間の今月の費用、未読の通知 */
+export const Dashboard = z
+  .object({
+    staff: z.array(StaffOverview),
+    approvals: z.array(Approval),
+    todayTasks: z.array(Node),
+    monthCostMicroUsd: z.number().int(),
+    notices: z.array(Notice),
+  })
+  .strict()
+  .meta({ id: "Dashboard" });
+
+/** ダッシュボードの型 */
+export type Dashboard = z.infer<typeof Dashboard>;

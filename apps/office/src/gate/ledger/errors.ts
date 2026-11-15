@@ -1,6 +1,7 @@
 // エラーログを error_events に残す。書く入口はここの recordError だけ (ログインと記録の 3.8)
 import { type Clock, jstYear, log, newId, redactText, sha256Hex } from "@know-office/core";
 import { RECORD_BINDINGS, type Bindings } from "../env.ts";
+import { liveOf } from "../live/publish.ts";
 
 /** 残すエラー */
 export type ErrorRecord = {
@@ -77,9 +78,14 @@ export async function recordError(env: Bindings, record: ErrorRecord, clock: Clo
       .first<{ n: number }>();
     // 超えた 1 回目だけ知らせ、続く間は重ねない
     if (recent?.n === BURST_LIMIT + 1) {
+      const id = newId(clock);
       await env.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) VALUES (?, ?, 'warn', 'error_burst', ?, ?, 'office')")
-        .bind(newId(clock), at, "同じエラーが続いている", `${record.route ?? record.source} で 5 分に ${String(BURST_LIMIT)} 回を超えた`)
+        .bind(id, at, "同じエラーが続いている", `${record.route ?? record.source} で 5 分に ${String(BURST_LIMIT)} 回を超えた`)
         .run();
+      // 配れなかった時にまたエラーログを書くと、続きの通知が回り続けるので、log にだけ残す
+      await liveOf(env)
+        .publish({ type: "notice", notice: { id } })
+        .catch((cause: unknown) => log("warn", "live_publish_failed", { message: messageOf(cause) }));
     }
   } catch (cause) {
     log("error", "record_error_failed", { traceId: record.traceId, message: messageOf(cause) });

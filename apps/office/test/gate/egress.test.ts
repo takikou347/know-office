@@ -185,7 +185,7 @@ describe("ワークスペースのハートビート", () => {
      */
     const failToStart = async (staffId: "builder" | "reviewer", at: number) => {
       const { container, seen } = fakeContainer(false);
-      const deps: BoxDeps = { ...boxDeps(), notifyDown: () => noticeWorkspaceDown(w.gate.env.DB, staffId, at) };
+      const deps: BoxDeps = { ...boxDeps(), notifyDown: async () => void (await noticeWorkspaceDown(w.gate.env.DB, staffId, at)) };
       await expect(new WorkspaceBox(container, egressFor, { staffId, workspaceId: `ws-${staffId}` }, deps).start()).rejects.toMatchObject({ code: "unavailable" });
       expect(seen.started).toHaveLength(4);
     };

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { recordsOf } from "../work/nodes.ts";
+import { announceNotice } from "../live/publish.ts";
 import { CLAUDE_FAILED } from "./errors.ts";
 
 /** Claude の API の失敗を数える窓と、通知を出す回数。サービスと拡張の 3.5 */
@@ -109,9 +110,11 @@ export async function noticeClaudeFailures(env: Bindings, clock: Clock, last: st
   const count = recent?.n ?? 0;
   if (count < CLAUDE_FAILURE_LIMIT) return;
   // 未読の同じ通知が無い時だけ 1 文で足す。同時に届いた失敗が、どれも無いと読んでから足すと重なるため
-  await env.DB.prepare(
+  const id = newId(clock);
+  const res = await env.DB.prepare(
     "INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'claude_failing', ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = 'claude_failing' AND read_at IS NULL)",
   )
-    .bind(newId(clock), at, "Claude の API の失敗が続いている", `5 分に ${String(count)} 回失敗した。最後は ${last}`)
+    .bind(id, at, "Claude の API の失敗が続いている", `5 分に ${String(count)} 回失敗した。最後は ${last}`)
     .run();
+  if (res.meta.changes === 1) await announceNotice(env, id, clock);
 }

@@ -38,8 +38,9 @@ export type BoxDeps = {
  * @param db D1 の DB
  * @param staffId 社員 ID
  * @param now 今の時刻
+ * @returns 足した通知の ID。もう出ていて足さなかった時は null
  */
-export async function noticeWorkspaceDown(db: D1Database, staffId: StaffId, now: number): Promise<void> {
+export async function noticeWorkspaceDown(db: D1Database, staffId: StaffId, now: number): Promise<string | null> {
   const orm = drizzle(db);
   // 題は、同じ社員の通知を重ねないための鍵も兼ねる
   const title = `${staffId} のワークスペースが起きない`;
@@ -48,9 +49,10 @@ export async function noticeWorkspaceDown(db: D1Database, staffId: StaffId, now:
     .from(notices)
     .where(and(eq(notices.kind, "workspace_down"), eq(notices.title, title), isNull(notices.readAt)))
     .limit(1);
-  if (open) return;
+  if (open) return null;
+  const id = newId({ now: () => now });
   await orm.insert(notices).values({
-    id: newId({ now: () => now }),
+    id,
     at: now,
     level: "warn",
     kind: "workspace_down",
@@ -58,6 +60,7 @@ export async function noticeWorkspaceDown(db: D1Database, staffId: StaffId, now:
     body: "4 回起こしても /v1/health が返らなかった。社員はワークスペースを待ち、ハートビートが届かない間は起こし直す",
     scope: "office",
   });
+  return id;
 }
 
 /**

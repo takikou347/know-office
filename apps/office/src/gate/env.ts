@@ -118,6 +118,22 @@ export interface Staff extends Rpc.DurableObjectBranded {
   loadTranscript(nodeId: string): Promise<RestoreInput | null>;
 }
 
+/** 配信 DO の RPC。全体で 1 つ。画面の WebSocket を休ませる形で持ち、出来事を配る (社員と自動の 3.7) */
+export interface Live extends Rpc.DurableObjectBranded {
+  /** 60 秒のうちに 1 回だけ使える作業トークンを出す */
+  issue(now: number): Promise<{ ticket: string; expiresAt: string }>;
+  /** 作業トークンを使った事にする */
+  redeem(ticket: string, now: number): Promise<boolean>;
+  /** 出来事を開いている WebSocket に配る。形は呼ぶ側の announce で確かめる */
+  publish(event: unknown): Promise<null>;
+  /** そのログインセッションの WebSocket を閉じる */
+  closeSession(sessionId: string): Promise<null>;
+  /** その送信元の WebSocket を閉じる */
+  closeIp(ip: string): Promise<null>;
+  /** すべての WebSocket を閉じる。except のログインセッションの物は残す */
+  closeAll(except: string | null): Promise<null>;
+}
+
 /** ワークスペースのコンテナの DO の RPC。社員 1 人に 1 つ */
 export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   /** コンテナを起こし、/v1/health が返るまで待つ */
@@ -154,6 +170,8 @@ export type Bindings = {
   STAFF: DurableObjectNamespace<Staff>;
   /** ワークスペースのコンテナの DO。社員 ID ごとに 1 つ */
   WORKSPACE: DurableObjectNamespace<WorkspaceContainer>;
+  /** 配信 DO。全体で 1 つ */
+  LIVE: DurableObjectNamespace<Live>;
   /** production、preview、development */
   ENVIRONMENT?: string;
   /** 開発環境の代わりの物の置き場 */

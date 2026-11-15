@@ -1,16 +1,16 @@
 // 勤怠: 1 日の勤怠と、勤怠の訂正 (社員と勤怠の 3.6 と 3.7、ルートの一覧の 1.3 と 1.4)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, AttendanceRow, CorrectAttendanceInput, DayAttendance, type DaySummary, StaffId, type WorkEntry } from "@know-office/core";
-import { eq } from "drizzle-orm";
+import { AppError, AttendanceQuery, AttendanceRow, CorrectAttendanceInput, DayAttendance, DaySummary, StaffId, type WorkEntry } from "@know-office/core";
+import { and, asc, desc, eq, gt, gte, lt, lte, or, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { createRouter } from "../app.ts";
 import { stepUpGate } from "../auth/passkey.ts";
-import { attendance } from "../db/main.ts";
+import { attendance, dailyTotals } from "../db/main.ts";
 import type { GateEnv, Staff } from "../env.ts";
 import { audit } from "../ledger/record.ts";
-import { okResponse, problems } from "../openapi.ts";
-import { created, ok } from "../respond.ts";
+import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { created, list, ok } from "../respond.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { loadDay, type Totals, type WorkEntryRow } from "../work/attendance.ts";
 
@@ -46,6 +46,18 @@ const correctAttendanceRoute = createRoute({
     ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500),
   },
 });
+
+const listAttendanceRoute = createRoute({
+  method: "get",
+  path: "/api/v1/records/attendance",
+  operationId: "listAttendance",
+  tags: ["records"],
+  request: { query: listQuery(router).extend(AttendanceQuery.shape) },
+  responses: { 200: listResponse(DaySummary), ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+/** 勤怠の履歴のカーソル。前のページの最後の「<日>.<社員 ID>」 */
+const AttendanceCursor = z.string().regex(/^\d{4}-\d{2}-\d{2}\.(president|builder|reviewer)$/);
 
 const iso = (at: number) => new Date(at).toISOString();
 
@@ -89,8 +101,31 @@ function toEntry(row: WorkEntryRow): WorkEntry {
   return { id: row.id, nodeId: row.nodeId, scope: row.scope, title: row.title, startedAt: iso(row.startedAt), endedAt: iso(row.endedAt), activeMs: row.activeMs, result: row.result };
 }
 
-/** 勤怠のルート: 1 日の勤怠と訂正 */
+/** 勤怠のルート: 1 日の勤怠、勤怠の履歴、訂正 */
 export const attendanceRoutes = router
+  .openapi(listAttendanceRoute, async (c) => {
+    const { from, to, staffId, cursor, limit } = c.req.valid("query");
+    if (from !== undefined && to !== undefined && from > to) {
+      throw new AppError("validation_failed", "入力の検証に失敗した", { errors: [{ pointer: "#/query/from", detail: "from は to より前にする" }] });
+    }
+    const where: (SQL | undefined)[] = [from === undefined ? undefined : gte(dailyTotals.day, from), to === undefined ? undefined : lte(dailyTotals.day, to), staffId === undefined ? undefined : eq(dailyTotals.staffId, staffId)];
+    if (cursor !== undefined) {
+      const parsed = AttendanceCursor.safeParse(cursor);
+      if (!parsed.success) throw new AppError("malformed_request", "カーソルの形が違う");
+      const [day = "", who = ""] = parsed.data.split(".");
+      // 新しい日から、同じ日は社員 ID の順に並べるので、カーソルの後はより前の日か、同じ日の後ろの社員
+      where.push(or(lt(dailyTotals.day, day), and(eq(dailyTotals.day, day), gt(dailyTotals.staffId, who))));
+    }
+    const rows = await drizzle(c.env.DB)
+      .select()
+      .from(dailyTotals)
+      .where(and(...where))
+      .orderBy(desc(dailyTotals.day), asc(dailyTotals.staffId))
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return list(c, page.map((r) => toSummary(r, StaffId.parse(r.staffId))), rows.length > limit && last ? `${last.day}.${last.staffId}` : null);
+  })
   .openapi(getDayAttendanceRoute, async (c) => {
     const { staffId } = c.req.valid("param");
     const { day } = c.req.valid("query");

@@ -1,0 +1,82 @@
+// ダッシュボード: 社員、承認待ち、今日のタスク、今月の費用、未読の通知を 1 回で返す (ルートの一覧の 1.12)
+import { createRoute, z } from "@hono/zod-openapi";
+import { type Approval, ApprovalStatus, Dashboard, jstDay, jstDayStart, jstYear, type Notice } from "@know-office/core";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { createRouter } from "../app.ts";
+import { approvals, nodes, notices } from "../db/main.ts";
+import { type Bindings, RECORD_BINDINGS } from "../env.ts";
+import { okResponse, problems } from "../openapi.ts";
+import { ok } from "../respond.ts";
+import { toNode } from "../work/nodes.ts";
+import { loadStaff } from "./staff.ts";
+
+const router = createRouter();
+
+/** 今日のタスクに出す状態。担当が手を付けている、レビューを待つ、オーナーを待つ */
+export const TODAY_STATUSES = ["doing", "review", "waiting_owner"] as const;
+/** 今日のタスクの数の上限 */
+export const TODAY_LIMIT = 50;
+/** 未読の通知の数の上限 */
+export const UNREAD_LIMIT = 20;
+
+const Payload = z.record(z.string(), z.unknown());
+const iso = (at: number) => new Date(at).toISOString();
+
+const getDashboardRoute = createRoute({
+  method: "get",
+  path: "/api/v1/dashboard",
+  operationId: "getDashboard",
+  tags: ["records"],
+  responses: { 200: okResponse(Dashboard), ...problems(401, 403, 429, 500) },
+});
+
+/**
+ * 日本時間の今月の 1 日 0 時から今までの費用を足す。月の年の REC_<年> を読む
+ * @param env バインディング
+ * @param now 今の時刻
+ * @returns 100 万分の 1 ドル
+ */
+export async function monthCost(env: Bindings, now: number): Promise<number> {
+  const from = jstDayStart(`${jstDay(now).slice(0, 7)}-01`);
+  const name = RECORD_BINDINGS.find((b) => b === `REC_${String(jstYear(now))}`);
+  const db = name ? env[name] : undefined;
+  if (!db) return 0;
+  const row = await db.prepare("SELECT coalesce(sum(cost_micro_usd), 0) AS cost FROM usage WHERE at >= ? AND at <= ?").bind(from, now).first<{ cost: number }>();
+  return row?.cost ?? 0;
+}
+
+/** ダッシュボードのルート */
+export const dashboardRoutes = router.openapi(getDashboardRoute, async (c) => {
+  const now = c.var.clock.now();
+  const orm = drizzle(c.env.DB);
+  const [staff, waiting, today, unread, cost] = await Promise.all([
+    loadStaff(c.env, now),
+    orm.select().from(approvals).where(eq(approvals.status, "pending")).orderBy(asc(approvals.id)),
+    orm
+      .select()
+      .from(nodes)
+      .where(and(eq(nodes.kind, "task"), inArray(nodes.status, [...TODAY_STATUSES])))
+      .orderBy(asc(nodes.priority), asc(nodes.id))
+      .limit(TODAY_LIMIT),
+    orm.select().from(notices).where(isNull(notices.readAt)).orderBy(desc(notices.id)).limit(UNREAD_LIMIT),
+    monthCost(c.env, now),
+  ]);
+  const toApproval = (row: (typeof waiting)[number]): Approval => {
+    // D1 の JSON は形を確かめてから返す
+    const payload = Payload.safeParse(row.payload);
+    return {
+      id: row.id,
+      kind: row.kind,
+      target: row.target,
+      payload: payload.success ? payload.data : {},
+      status: ApprovalStatus.parse(row.status),
+      requestedBy: row.requestedBy,
+      requestedAt: iso(row.requestedAt),
+      decidedAt: row.decidedAt === null ? null : iso(row.decidedAt),
+      reason: row.reason,
+    };
+  };
+  const toNotice = (row: (typeof unread)[number]): Notice => ({ id: row.id, at: iso(row.at), level: row.level, kind: row.kind, title: row.title, body: row.body ?? "", scope: row.scope, readAt: null });
+  return ok(c, { staff, approvals: waiting.map(toApproval), todayTasks: today.map((r) => toNode(r, r.status === "done" ? 1 : 0)), monthCostMicroUsd: cost, notices: unread.map(toNotice) });
+});

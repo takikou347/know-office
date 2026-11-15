@@ -8,6 +8,10 @@ import type { GitHubAccess } from "./github/forge.ts";
 import type { GuardDeps } from "./guard/deps.ts";
 import { registerComponents } from "./openapi.ts";
 import { attendanceRoutes } from "./routes/attendance.ts";
+import { dashboardRoutes } from "./routes/dashboard.ts";
+import { liveRoutes } from "./routes/live.ts";
+import { messageRoutes } from "./routes/messages.ts";
+import { staffRoutes } from "./routes/staff.ts";
 import { extensionRoutes } from "./routes/extensions.ts";
 import { githubRoutes, hookRoutes } from "./routes/github.ts";
 import { findingRoutes } from "./routes/findings.ts";
@@ -45,6 +49,10 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
     .route("/", serviceRoutes)
     .route("/", settingRoutes)
     .route("/", noticeRoutes)
+    .route("/", staffRoutes)
+    .route("/", messageRoutes)
+    .route("/", liveRoutes)
+    .route("/", dashboardRoutes)
     .route("/", extensionRoutes(options.extensions ?? INSTALLED))
     .route("/", githubRoutes)
     .route("/", hookRoutes)

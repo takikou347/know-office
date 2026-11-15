@@ -2,6 +2,7 @@ import type { Extension, Health } from "@know-office/core";
 import { AppBar, AppShell } from "knowidea-ui";
 import { withScreens } from "./extensions.ts";
 import { type Navigate, Page, type ToggleExtension } from "./pages.tsx";
+import { LiveProvider } from "./parts/live.tsx";
 import { LiveNoticeBar, NoticeHold, NoticeProvider } from "./parts/notices.tsx";
 import { bottomCurrentOf, bottomItems, headingOf, morePath, screenOf, sideItemsWith } from "./routes.ts";
 
@@ -23,32 +24,34 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
   const shown = withScreens(extensions);
   const screen = screenOf(pathname, shown);
   return (
-    <NoticeProvider>
-      <NoticeHold>
-        <AppShell
-          items={sideItemsWith(shown)}
-          current={more ? undefined : screen.id}
-          bottomItems={bottomItems}
-          bottomCurrent={bottomCurrentOf(pathname, shown)}
-          brand={{ name: "know-office" }}
-          header={
-            <>
-              <AppBar title={headingOf(pathname, shown)} position="sticky" />
-              <LiveNoticeBar />
-            </>
-          }
-        >
-          <Page
-            screen={more ? "more" : screen.id}
-            pathname={pathname}
-            query={searchParams}
-            health={health}
-            navigate={navigate}
-            extensions={extensions}
-            toggleExtension={toggleExtension}
-          />
-        </AppShell>
-      </NoticeHold>
-    </NoticeProvider>
+    <LiveProvider>
+      <NoticeProvider>
+        <NoticeHold>
+          <AppShell
+            items={sideItemsWith(shown)}
+            current={more ? undefined : screen.id}
+            bottomItems={bottomItems}
+            bottomCurrent={bottomCurrentOf(pathname, shown)}
+            brand={{ name: "know-office" }}
+            header={
+              <>
+                <AppBar title={headingOf(pathname, shown)} position="sticky" />
+                <LiveNoticeBar />
+              </>
+            }
+          >
+            <Page
+              screen={more ? "more" : screen.id}
+              pathname={pathname}
+              query={searchParams}
+              health={health}
+              navigate={navigate}
+              extensions={extensions}
+              toggleExtension={toggleExtension}
+            />
+          </AppShell>
+        </NoticeHold>
+      </NoticeProvider>
+    </LiveProvider>
   );
 }

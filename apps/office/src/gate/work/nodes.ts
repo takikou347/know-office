@@ -1,7 +1,7 @@
 // 目的からタスクまでの木。作る、変える、読む、受け付ける、出来事を残す (タスクとレビューの 3.1、データの 2.5)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, jstYear, newId, type Node, type NodeEvent, type NodeKind, type NodeStatus, type NodeTree, type StaffId, type TaskKind } from "@know-office/core";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { nodes, staff } from "../db/main.ts";
@@ -437,6 +437,31 @@ export async function loadTrees(db: D1Database, query: TreeQuery): Promise<{ tre
     .filter((r) => query.cursor === undefined || r.id > query.cursor);
   const page = roots.slice(0, query.limit);
   return { trees: page.map(build), next: roots.length > query.limit ? (page.at(-1)?.id ?? null) : null };
+}
+
+/**
+ * その社員のタスクを、木にせず ID の順に cursor の後から limit 件読む。進みは終えた物だけ 1
+ * @param db 今の状態の D1
+ * @param query 条件
+ * @returns タスクの 1 ページ (children は空) と次のカーソル
+ */
+export async function loadAssigned(db: D1Database, query: TreeQuery & { assignee: StaffId }): Promise<{ trees: NodeTree[]; next: string | null }> {
+  const found = await drizzle(db)
+    .select()
+    .from(nodes)
+    .where(
+      and(
+        eq(nodes.kind, "task"),
+        eq(nodes.assignee, query.assignee),
+        query.status === undefined ? undefined : eq(nodes.status, query.status),
+        query.scope === undefined ? undefined : eq(nodes.scope, query.scope),
+        query.cursor === undefined ? undefined : gt(nodes.id, query.cursor),
+      ),
+    )
+    .orderBy(asc(nodes.id))
+    .limit(query.limit + 1);
+  const page = found.slice(0, query.limit);
+  return { trees: page.map((r) => ({ ...toNode(r, r.status === "done" ? 1 : 0), children: [] })), next: found.length > query.limit ? (page.at(-1)?.id ?? null) : null };
 }
 
 /**

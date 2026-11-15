@@ -9,6 +9,7 @@ import { retryMirrors } from "../github/mirror.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { checkOverruns, checkThresholds } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
+import { announceNotice } from "../live/publish.ts";
 import { STORAGE_LIMIT_BYTES, storageUses } from "../ledger/storage.ts";
 import { pollBatches, type WeeklyDeps } from "./weekly.ts";
 
@@ -42,8 +43,9 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
       .where(and(eq(notices.kind, "storage"), eq(notices.title, title), isNull(notices.readAt)))
       .limit(1);
     if (open) continue;
+    const id = newId(clock);
     await orm.insert(notices).values({
-      id: newId(clock),
+      id,
       at: clock.now(),
       level: "warn",
       kind: "storage",
@@ -51,6 +53,7 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
       body: `${(use.bytes / GB).toFixed(1)}GB / ${String(STORAGE_LIMIT_BYTES / GB)}GB を使っている`,
       scope: "office",
     });
+    await announceNotice(env, id, clock);
   }
 }
 

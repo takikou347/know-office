@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import { type GuardKeys, newId, systemClock } from "@know-office/core";
 import { type Admission, type Challenge, GuardBook, type RateBucket } from "../auth/guard-book.ts";
 import type { Bindings, Guard } from "../env.ts";
+import { announceNotice, closeLive } from "../live/publish.ts";
 import type { Observed } from "../guard/deps.ts";
 import { type KeyState, OfficeGuard } from "../guard/office-guard.ts";
 import { noticeDenied } from "../ledger/notices.ts";
@@ -10,10 +11,14 @@ import { noticeDenied } from "../ledger/notices.ts";
 /** 全体のセキュリティ DO。ゲートウェイだけが RPC で呼ぶ。時刻は呼ぶ側の Clock で渡す */
 export class GuardDO extends DurableObject<Bindings> implements Guard {
   #book = new GuardBook(this.ctx.storage, async (ip, at) => {
+    const id = newId(systemClock);
     await this.env.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) VALUES (?, ?, 'warn', 'lockout', ?, ?, 'office')")
-      .bind(newId(systemClock), at, "ログインの失敗が続いたため送信元を 15 分止めた", `送信元 ${ip} が 10 分に 5 回失敗した`)
+      .bind(id, at, "ログインの失敗が続いたため送信元を 15 分止めた", `送信元 ${ip} が 10 分に 5 回失敗した`)
       .run();
-  }, (at, count) => noticeDenied(this.env.DB, at, count));
+    await announceNotice(this.env, id, systemClock);
+    // 止めた送信元の配信を開いたままにしない
+    await closeLive(this.env, systemClock, (live) => live.closeIp(ip));
+  }, (at, count) => noticeDenied(this.env, at, count, systemClock));
 
   #office = new OfficeGuard(this.ctx.storage);
 

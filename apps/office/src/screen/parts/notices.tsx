@@ -1,11 +1,12 @@
-// 画面の通知。入口から 1 分ごとに読み、上部の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5)
+// 画面の通知。配信の印で読み直し、配信が切れている間だけ 1 分ごとに読む。上部の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5、社員と自動の 3.7)
 import { type Notice, type NoticeLevel, systemClock } from "@know-office/core";
 import { Alert, Link, List, type Tone } from "knowidea-ui";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { type Api, ApiContext } from "../api.ts";
 import { jstTime } from "../format.ts";
+import { markReloader, useLive } from "./live.tsx";
 
-/** 通知を読み直す間。起きてから 5 分以内に画面に出すので、それより短くする */
+/** 配信が切れている間に通知を読み直す間。起きてから 5 分以内に画面に出すので、それより短くする */
 export const NOTICE_POLL_MS = 60_000;
 
 /** 開いた時に、初めの通知を待って画面を描かずにおく長さの上限。帯が後から差し込まれて、押そうとした物がずれないようにする */
@@ -110,27 +111,33 @@ export interface NoticeProviderProps {
  */
 export function NoticeProvider({ children }: NoticeProviderProps) {
   const api = useContext(ApiContext);
+  const { connected, subscribe } = useLive();
   const [loaded, setLoaded] = useState<Loaded>({ notices: [], state: "loading" });
   // 入口を呼ぶ口が無い時は読まないので、待たない
   const [holding, setHolding] = useState(api !== null);
   useEffect(() => {
+    if (!api) return () => {};
     let live = true;
     const hold = holdNotices(() => setHolding(false));
-    const pull = () => {
-      if (!api) return;
-      void fetchNotices(api).then((value) => {
-        if (!live) return;
-        setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
-        hold.settled();
-      });
+    const pull = async (): Promise<void> => {
+      const value = await fetchNotices(api);
+      if (!live) return;
+      setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
+      hold.settled();
     };
-    const stop = watchNotices(pull, typeof document === "undefined" ? null : document);
+    const onMark = markReloader(pull);
+    const unsubscribe = subscribe((event) => {
+      if (event.type === "notice") onMark(event.notice.id);
+    });
+    // つながっている間は印で読み直し、つながった時に 1 回読んで切れていた間の通知を拾う。切れている間だけ間をおいて読む
+    const stop = connected ? (void pull(), () => {}) : watchNotices(() => void pull(), typeof document === "undefined" ? null : document);
     return () => {
       live = false;
+      unsubscribe();
       stop();
       hold.stop();
     };
-  }, [api]);
+  }, [api, connected, subscribe]);
   const markRead = useCallback(
     (id: string) => {
       if (!api) return;

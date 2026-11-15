@@ -8,6 +8,7 @@ import { rotateVaultKeys } from "../auth/vault.ts";
 import { nodes, notices, services, sessions, staff, stops, stopUpdates } from "../db/main.ts";
 import type { Bindings, Guard, Staff } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
+import { announceNotice, closeLive } from "../live/publish.ts";
 import { clockAt } from "../work/attendance.ts";
 import type { GuardDeps, RecentOp } from "./deps.ts";
 
@@ -137,6 +138,7 @@ export async function applyStop(env: Bindings, input: StopInput, now: number, de
   // 止める権利は GuardDO の中で 1 つずつ渡すので、同時に来た 2 つ目はここで返る
   if (!(await guardDo(env).claimStop(input.scope, input.target, stopId))) return null;
   const subject = await subjectOf(env.DB, input);
+  const stopNotice = notice(now, "stop", "guard_stop", `${SCOPE_LABEL[input.scope]}を止めた`, input.reason ?? `${input.signal}: ${String(input.measured)} / ${String(input.threshold)}`);
   try {
     await orm.batch([
       orm.insert(stops).values({
@@ -155,12 +157,13 @@ export async function applyStop(env: Bindings, input: StopInput, now: number, de
         model: subject.model,
         by: input.by,
       }),
-      orm.insert(notices).values(notice(now, "stop", "guard_stop", `${SCOPE_LABEL[input.scope]}を止めた`, input.reason ?? `${input.signal}: ${String(input.measured)} / ${String(input.threshold)}`)),
+      orm.insert(notices).values(stopNotice),
     ]);
   } catch (error) {
     await guardDo(env).dropClaim(stopId);
     throw error;
   }
+  await announceNotice(env, stopNotice.id, clockAt(now));
   // 直前の 20 件の出来事は、止めた記録と同じ時に監査ログの detail に残す
   await record(env, {
     at: now,
@@ -173,7 +176,9 @@ export async function applyStop(env: Bindings, input: StopInput, now: number, de
   try {
     await enforce(env, input, subject.staffId, now, deps);
   } catch (error) {
-    await orm.insert(notices).values(notice(now, "stop", "guard_stop_failed", `${SCOPE_LABEL[input.scope]}を止める動きが途中で失敗した`, "止めた記録は残っている。止まっていない所があるので、記録を確かめる"));
+    const failed = notice(now, "stop", "guard_stop_failed", `${SCOPE_LABEL[input.scope]}を止める動きが途中で失敗した`, "止めた記録は残っている。止まっていない所があるので、記録を確かめる");
+    await orm.insert(notices).values(failed);
+    await announceNotice(env, failed.id, clockAt(now));
     await record(env, { at: now, actor: "system", action: "guard.stop_failed", target: stopId, detail: { scope: input.scope, target: input.target }, traceId: input.traceId });
     await recordError(env, { source: "gate", level: "error", code: "guard_stop_failed", error }, clockAt(now));
     throw new AppError("internal", "止める動きが途中で失敗した");
@@ -231,7 +236,9 @@ async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null,
       try {
         await deps.rollback(input.target);
       } catch (error) {
-        await orm.insert(notices).values(notice(now, "stop", "guard_rollback_failed", `${input.target} を前のバージョンに戻せなかった`, "公開は止めている。前のバージョンへは手で戻す"));
+        const failed = notice(now, "stop", "guard_rollback_failed", `${input.target} を前のバージョンに戻せなかった`, "公開は止めている。前のバージョンへは手で戻す");
+        await orm.insert(notices).values(failed);
+        await announceNotice(env, failed.id, clockAt(now));
         await recordError(env, { source: "gate", level: "error", code: "guard_rollback_failed", error }, clockAt(now));
       }
       return;
@@ -239,6 +246,8 @@ async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null,
     case "office":
       for (const id of ALL_STAFF) await staffOf(env, id).halt(now);
       await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
+      // 切ったログインセッションの配信を開いたままにしない
+      await closeLive(env, clockAt(now), (live) => live.closeAll(null));
       // 取り替えが落ちても、外の鍵の印と 1 時間の鍵の取り消しは必ず行う。落ちた事は最初の失敗を投げ直して止めた記録に残す
       const failures: unknown[] = [];
       try {
@@ -275,7 +284,7 @@ async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null,
  * @param body 中身
  * @returns notices に足す値
  */
-function notice(now: number, level: "warn" | "stop", kind: string, title: string, body: string): typeof notices.$inferInsert {
+function notice(now: number, level: "warn" | "stop", kind: string, title: string, body: string): typeof notices.$inferInsert & { id: string } {
   return { id: newId(clockAt(now)), at: now, level, kind, title, body, scope: "office" };
 }
 
@@ -288,6 +297,7 @@ function notice(now: number, level: "warn" | "stop", kind: string, title: string
  */
 export async function recordNear(env: Bindings, input: Omit<StopInput, "by" | "reason">, now: number): Promise<string> {
   const orm = drizzle(env.DB);
+  const nearNotice = newId(clockAt(now));
   const id = newId(clockAt(now));
   await orm.batch([
     orm.insert(stops).values({
@@ -304,7 +314,7 @@ export async function recordNear(env: Bindings, input: Omit<StopInput, "by" | "r
       by: "system",
     }),
     orm.insert(notices).values({
-      id: newId(clockAt(now)),
+      id: nearNotice,
       at: now,
       level: "warn",
       kind: "guard_near",
@@ -313,6 +323,7 @@ export async function recordNear(env: Bindings, input: Omit<StopInput, "by" | "r
       scope: "office",
     }),
   ]);
+  await announceNotice(env, nearNotice, clockAt(now));
   await record(env, { at: now, actor: "system", action: "guard.near", target: id, detail: { scope: input.scope, target: input.target, signal: input.signal, recentOps: input.recentOps } });
   return id;
 }
