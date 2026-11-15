@@ -8,7 +8,7 @@ import { INSTALLED } from "../../src/gate/extensions/installed.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { runTool, staffTools } from "../../src/gate/work/tools.ts";
 import { createTestGate, type TestGate } from "../helpers/gate.ts";
-import { api, at, type WorkWorld, useWork } from "../helpers/work.ts";
+import { api, at, MINUTE, rows, type WorkWorld, useWork } from "../helpers/work.ts";
 
 const world = useWork();
 
@@ -18,13 +18,22 @@ const ExtensionRow = z.object({ id: z.string(), title: z.string(), enabled: z.bo
 const SDK_NOTE_READ = "mcp__staff__ext__sample-notes__note_read";
 
 /**
- * 拡張を入れるか切る
+ * パスキーで確かめた事にする。確認の流れそのものは passkey.test.ts で確かめる
+ * @param w テストの物
+ */
+async function stepUp(w: WorkWorld): Promise<void> {
+  await w.d1.DB.prepare("UPDATE sessions SET step_up_until = ?").bind(w.clock.now() + 15 * MINUTE).run();
+}
+
+/**
+ * 拡張を入れるか切る。入れる時はパスキーで確かめてから送る
  * @param w テストの物
  * @param id 拡張の ID
  * @param enabled 入れるか
  * @returns 返った拡張
  */
 async function toggle(w: WorkWorld, id: string, enabled: boolean): Promise<z.infer<typeof ExtensionRow>> {
+  if (enabled) await stepUp(w);
   return ExtensionRow.parse(await api(w, "PUT", `/api/v1/extensions/${id}`, { enabled }));
 }
 
@@ -135,6 +144,18 @@ describe("差し込み口", () => {
     expect(await api(w, "GET", "/api/v1/ext/test-counter/count")).toEqual({ count: 1 });
     // 拡張のデータは拡張ごとの置き場 (R2 の ext/<id>/) にだけ書く
     expect((await gate.env.FILES.list({ prefix: "ext/test-counter/" })).objects.map((o) => o.key)).toEqual(["ext/test-counter/count.json"]);
+  });
+
+  it("確認なしで入れると断られ、記録が残る", async () => {
+    // 入れると社員のツールが増えるので、守りを弱める変更としてパスキーの確認を求める
+    expect(await api(world, "PUT", "/api/v1/extensions/sample-notes", { enabled: true }, 401)).toMatchObject({ code: "step_up_required" });
+    expect(z.array(ExtensionRow).parse(await api(world, "GET", "/api/v1/extensions"))).toContainEqual({ id: "sample-notes", title: "メモ", enabled: false, ownerData: false });
+    expect(await rows(world.d1.DB, "SELECT key FROM settings WHERE key LIKE 'extension.%'")).toEqual([]);
+    expect(world.gate.audits.filter((a) => a.action.startsWith("extension.")).map((a) => [a.action, a.target, a.detail])).toEqual([
+      ["extension.toggle_refused", "sample-notes", { enabled: true, reason: "step_up_required" }],
+    ]);
+    // 切る側は守りを強めるだけなので、確認なしで通す
+    expect(await api(world, "PUT", "/api/v1/extensions/sample-notes", { enabled: false })).toMatchObject({ enabled: false });
   });
 
   it("拡張のツールもルールの判断を通り、鍵や自動停止や社員に触れる名前は入れても断る", () => {

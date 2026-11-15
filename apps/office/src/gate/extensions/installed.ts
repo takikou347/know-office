@@ -2,16 +2,16 @@
 import { type ExtensionDefinition, isExtension } from "./define.ts";
 
 /**
- * 拡張のモジュールを集める。vite が組み立ての時に import.meta.glob を import に直す
+ * 拡張のモジュールを集める。vite は組み立ての時に import.meta.glob の呼び出しを import の並びに、import.meta.env を値に置き換える
  * @returns ファイルの道からモジュールへの対応
  */
 function modules(): Record<string, unknown> {
-  try {
-    return import.meta.glob("../../extensions/*/index.ts", { eager: true });
-  } catch {
-    // wrangler (esbuild) だけで組む DO のテストの入口では import.meta.glob が無い。拡張を 1 つも入れない側に倒す
-    return {};
-  }
+  // wrangler (esbuild) だけで組むテストの入口 (test/do/harness.ts と、test/helpers/worker.ts が起こす wrangler.jsonc の Worker) は
+  // import.meta を置き換えないので、import.meta.glob を呼ぶと落ちる。そこでは拡張を 1 つも入れない。
+  // typeof import.meta.glob で見分けると、vite は呼び出しだけを置き換えて typeof を残し、本番でも 0 個になる (test/extensions/build.test.ts)。
+  // vite は import.meta.env を必ず値に置き換えるので、こちらで見分ける
+  if (import.meta.env === undefined) return {};
+  return import.meta.glob("../../extensions/*/index.ts", { eager: true });
 }
 
 /**

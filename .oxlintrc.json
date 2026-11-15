@@ -46,6 +46,22 @@
   },
   "overrides": [
     {
+      // 管理の拡張は、土台の定義 (gate/extensions/define.ts) と画面の口 (screen/extensions.ts) だけを使う。鍵、D1、DO、ルールの判断、自動停止には届かせない (サービスと拡張の 3.8)
+      "files": ["apps/office/src/extensions/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [{ "name": "@know-office/core", "importNames": ["deriveKey", "Secret", "decide", "toOperation", "DEFAULT_RULES"], "message": "拡張は鍵とルールの判断に触れない" }],
+            "patterns": [
+              { "group": ["**/gate/**", "!**/gate/extensions/define.ts"], "message": "拡張は土台の定義 (gate/extensions/define.ts) だけを使う" },
+              { "group": ["drizzle-orm", "drizzle-orm/**", "@cloudflare/**", "cloudflare:**", "**/packages/core/src/**"], "message": "拡張は D1、DO、R2 を直に使わず、渡された置き場を使う" }
+            ]
+          }
+        ]
+      }
+    },
+    {
       // ログの出口はここだけ。ほかは log() を通して鍵を伏せる
       "files": ["packages/core/src/log.ts"],
       "rules": { "no-console": "off" }

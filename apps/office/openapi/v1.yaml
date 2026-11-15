@@ -5114,26 +5114,36 @@ paths:
       tags:
       - extensions
       summary: 拡張機能を有効化、無効化する
-      description: '処理の流れ:
+      description: '有効にする場合のみパスキーの確認が必要。
 
 
-        1. 拡張機能が存在することを確認する
+        処理の流れ:
 
-        2. `settings` に `extension.<拡張機能 ID>` の行を、最新のバージョンに 1 を足して追加し、監査ログに `extension.toggle` を記録する。無効にしても拡張機能のデータは消さない
+
+        1. 有効にする時は、パスキーの確認があることを確認する。無ければ監査ログに `extension.toggle_refused` を記録して断る
+
+        2. 拡張機能が存在することを確認する
+
+        3. `settings` に `extension.<拡張機能 ID>` の行を、最新のバージョンに 1 を足して追加し、監査ログに `extension.toggle` を記録する。無効にしても拡張機能のデータは消さない
 
 
         このルート固有のエラー:
 
 
+        - 401 `step_up_required`: 有効にする時に、パスキーの確認がない
+
         - 404 `not_found`: 拡張機能が存在しない
 
         - 409 `conflict`: 同時に入れ切りされ、バージョンが異なる'
       x-steps:
+      - 有効にする時は、パスキーの確認があることを確認する。無ければ監査ログに `extension.toggle_refused` を記録して断る
       - 拡張機能が存在することを確認する
       - '`settings` に `extension.<拡張機能 ID>` の行を、最新のバージョンに 1 を足して追加し、監査ログに `extension.toggle` を記録する。無効にしても拡張機能のデータは消さない'
       x-errors:
+      - '401 `step_up_required`: 有効にする時に、パスキーの確認がない'
       - '404 `not_found`: 拡張機能が存在しない'
       - '409 `conflict`: 同時に入れ切りされ、バージョンが異なる'
+      x-step-up: conditional
       parameters:
       - name: extensionId
         in: path

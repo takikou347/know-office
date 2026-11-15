@@ -1,7 +1,7 @@
 // 拡張を入れているかの読み書きと、拡張ごとの置き場 (サービスと拡張の 3.8)
 import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
 import { AppError, newId } from "@know-office/core";
-import { and, desc, eq, like, sql } from "drizzle-orm";
+import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { settings } from "../db/main.ts";
@@ -24,16 +24,24 @@ export type ExtensionState = { enabled: boolean; version: number };
  * @returns 拡張 ID から、入れているかと版への対応
  */
 export async function extensionStates(db: D1Database, extensions: readonly ExtensionDefinition[]): Promise<Map<string, ExtensionState>> {
-  const rows = await drizzle(db)
+  const out = new Map<string, ExtensionState>(extensions.map((e) => [e.id, { enabled: false, version: 0 }]));
+  if (extensions.length === 0) return out;
+  const orm = drizzle(db);
+  // キーごとの最新の版だけを読む
+  const latest = orm
+    .select({ key: settings.key, version: max(settings.version).as("latest_version") })
+    .from(settings)
+    .where(and(eq(settings.scope, "office"), inArray(settings.key, extensions.map((e) => `${KEY_PREFIX}${e.id}`))))
+    .groupBy(settings.key)
+    .as("latest");
+  const rows = await orm
     .select({ key: settings.key, value: settings.value, version: settings.version })
     .from(settings)
-    .where(and(eq(settings.scope, "office"), like(settings.key, `${KEY_PREFIX}%`)))
-    .orderBy(desc(settings.version));
-  const out = new Map<string, ExtensionState>(extensions.map((e) => [e.id, { enabled: false, version: 0 }]));
-  for (const e of extensions) {
-    const row = rows.find((r) => r.key === `${KEY_PREFIX}${e.id}`);
+    .innerJoin(latest, and(eq(settings.key, latest.key), eq(settings.version, latest.version)))
+    .where(eq(settings.scope, "office"));
+  for (const row of rows) {
     // 形の違う値は入れていない側に倒す
-    if (row) out.set(e.id, { enabled: z.boolean().safeParse(row.value).data ?? false, version: row.version });
+    out.set(row.key.slice(KEY_PREFIX.length), { enabled: z.boolean().safeParse(row.value).data ?? false, version: row.version });
   }
   return out;
 }

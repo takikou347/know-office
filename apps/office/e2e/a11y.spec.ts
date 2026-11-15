@@ -4,8 +4,22 @@ import { screens } from "../src/screen/routes.ts";
 
 // 使いやすさ: キーボードだけで承認まで出せ、8 画面と深い所に axe の critical と serious が無い。画面の 3.5
 
-/** axe に掛ける所。8 画面に、その他と、社員とサービスを選んだ所を足す */
-const pages: readonly { name: string; path: string; heading: string; ready?: string }[] = [
+const META = { traceId: "0".repeat(32) };
+
+/**
+ * 見本の拡張を入れた事にする。入口の返事は境目のモックで返す。入れ切りそのものは e2e/office.spec.ts と test/extensions/ で確かめる
+ * @param page 開くページ
+ */
+async function withSampleNotes(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.pathname === "/api/v1/extensions",
+    (route) => route.fulfill({ json: { data: [{ id: "sample-notes", title: "メモ", enabled: true, ownerData: false }], meta: { ...META, next: null } } }),
+  );
+  await page.route("**/api/v1/ext/sample-notes/note", (route) => route.fulfill({ json: { data: { body: "金曜は早く上がる" }, meta: META } }));
+}
+
+/** axe に掛ける所。8 画面に、その他と、社員とサービスを選んだ所と、入れた拡張の画面を足す */
+const pages: readonly { name: string; path: string; heading: string; ready?: string; mock?: (page: Page) => Promise<void> }[] = [
   ...screens.map((s) => ({ name: s.label, path: s.path, heading: s.label })),
   { name: "その他", path: "/more", heading: "その他" },
   { name: "社員の会話", path: "/staff/builder", heading: "社員と仕事" },
@@ -18,6 +32,8 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
   { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },
   { name: "目的と組織図の木", path: "/goals", heading: "目的と組織図", ready: "目標: know-office を動かし始める" },
+  // 入れた拡張の画面は、メモを読み終えてから掛ける
+  { name: "入れた拡張の画面 (メモ)", path: "/ext/sample-notes", heading: "メモ", ready: "社員は note_read で読みます", mock: withSampleNotes },
 ];
 
 /** focus がどの物にも無く、body にある時の訳 */
@@ -131,6 +147,7 @@ test.describe("使いやすさ", () => {
   test.describe("自動のチェック", () => {
     for (const p of pages) {
       test(p.name, async ({ page }) => {
+        await p.mock?.(page);
         await page.goto(p.path);
         await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
         if (p.ready) await expect(page.getByText(p.ready)).toBeVisible();

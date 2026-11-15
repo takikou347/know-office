@@ -4,6 +4,7 @@ import { AppError, Extension, ToggleExtensionInput } from "@know-office/core";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { createRouter } from "../app.ts";
+import { requireStepUp } from "../auth/passkey.ts";
 import type { GateEnv } from "../env.ts";
 import type { ExtensionContext, ExtensionDefinition, ExtensionRoute } from "../extensions/define.ts";
 import { enabledExtensions, extensionStates, extensionStore, toggleExtension } from "../extensions/state.ts";
@@ -34,7 +35,7 @@ function requireEnabled(ext: ExtensionDefinition, extensions: readonly Extension
  * @param enabled 入れているか
  * @returns 返す形
  */
-const view =(ext: ExtensionDefinition, enabled: boolean): Extension => ({ id: ext.id, title: ext.title, enabled, ownerData: ext.ownerData });
+const view = (ext: ExtensionDefinition, enabled: boolean): Extension => ({ id: ext.id, title: ext.title, enabled, ownerData: ext.ownerData });
 
 /**
  * 拡張の中身に渡す物を作る。鍵、D1、DO は渡さず、時刻とその拡張の置き場だけを渡す
@@ -90,6 +91,7 @@ export function extensionRoutes(extensions: readonly ExtensionDefinition[]) {
     path: "/api/v1/extensions/{extensionId}",
     operationId: "toggleExtension",
     tags: ["extensions"],
+    "x-step-up": "conditional",
     request: { params: ExtensionParam, body: jsonBody(ToggleExtensionInput) },
     responses: { 200: okResponse(Extension), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
   });
@@ -110,6 +112,15 @@ export function extensionRoutes(extensions: readonly ExtensionDefinition[]) {
     .openapi(toggleExtensionRoute, async (c) => {
       const { extensionId } = c.req.valid("param");
       const { enabled } = c.req.valid("json");
+      // 入れると社員のツールとルートが増えるので、守りを弱める変更としてパスキーの確認を求める。断った試みも残す
+      if (enabled) {
+        try {
+          requireStepUp(c);
+        } catch (error) {
+          await audit(c, "extension.toggle_refused", extensionId, { enabled, reason: "step_up_required" });
+          throw error;
+        }
+      }
       const ext = extensions.find((e) => e.id === extensionId);
       if (!ext) throw new AppError("not_found", "拡張機能が存在しない");
       const current = (await extensionStates(c.env.DB, [ext])).get(ext.id)?.version ?? 0;
