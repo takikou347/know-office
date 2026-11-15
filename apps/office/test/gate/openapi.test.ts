@@ -94,7 +94,6 @@ const UNBUILT: Record<string, string> = {
   "POST /v1/abort": "#105",
   "POST /v1/messages": "#105",
   "POST /ws/v1/events": "#105",
-  "POST /ws/v1/tools/{toolName}": "#103",
 };
 
 /**
