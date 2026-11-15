@@ -10,6 +10,11 @@ on:
     - cron: "0 0 * * 1"
   # deploy.yml がデプロイの前に同じ中身を回す
   workflow_call:
+    inputs:
+      release:
+        description: 本番に出す前なら true。作っていないルートと仮のデータを読む画面が残っていたら落とす
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -51,6 +56,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      - name: 本番に出す前に、作っていないルートと仮のデータを読む画面が無い事を確かめる
+        if: inputs.release
+        env:
+          RELEASE: "1"
+        run: pnpm --filter @know-office/office exec vitest run test/gate/openapi.test.ts test/screen/no-mock.test.ts
 
   # 決まり、手順、仕様の文だけの変更ではコードが動かないので、test と e2e を飛ばす。main への push では必ず走らせる
   # 依存 (package.json か pnpm-lock.yaml) を変えた PR だけ、依存の弱点を確かめる。週に 1 度の確かめは依存の弱点だけを見る

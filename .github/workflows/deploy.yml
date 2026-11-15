@@ -45,6 +45,9 @@ jobs:
     needs: ready
     if: needs.ready.outputs.ok == 'true' && github.event.action != 'closed'
     uses: ./.github/workflows/check.yml
+    # main への push は本番に出すので、作り終えた事も確かめる。PR のプレビューは途中の物でも出す
+    with:
+      release: ${{ github.event_name == 'push' }}
 
   production:
     needs: [ready, check]
