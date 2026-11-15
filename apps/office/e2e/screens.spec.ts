@@ -192,6 +192,19 @@ test("画面を移ると、題が変わり、中身に移る", async ({ page }) 
   await expect(page.getByRole("main")).toBeFocused();
 });
 
+test("画面を移った直後に Tab を押しても、中身の先頭から進む", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1, name: "ダッシュボード" })).toBeVisible();
+  // 描き直しを待たずに確かめる。次の描画まで中身に移らないと、その間に押した Tab の行き先が、後から中身に戻される
+  const active = await page.evaluate(async () => {
+    const link = [...document.querySelectorAll<HTMLAnchorElement>('nav a[href="/staff"]')].find((a) => a.getClientRects().length > 0);
+    link?.click();
+    for (let n = 0; n < 5; n++) await Promise.resolve();
+    return { tag: document.activeElement?.tagName, title: document.title };
+  });
+  expect(active).toEqual({ tag: "MAIN", title: "社員と仕事 - know-office" });
+});
+
 test("画面を移ると、中身の先頭に戻り、中身に Tab で入れるままである", async ({ page }) => {
   // 記録も守りも長いので、移った先でも送った分が残りうる。送られるのは中身の main だけ
   await page.goto("/records");

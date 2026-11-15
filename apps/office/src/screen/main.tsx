@@ -2,7 +2,7 @@ import "knowidea-tokens/tokens.css";
 import "knowidea-css/index.css";
 import "./app.css";
 import type { Extension, Health } from "@know-office/core";
-import { StrictMode, useCallback, useEffect, useState } from "react";
+import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { ApiContext, createApi, sessionFetch } from "./api.ts";
@@ -46,6 +46,8 @@ function announce() {
  */
 function useRoute() {
   const [url, setUrl] = useState(urlNow);
+  // 画面が変わった時に、描いた直後に題と読み上げに伝える印
+  const moved = useRef(false);
   const navigate = useCallback((to: string, opts?: { replace?: boolean }) => {
     // 今と同じ所へは履歴を積まない
     const here = window.location.pathname + window.location.search + window.location.hash;
@@ -57,16 +59,22 @@ function useRoute() {
     }
     window.history.pushState(null, "", to);
     shownPath = window.location.pathname;
+    moved.current = true;
     setUrl(urlNow());
-    requestAnimationFrame(announce);
   }, []);
+  // 新しい画面を描いたのと同じ時に中身へ移る。次の描画まで待つと、その間に押した Tab の行き先を後から中身に戻してしまう
+  useLayoutEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    announce();
+  }, [url]);
   useEffect(() => {
     document.title = titleNow();
     const onPop = () => {
-      setUrl(urlNow());
       // 画面が変わった時だけ、先頭へ戻して中身に移る
-      if (window.location.pathname !== shownPath) requestAnimationFrame(announce);
+      if (window.location.pathname !== shownPath) moved.current = true;
       shownPath = window.location.pathname;
+      setUrl(urlNow());
     };
     const onClick = (e: MouseEvent) => {
       const a = e.target instanceof Element ? e.target.closest("a") : null;
