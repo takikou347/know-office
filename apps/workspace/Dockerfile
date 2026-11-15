@@ -25,8 +25,8 @@ RUN chown -R root:root /opt/workspace && chmod -R go-w /opt/workspace
 # 社員が書けるのはタスクのリポジトリを置く /work だけ
 RUN mkdir /work && chown staff:office /work
 
-# USER を置かず root で起こす。uid を落とすには root が要る
-WORKDIR /work
+# USER を置かず root で起こす。uid を落とすには root が要る。サーバーの置き場は社員が書けない所にし、/work は SDK の子のプロセスにだけ渡す
+WORKDIR /opt/workspace
 # Containers が外向きの HTTPS を受け手に回すための CA を信じる
 ENV NODE_EXTRA_CA_CERTS=/etc/cloudflare/certs/cloudflare-containers-ca.crt
 EXPOSE 8080

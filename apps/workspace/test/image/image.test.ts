@@ -98,16 +98,22 @@ describe("ワークスペースのサーバー", () => {
     }
   });
 
-  it("社員はサーバーを止められない", () => {
-    expect(inServer(id, "kill 1").code).not.toBe(0);
-    expect(inServer(id, "kill -9 1").code).not.toBe(0);
+  it("社員はサーバーに合図を送れず、止められない", () => {
+    // 対照: root は同じ pid に合図を送れる。社員が断られるのは uid が違うから
+    expect(inServer(id, "kill -0 1", "root").code).toBe(0);
+    for (const signal of ["-0", "-TERM", "-KILL"]) {
+      const sent = inServer(id, `kill ${signal} 1`);
+      expect({ signal, code: sent.code === 0, out: /not permitted/i.test(sent.out) }).toEqual({ signal, code: false, out: true });
+    }
     expect(inServer(id, "stat -c %u /proc/1", "root")).toEqual({ code: 0, out: "0" });
   });
 
-  it("社員は 8080 番で listen できない", () => {
-    for (const host of ["0.0.0.0", "127.0.0.1"]) {
-      const listen = inServer(id, `node -e "require('net').createServer().on('error',()=>process.exit(1)).listen(8080,'${host}',()=>process.exit(0))"`);
-      expect({ host, code: listen.code }).toEqual({ host, code: 1 });
-    }
+  it("社員は 8080 番を取れない", () => {
+    // サーバーを止められないので、8080 番は使われたまま。Docker は 1024 未満の番号を誰にでも許す (ip_unprivileged_port_start=0) ので、番号の小ささでは確かめない
+    const listen = inServer(id, `node -e "require('net').createServer().on('error',(e)=>{console.log(e.code);process.exit(1)}).listen(8080,'0.0.0.0',()=>process.exit(0))"`);
+    expect(listen).toEqual({ code: 1, out: "EADDRINUSE" });
+    // 8080 番で答えているのは、root のサーバーのまま
+    expect(inServer(id, "stat -c %u /proc/1", "root")).toEqual({ code: 0, out: "0" });
+    expect(inServer(id, `node -e "fetch('http://127.0.0.1:8080/v1/health').then(r=>r.text()).then(console.log)"`).out).toContain('"part":"workspace"');
   });
 });

@@ -1,5 +1,4 @@
 // ワークスペースのコンテナの入口。ゲートウェイの鍵を環境変数から取り出し、8080 番でサーバーを起こす
-import { chown } from "node:fs/promises";
 import { log } from "@know-office/core";
 import { staffHome, WORK_ROOT } from "./agent.ts";
 import { Runner } from "./run.ts";
@@ -12,7 +11,7 @@ import { TranscriptShipper } from "./transcript.ts";
 const PORT = 8080;
 
 // 会話の記録は SDK がホームの下に書き、増えた分をゲートウェイに送る。ワークスペースは暗号の鍵を持たない
-const transcripts = new TranscriptShipper({ fetcher: (url, init) => fetch(url, init), home: staffHome(), cwd: WORK_ROOT, own: (path) => chown(path, STAFF_UID, STAFF_GID) });
+const transcripts = new TranscriptShipper({ fetcher: (url, init) => fetch(url, init), home: staffHome(), cwd: WORK_ROOT, owner: { uid: STAFF_UID, gid: STAFF_GID } });
 
 // SDK は宛先を変えずに api.anthropic.com を呼び、コンテナの外向きの通信の受け手がゲートウェイの Claude のプロキシに回す
 // SDK の子のプロセスは staff に落として起こし、root のサーバーの環境とメモリに触らせない
