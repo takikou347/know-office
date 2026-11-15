@@ -88,7 +88,7 @@ test.describe("速さ", () => {
 });
 
 test.describe("オフィスの部屋", () => {
-  test("出来事を動きで見せる", async ({ page, context }) => {
+  test("出来事を動きで見せる", async ({ page }) => {
     const waiting = page.getByRole("list", { name: "可を待つ物" }).getByRole("link", { name: /CodeEditor のページを足す/ });
     await page.goto("/");
     await expect(waiting).toBeVisible();
@@ -108,12 +108,12 @@ test.describe("オフィスの部屋", () => {
     await openInApp(page, "オフィス");
     await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を承認した");
 
-    // 不可を出すと、差し戻しの出来事になる。読み込み直した別のページで、初めの状態から確かめる
-    const other = await context.newPage();
-    await other.goto("/staff/builder/tasks/t2");
-    await other.getByRole("button", { name: "不可" }).click();
-    await openInApp(other, "オフィス");
-    await expect(roomOf(other).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を作る役に差し戻した");
+    // 不可を出すと、差し戻しの出来事になる。読み込み直すと置き場は初めの状態に戻るので、同じページで確かめる。
+    // 別のページを開くと、GPU の無い headless では前のページの部屋も見えている扱いで描き続け、次の部屋を組むのが 5 秒を超える
+    await page.goto("/staff/builder/tasks/t2");
+    await page.getByRole("button", { name: "不可" }).click();
+    await openInApp(page, "オフィス");
+    await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を作る役に差し戻した");
   });
 
   test("WebGL が無い時は 2D の一覧", async ({ page }) => {
