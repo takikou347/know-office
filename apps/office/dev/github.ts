@@ -1,5 +1,5 @@
 // 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、署名付きの通知を GitHub と同じ形で持つ
-import { createHmac, generateKeyPairSync, type KeyObject } from "node:crypto";
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { Hono } from "hono";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
@@ -64,6 +64,16 @@ export type FakeGitHub = {
   app: Hono;
   /** 届いた要求 */
   requests: GitHubRequest[];
+  /** git の受け口に届いた本文のバイト数と Content-Encoding */
+  gitBodies: { route: string; bytes: number; encoding: string | null }[];
+  /** 次に git の受け口が返すステータス。null なら確かめた上で 200 */
+  gitStatus: number | null;
+  /** 次に出す 1 時間の鍵の返事に被せる中身。広い鍵を返す GitHub の代わり */
+  nextMint: { repositories?: { full_name: string }[]; permissions?: Record<string, "read" | "write"> } | null;
+  /** 取り消された 1 時間の鍵 */
+  revoked: string[];
+  /** リポジトリの既定のブランチ。無ければ main */
+  defaultBranches: Map<string, string>;
   /** 「メソッド パス」に返す本文を置く。undefined は置いた本文を消し、404 に戻す */
   set(route: string, body: unknown): void;
   /** 作った App。ID から */
@@ -102,6 +112,10 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const codes = new Map<string, { appId: number; pem: string }>();
   const installations = new Map<number, { appId: number; repos: string[] }>();
   const tokens = new Map<string, FakeToken>();
+  const gitBodies: FakeGitHub["gitBodies"] = [];
+  const revoked: string[] = [];
+  const defaultBranches = new Map<string, string>();
+  const state = { gitStatus: null as number | null, nextMint: null as FakeGitHub["nextMint"] };
   const visibility = new Map<string, boolean>();
   const pick: FakeGitHub["pick"] = [
     { fullName: "example/knowidea-ui", private: false },
@@ -255,6 +269,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       const token = `ghs_fake${String(next())}${crypto.randomUUID().replaceAll("-", "")}`;
       const expiresAt = now() + TOKEN_MS;
       tokens.set(token, { installationId: id, repos, permissions, expiresAt });
+      const over = state.nextMint;
+      state.nextMint = null;
       return c.json(
         {
           token,
@@ -262,9 +278,19 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           permissions,
           repository_selection: repos === null ? "all" : "selected",
           ...(repos === null ? {} : { repositories: repos.map((r) => ({ full_name: r, name: r.split("/")[1], private: visibility.get(r) ?? false })) }),
+          ...over,
         },
         201,
       );
+    })
+    // 1 時間の鍵を期限の前に取り消す
+    .delete("/installation/token", (c) => {
+      const token = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
+      remember("DELETE /installation/token", "", token);
+      if (!live(token)) return c.json({ message: "Bad credentials" }, 401);
+      tokens.delete(token);
+      revoked.push(token);
+      return c.body(null, 204);
     })
     .get("/installation/repositories", (c) => {
       const token = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
@@ -283,7 +309,20 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       const basic = /^Basic (.+)$/.exec(c.req.header("authorization") ?? "")?.[1];
       const [user, token = ""] = basic ? atob(basic).split(":") : [];
       requests.push({ route, body: null, token: token || null });
-      await c.req.arrayBuffer();
+      // 大きな push も読み切れるよう、ためずに数える
+      let bytes = 0;
+      const reader = c.req.raw.body?.getReader();
+      for (;;) {
+        const chunk = reader ? await reader.read() : { done: true as const, value: undefined };
+        if (chunk.done) break;
+        bytes += chunk.value.byteLength;
+      }
+      gitBodies.push({ route, bytes, encoding: c.req.header("content-encoding") ?? null });
+      if (state.gitStatus !== null) {
+        const status = state.gitStatus;
+        state.gitStatus = null;
+        return new Response("fake failure", { status });
+      }
       const t = user === "x-access-token" ? live(token) : null;
       if (!t) return c.text("Authentication failed", 401);
       const repo = `${c.req.param("owner")}/${c.req.param("name").replace(/\.git$/, "")}`;
@@ -304,6 +343,11 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         const repo = /^\/repos\/([^/]+\/[^/]+)/.exec(c.req.path)?.[1];
         if (repo !== undefined && !reaches(t, repo)) return c.json({ message: "Not Found" }, 404);
       }
+      // 入れたリポジトリの情報は、置いた返事が無ければ公開か非公開と既定のブランチを返す
+      const info = /^GET \/repos\/([^/]+\/[^/]+)$/.exec(route)?.[1];
+      if (info !== undefined && !routes.has(route) && visibility.has(info)) {
+        return c.json({ full_name: info, private: visibility.get(info) ?? false, default_branch: defaultBranches.get(info) ?? "main" });
+      }
       if (/^POST \/app\/installations\/\d+\/access_tokens$/.test(route)) {
         return c.json({ token: `ghs_test${String(next())}`, expires_at: "2099-01-01T00:00:00Z" }, 201);
       }
@@ -315,63 +359,29 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     if (body === undefined) routes.delete(route);
     else routes.set(route, body);
   };
-  const uninstall = (installationId: number): void => {
-    installations.delete(installationId);
-  };
-  return { app, requests, set, apps, installations, tokens, pick, uninstall };
-}
-
-/**
- * GitHub の配信 ID と同じ、時刻の入った UUID (版 1) を作る。RFC 9562 の 5.1
- * @param at 時刻 (協定世界時のミリ秒)
- * @returns 配信 ID
- */
-export function deliveryId(at: number): string {
-  // 1582-10-15 からの 100 ナノ秒の数
-  const ticks = BigInt(at) * 10_000n + 0x01b21dd213814000n;
-  const low = (ticks & 0xffffffffn).toString(16).padStart(8, "0");
-  const mid = ((ticks >> 32n) & 0xffffn).toString(16).padStart(4, "0");
-  const high = (((ticks >> 48n) & 0x0fffn) | 0x1000n).toString(16).padStart(4, "0");
-  const rest = crypto.getRandomValues(new Uint8Array(8));
-  rest[0] = ((rest[0] ?? 0) & 0x3f) | 0x80;
-  const hex = [...rest].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return `${low}-${mid}-${high}-${hex.slice(0, 4)}-${hex.slice(4)}`;
-}
-
-/** 代わりの GitHub が送る通知 */
-export type WebhookOptions = {
-  /** 送り先 */
-  url: string;
-  /** X-GitHub-Event の値 */
-  event: string;
-  /** 本文 */
-  payload: unknown;
-  /** 署名の鍵 */
-  secret: string;
-  /** X-GitHub-Delivery の値。無ければ今の時刻の配信 ID */
-  delivery?: string;
-  /** 送る関数。初期値は fetch */
-  fetcher?: (req: Request) => Promise<Response>;
-};
-
-/**
- * GitHub と同じヘッダーと署名で通知を送る
- * @param options 送り先、種類、本文、署名の鍵
- * @returns 送り先の返事
- */
-export function sendWebhook(options: WebhookOptions): Promise<Response> {
-  const body = JSON.stringify(options.payload);
-  const signature = `sha256=${createHmac("sha256", options.secret).update(body).digest("hex")}`;
-  const req = new Request(options.url, {
-    method: "POST",
-    signal: AbortSignal.timeout(10_000),
-    body,
-    headers: {
-      "content-type": "application/json",
-      "x-github-event": options.event,
-      "x-github-delivery": options.delivery ?? deliveryId(Date.now()),
-      "x-hub-signature-256": signature,
+  return {
+    app,
+    requests,
+    gitBodies,
+    get gitStatus() {
+      return state.gitStatus;
     },
-  });
-  return (options.fetcher ?? fetch)(req);
+    set gitStatus(v) {
+      state.gitStatus = v;
+    },
+    get nextMint() {
+      return state.nextMint;
+    },
+    set nextMint(v) {
+      state.nextMint = v;
+    },
+    revoked,
+    defaultBranches,
+    set,
+    apps,
+    installations,
+    tokens,
+    pick,
+    uninstall: (installationId: number): void => void installations.delete(installationId),
+  };
 }

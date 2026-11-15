@@ -1,4 +1,4 @@
-// 本物の wrangler.jsonc の Worker を本物の workerd で起こし、/api/* だけが入口に来て、ほかの道は画面を返す事を確かめる
+// 本物の wrangler.jsonc の Worker を本物の workerd で起こし、/api/* と GitHub の通知の道だけが入口に来て、ほかの道は画面を返す事を確かめる
 import { Problem } from "@know-office/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY } from "../../src/gate/headers.ts";
@@ -15,11 +15,12 @@ afterAll(() => worker?.dispose());
  * 起こした Worker に要求を出す
  * @param path / から始まる道
  * @param headers 付けるヘッダー
+ * @param init メソッドと本文。無ければ GET
  * @returns 返事
  */
-function request(path: string, headers?: Record<string, string>): Promise<Response> {
+function request(path: string, headers?: Record<string, string>, init?: { method: string; body?: string }): Promise<Response> {
   if (!worker) throw new Error("Worker を起こせていない");
-  return worker.request(path, headers);
+  return worker.request(path, headers, init);
 }
 
 // ブラウザーでアドレスを開いた時のヘッダー。画面のファイルの SPA への戻しは、この開き方の時に効く
@@ -44,6 +45,19 @@ describe("入口と画面の分かれ方 (wrangler.jsonc)", () => {
     const res = await request("/api/v1/nothing", NAVIGATE);
     expect(res.status).toBe(401);
     expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+  });
+
+  it("GitHub の通知の道は入口が受け、署名の無い通知を 401 で断る", async () => {
+    const res = await request("/hooks/v1/github", { "Content-Type": "application/json", "X-GitHub-Event": "ping" }, { method: "POST", body: "{}" });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+    expect(Problem.parse(await res.json()).code).toBe("unauthenticated");
+  });
+
+  it.each(["/hooks/v1/other", "/hooks"])("通知の道のほかの %s は入口を通らず画面を返す", async (path) => {
+    const res = await request(path, NAVIGATE);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<div id="root"></div>');
   });
 
   it.each(["/", "/dashboard", "/settings/sessions"])("ブラウザーで %s を開くと入口を通らず画面の index.html を返す", async (path) => {

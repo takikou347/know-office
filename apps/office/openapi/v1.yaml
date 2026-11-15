@@ -3525,7 +3525,7 @@ paths:
 
         1. パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
 
-        2. ログインセッションの署名鍵で、10 分間有効な `state` を生成する
+        2. 使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する
 
         3. GitHub App の manifest と GitHub の URL を返す
 
@@ -3536,7 +3536,7 @@ paths:
         - 409 `conflict`: すでに連携済み'
       x-steps:
       - パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
-      - ログインセッションの署名鍵で、10 分間有効な `state` を生成する
+      - 使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する
       - GitHub App の manifest と GitHub の URL を返す
       x-errors:
       - '409 `conflict`: すでに連携済み'
@@ -3582,11 +3582,11 @@ paths:
         処理の流れ:
 
 
-        1. `state` の署名と有効期限を検証する
+        1. `state` の署名と有効期限を検証し、`github_states` から使い捨ての値を 1 文で消す。消せなければ断る
 
-        2. まだ連携していないことを確認する
+        2. まだ連携していない、インストールの前の App も無いことを確認する
 
-        3. `code` を App の鍵に交換し、暗号化して `vault` に保存する。読んだ時から `github_app` の版が進んでいれば保存しない
+        3. `code` を App の鍵に交換し、暗号化して `vault` に保存する。読んだ時から `github_app` の版が進んだか、使える App かインストールがあれば保存しない
 
         4. 監査ログに `github.app_created` を記録する
 
@@ -3596,20 +3596,20 @@ paths:
         このルート固有のエラー:
 
 
-        - 403 `forbidden`: `state` が一致しない、または期限を過ぎた
+        - 403 `forbidden`: `state` が一致しない、期限を過ぎた、またはもう使った
 
-        - 409 `conflict`: すでに連携済み、または同じ時に別の App を保存した
+        - 409 `conflict`: すでに連携済み、インストールの前の App がある、または同じ時に別の App を保存した
 
         - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
-      - '`state` の署名と有効期限を検証する'
-      - まだ連携していないことを確認する
-      - '`code` を App の鍵に交換し、暗号化して `vault` に保存する。読んだ時から `github_app` の版が進んでいれば保存しない'
+      - '`state` の署名と有効期限を検証し、`github_states` から使い捨ての値を 1 文で消す。消せなければ断る'
+      - まだ連携していない、インストールの前の App も無いことを確認する
+      - '`code` を App の鍵に交換し、暗号化して `vault` に保存する。読んだ時から `github_app` の版が進んだか、使える App かインストールがあれば保存しない'
       - 監査ログに `github.app_created` を記録する
       - 302 で App のインストール画面にリダイレクトする
       x-errors:
-      - '403 `forbidden`: `state` が一致しない、または期限を過ぎた'
-      - '409 `conflict`: すでに連携済み、または同じ時に別の App を保存した'
+      - '403 `forbidden`: `state` が一致しない、期限を過ぎた、またはもう使った'
+      - '409 `conflict`: すでに連携済み、インストールの前の App がある、または同じ時に別の App を保存した'
       - '502 `upstream_failed`: GitHub がエラーを返した'
       parameters:
       - name: code
@@ -3912,19 +3912,19 @@ paths:
       tags:
       - github
       summary: GitHub の Webhook を受信する
-      description: '署名、時刻、配信 ID を検証する。本文は GitHub の形式で 5MB まで、1 分あたり 60 回まで。捨てる通知も 204 を返す。
+      description: '署名、時刻、本文の SHA-256 を検証する。本文は GitHub の形式で 5MB まで、署名の合う通知は 1 分あたり 60 回まで。捨てる通知も 204 を返す。
 
 
         処理の流れ:
 
 
-        1. 本文を 5MB まで読み、`vault` の通知の秘密で `X-Hub-Signature-256` をタイミング攻撃に強い比較で検証する
+        1. 署名の前は送信元ごとの数だけを数える。本文を 5MB まで読み、`vault` の通知の秘密で `X-Hub-Signature-256` をタイミング攻撃に強い比較で検証し、合った通知だけを全体の 1 分 60 回で数える
 
-        2. `X-GitHub-Delivery` (時刻の入った UUID 版 1) の時刻が今から 5 分より離れた通知と、ほかのインストールの通知は捨てる
+        2. `X-GitHub-Delivery` は UUID の形だけを確かめ、時刻の入った版 1 なら時刻が今から 5 分より離れた通知を捨てる。ほかのインストールの通知も捨てる
 
-        3. イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` にある配信 ID の通知では何も直さない
+        3. イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` に同じ本文の SHA-256 がある通知 (配信 ID を変えた送り直しも) では何も直さない
 
-        4. Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければ配信 ID を消す
+        4. Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければその記録を消す
 
 
         このルート固有のエラー:
@@ -3936,17 +3936,17 @@ paths:
 
         - 413 `payload_too_large`: 本文が 5MB を超える
 
-        - 429 `rate_limited`: 1 分あたり 60 回を超えた'
+        - 429 `rate_limited`: 送信元ごとの数か、署名の合う通知の 1 分あたり 60 回を超えた'
       x-steps:
-      - 本文を 5MB まで読み、`vault` の通知の秘密で `X-Hub-Signature-256` をタイミング攻撃に強い比較で検証する
-      - '`X-GitHub-Delivery` (時刻の入った UUID 版 1) の時刻が今から 5 分より離れた通知と、ほかのインストールの通知は捨てる'
-      - イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` にある配信 ID の通知では何も直さない
-      - Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければ配信 ID を消す
+      - 署名の前は送信元ごとの数だけを数える。本文を 5MB まで読み、`vault` の通知の秘密で `X-Hub-Signature-256` をタイミング攻撃に強い比較で検証し、合った通知だけを全体の 1 分 60 回で数える
+      - '`X-GitHub-Delivery` は UUID の形だけを確かめ、時刻の入った版 1 なら時刻が今から 5 分より離れた通知を捨てる。ほかのインストールの通知も捨てる'
+      - イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` に同じ本文の SHA-256 がある通知 (配信 ID を変えた送り直しも) では何も直さない
+      - Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければその記録を消す
       x-errors:
       - '400 `malformed_request`: 配信 ID か種類か本文の形が違う'
       - '401 `unauthenticated`: 連携していない、署名がない、または一致しない'
       - '413 `payload_too_large`: 本文が 5MB を超える'
-      - '429 `rate_limited`: 1 分あたり 60 回を超えた'
+      - '429 `rate_limited`: 送信元ごとの数か、署名の合う通知の 1 分あたり 60 回を超えた'
       security: []
       responses:
         '204':

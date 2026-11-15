@@ -5,7 +5,7 @@ import { createRouter } from "../app.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { storeStatements } from "../auth/vault.ts";
 import { endpoints } from "../endpoints.ts";
-import { appManifest, callGitHub, checkInstallation, exchangeCode, githubToken, loadLink, parseGitHub, signState, verifyState } from "../github/app.ts";
+import { appManifest, callGitHub, checkInstallation, consumeState, exchangeCode, githubToken, loadLink, parseGitHub, signState } from "../github/app.ts";
 import { receiveHook } from "../github/hooks.ts";
 import { loadGitHubRules, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
 import { audit } from "../ledger/record.ts";
@@ -17,8 +17,8 @@ const router = createRouter();
 /** 一覧のカーソル。GitHub のページの番号 */
 const PageCursor = z.string().regex(/^[1-9]\d{0,3}$/);
 
-/** インストールが無い時だけ書く条件 */
-const NOT_INSTALLED = { sql: "NOT EXISTS (SELECT 1 FROM vault WHERE name = 'github_installation' AND revoked_at IS NULL)", args: [] };
+/** App もインストールも使える物が無い時だけ書く条件。インストールの前の App を別の code で置き換えない */
+const NOT_LINKED = { sql: "NOT EXISTS (SELECT 1 FROM vault WHERE name IN ('github_app', 'github_installation') AND revoked_at IS NULL)", args: [] };
 
 const connectGitHubRoute = createRoute({
   method: "post",
@@ -99,14 +99,15 @@ export const githubRoutes = router
   })
   .openapi(receiveGitHubAppRoute, async (c) => {
     const { code, state } = c.req.valid("query");
-    await verifyState(c.env, c.var.clock, state);
+    await consumeState(c.env, c.var.clock, state);
     const link = await loadLink(c.env);
     if (link.installation) throw new AppError("conflict", "すでに連携済み");
+    if (link.app) throw new AppError("conflict", "作った App をまだインストールしていない");
     const made = await exchangeCode(c.env, c.var.fetch, code);
     const keys = new Secret(JSON.stringify({ appId: made.id, slug: made.slug, privateKey: made.pem, webhookSecret: made.webhook_secret }));
     const now = c.var.clock.now();
-    // 読んだ版から書く 1 文で、同時に戻った 2 つの片方だけを置く。前に作って入れなかった App の鍵は取り消す
-    const statements = await storeStatements(c.env.DB, { name: "github_app", value: keys, top: link.appTop, now, master: c.env.MASTER_KEY, when: NOT_INSTALLED });
+    // 読んだ版から書く 1 文で、同時に戻った 2 つの片方だけを置く
+    const statements = await storeStatements(c.env.DB, { name: "github_app", value: keys, top: link.appTop, now, master: c.env.MASTER_KEY, when: NOT_LINKED });
     const [written] = await c.env.DB.batch(statements);
     if ((written?.meta.changes ?? 0) === 0) throw new AppError("conflict", "同じ時に別の App を置いた");
     await audit(c, "github.app_created", String(made.id), { slug: made.slug });

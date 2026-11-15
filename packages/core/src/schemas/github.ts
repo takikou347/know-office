@@ -163,8 +163,8 @@ export const GitHubAppKeys = z
 /** vault の github_installation に置く値 */
 export const GitHubInstallationKey = z.object({ id: GitHubId }).strict();
 
-/** X-GitHub-Delivery。GitHub は時刻の入った UUID (版 1) を送る */
-export const DeliveryId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-1[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+/** X-GitHub-Delivery。GitHub は版を約束しないので、UUID の形だけを確かめる */
+export const DeliveryId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 
 /** X-Hub-Signature-256 */
 export const HubSignature = z.string().regex(/^sha256=[0-9a-f]{64}$/);

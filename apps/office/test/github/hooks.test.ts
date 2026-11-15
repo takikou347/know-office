@@ -1,5 +1,5 @@
 // GitHub の通知。署名と時刻と配信 ID を確かめ、チェック、プルリクエスト、Issue、App を外した事を受ける (タスクとレビューの 3.5)
-import { deliveryId } from "../../dev/github.ts";
+import { deliveryId } from "../../dev/github-hooks.ts";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { MINUTE, rows, useWork } from "../helpers/work.ts";
@@ -150,11 +150,44 @@ describe("なりすましと偽の通知を断る", () => {
     expect((await planTasks()).map((t) => t["issue_number"])).toEqual([1]);
   });
 
-  it("配信 ID が時刻の入った形でなければ 400", async () => {
+  it("同じ本文と署名に新しい配信 ID を付けた送り直しは 2 度目を受けない", async () => {
     const c = await connect(world);
-    const res = await hook(world, { event: "issues", payload: issueOpened(c), secret: c.webhookSecret, delivery: crypto.randomUUID() });
+    for (const delivery of [deliveryId(world.clock.now()), deliveryId(world.clock.now() + 1), crypto.randomUUID()]) {
+      expect((await hook(world, { event: "issues", payload: issueOpened(c), secret: c.webhookSecret, delivery })).status).toBe(204);
+    }
+    expect(await planTasks()).toEqual([{ issue_number: 7, title: "勤怠の表が崩れる" }]);
+    const id = await review();
+    await hook(world, { event: "check_run", payload: checkRun(c, "verify", "success"), secret: c.webhookSecret });
+    await hook(world, { event: "check_suite", payload: { action: "rerequested", check_suite: { head_sha: HEAD }, repository: { full_name: UI }, installation: { id: c.installationId } }, secret: c.webhookSecret });
+    // 走り直しの前の結果を、配信 ID を替えて送り直されても戻さない
+    await hook(world, { event: "check_run", payload: checkRun(c, "verify", "success"), secret: c.webhookSecret, delivery: crypto.randomUUID() });
+    expect(await checksOf(id)).toEqual([]);
+  });
+
+  it("配信 ID は UUID の形だけを確かめ、時刻は版 1 の時だけ見る", async () => {
+    const c = await connect(world);
+    expect((await hook(world, { event: "issues", payload: issueOpened(c, 1), secret: c.webhookSecret, delivery: crypto.randomUUID() })).status).toBe(204);
+    const res = await hook(world, { event: "issues", payload: issueOpened(c, 2), secret: c.webhookSecret, delivery: "not-a-delivery-id" });
     expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 400, code: "malformed_request" });
-    expect(await planTasks()).toEqual([]);
+    expect((await planTasks()).map((t) => t["issue_number"])).toEqual([1]);
+  });
+
+  it("署名の無い 61 回の後でも、署名の合う通知は通る", async () => {
+    const c = await connect(world);
+    for (let i = 0; i < 61; i += 1) {
+      const res = await world.gate.app.request("/hooks/v1/github", { method: "POST", body: "{}", headers: { "x-github-event": "ping", "x-github-delivery": crypto.randomUUID(), "CF-Connecting-IP": "203.0.113.9" } }, world.gate.env);
+      expect(res.status).toBe(401);
+    }
+    expect((await hook(world, { event: "issues", payload: issueOpened(c), secret: c.webhookSecret })).status).toBe(204);
+    expect((await planTasks()).length).toBe(1);
+  });
+
+  it("署名の合う通知は 1 分に 60 回まで受け、61 回目は 429", async () => {
+    const c = await connect(world);
+    const ping = (i: number) => hook(world, { event: "ping", payload: { zen: String(i), installation: { id: c.installationId } }, secret: c.webhookSecret });
+    for (let i = 0; i < 60; i += 1) expect((await ping(i)).status).toBe(204);
+    const res = await ping(60);
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 429, code: "rate_limited" });
   });
 
   it("本文はちょうど 5MB まで受け、超えると 413", async () => {

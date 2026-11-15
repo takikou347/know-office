@@ -239,6 +239,12 @@ async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null,
     case "office":
       for (const id of ALL_STAFF) await staffOf(env, id).halt(now);
       await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
+      // 出した 1 時間の鍵は期限まで使えるので、GitHub の側で取り消す。届かなくても止めるのは続ける
+      try {
+        await deps.revokeGitHubTokens(env);
+      } catch (error) {
+        await recordError(env, { source: "gate", level: "error", code: "github_token_revoke_failed", error }, clockAt(now));
+      }
       await rotateVaultKeys(env.DB, env.MASTER_KEY, now);
       await guardDo(env).holdKeys();
       return;

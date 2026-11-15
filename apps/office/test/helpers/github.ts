@@ -3,7 +3,7 @@ import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/work
 import type { StaffId } from "@know-office/core";
 import { expect } from "vitest";
 import { z } from "zod";
-import { deliveryId, sendWebhook } from "../../dev/github.ts";
+import { deliveryId, sendWebhook } from "../../dev/github-hooks.ts";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { MINUTE, type WorkWorld } from "./work.ts";

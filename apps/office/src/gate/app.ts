@@ -8,7 +8,7 @@ import { bodyShape } from "./body.ts";
 import { securityHeaders } from "./headers.ts";
 import type { GateEnv } from "./env.ts";
 import { endpoints } from "./endpoints.ts";
-import { SHARED_TOKENS, type TokenCache, vaultForge } from "./github/app.ts";
+import { revokeTokens, SHARED_TOKENS, type TokenCache, vaultForge } from "./github/app.ts";
 import { type GitHubAccess, httpForge } from "./github/forge.ts";
 import { type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
@@ -71,9 +71,10 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
   app.use("*", async (c, next) => {
     c.set("clock", clock);
     c.set("fetch", fetcher);
-    c.set("guard", options.guard ?? UNCONNECTED_DEPS);
     const github = options.github;
     const tokens = { fetcher, clock, cache: options.githubTokens ?? SHARED_TOKENS };
+    // 全体を止めた時は、この入口がためた鍵を、この入口の fetch で取り消す
+    c.set("guard", { ...(options.guard ?? UNCONNECTED_DEPS), revokeGitHubTokens: (env) => revokeTokens(env, tokens) });
     c.set("github", tokens);
     // vault はルートが GitHub を呼ぶ時に初めて読む
     c.set("forge", github ? httpForge(endpoints(c.env).github, fetcher, github) : vaultForge(c.env, tokens));

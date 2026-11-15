@@ -76,11 +76,19 @@ export const reviewNotes = sqliteTable("review_notes", {
   githubCommentId: integer("github_comment_id"),
 });
 
-/** 受けた GitHub の通知。同じ通知を 2 度受けない */
+/** 受けた GitHub の通知。送り直しは配信 ID が変わるので、本文の SHA-256 で同じ通知を 2 度受けない */
 export const githubDeliveries = sqliteTable("github_deliveries", {
   deliveryId: text("delivery_id").primaryKey(),
+  bodySha256: text("body_sha256").notNull().unique(),
   event: text("event").notNull(),
   receivedAt: time("received_at").notNull(),
+});
+
+/** GitHub App を作りに出した state の使い捨ての値。callback で 1 度だけ消せる */
+export const githubStates = sqliteTable("github_states", {
+  nonce: text("nonce").primaryKey(),
+  createdAt: time("created_at").notNull(),
+  expiresAt: time("expires_at").notNull(),
 });
 
 // 2.6 サービス、設定、通知、拡張

@@ -221,6 +221,8 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     answer: null,
     rollback: (serviceId) => Promise.resolve(void deps.rollbacks.push(serviceId)),
     review: () => Promise.resolve(deps.answer),
+    // 入口の分は createApp が入口のためる所で取り消す。DO から止めた時に使う
+    revokeGitHubTokens: () => Promise.resolve(),
   };
   // GuardDO はロックアウトと数え方の 2 つの本を持つ
   const guardDo = {

@@ -41,8 +41,8 @@
   // 開発の実行と e2e は Docker が無くても動かす。コンテナを確かめる時は、これを外した設定で wrangler dev を起こす
   "dev": { "enable_containers": false },
   "assets": {
-    // /api と GitHub の通知 (/hooks) の下だけ入口が受け、ほかは画面のファイルを返す
+    // /api の下と GitHub の通知の道だけ入口が受け、ほかは画面のファイルを返す
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/hooks/*"]
+    "run_worker_first": ["/api/*", "/hooks/v1/github"]
   }
 }

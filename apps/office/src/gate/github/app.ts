@@ -17,7 +17,7 @@ import {
   toBase64url,
 } from "@know-office/core";
 import { SignJWT } from "jose";
-import type { z, ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { signingKey } from "../auth/session.ts";
 import { readStored, revokeStatement, vaultKey } from "../auth/vault.ts";
 import { endpoints } from "../endpoints.ts";
@@ -196,6 +196,9 @@ export function appManifest(origin: string): Record<string, unknown> {
 /** state の署名に付ける頭。ログインセッションのクッキーの署名と取り違えない */
 const STATE_CONTEXT = "know-office:github-state:";
 
+/** state の中身。exp は期限、n は使い捨ての値 */
+const StatePayload = z.object({ exp: z.number(), n: z.string().regex(/^[A-Za-z0-9_-]{22}$/) });
+
 /**
  * 10 分効く state を、ログインセッションの署名の鍵で作る
  * @param env バインディング
@@ -204,19 +207,26 @@ const STATE_CONTEXT = "know-office:github-state:";
  */
 export async function signState(env: Bindings, clock: Clock): Promise<string> {
   const key = await signingKey(await vaultKey(env.DB, "session_signing", env.MASTER_KEY, clock));
-  const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ exp: clock.now() + STATE_MS, n: toBase64url(crypto.getRandomValues(new Uint8Array(16))) })));
+  const now = clock.now();
+  const nonce = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
+  // 使い捨ての値を D1 に置き、callback で 1 度だけ消せるようにする。切れた値はここで掃く
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM github_states WHERE expires_at <= ?").bind(now),
+    env.DB.prepare("INSERT INTO github_states (nonce, created_at, expires_at) VALUES (?, ?, ?)").bind(nonce, now, now + STATE_MS),
+  ]);
+  const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ exp: now + STATE_MS, n: nonce })));
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${STATE_CONTEXT}${payload}`));
   return `${payload}.${toBase64url(signature)}`;
 }
 
 /**
- * state の署名と期限を確かめる
+ * state の署名と期限を確かめ、使い捨ての値を 1 文で消す。消せた時だけ進める
  * @param env バインディング
  * @param clock 時刻
  * @param state 戻ってきた state。形は呼ぶ側が確かめている
- * @throws forbidden 署名が合わない、期限を過ぎた時
+ * @throws forbidden 署名が合わない、期限を過ぎた、もう使った時
  */
-export async function verifyState(env: Bindings, clock: Clock, state: string): Promise<void> {
+export async function consumeState(env: Bindings, clock: Clock, state: string): Promise<void> {
   const [payload = "", encoded = ""] = state.split(".");
   const signature = fromBase64url(encoded);
   const key = await signingKey(await vaultKey(env.DB, "session_signing", env.MASTER_KEY, clock));
@@ -224,14 +234,18 @@ export async function verifyState(env: Bindings, clock: Clock, state: string): P
   const valid = signature !== null && (await crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(`${STATE_CONTEXT}${payload}`)).catch(() => false));
   if (!valid) throw new AppError("forbidden", "state が一致しない");
   const bytes = fromBase64url(payload);
-  let exp = 0;
+  let parsed: unknown = null;
   try {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes ?? new Uint8Array()));
-    exp = typeof parsed === "object" && parsed !== null && "exp" in parsed && typeof parsed.exp === "number" ? parsed.exp : 0;
+    parsed = JSON.parse(new TextDecoder().decode(bytes ?? new Uint8Array()));
   } catch {
-    exp = 0;
+    parsed = null;
   }
-  if (exp <= clock.now()) throw new AppError("forbidden", "state の期限を過ぎた");
+  const body = StatePayload.safeParse(parsed);
+  const now = clock.now();
+  if (!body.success || body.data.exp <= now) throw new AppError("forbidden", "state の期限を過ぎた");
+  // 同じ state で 2 度進めないよう、読んで確かめず消せた件数で決める
+  const used = await env.DB.prepare("DELETE FROM github_states WHERE nonce = ? AND expires_at > ?").bind(body.data.n, now).run();
+  if (used.meta.changes === 0) throw new AppError("forbidden", "state はもう使った");
 }
 
 /**
@@ -268,18 +282,20 @@ export async function checkInstallation(env: Bindings, fetcher: Fetcher, app: Gi
 }
 
 /**
- * インストールを外した事にする。まだ使える版の時だけ取り消し、取り消せた時だけ監査ログに残す
+ * インストールを外した事にする。まだ使える版の時だけ、インストールと App の鍵を 1 回の batch で取り消し、取り消せた時だけ監査ログに残す。もう一度つなぐ時は新しい App を作る
  * @param env バインディング
  * @param installation 外れたインストール
  * @param installation.id インストール ID
  * @param installation.version vault の版
+ * @param app 外れたインストールの App
+ * @param app.version vault の版
  * @param now 今の時刻
  * @param why 気づいたきっかけ
  * @returns 取り消せたら true
  */
-export async function dropInstallation(env: Bindings, installation: { id: number; version: number }, now: number, why: "webhook" | "token_404"): Promise<boolean> {
-  const result = await revokeStatement(env.DB, "github_installation", installation.version, now).run();
-  if (result.meta.changes === 0) return false;
+export async function dropInstallation(env: Bindings, installation: { id: number; version: number }, app: { version: number }, now: number, why: "webhook" | "token_404"): Promise<boolean> {
+  const [result] = await env.DB.batch([revokeStatement(env.DB, "github_installation", installation.version, now), revokeStatement(env.DB, "github_app", app.version, now)]);
+  if ((result?.meta.changes ?? 0) === 0) return false;
   await auditFrom(env, { at: now, actor: "system", action: "github.uninstalled", target: String(installation.id), scope: "office", detail: { why } });
   return true;
 }
@@ -313,6 +329,39 @@ export class TokenCache {
   put(key: string, token: Secret, until: number): void {
     this.#entries.set(key, { token, until });
   }
+
+  /**
+   * ためた鍵の数
+   * @returns 数
+   */
+  get size(): number {
+    return this.#entries.size;
+  }
+
+  /**
+   * ためた鍵をすべて取り出し、ためる所を空にする
+   * @returns 取り出した鍵
+   */
+  drain(): Secret[] {
+    const tokens = [...this.#entries.values()].map((e) => e.token);
+    this.#entries.clear();
+    return tokens;
+  }
+}
+
+/**
+ * ためた 1 時間の鍵を GitHub の側で取り消し、ためる所を空にする。全体を止めた時に呼ぶ (自動停止の 3.5)
+ * 取り消しに失敗した鍵も捨てる。元の鍵は vault で取り替えるので、新しい鍵は作れない
+ * @param env バインディング
+ * @param deps fetch とためる所
+ * @param deps.fetcher 外への fetch
+ * @param deps.cache ためる所
+ */
+export async function revokeTokens(env: Bindings, deps: { fetcher: Fetcher; cache: TokenCache }): Promise<void> {
+  const tokens = deps.cache.drain();
+  await Promise.all(
+    tokens.map((token) => callGitHub(env, deps.fetcher, "installation/token", { method: "DELETE", headers: { authorization: `Bearer ${token.reveal()}` } }).catch(() => null)),
+  );
 }
 
 /** Worker の中で共にためる所。要求ごとに作る受け手も同じ所を使う */
@@ -370,7 +419,7 @@ export async function githubToken(env: Bindings, deps: TokenDeps, repo: string |
   });
   if (res.status === 404) {
     // App を外した通知が届かなくても、ここで連携を切る (タスクとレビューの 3.2 の 5)
-    await dropInstallation(env, link.installation, now, "token_404");
+    await dropInstallation(env, link.installation, link.app, now, "token_404");
     throw new AppError("upstream_failed", "GitHub App が外された");
   }
   if (res.status === 422 && repo !== null) throw new AppError("rule_denied", "連携で選んでいないリポジトリ");

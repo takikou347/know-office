@@ -66,12 +66,14 @@ export const admission = createMiddleware<GateEnv>(async (c, next) => {
 });
 
 /**
- * GitHub の通知を 1 分 60 回に絞る。GitHub の送り元は決まらないので、送り元でなく通知の全体で数える
- * @throws rate_limited 1 分の数を超えた時。Retry-After に秒数を入れる
+ * GitHub の通知の道を、署名を確かめる前は送信元ごとに絞る。通知の全体の 1 分 60 回は、署名が合ってから receiveHook で数える
+ * @throws rate_limited 送信元の 1 分の数を超えた時。Retry-After に秒数を入れる
  */
 export const hookAdmission = createMiddleware<GateEnv>(async (c, next) => {
-  c.set("ip", c.req.header("CF-Connecting-IP") ?? "unknown");
-  const { retryAfter } = await guardOf(c).admit("hooks:github", "hook", c.var.clock.now());
+  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  c.set("ip", ip);
+  // 署名の無い要求で全体の数を使い切らせないよう、ここでは送信元の数だけを見る
+  const { retryAfter } = await guardOf(c).admit(`hooks-ip:${ip}`, "api", c.var.clock.now());
   if (retryAfter !== null) throw new AppError("rate_limited", "要求が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
   await next();
 });

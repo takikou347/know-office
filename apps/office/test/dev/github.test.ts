@@ -3,7 +3,8 @@ import { createHmac, createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createFakeGitHub, deliveryId, sendWebhook } from "../../dev/github.ts";
+import { createFakeGitHub } from "../../dev/github.ts";
+import { deliveryId, sendWebhook } from "../../dev/github-hooks.ts";
 
 /**
  * git の Basic の合言葉に鍵を入れたヘッダー

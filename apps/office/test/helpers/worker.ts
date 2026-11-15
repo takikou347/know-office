@@ -85,8 +85,8 @@ export async function startTestWorker(): Promise<TestWorker> {
 
 /** 本物の wrangler.jsonc で起こした Worker */
 export type OfficeWorker = {
-  /** GET の要求を出す。path は / から始める */
-  request(path: string, headers?: Record<string, string>): Promise<Response>;
+  /** 要求を出す。path は / から始める。init が無ければ GET */
+  request(path: string, headers?: Record<string, string>, init?: { method: string; body?: string }): Promise<Response>;
   /** 止めて、画面のファイルの置き場を消す */
   dispose(): Promise<void>;
 };
@@ -117,9 +117,9 @@ export async function startOfficeWorker(): Promise<OfficeWorker> {
     throw error;
   }
   return {
-    request: async (path, headers = {}) => {
+    request: async (path, headers = {}, init = { method: "GET" }) => {
       // miniflare の Response を、テストの型と同じ Node の Response に移す
-      const res = await worker.fetch(`http://test${path}`, { headers });
+      const res = await worker.fetch(`http://test${path}`, { headers, ...init });
       return new Response(await res.text(), { status: res.status, headers: Object.fromEntries(res.headers) });
     },
     dispose: async () => {

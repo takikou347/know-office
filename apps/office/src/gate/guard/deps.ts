@@ -1,5 +1,7 @@
 // 自動停止が外へ頼む口と、DO が返す数えた答えの形 (自動停止の 3.4、3.6)
 import type { Judgment } from "@know-office/core";
+import type { Bindings } from "../env.ts";
+import { revokeTokens, SHARED_TOKENS } from "../github/app.ts";
 
 /** 直前の出来事 1 件。出来事の項目はどれも文字、数、真偽、null */
 export type RecentOp = Record<string, string | number | boolean | null>;
@@ -39,6 +41,8 @@ export type GuardDeps = {
   rollback(serviceId: string): Promise<void>;
   /** 止めた記録をレビュー担当に渡し、理由を確かめさせる。答えが無ければ null */
   review(record: StopRecord): Promise<ReviewAnswer | null>;
+  /** ためた GitHub の 1 時間の鍵を GitHub の側で取り消し、ためる所を空にする */
+  revokeGitHubTokens(env: Bindings): Promise<void>;
 };
 
 /** まだつないでいない口。戻しは失敗として返し、止めた側が通知とエラーログに残す。レビュー担当は答えず、再開はオーナーが行う */
@@ -46,4 +50,5 @@ export type GuardDeps = {
 export const UNCONNECTED_DEPS: GuardDeps = {
   rollback: () => Promise.reject(new Error("rollback.yml をまだつないでいない")),
   review: () => Promise.resolve(null),
+  revokeGitHubTokens: (env) => revokeTokens(env, { fetcher: (input, init) => fetch(input, init), cache: SHARED_TOKENS }),
 };

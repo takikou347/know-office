@@ -1,5 +1,5 @@
-// ワークスペースからの GitHub への要求を受ける。git は読むか push かを決め、送られた ref を見てから、絞った 1 時間の鍵を付けて送る。api.github.com は選んだリポジトリへの GET だけを通す (タスクとレビューの 3.3)
-import { AppError, allowedFetch, decideRepo, recordedText, RepoName } from "@know-office/core";
+// ワークスペースからの GitHub への要求を受ける。git は読むか push かを決め、push の命令だけを読んで ref を見てから、絞った 1 時間の鍵を付けて送る。api.github.com は選んだリポジトリへの GET だけを通す (タスクとレビューの 3.3)
+import { AppError, allowedFetch, decideRepo, GitHubRepo, recordedText, RepoName } from "@know-office/core";
 import type { Context } from "hono";
 import { endpoints } from "../endpoints.ts";
 import type { GateEnv } from "../env.ts";
@@ -8,57 +8,69 @@ import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { findNode } from "../work/nodes.ts";
 import type { TicketClaims } from "../work/ticket.ts";
-import { githubToken } from "./app.ts";
+import { callGitHub, githubToken, parseGitHub } from "./app.ts";
 import type { Permissions } from "./forge.ts";
 import { repoScope } from "./rules.ts";
 
-/** push の本文の上限 (100MB)。GitHub が 1 回の push に受ける上限に合わせる */
+/** push の本文の上限 (100MB)。GitHub が 1 回の push に受ける上限に合わせる。gzip は解いた後の量で数える */
 export const PUSH_BODY_BYTES = 100 * 1024 * 1024;
+/** push の命令の部分の上限 (1MB)。flush までをここまでに読めなければ断る */
+const COMMAND_BYTES = 1024 * 1024;
 /** git の道。/{owner}/{name}.git/ の後ろに、ref の一覧か、読むか push */
 const GIT_PATH = /^\/([^/]+)\/([^/]+?)(?:\.git)?\/(info\/refs|git-upload-pack|git-receive-pack)$/;
-/** GitHub に引き継ぐ git の要求のヘッダー。作業トークンは引き継がない */
-const GIT_HEADERS = ["content-type", "accept", "git-protocol", "content-encoding"] as const;
+/** GitHub に引き継ぐ git の要求のヘッダー。作業トークンは引き継がない。本文は解いて送るので content-encoding も引き継がない */
+const GIT_HEADERS = ["content-type", "accept", "git-protocol"] as const;
 /** 何も無い sha。ref を消す命令の後ろの値 */
 const ZERO_SHA = "0".repeat(40);
+/** push で変えてよい ref の形 */
+const BRANCH_REF = /^refs\/heads\/[A-Za-z0-9._/-]+$/;
 
 /** push で変える ref の 1 つ */
 export type RefUpdate = { from: string; to: string; ref: string };
 
 /**
- * push の本文の頭の pkt-line から、変える ref を読む。flush (0000) までが命令。Git の pack-protocol の決まり
- * @param body 本文
- * @returns 変える ref。形が違えば null
+ * push の本文の頭の pkt-line から、変える ref を読む。shallow の行の後に命令が並び、flush (0000) までが命令。Git の pack-protocol の決まり
+ * @param body 本文の頭
+ * @returns 変える ref と命令の終わりの位置。形が違えば null、まだ足りなければ "more"
  */
-export function readRefUpdates(body: Uint8Array): RefUpdate[] | null {
+export function readRefUpdates(body: Uint8Array): { updates: RefUpdate[]; end: number } | "more" | null {
   const decoder = new TextDecoder();
   const updates: RefUpdate[] = [];
   let at = 0;
   for (;;) {
-    if (at + 4 > body.length) return null;
-    const length = Number.parseInt(decoder.decode(body.subarray(at, at + 4)), 16);
-    if (Number.isNaN(length)) return null;
-    if (length === 0) return updates;
-    if (length < 4 || at + length > body.length) return null;
+    if (at + 4 > body.length) return "more";
+    const head = decoder.decode(body.subarray(at, at + 4));
+    // parseInt は符号や後ろの文字を読み飛ばすので、先に 16 進数 4 桁だけかを確かめる
+    if (!/^[0-9a-f]{4}$/i.test(head)) return null;
+    const length = Number.parseInt(head, 16);
+    if (length === 0) return { updates, end: at + 4 };
+    if (length < 5) return null;
+    if (at + length > body.length) return "more";
     const line = decoder.decode(body.subarray(at + 4, at + length)).split("\0")[0]?.replace(/\n$/, "") ?? "";
+    at += length;
+    // 浅い clone からの push は、命令の前に shallow の行を送る
+    if (updates.length === 0 && /^shallow [0-9a-f]{40}$/.test(line)) continue;
     const match = /^([0-9a-f]{40}) ([0-9a-f]{40}) (\S+)$/.exec(line);
     if (!match) return null;
     updates.push({ from: match[1] ?? "", to: match[2] ?? "", ref: match[3] ?? "" });
-    at += length;
   }
 }
 
 /**
- * push の命令を断る理由を返す。main を進める事、ref を消す事、ブランチでない ref を変える事を断る
+ * push の命令を断る理由を返す。main と既定のブランチを進める事、ref を消す事、ブランチでない ref や崩れた名前の ref を変える事を断る
  * @param updates 変える ref
+ * @param defaultBranch リポジトリの既定のブランチ
  * @returns 断る理由。通すなら null
  */
-function refusedRef(updates: RefUpdate[]): string | null {
+function refusedRef(updates: RefUpdate[], defaultBranch: string): string | null {
   if (updates.length === 0) return "変える ref が無い";
   for (const u of updates) {
     if (u.to === ZERO_SHA) return `ref を消す push: ${u.ref}`;
-    if (!u.ref.startsWith("refs/heads/")) return `ブランチでない ref: ${u.ref}`;
-    // main を進めるのはゲートウェイだけ (タスクとレビューの 3.4)
-    if (u.ref === "refs/heads/main") return "main への push";
+    if (!BRANCH_REF.test(u.ref)) return `ブランチでない ref: ${u.ref}`;
+    if (u.ref.includes("//") || u.ref.includes("..") || u.ref.endsWith("/") || u.ref.endsWith(".lock")) return `崩れた ref: ${u.ref}`;
+    const branch = u.ref.slice("refs/heads/".length).toLowerCase();
+    // main と既定のブランチを進めるのはゲートウェイだけ (タスクとレビューの 3.4)。大文字の違いで別のブランチと見せさせない
+    if (branch === "main" || branch === defaultBranch.toLowerCase()) return `${branch} への push`;
   }
   return null;
 }
@@ -77,26 +89,132 @@ async function deny(c: Context<GateEnv>, ticket: TicketClaims, target: string, r
   throw new AppError("rule_denied", reason);
 }
 
+/** 流して送る本文。送った量が上限を超えたかを後で見る */
+type Relayed = { stream: ReadableStream<Uint8Array>; over: () => boolean };
+
 /**
- * 本文を上限まで読む
- * @param c 要求の文脈
- * @returns 本文
- * @throws payload_too_large 上限を超える時
+ * 流れを書く口へ移す。読めない、壊れた gzip の失敗は書く口を切り、読む側の流れに出す
+ * @param from 読む流れ
+ * @param to 書く口
  */
-async function readBody(c: Context<GateEnv>): Promise<Uint8Array<ArrayBuffer>> {
-  if (Number(c.req.header("Content-Length") ?? "0") > PUSH_BODY_BYTES) throw new AppError("payload_too_large", "push が 100MB を超える");
-  const body = new Uint8Array(await c.req.arrayBuffer());
-  if (body.byteLength > PUSH_BODY_BYTES) throw new AppError("payload_too_large", "push が 100MB を超える");
-  return body;
+async function pump(from: ReadableStream<Uint8Array>, to: WritableStreamDefaultWriter<BufferSource>): Promise<void> {
+  const reader = from.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // 型の上で書く口は ArrayBuffer の上の物だけを受けるので写す
+      await to.write(new Uint8Array(value));
+    }
+    await to.close();
+  } catch (error) {
+    await to.abort(error).catch(() => undefined);
+    await reader.cancel().catch(() => undefined);
+  }
 }
 
 /**
- * ワークスペースの git の要求を、絞った鍵を付けて github.com に送る。push はタスクのリポジトリのブランチだけを通す
+ * 本文を gzip なら解いて読む口にする
+ * @param c 要求の文脈
+ * @returns 解いた本文
+ * @throws payload_too_large Content-Length が上限を超える時
+ * @throws malformed_request gzip でない content-encoding の時
+ */
+function decodedBody(c: Context<GateEnv>): ReadableStream<Uint8Array> {
+  if (Number(c.req.header("Content-Length") ?? "0") > PUSH_BODY_BYTES) throw new AppError("payload_too_large", "push が 100MB を超える");
+  const encoding = (c.req.header("Content-Encoding") ?? "identity").trim().toLowerCase();
+  const raw: ReadableStream<Uint8Array> = c.req.raw.body ?? new ReadableStream<Uint8Array>({ start: (controller) => controller.close() });
+  if (encoding === "identity") return raw;
+  if (encoding === "gzip") {
+    const gunzip = new DecompressionStream("gzip");
+    void pump(raw, gunzip.writable.getWriter());
+    return gunzip.readable;
+  }
+  throw new AppError("malformed_request", "content-encoding は gzip だけを受ける");
+}
+
+/**
+ * 先に読んだ頭と残りをつなぎ、送った量を数えて、上限を超えたら流れを切る
+ * @param head 先に読んだ頭
+ * @param rest 残りを読む口
+ * @returns 流して送る本文
+ */
+function relayed(head: Uint8Array, rest: ReadableStreamDefaultReader<Uint8Array>): Relayed {
+  const state = { sent: head.byteLength, over: head.byteLength > PUSH_BODY_BYTES, first: true };
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (state.first) {
+        state.first = false;
+        if (head.byteLength > 0) {
+          controller.enqueue(head);
+          return;
+        }
+      }
+      const { done, value } = await rest.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      state.sent += value.byteLength;
+      if (state.sent > PUSH_BODY_BYTES) {
+        state.over = true;
+        void rest.cancel();
+        controller.error(new Error("push が 100MB を超える"));
+        return;
+      }
+      controller.enqueue(value);
+    },
+    cancel: async () => rest.cancel(),
+  });
+  return { stream, over: () => state.over };
+}
+
+/**
+ * push の本文から命令の部分だけを読み、残りは読まずに流す形にする
+ * @param body 解いた本文
+ * @returns 変える ref と流して送る本文
+ * @throws malformed_request 命令の形が違う、flush で終わらない、flush までが 1MB を超える時
+ */
+async function readCommands(body: ReadableStream<Uint8Array>): Promise<{ updates: RefUpdate[]; relay: Relayed }> {
+  const reader = body.getReader();
+  let head = new Uint8Array(0);
+  for (;;) {
+    const parsed = readRefUpdates(head);
+    if (parsed === null) throw new AppError("malformed_request", "push の命令の形が違う");
+    if (parsed !== "more") return { updates: parsed.updates, relay: relayed(head, reader) };
+    if (head.byteLength > COMMAND_BYTES) throw new AppError("malformed_request", "push の命令が長すぎる");
+    const { done, value } = await reader.read();
+    if (done) throw new AppError("malformed_request", "push の命令が flush で終わらない");
+    const next = new Uint8Array(head.byteLength + value.byteLength);
+    next.set(head);
+    next.set(value, head.byteLength);
+    head = next;
+  }
+}
+
+/**
+ * リポジトリの既定のブランチを読む
+ * @param c 要求の文脈
+ * @param repo リポジトリ
+ * @param token 読める鍵
+ * @returns 既定のブランチの名前
+ * @throws upstream_failed 読めない、形が違う時。分からなければ push を通さない
+ */
+async function defaultBranchOf(c: Context<GateEnv>, repo: string, token: string): Promise<string> {
+  const res = await callGitHub(c.env, c.var.fetch, `repos/${repo}`, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
+  return (await parseGitHub(res, GitHubRepo)).default_branch;
+}
+
+/**
+ * ワークスペースの git の要求を、絞った鍵を付けて github.com に送る。push はタスクのリポジトリのブランチだけを通す。本文は命令だけを読み、残りは流して送る
  * @param c 要求の文脈。作業トークンは受け手が確かめている
  * @param ticket 確かめた作業トークン
  * @returns GitHub の返事
  * @throws not_found git の道でない時
- * @throws rule_denied 触れるリポジトリでない、できない操作、タスクのでないリポジトリ、main や ref を消す push の時
+ * @throws rule_denied 触れるリポジトリでない、できない操作、タスクのでないリポジトリ、main や既定のブランチ、ref を消す、崩れた ref の push の時
+ * @throws malformed_request push の命令の形が違う時
+ * @throws payload_too_large 本文が 100MB を超える時
  * @throws upstream_failed つないでいない、GitHub に届かない時
  */
 export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promise<Response> {
@@ -109,40 +227,41 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   const scope = await repoScope(c.env.DB, repo.data);
   const decision = decideRepo({ action: push ? "push" : "read", repo: repo.data, paths: [] }, scope);
   if (!decision.allow) return deny(c, ticket, `${repo.data} ${push ? "push" : "read"}`, decision.reason);
-  let body: Uint8Array<ArrayBuffer> | null = null;
-  let refs: string[] = [];
-  if (push) {
-    // 書くのはタスクのリポジトリだけ。ほかのリポジトリはタスクの外
-    const task = await findNode(c.env.DB, ticket.nodeId);
-    if (task.repo !== repo.data) return deny(c, ticket, `${repo.data} push`, "タスクのリポジトリでない");
-    if (c.req.method === "POST") {
-      body = await readBody(c);
-      const updates = readRefUpdates(body);
-      if (!updates) throw new AppError("malformed_request", "push の命令の形が違う");
-      const refused = refusedRef(updates);
-      if (refused !== null) return deny(c, ticket, `${repo.data} push`, refused);
-      refs = updates.map((u) => u.ref);
+  // 書くのはタスクのリポジトリだけ。ほかのリポジトリはタスクの外
+  if (push && (await findNode(c.env.DB, ticket.nodeId)).repo !== repo.data) return deny(c, ticket, `${repo.data} push`, "タスクのリポジトリでない");
+  const body = c.req.method === "POST" ? decodedBody(c) : null;
+  const commands = push && body ? await readCommands(body) : null;
+  const token = await githubToken(c.env, c.var.github, repo.data, { contents: push ? "write" : "read" });
+  if (commands) {
+    const refused = refusedRef(commands.updates, await defaultBranchOf(c, repo.data, token.reveal()));
+    if (refused !== null) {
+      void commands.relay.stream.cancel();
+      return deny(c, ticket, `${repo.data} push`, refused);
     }
-  } else if (c.req.method === "POST") {
-    body = await readBody(c);
   }
-  const permissions: Permissions = { contents: push ? "write" : "read" };
-  const token = await githubToken(c.env, c.var.github, repo.data, permissions);
+  const relay = commands?.relay ?? (body ? relayed(new Uint8Array(0), body.getReader()) : null);
   const root = `${endpoints(c.env).githubGit.replace(/\/$/, "")}/`;
   const headers = new Headers({ authorization: `Basic ${btoa(`x-access-token:${token.reveal()}`)}` });
   for (const name of GIT_HEADERS) {
     const value = c.req.header(name);
     if (value !== undefined) headers.set(name, value);
   }
-  let res: Response;
+  // 流れの本文は duplex を要る所がある
+  const init: RequestInit & { duplex?: "half" } = { method: c.req.method, headers, ...(relay ? { body: relay.stream, duplex: "half" } : {}) };
+  let res: Response | null = null;
   try {
-    res = await allowedFetch(c.var.fetch, `${root}${repo.data}.git/${match[3] ?? ""}${url.search}`, [root], { method: c.req.method, headers, ...(body ? { body } : {}) });
+    res = await allowedFetch(c.var.fetch, `${root}${repo.data}.git/${match[3] ?? ""}${url.search}`, [root], init);
   } catch {
-    throw new AppError("upstream_failed", "GitHub に届かない");
+    res = null;
   }
-  if (push && c.req.method === "POST" && res.ok) {
-    await auditFrom(c.env, { at: c.var.clock.now(), actor: ticket.staffId, action: "github.push", target: repo.data, scope: "office", detail: { nodeId: ticket.nodeId, refs }, traceId: c.var.traceId });
-  }
+  if (relay?.over()) throw new AppError("payload_too_large", "push が 100MB を超える");
+  const status = res?.status ?? 502;
+  // 読む操作も push も、失敗も含めて App を通した操作として残す (タスクとレビューの 3.3)
+  const entry = commands
+    ? { action: "github.push", detail: { nodeId: ticket.nodeId, refs: commands.updates.map((u) => recordedText(u.ref)), status } }
+    : { action: "github.read", detail: { nodeId: ticket.nodeId, via: "git", path: match[3] ?? "", status } };
+  await auditFrom(c.env, { at: c.var.clock.now(), actor: ticket.staffId, target: repo.data, scope: "office", traceId: c.var.traceId, ...entry });
+  if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
   return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/octet-stream" } });
 }
 
@@ -177,13 +296,23 @@ export async function relayGitHubApi(c: Context<GateEnv>, ticket: TicketClaims):
   if (!decision.allow) return deny(c, ticket, `${repo.data} read`, decision.reason);
   const token = await githubToken(c.env, c.var.github, repo.data, readPermissions(match[2] ?? ""));
   const root = `${endpoints(c.env).github.replace(/\/$/, "")}/`;
-  let res: Response;
+  let res: Response | null = null;
   try {
     res = await allowedFetch(c.var.fetch, `${root}repos/${repo.data}${match[2] ?? ""}${url.search}`, [root], {
       headers: { authorization: `Bearer ${token.reveal()}`, accept: c.req.header("accept") ?? "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
     });
   } catch {
-    throw new AppError("upstream_failed", "GitHub に届かない");
+    res = null;
   }
+  await auditFrom(c.env, {
+    at: c.var.clock.now(),
+    actor: ticket.staffId,
+    action: "github.read",
+    target: repo.data,
+    scope: "office",
+    detail: { nodeId: ticket.nodeId, via: "api", path: recordedText(match[2] ?? ""), status: res?.status ?? 502 },
+    traceId: c.var.traceId,
+  });
+  if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
   return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
 }
