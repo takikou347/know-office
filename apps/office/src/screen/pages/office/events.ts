@@ -34,23 +34,25 @@ export function eventsBetween(prev: OfficeSnapshot, next: OfficeSnapshot): Offic
   const before = new Map(prev.tasks.map((t) => [t.id, t]));
   for (const t of next.tasks) {
     const old = before.get(t.id);
+    const isNew = old === undefined;
+    const handedOver = old !== undefined && old.staffId !== t.staffId;
+    const forOthers = t.staffId !== ASSIGNER;
     // 新しいタスクと担当の替わったタスクは、社長が担当に渡す
-    if ((!old || old.staffId !== t.staffId) && t.staffId !== ASSIGNER) {
-      events.push({ kind: "assign", taskId: t.id, title: t.title, from: ASSIGNER, to: t.staffId });
-    }
-    const was = old?.state ?? "次";
-    if (was !== "可待ち" && t.state === "可待ち" && t.staffId !== REVIEWER) {
-      events.push({ kind: "review-request", taskId: t.id, title: t.title, from: t.staffId, to: REVIEWER });
-    }
-    if (was === "可待ち" && t.state === "済") events.push({ kind: "approve", taskId: t.id, title: t.title, by: REVIEWER, owner: t.staffId });
-    if (was === "可待ち" && (t.state === "今" || t.state === "次")) {
-      events.push({ kind: "send-back", taskId: t.id, title: t.title, by: REVIEWER, to: t.staffId });
-    }
+    if ((isNew || handedOver) && forOthers) events.push({ kind: "assign", taskId: t.id, title: t.title, from: ASSIGNER, to: t.staffId });
+    const wasWaiting = old?.state === "可待ち";
+    const isWaiting = t.state === "可待ち";
+    const byOthers = t.staffId !== REVIEWER;
+    const backToWork = t.state === "今" || t.state === "次";
+    const entersReview = isWaiting && old?.state !== t.state;
+    if (entersReview && byOthers) events.push({ kind: "review-request", taskId: t.id, title: t.title, from: t.staffId, to: REVIEWER });
+    if (wasWaiting && t.state === "済") events.push({ kind: "approve", taskId: t.id, title: t.title, by: REVIEWER, owner: t.staffId });
+    if (wasWaiting && backToWork) events.push({ kind: "send-back", taskId: t.id, title: t.title, by: REVIEWER, to: t.staffId });
   }
   const states = new Map(prev.staff.map((s) => [s.id, s.state]));
   for (const s of next.staff) {
     const was = states.get(s.id);
-    if (was && was !== s.state) events.push({ kind: "state", staffId: s.id, from: was, to: s.state });
+    const changed = was !== undefined && was !== s.state;
+    if (changed) events.push({ kind: "state", staffId: s.id, from: was, to: s.state });
   }
   return events;
 }
@@ -83,4 +85,21 @@ export function describeEvent(e: OfficeEvent, roleOf: (id: string) => string): s
     default:
       return e satisfies never;
   }
+}
+
+/** 読み上げる出来事の数の上限。超えた分は件数だけを読む */
+export const NEWS_LIMIT = 3;
+
+/**
+ * 1 つのまとまりの出来事を、読み上げる 1 つの文にする。上限を超えた分は「ほか N 件」にする
+ * @param events 出来事の並び
+ * @param roleOf 社員の id から役目の名前を返す関数
+ * @returns 読み上げる文
+ */
+export function newsOf(events: readonly OfficeEvent[], roleOf: (id: string) => string): string {
+  if (events.length === 0) return "直近の出来事はまだありません";
+  const said = events.slice(0, NEWS_LIMIT).map((e) => describeEvent(e, roleOf));
+  const rest = events.length - said.length;
+  const more = rest > 0 ? [`ほか ${rest} 件`] : [];
+  return `直近の出来事: ${[...said, ...more].join("。")}`;
 }

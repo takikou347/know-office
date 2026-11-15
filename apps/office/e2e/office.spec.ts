@@ -27,19 +27,27 @@ function recordRequests(page: Page): string[] {
 const roomOf = (page: Page) => page.getByRole("region", { name: "オフィスの部屋" });
 
 /**
- * 読み込み直さずに、切り替えからオフィスへ移る。狭い幅ではその他から移る
+ * 読み込み直さずに、切り替えから画面へ移る。狭い幅で切り替えに無い画面は、その他から移る
  * @param page 見るページ
+ * @param name 画面の名前
  */
-async function openOfficeInApp(page: Page): Promise<void> {
-  const side = page.locator("nav:visible").getByRole("link", { name: "オフィス" });
+async function openInApp(page: Page, name: string): Promise<void> {
+  const side = page.locator("nav:visible").getByRole("link", { name, exact: true });
   if (await side.isVisible()) {
     await side.click();
   } else {
     await page.locator("nav:visible").getByRole("link", { name: "その他" }).click();
-    await page.getByRole("main").getByRole("link", { name: "オフィス" }).click();
+    await page.getByRole("main").getByRole("link", { name, exact: true }).click();
   }
-  await expect(page.getByRole("heading", { level: 1, name: "オフィス" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
 }
+
+/**
+ * 部屋の canvas の今の絵を返す
+ * @param page 見るページ
+ * @returns 絵の PNG
+ */
+const pictureOf = (page: Page) => roomOf(page).locator("canvas").screenshot({ animations: "allow" });
 
 /**
  * 社員を覆うリンクの箱の位置を返す
@@ -79,31 +87,36 @@ test.describe("速さ", () => {
   });
 });
 
-test.describe("オフィスの 3D", () => {
-  test("社員と状態と直近の出来事を読み上げる", async ({ page }) => {
+test.describe("オフィスの部屋", () => {
+  test("出来事を動きで見せる", async ({ page, context }) => {
+    const waiting = page.getByRole("list", { name: "可を待つ物" }).getByRole("link", { name: /CodeEditor のページを足す/ });
+    await page.goto("/");
+    await expect(waiting).toBeVisible();
     await page.goto("/office");
     const room = roomOf(page);
     await expect(room.getByRole("link", { name: "社長 働いている" })).toBeVisible();
     await expect(room.getByRole("link", { name: "作る役 働いている" })).toBeVisible();
     await expect(room.getByRole("link", { name: "見る役 待っている" })).toBeVisible();
     await expect(room.getByRole("status")).toHaveText("直近の出来事はまだありません");
-  });
 
-  test("可を出すと、オフィスで承認の出来事を読み上げる", async ({ page }) => {
+    // 可を出すと、タスクの一覧も同じ置き場から読むので変わり、オフィスでは承認の出来事になる
     await page.goto("/staff/builder/tasks/t2");
     await page.getByRole("button", { name: "可", exact: true }).click();
-    await openOfficeInApp(page);
+    await openInApp(page, "ダッシュボード");
+    await expect(page.getByRole("list", { name: "可を待つ物" })).toBeVisible();
+    await expect(waiting).toHaveCount(0);
+    await openInApp(page, "オフィス");
     await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を承認した");
+
+    // 不可を出すと、差し戻しの出来事になる。読み込み直した別のページで、初めの状態から確かめる
+    const other = await context.newPage();
+    await other.goto("/staff/builder/tasks/t2");
+    await other.getByRole("button", { name: "不可" }).click();
+    await openInApp(other, "オフィス");
+    await expect(roomOf(other).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を作る役に差し戻した");
   });
 
-  test("不可を出すと、オフィスで差し戻しの出来事を読み上げる", async ({ page }) => {
-    await page.goto("/staff/builder/tasks/t2");
-    await page.getByRole("button", { name: "不可" }).click();
-    await openOfficeInApp(page);
-    await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を作る役に差し戻した");
-  });
-
-  test("WebGL が無い時は 2D の一覧に代える", async ({ page }) => {
+  test("WebGL が無い時は 2D の一覧", async ({ page }) => {
     await withoutWebgl(page);
     const urls = recordRequests(page);
     await page.goto("/office");
@@ -116,14 +129,41 @@ test.describe("オフィスの 3D", () => {
     await expect(page.getByRole("log", { name: "作る役との会話" })).toBeVisible();
   });
 
-  test("動きを減らす設定では部屋を出し、社員を動かさない", async ({ page }) => {
+  test("動きを減らす設定では動かさない", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/office");
     await expect(roomOf(page).locator("canvas")).toBeVisible();
     await expect(page.getByRole("list", { name: "社員の様子" })).toHaveCount(0);
+    // 初めから動かさないので、止めるボタンは出さない
+    await expect(page.getByRole("button", { name: "動きを止める" })).toHaveCount(0);
     const first = await boxOf(page, /見る役/);
+    const before = await pictureOf(page);
     await page.waitForTimeout(600);
     expect(await boxOf(page, /見る役/)).toEqual(first);
+    expect((await pictureOf(page)).equals(before)).toBe(true);
+  });
+
+  test("動きを止めるボタン", async ({ page }) => {
+    await page.goto("/office");
+    const halt = page.getByRole("button", { name: "動きを止める" });
+    await expect(halt).toHaveAttribute("aria-pressed", "false");
+    // 確かめ方が効いている事: 動いている間は、時間が経つと絵が変わる
+    const moving = await pictureOf(page);
+    await page.waitForTimeout(600);
+    expect((await pictureOf(page)).equals(moving)).toBe(false);
+
+    await halt.click();
+    await expect(halt).toHaveAttribute("aria-pressed", "true");
+    await expect(roomOf(page)).toHaveAttribute("data-motion", "still");
+    const still = await pictureOf(page);
+    await page.waitForTimeout(600);
+    expect((await pictureOf(page)).equals(still)).toBe(true);
+
+    await halt.click();
+    await expect(halt).toHaveAttribute("aria-pressed", "false");
+    await expect(roomOf(page)).toHaveAttribute("data-motion", "moving");
+    await page.waitForTimeout(600);
+    expect((await pictureOf(page)).equals(still)).toBe(false);
   });
 
   test("キーボードで社員を選ぶ", async ({ page, browserName }) => {
@@ -134,7 +174,7 @@ test.describe("オフィスの 3D", () => {
     const key = browserName === "webkit" ? "Alt+Tab" : "Tab";
     // 切り替えの並びを飛ばし、中身の頭から Tab で進む
     await page.getByRole("main").focus();
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 12; i++) {
       await page.keyboard.press(key);
       if (await target.evaluate((el) => el === document.activeElement)) break;
     }

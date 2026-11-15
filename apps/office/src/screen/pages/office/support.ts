@@ -6,8 +6,8 @@ export interface Show3dEnv {
   createCanvas: () => { getContext: (kind: string) => unknown };
 }
 
-/** 動きを減らす設定のメディアクエリ */
-export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+/** 動きを減らす設定をしていない時に合うメディアクエリ */
+export const MOTION_ALLOWED_QUERY = "(prefers-reduced-motion: no-preference)";
 
 /**
  * 3D の部屋を出せるかを決める。WebGL 2 が使える時だけ出す

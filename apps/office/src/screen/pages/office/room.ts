@@ -1,27 +1,16 @@
-// three.js でオフィスの部屋を組み、子犬の社員を置き、状態ごとの形と出来事の動きの列を毎フレーム当てる
-import {
-  BufferGeometry,
-  Color,
-  DirectionalLight,
-  HemisphereLight,
-  Material,
-  Mesh,
-  MeshStandardMaterial,
-  type Object3D,
-  OrthographicCamera,
-  PCFSoftShadowMap,
-  Scene,
-  Vector3,
-  WebGLRenderer,
-} from "three";
+// オフィスの部屋。舞台と子犬の社員を組み (組み立て)、出来事の動きを進め (動き)、状態ごとの形を当てて描き (描画)、閉じる時に捨てる (片付け)
+import { Color, MeshStandardMaterial, Vector3 } from "three";
 import type { Staff } from "../../mock.ts";
 import { avatarSourceOf } from "./avatars.ts";
-import { COATS, PROPS, PUPPY_SCALE, type Puppy, applyPuppyPose, buildPuppy } from "./figure.ts";
+import { disposeScene } from "./cleanup.ts";
+import { type ActorState, createDirector } from "./director.ts";
+import { COATS, PROPS, PUPPY_SCALE, type Puppy, applyPuppyPose, buildPuppy, puppyScaleFor } from "./figure.ts";
 import { type DeskParts, SEAT_HEIGHT, buildRoomShell, stackPaper } from "./furniture.ts";
-import { GRID, type Point, seatOf, stationOf } from "./layout.ts";
+import { type Point, seatOf, stationOf } from "./layout.ts";
 import { buildMarks, type Marks, showMark } from "./marks.ts";
 import { activityOf, poseOf } from "./motion.ts";
 import type { Actors, Step } from "./plan.ts";
+import { buildStage } from "./stage.ts";
 import type { OfficeTheme } from "./themes.ts";
 import { type VrmAvatar, loadVrmAvatar } from "./vrm.ts";
 
@@ -42,9 +31,9 @@ export interface SeatBox {
 
 /** 組んだ部屋 */
 export interface Room {
-  /** 時刻の形を当てて描く */
+  /** 時刻まで動きを進めて描く */
   render: (t: number) => void;
-  /** canvas の大きさを変える */
+  /** canvas の大きさを変えて描く */
   resize: (width: number, height: number) => void;
   /** 社員の姿を覆う箱を返す */
   boxes: () => SeatBox[];
@@ -52,32 +41,31 @@ export interface Room {
   actors: () => Actors;
   /** 社員の状態を変える */
   setStates: (seats: readonly Seat[]) => void;
-  /** 動きの列を後ろに積む。動きを減らす設定では、その場で置き換える */
+  /** 動きの列を後ろに積む。動かさない間は、その場で置き換える */
   play: (steps: readonly Step[]) => void;
-  /** 使った物を捨てる */
+  /** 動かすかを決める。動かさない時は残りの列を置き換え、息や打鍵も止めた形で描く */
+  setMoving: (moves: boolean) => void;
+  /** 使った物を捨て、描く所を手放す */
   dispose: () => void;
 }
 
 /** 色の書き方 (CSS の色か var(--color-...)) を CSS の rgb() に直す関数 */
 export type ColorResolver = (value: string) => string;
 
-/** 歩く速さ (タイル毎秒) と、書類を置くのに掛ける時間と、印を出す時間 (ミリ秒) */
-const WALK_SPEED = 1.8;
-const GIVE_MS = 700;
-const MARK_MS = 2400;
+/** 部屋の決まり */
+export interface RoomOptions {
+  /** 初めから動かすか */
+  moves: boolean;
+  /** 描く所を失った時に呼ぶ */
+  onLost: () => void;
+}
 
-interface Actor {
-  id: string;
+/** 社員の姿と状態 */
+interface Figure {
   state: Staff["state"];
   puppy: Puppy;
   marks: Marks;
   vrm?: VrmAvatar;
-  pos: Point;
-  face: number;
-  present: boolean;
-  carry: boolean;
-  walking: boolean;
-  mark: { kind: "ok" | "back"; until: number } | null;
 }
 
 const atSeat = (id: string, p: Point) => {
@@ -90,13 +78,16 @@ const atSeat = (id: string, p: Point) => {
  * @param canvas 描く canvas
  * @param seats 部屋に置く社員
  * @param theme 部屋の色と明かり
- * @param resolve 色の書き方を CSS の rgb() に直す関数
- * @param opts 動きの決まり
- * @param opts.reduce 動きを減らす設定か
+ * @param resolve 色の書き方を CSS の rgb() に直す関数。組む時にだけ呼ぶ
+ * @param opts 動かすかと、描く所を失った時の呼び先
  * @returns 組んだ部屋
  */
-export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], theme: OfficeTheme, resolve: ColorResolver, opts: { reduce: boolean }): Room {
+export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], theme: OfficeTheme, resolve: ColorResolver, opts: RoomOptions): Room {
+  // 組み立て: 色はここで 1 回だけ直し、描く間は作った Color を使い回す
   const color = (value: string) => new Color(resolve(value));
+  const screenOn = color(theme.screenOn);
+  const screenOff = color(theme.screenOff);
+  const markColors = { stop: color(theme.stop), ok: color(theme.ok), back: color(theme.back) };
   const materials = new Map<string, MeshStandardMaterial>();
   const mat = (key: string) => {
     const binder = /^binder(\d)$/.exec(key);
@@ -109,37 +100,21 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     }
     return m;
   };
-
-  const renderer = new WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = PCFSoftShadowMap;
-  const scene = new Scene();
-  scene.background = color(theme.background);
+  const { renderer, scene, camera, sun, fit } = buildStage(canvas, color(theme.background), theme);
   const desks: Record<string, DeskParts> = buildRoomShell(scene, mat, resolve, theme);
-
-  // 柔らかい光: 空と床の色を混ぜた明かりに、窓の側からの影の柔らかい日の光を足す
-  scene.add(new HemisphereLight(0xfffaf0, 0xe8d8c0, theme.ambient * 2.2));
-  const sun = new DirectionalLight(0xfff4e0, theme.sun);
-  sun.position.set(GRID.cols * 0.75, 9, -2);
-  sun.target.position.set(GRID.cols / 2, 0, GRID.rows / 2);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.radius = 4;
-  Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, far: 30 });
-  scene.add(sun, sun.target);
-
   const paperMat = mat("paper");
   let disposed = false;
-  const actors = new Map<string, Actor>();
+  const figures = new Map<string, Figure>();
+  const states = new Map<string, ActorState>();
   for (const s of seats) {
     const puppy = buildPuppy(COATS[s.id] ?? "#c99a6e", PROPS[s.id] ?? null, paperMat.color);
-    const marks = buildMarks({ stop: color(theme.stop), ok: color(theme.ok), back: color(theme.back) });
+    const marks = buildMarks(markColors);
     puppy.root.add(marks.group);
     scene.add(puppy.root);
+    const figure: Figure = { state: s.state, puppy, marks };
+    figures.set(s.id, figure);
     const at = stationOf(s.id, s.state);
-    const actor: Actor = { id: s.id, state: s.state, puppy, marks, pos: at ?? { x: 0, z: 0 }, face: at?.face ?? 0, present: at !== null, carry: false, walking: false, mark: null };
-    actors.set(s.id, actor);
+    states.set(s.id, { id: s.id, pos: at ?? { x: 0, z: 0 }, face: at?.face ?? 0, present: at !== null, carry: false, walking: false, giving: false, mark: null });
     const source = avatarSourceOf(s.id);
     if (source.kind === "vrm") {
       // 読めたら子犬と差し替え、読めなければ子犬のままにする
@@ -148,139 +123,71 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
           if (disposed) return vrm.dispose();
           puppy.body.visible = false;
           puppy.root.add(vrm.object);
-          actor.vrm = vrm;
+          figure.vrm = vrm;
         })
         .catch(() => undefined);
     }
   }
-
-  const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
-  const target = new Vector3(GRID.cols / 2, 0.4, GRID.rows / 2);
-  camera.position.copy(target).add(new Vector3(0.55, 0.95, 1).normalize().multiplyScalar(30));
-  camera.lookAt(target);
-  camera.updateMatrixWorld();
-  // 部屋の隅を目の向きに写し、どの縦横比でも部屋がちょうど収まる広さを決める
-  const corners: Vector3[] = [];
-  for (const x of [-0.2, GRID.cols + 0.2]) for (const y of [0, 2]) for (const z of [-0.2, GRID.rows + 0.2]) corners.push(new Vector3(x, y, z));
-  const view = corners.map((c) => c.clone().applyMatrix4(camera.matrixWorldInverse));
-  const span = {
-    minX: Math.min(...view.map((v) => v.x)),
-    maxX: Math.max(...view.map((v) => v.x)),
-    minY: Math.min(...view.map((v) => v.y)),
-    maxY: Math.max(...view.map((v) => v.y)),
+  const paintScreen = (id: string, state: Staff["state"]) => {
+    const desk = desks[id];
+    if (!desk) return;
+    const on = state === "working";
+    desk.screen.color.copy(on ? screenOn : screenOff);
+    desk.screen.emissive.copy(desk.screen.color);
+    desk.screen.emissiveIntensity = on ? 0.7 : 0;
   };
+  for (const [id, f] of figures) paintScreen(id, f.state);
+
+  // 動き: 書類を机に置いたら山を足し、影の地図を描き直す
+  const director = createDirector(states, (deskId) => {
+    const desk = desks[deskId];
+    if (!desk) return;
+    stackPaper(desk.papers, paperMat);
+    renderer.shadowMap.needsUpdate = true;
+  });
+  let moves = opts.moves;
   let size = { width: 1, height: 1 };
+  let scale = PUPPY_SCALE;
 
-  // 動きの列。先頭から 1 段ずつ進める
-  const queue: Step[] = [];
-  let current: { step: Step; start: number } | null = null;
-  const apply = (step: Step, now: number) => {
-    const a = actors.get(step.actor);
-    if (!a) return;
-    if (step.kind === "give") {
-      a.carry = false;
-      const desk = desks[step.desk];
-      if (desk) stackPaper(desk.papers, paperMat);
-    } else if (step.kind === "mark") {
-      a.mark = { kind: step.mark, until: now + MARK_MS };
-    } else if (step.kind === "place") {
-      a.present = step.at !== null;
-      if (step.at) {
-        a.pos = { x: step.at.x, z: step.at.z };
-        a.face = step.at.face;
-      }
-      a.walking = false;
-    }
-  };
-  const advance = (t: number) => {
-    for (;;) {
-      if (!current) {
-        const next = queue.shift();
-        if (!next) return;
-        current = { step: next, start: t };
-        if (next.kind === "walk") {
-          const a = actors.get(next.actor);
-          if (a) Object.assign(a, { walking: true, carry: next.carry === "paper", present: true });
-        }
-      }
-      const { step, start } = current;
-      const a = actors.get(step.actor);
-      if (step.kind === "walk" && a) {
-        const lengths = step.path.slice(1).map((p, i) => Math.hypot(p.x - (step.path[i]?.x ?? 0), p.z - (step.path[i]?.z ?? 0)));
-        let left = ((t - start) / 1000) * WALK_SPEED;
-        let i = 0;
-        while (i < lengths.length && left > (lengths[i] ?? 0)) left -= lengths[i++] ?? 0;
-        if (i >= lengths.length) {
-          const end = step.path.at(-1);
-          if (end) a.pos = { ...end };
-          a.walking = false;
-          current = null;
-          continue;
-        }
-        const p0 = step.path[i] ?? a.pos;
-        const p1 = step.path[i + 1] ?? a.pos;
-        const k = left / (lengths[i] || 1);
-        a.pos = { x: p0.x + (p1.x - p0.x) * k, z: p0.z + (p1.z - p0.z) * k };
-        a.face = Math.atan2(p1.x - p0.x, p1.z - p0.z);
-        return;
-      }
-      if (step.kind === "give" && a) {
-        a.face = Math.PI;
-        if (t - start < GIVE_MS) return;
-      }
-      apply(step, t);
-      current = null;
-    }
-  };
-
+  // 描画: 動かさない間は時刻 0 の形 (息、打鍵、しっぽを止めた形) で描く
   const draw = (t: number) => {
-    for (const a of actors.values()) {
-      const activity = a.walking ? "walk" : activityOf(a.state);
-      const standing = !a.walking && current?.step.actor === a.id && current.step.kind === "give";
-      // 書類を置く間は立ち止まる。動きを減らす設定では時刻 0 の形のままにする
-      const pose = standing ? poseOf("walk", 0) : poseOf(activity, opts.reduce ? 0 : t);
-      const seated = pose.posture === "sit" && atSeat(a.id, a.pos);
-      applyPuppyPose(a.puppy, { ...pose, visible: a.present && (a.walking || pose.visible) });
-      a.vrm?.applyPose(pose);
-      a.vrm?.update(1 / 60);
-      a.puppy.root.position.set(a.pos.x, seated ? SEAT_HEIGHT : 0, a.pos.z);
-      a.puppy.root.rotation.y = a.face;
-      a.puppy.paper.visible = a.carry;
-      if (a.mark && !opts.reduce && t > a.mark.until) a.mark = null;
-      const stopMark = pose.mark === "stop" && !a.walking ? "stop" : null;
-      showMark(a.marks, a.mark?.kind ?? stopMark, camera);
-      const desk = desks[a.id];
-      if (desk) {
-        const on = a.state === "working";
-        desk.screen.color.copy(color(on ? theme.screenOn : theme.screenOff));
-        desk.screen.emissive.copy(desk.screen.color);
-        desk.screen.emissiveIntensity = on ? 0.7 : 0;
-      }
+    const at = moves ? t : 0;
+    for (const [id, f] of figures) {
+      const a = states.get(id);
+      if (!a) continue;
+      const pose = a.giving ? poseOf("walk", 0) : poseOf(a.walking ? "walk" : activityOf(f.state), at);
+      const seated = pose.posture === "sit" && atSeat(id, a.pos);
+      applyPuppyPose(f.puppy, { ...pose, visible: a.present && (a.walking || pose.visible) });
+      f.vrm?.applyPose(pose);
+      f.vrm?.update(1 / 30);
+      f.puppy.root.position.set(a.pos.x, seated ? SEAT_HEIGHT : 0, a.pos.z);
+      f.puppy.root.rotation.y = a.face;
+      f.puppy.paper.visible = a.carry;
+      // 歩いている間は止めた印を出さない
+      const stopMark = a.walking ? null : pose.mark;
+      showMark(f.marks, a.mark?.kind ?? stopMark, camera);
     }
     renderer.render(scene, camera);
   };
 
+  // 片付け: 描く所を失ったら 2D に代える。捨てる時に自分で失わせる分は聞かない
+  const lost = () => opts.onLost();
+  canvas.addEventListener("webglcontextlost", lost);
+
   return {
     render: (t) => {
-      advance(t);
+      director.advance(t);
       draw(t);
     },
     resize: (width, height) => {
       size = { width: Math.max(1, width), height: Math.max(1, height) };
-      renderer.setSize(size.width, size.height, false);
-      let w = (span.maxX - span.minX) * 1.02;
-      let h = (span.maxY - span.minY) * 1.02;
-      const aspect = size.width / size.height;
-      if (w / h < aspect) w = h * aspect;
-      else h = w / aspect;
-      const cx = (span.minX + span.maxX) / 2;
-      const cy = (span.minY + span.maxY) / 2;
-      Object.assign(camera, { left: cx - w / 2, right: cx + w / 2, top: cy + h / 2, bottom: cy - h / 2 });
-      camera.updateProjectionMatrix();
-      if (opts.reduce) draw(0);
+      fit(size.width, size.height);
+      scale = puppyScaleFor(size.width);
+      for (const f of figures.values()) f.puppy.root.scale.setScalar(scale);
+      draw(0);
     },
     boxes: () =>
-      [...actors.values()].flatMap((a) => {
+      [...states.values()].flatMap((a) => {
         // 退勤した社員は、空いた席を覆う
         const seat = seatOf(a.id)?.seat ?? null;
         const at = a.present ? a.pos : seat;
@@ -291,42 +198,50 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
           return { x: ((v.x + 1) / 2) * size.width, y: ((1 - v.y) / 2) * size.height };
         };
         // 頭の上の印まで覆う
-        const top = toScreen(lifted + 1.2 * PUPPY_SCALE);
+        const top = toScreen(lifted + 1.2 * scale);
         const bottom = toScreen(0);
         const height = bottom.y - top.y;
         const width = Math.max(height * 0.8, 24);
         return [{ id: a.id, left: top.x - width / 2, top: top.y, width, height }];
       }),
-    actors: () => Object.fromEntries([...actors.values()].map((a) => [a.id, { at: a.present ? (stationOf(a.id, a.state) ?? null) : null, canMove: a.present && a.state !== "stopped" }])),
+    actors: () =>
+      Object.fromEntries(
+        [...states.values()].map((a) => {
+          const state = figures.get(a.id)?.state ?? "off";
+          return [a.id, { at: a.present ? (stationOf(a.id, state) ?? null) : null, canMove: a.present && state !== "stopped" }];
+        }),
+      ),
     setStates: (next) => {
       for (const s of next) {
-        const a = actors.get(s.id);
-        if (a) a.state = s.state;
+        const f = figures.get(s.id);
+        if (!f || f.state === s.state) continue;
+        f.state = s.state;
+        paintScreen(s.id, s.state);
       }
-      if (opts.reduce) draw(0);
+      if (moves) return;
+      draw(0);
     },
     play: (steps) => {
-      if (!opts.reduce) {
-        queue.push(...steps);
-        return;
-      }
+      director.push(steps);
+      if (moves) return;
       // 歩かずに置き換え、印は次の出来事まで出したままにする
-      for (const a of actors.values()) a.mark = null;
-      for (const s of steps) apply(s, 0);
+      director.settle();
+      draw(0);
+    },
+    setMoving: (next) => {
+      moves = next;
+      if (next) return;
+      director.settle();
       draw(0);
     },
     dispose: () => {
       disposed = true;
-      scene.traverse((o: Object3D) => {
-        if (!(o instanceof Mesh)) return;
-        const geometry: unknown = o.geometry;
-        const material: unknown = o.material;
-        if (geometry instanceof BufferGeometry) geometry.dispose();
-        if (material instanceof MeshStandardMaterial) material.map?.dispose();
-        if (material instanceof Material) material.dispose();
-      });
-      for (const a of actors.values()) a.vrm?.dispose();
+      canvas.removeEventListener("webglcontextlost", lost);
+      for (const f of figures.values()) f.vrm?.dispose();
+      disposeScene(scene, materials.values());
+      sun.shadow.map?.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
     },
   };
 }

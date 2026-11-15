@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type OfficeSnapshot, describeEvent, eventsBetween } from "../../src/screen/pages/office/events.ts";
+import { type OfficeSnapshot, describeEvent, eventsBetween, newsOf } from "../../src/screen/pages/office/events.ts";
 
 // 画面が持つデータの変化から、オフィスで見せる出来事を決める。画面の 3.4
 
@@ -92,5 +92,30 @@ describe("出来事", () => {
       "見る役が「B」を作る役に差し戻した",
     );
     expect(describeEvent({ kind: "state", staffId: "builder", from: "working", to: "off" }, roleOf)).toBe("作る役が退勤した");
+  });
+});
+
+/**
+ * 承認の出来事を作る
+ * @param title タスクの題
+ * @returns 承認の出来事
+ */
+const approve = (title: string) => ({ kind: "approve" as const, taskId: title, title, by: "reviewer", owner: "builder" });
+
+describe("オフィスの部屋", () => {
+  it("まとまりの出来事を全部読み上げる", () => {
+    expect(newsOf([approve("A")], roleOf)).toBe("直近の出来事: 見る役が「A」を承認した");
+    // 2 件は、どちらも読み上げる
+    expect(newsOf([approve("A"), approve("B")], roleOf)).toBe("直近の出来事: 見る役が「A」を承認した。見る役が「B」を承認した");
+    // 上限ちょうどの 3 件は、全部を読み上げる
+    expect(newsOf([approve("A"), approve("B"), approve("C")], roleOf)).toBe(
+      "直近の出来事: 見る役が「A」を承認した。見る役が「B」を承認した。見る役が「C」を承認した",
+    );
+    // 3 件を超えたら、初めの 3 件と、ほかの件数を読み上げる
+    expect(newsOf([approve("A"), approve("B"), approve("C"), approve("D"), approve("E")], roleOf)).toBe(
+      "直近の出来事: 見る役が「A」を承認した。見る役が「B」を承認した。見る役が「C」を承認した。ほか 2 件",
+    );
+    // 出来事が無ければ、まだ無い事を読み上げる
+    expect(newsOf([], roleOf)).toBe("直近の出来事はまだありません");
   });
 });

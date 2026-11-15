@@ -21,20 +21,24 @@ export type Step =
  * @param actor 運ぶ社員
  * @param desk 机の持ち主
  * @param actors 社員の居る所
- * @param reduce 動きを減らす設定か
+ * @param walks 歩かせるか
  * @returns 動きの列
  */
-function carryTo(actor: string, desk: string, actors: Actors, reduce: boolean): Step[] {
+function carryTo(actor: string, desk: string, actors: Actors, walks: boolean): Step[] {
   const me = actors[actor];
+  const from = me?.canMove ? me.at : null;
   const target = seatOf(desk)?.handoff ?? null;
   const give: Step = { kind: "give", actor, desk };
-  if (reduce || !me?.at || !me.canMove || !target) return [give];
-  return [
-    { kind: "walk", actor, path: routeBetween(me.at, target), carry: "paper" },
-    give,
-    { kind: "walk", actor, path: routeBetween(target, me.at), carry: null },
-    { kind: "place", actor, at: me.at },
-  ];
+  const canWalk = walks && from !== null && from !== undefined && target !== null;
+  if (canWalk) {
+    return [
+      { kind: "walk", actor, path: routeBetween(from, target), carry: "paper" },
+      give,
+      { kind: "walk", actor, path: routeBetween(target, from), carry: null },
+      { kind: "place", actor, at: from },
+    ];
+  }
+  return [give];
 }
 
 /**
@@ -42,14 +46,14 @@ function carryTo(actor: string, desk: string, actors: Actors, reduce: boolean): 
  * @param e 出来事
  * @param actors 社員の今の居る所と、歩けるか
  * @param opts 動きの決まり
- * @param opts.reduce 動きを減らす設定か。歩かずに置き換える
+ * @param opts.walks 歩かせるか。歩かせない時 (動きを減らす設定と、動きを止めた時) は置き換える
  * @returns 動きの列
  */
-export function planMotions(e: OfficeEvent, actors: Actors, opts: { reduce: boolean }): Step[] {
+export function planMotions(e: OfficeEvent, actors: Actors, opts: { walks: boolean }): Step[] {
   switch (e.kind) {
     case "assign":
     case "review-request":
-      return carryTo(e.from, e.to, actors, opts.reduce);
+      return carryTo(e.from, e.to, actors, opts.walks);
     case "approve":
       return [{ kind: "mark", actor: e.by, mark: "ok" }];
     case "send-back":
@@ -59,8 +63,9 @@ export function planMotions(e: OfficeEvent, actors: Actors, opts: { reduce: bool
       const to = stationOf(e.staffId, e.to);
       const place: Step = { kind: "place", actor: e.staffId, at: to };
       // 止めた社員は歩けない。止められた時は、その場から席へ置き換える
-      if (opts.reduce || !from || !to || e.from === "stopped" || e.to === "stopped") return [place];
-      return [{ kind: "walk", actor: e.staffId, path: routeBetween(from, to), carry: null }, place];
+      const free = e.from !== "stopped" && e.to !== "stopped";
+      if (opts.walks && free && from && to) return [{ kind: "walk", actor: e.staffId, path: routeBetween(from, to), carry: null }, place];
+      return [place];
     }
     default:
       return e satisfies never;

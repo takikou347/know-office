@@ -40,13 +40,12 @@ import {
   staff,
   stages,
   stops,
-  tasks,
   workEntries,
 } from "./mock.ts";
 import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { StopButton } from "./pages/guard/StopButton.tsx";
 import { OfficePage } from "./pages/office/OfficePage.tsx";
-import { workFeed } from "./pages/office/feed.ts";
+import { useWorkTasks, workFeed } from "./pages/office/feed.ts";
 import { RecordBreakdown } from "./pages/ledger/RecordBreakdown.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
 import { StaffStatus } from "./parts/staff-status.tsx";
@@ -97,6 +96,7 @@ const reviewHref = (t: Task) => `/staff/${t.staffId}/tasks/${t.id}`;
 
 function Dashboard({ health }: { health?: Health }) {
   const working = staff.filter((s) => s.state === "working").length;
+  const tasks = useWorkTasks();
   const waiting = tasks.filter((t) => t.state === "可待ち");
   const today = tasks.filter((t) => t.state === "今");
   return (
@@ -226,7 +226,7 @@ type StaffTab = (typeof staffTabs)[number];
 const isStaffTab = (v: string | null): v is StaffTab => staffTabs.some((t) => t === v);
 
 function StaffDetail({ s, tab, day, navigate }: { s: Staff; tab: StaffTab; day: string | null; navigate: Navigate }) {
-  const mine = tasks.filter((t) => t.staffId === s.id);
+  const mine = useWorkTasks().filter((t) => t.staffId === s.id);
   return (
     <Stack gap={4}>
       <Stack direction="row" gap={2} align="center" wrap>
@@ -281,7 +281,7 @@ function StaffDetail({ s, tab, day, navigate }: { s: Staff; tab: StaffTab; day: 
 function StaffAndTasks({ pathname, query, navigate }: { pathname: string; query: URLSearchParams; navigate: Navigate }) {
   const [, , id, , taskId] = pathname.split("/");
   const selected = staff.find((s) => s.id === id);
-  const task = tasks.find((t) => t.id === taskId && t.staffId === selected?.id);
+  const task = useWorkTasks().find((t) => t.id === taskId && t.staffId === selected?.id);
   const tabParam = query.get("tab");
   const tab: StaffTab = isStaffTab(tabParam) ? tabParam : "talk";
   return (
@@ -478,6 +478,7 @@ function Guard() {
 }
 
 function Records() {
+  const allTasks = useWorkTasks();
   const rows = staff.flatMap((s) =>
     (workEntries[s.id] ?? []).map((e) => ({ ...e, who: s.role, key: `${s.id}-${e.start}` })),
   );
@@ -500,7 +501,7 @@ function Records() {
       <Part title="仕事">
         <Grid minItemWidth={160}>
           {(["今", "可待ち", "次", "済"] as const).map((st) => (
-            <Stat key={st} label={st} value={tasks.filter((t) => t.state === st).length} unit="件" />
+            <Stat key={st} label={st} value={allTasks.filter((t) => t.state === st).length} unit="件" />
           ))}
         </Grid>
       </Part>

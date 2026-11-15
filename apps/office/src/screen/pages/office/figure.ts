@@ -1,11 +1,13 @@
 // 子犬の社員の姿を、丸い形の重ねで作る。シーズー風の丸い頭、垂れた長い耳、クリーム色と毛色の 2 色、大きな黒い目、短い足、丸いしっぽ
 import {
   CapsuleGeometry,
+  CircleGeometry,
   Color,
   ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   type Object3D,
   SphereGeometry,
@@ -28,6 +30,20 @@ export const PROPS: Readonly<Record<string, Prop>> = { president: "crown", build
 
 /** 子犬の大きさの倍率。部屋の机と比べて見分けやすい大きさにする */
 export const PUPPY_SCALE = 1.6;
+
+/** 電話の幅で子犬を大きくする倍率 */
+const PHONE_PUPPY_SCALE = 2.1;
+/** これより狭い部屋を電話の幅と見る (CSS のピクセル) */
+const PHONE_WIDTH = 600;
+
+/**
+ * 部屋の幅に合う子犬の大きさの倍率を返す。電話の幅では部屋が小さく見えるので、子犬を大きくする
+ * @param width 部屋の幅 (CSS のピクセル)
+ * @returns 倍率
+ */
+export function puppyScaleFor(width: number): number {
+  return width < PHONE_WIDTH ? PHONE_PUPPY_SCALE : PUPPY_SCALE;
+}
 
 const CREAM = "#f7ecdc";
 const DARK = "#2b211c";
@@ -67,7 +83,6 @@ function ball(parent: Object3D, r: number, m: MeshStandardMaterial, at: [number,
   const mesh = new Mesh(new SphereGeometry(r, 20, 14), m);
   mesh.position.set(...at);
   mesh.scale.set(...scale);
-  mesh.castShadow = true;
   parent.add(mesh);
   return mesh;
 }
@@ -131,6 +146,11 @@ export function buildPuppy(coat: string, prop: Prop, paperColor: Color): Puppy {
   root.scale.setScalar(PUPPY_SCALE);
   const body = new Group();
   root.add(body);
+  // 子犬は日の光の影を落とさず、足元の丸い影で置く。動く物が影を落とさなければ、影の地図を描き直さずに済む
+  const blob = new Mesh(new CircleGeometry(0.26, 24), new MeshBasicMaterial({ color: DARK, transparent: true, opacity: 0.22, depthWrite: false }));
+  blob.rotation.x = -Math.PI / 2;
+  blob.position.y = 0.006;
+  root.add(blob);
 
   // 胴: クリーム色の丸に、背中の毛色を重ね、胸にふわふわを足す
   const torso = new Group();
@@ -149,7 +169,6 @@ export function buildPuppy(coat: string, prop: Prop, paperColor: Color): Puppy {
   ball(head, 0.22, cream, [0, 0, 0]);
   const cap = new Mesh(new SphereGeometry(0.228, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), fur);
   cap.rotation.x = -0.55;
-  cap.castShadow = true;
   head.add(cap);
   ball(head, 0.07, cream, [0, 0.13, 0.15], [0.55, 1, 0.5]);
   ball(head, 0.1, cream, [0, -0.08, 0.16], [1.25, 0.85, 0.9]);
@@ -179,7 +198,6 @@ export function buildPuppy(coat: string, prop: Prop, paperColor: Color): Puppy {
     pivot.position.set(0.19 * side, 0.06, 0);
     const flap = new Mesh(new CapsuleGeometry(0.075, 0.2, 6, 12), fur);
     flap.position.y = -0.14;
-    flap.castShadow = true;
     pivot.add(flap);
     ball(pivot, 0.08, fur, [0.01 * side, -0.27, 0]);
     head.add(pivot);
@@ -194,7 +212,6 @@ export function buildPuppy(coat: string, prop: Prop, paperColor: Color): Puppy {
     pivot.position.set(x, 0.13, z);
     const limb = new Mesh(new CapsuleGeometry(0.055, 0.06, 4, 8), cream);
     limb.position.y = -0.06;
-    limb.castShadow = true;
     pivot.add(limb);
     ball(pivot, 0.062, cream, [0, -0.11, 0.015]);
     body.add(pivot);

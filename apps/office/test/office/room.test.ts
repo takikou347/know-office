@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { avatarSourceOf } from "../../src/screen/pages/office/avatars.ts";
+import { puppyScaleFor } from "../../src/screen/pages/office/figure.ts";
 import { activityOf, poseOf } from "../../src/screen/pages/office/motion.ts";
 import { canShow3d } from "../../src/screen/pages/office/support.ts";
 import { OFFICE_THEME, type OfficeThemeId, THEME_IDS, officeThemes, themeOf } from "../../src/screen/pages/office/themes.ts";
@@ -113,6 +114,12 @@ describe("部屋の案", () => {
 });
 
 describe("社員の姿", () => {
+  it("電話の幅では子犬を大きくし、広い幅では机と釣り合う大きさにする", () => {
+    expect(puppyScaleFor(360)).toBeGreaterThan(puppyScaleFor(1280));
+    expect(puppyScaleFor(599)).toBe(puppyScaleFor(360));
+    expect(puppyScaleFor(600)).toBe(puppyScaleFor(1280));
+  });
+
   it("VRM のモデルが無い社員は、形を組み合わせた子犬にする", () => {
     expect(avatarSourceOf("builder", {})).toEqual({ kind: "shapes" });
   });

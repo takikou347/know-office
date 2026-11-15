@@ -1,11 +1,11 @@
 // オフィスの画面。画面のデータの変わりから出来事を起こし、3D を出せる時は部屋で動きを見せ、出せない時は 2D の一覧で社員を出す
-import { List } from "knowidea-ui";
+import { Button, List } from "knowidea-ui";
 import { Component, type ReactNode, Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { type Staff, staff } from "../../mock.ts";
 import { StaffStatus } from "../../parts/staff-status.tsx";
-import { type OfficeEvent, type OfficeSnapshot, describeEvent, eventsBetween } from "./events.ts";
+import { type OfficeEvent, type OfficeSnapshot, eventsBetween, newsOf } from "./events.ts";
 import { workFeed } from "./feed.ts";
-import { REDUCED_MOTION_QUERY, browserEnv, canShow3d } from "./support.ts";
+import { MOTION_ALLOWED_QUERY, browserEnv, canShow3d } from "./support.ts";
 
 // three.js と部屋の作りは、この画面を開いた時だけ読む
 const OfficeScene = lazy(() => import("./OfficeScene.tsx"));
@@ -65,9 +65,7 @@ function useOfficeEvents() {
   useEffect(() => {
     let id = 0;
     const take = () => {
-      const now = workFeed.snapshot();
-      const before = workFeed.seen;
-      workFeed.seen = now;
+      const { before, now } = workFeed.take();
       setSnap(now);
       const events = eventsBetween(before, now);
       if (events.length > 0) setBatch({ id: ++id, before, events });
@@ -89,21 +87,20 @@ export function OfficePage() {
     if (!browser) return "checking";
     return canShow3d(browserEnv()) ? "3d" : "2d";
   });
-  const [reduce, setReduce] = useState(() => browser && window.matchMedia(REDUCED_MOTION_QUERY).matches);
+  const [motionAllowed, setMotionAllowed] = useState(() => browser && window.matchMedia(MOTION_ALLOWED_QUERY).matches);
+  // 動きを止めるボタンで止めているか。開き直すと動く所から始める
+  const [halted, setHalted] = useState(false);
   const { snap, batch } = useOfficeEvents();
   useEffect(() => {
     // 開いている間に動きを減らす設定を変えても合わせる
-    const query = window.matchMedia(REDUCED_MOTION_QUERY);
-    const follow = (e: MediaQueryListEvent) => setReduce(e.matches);
+    const query = window.matchMedia(MOTION_ALLOWED_QUERY);
+    const follow = (e: MediaQueryListEvent) => setMotionAllowed(e.matches);
     query.addEventListener("change", follow);
     return () => query.removeEventListener("change", follow);
   }, []);
   const fail = useCallback(() => setMode("2d"), []);
   const people = peopleOf(snap);
-  const latest = batch?.events.at(-1);
-  const news = (
-    <p role="status">{latest ? `直近の出来事: ${describeEvent(latest, roleOf)}` : "直近の出来事はまだありません"}</p>
-  );
+  const news = <p role="status">{newsOf(batch?.events ?? [], roleOf)}</p>;
   const list = (
     <>
       <p>3D を出せないブラウザなので、社員を一覧で出しています。押すとその社員の会話が開きます</p>
@@ -113,10 +110,19 @@ export function OfficePage() {
   );
   if (mode === "checking") return <p role="status">部屋を用意しています</p>;
   if (mode === "2d") return list;
+  // 動きを減らす設定では初めから動かさないので、止めるボタンは出さない
+  const halt = motionAllowed ? (
+    <Button variant="secondary" aria-pressed={halted} onClick={() => setHalted((h) => !h)}>
+      動きを止める
+    </Button>
+  ) : null;
   return (
     <SceneBoundary fallback={list}>
       <Suspense fallback={<p role="status">部屋を読んでいます</p>}>
-        <OfficeScene people={people} batch={batch} reduce={reduce} onFail={fail} news={news} />
+        <OfficeScene people={people} batch={batch} moves={motionAllowed && !halted} onFail={fail}>
+          {halt}
+          {news}
+        </OfficeScene>
       </Suspense>
     </SceneBoundary>
   );
