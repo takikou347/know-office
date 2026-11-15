@@ -43,7 +43,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const found = emails.length > 0 ? [`足した行に noreply でないメールアドレスが ${emails.length} 件ある`] : [];
   const messages = [...new Set([...problems.filter((p) => p !== undefined), ...found])];
   if (messages.length > 0) {
-    for (const message of messages) console.error(message);
+    process.stderr.write(`${messages.join("\n")}\n`);
     process.exit(1);
   }
 }
