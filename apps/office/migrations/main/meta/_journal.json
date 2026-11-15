@@ -43,6 +43,13 @@
       "when": 1794711766591,
       "tag": "0005_github_dedupe",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794720684571,
+      "tag": "0006_seed_services",
+      "breakpoints": true
     }
   ]
 }

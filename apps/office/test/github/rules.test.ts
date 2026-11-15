@@ -1,7 +1,7 @@
 // GitHub のルールとブランチの保護。できる操作、触れない所、main に入れる条件をゲートウェイが守り、公開のリポジトリにはルールセットを掛け直す (タスクとレビューの 3.4)
 import { newId, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { services } from "../../src/gate/db/main.ts";
 import { createNode } from "../../src/gate/work/nodes.ts";
@@ -9,6 +9,11 @@ import { runTool } from "../../src/gate/work/tools.ts";
 import { api, clockIn, MINUTE, purposeAndGoal, rows, staffOf, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork({ github: true });
+
+// マイグレーションで登録した最初の 2 つのサービスは、代わりの GitHub に無いリポジトリを指すので、テストごとに置くサービスだけにする
+beforeEach(async () => {
+  await drizzle(world.d1.DB).delete(services);
+});
 
 const UI = "example/knowidea-ui";
 const OFFICE = "example/know-office";

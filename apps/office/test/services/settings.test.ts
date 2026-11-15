@@ -1,5 +1,6 @@
 // サービスごとの設定が office の初期値を受け継ぐ事。変えていない項目は初期値に従い、変えた項目だけがそのサービスに効く (サービスと拡張の 3.3)
 import { newId } from "@know-office/core";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -150,7 +151,7 @@ describe("設定の入力", () => {
       inherited: false,
       version: 1,
     });
-    const [row] = await drizzle(world.d1.DB).select({ staffId: services.staffId }).from(services);
+    const [row] = await drizzle(world.d1.DB).select({ staffId: services.staffId }).from(services).where(eq(services.id, ui));
     expect(row?.staffId).toBe("president");
   });
 });
@@ -224,7 +225,7 @@ describe("同時に変えた時の版", () => {
     });
     const res = await Promise.all([send(["checks", "reviewer", "owner"]), send(["checks", "reviewer"])]);
     expect(res.map((r) => r.status).toSorted((a, b) => a - b)).toEqual([200, 409]);
-    expect(await count(world, "SELECT COUNT(*) AS n FROM service_settings")).toBe(1);
+    expect(await count(world, `SELECT COUNT(*) AS n FROM service_settings WHERE service_id = '${ui}'`)).toBe(1);
   });
 
   it("古い版で弱める変更は、パスキーの確認より先に版の違いで断る", async () => {
@@ -255,8 +256,8 @@ describe("同時に変えた時の版", () => {
     const write = (defaultVersion: number) =>
       appendServiceSetting(world.d1.DB, { serviceId: ui, key: "paused", value: null, version: 1, defaultVersion, now: world.clock.now() });
     await expect(write(0)).rejects.toMatchObject({ code: "conflict" });
-    expect(await count(world, "SELECT COUNT(*) AS n FROM service_settings")).toBe(1);
+    expect(await count(world, `SELECT COUNT(*) AS n FROM service_settings WHERE service_id = '${ui}'`)).toBe(1);
     await expect(write(1)).resolves.toBeUndefined();
-    expect(await count(world, "SELECT COUNT(*) AS n FROM service_settings")).toBe(2);
+    expect(await count(world, `SELECT COUNT(*) AS n FROM service_settings WHERE service_id = '${ui}'`)).toBe(2);
   });
 });
