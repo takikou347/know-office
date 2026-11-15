@@ -21,6 +21,18 @@ function fakeFetch(answers: Response[]) {
   return { fetcher, calls };
 }
 
+/**
+ * 外から終わらせられる約束を作る
+ * @returns 約束と、それを終わらせる関数
+ */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  const held: { resolve?: () => void } = {};
+  const promise = new Promise<void>((done) => {
+    held.resolve = done;
+  });
+  return { promise, resolve: () => held.resolve?.() };
+}
+
 describe("画面から入口を呼ぶ口", () => {
   it("ログインセッションが無ければ、本文の形を application/json にして作ってから 1 度だけ呼び直す", async () => {
     const { fetcher, calls } = fakeFetch([problem(401, "unauthenticated"), new Response(null, { status: 201 }), Response.json({ data: 1 })]);
@@ -36,5 +48,30 @@ describe("画面から入口を呼ぶ口", () => {
     const denied = fakeFetch([problem(401, "unauthenticated"), problem(401, "unauthenticated")]);
     expect((await sessionFetch("http://localhost", denied.fetcher)("http://localhost/api/v1/me")).status).toBe(401);
     expect(denied.calls).toEqual(["GET /api/v1/me", "POST /api/v1/sessions application/json"]);
+  });
+
+  it("同時に呼んだ 3 つがどれも 401 でも、ログインセッションは 1 つだけ作る", async () => {
+    const posts: string[] = [];
+    let signedIn = false;
+    // 3 つ目の 401 は、ログインセッションを作り終えた後に返す。先に送った要求の返事が遅れて届いた時にあたる
+    const late = deferred();
+    const fetcher = async (input: RequestInfo | URL) => {
+      const path = new URL(input instanceof Request ? input.url : input).pathname;
+      if (path === "/api/v1/sessions") {
+        posts.push(path);
+        signedIn = true;
+        return new Response(null, { status: 201 });
+      }
+      const sentWithSession = signedIn;
+      if (path === "/api/v1/slow" && !sentWithSession) await late.promise;
+      return sentWithSession ? Response.json({ data: path }) : problem(401, "unauthenticated");
+    };
+    const call = sessionFetch("http://localhost", fetcher);
+    const slow = call("http://localhost/api/v1/slow");
+    const fast = await Promise.all([call("http://localhost/api/v1/me"), call("http://localhost/api/v1/notices")]);
+    expect(fast.map((r) => r.status)).toEqual([200, 200]);
+    late.resolve();
+    expect((await slow).status).toBe(200);
+    expect(posts).toEqual(["/api/v1/sessions"]);
   });
 });

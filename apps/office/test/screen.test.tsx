@@ -33,6 +33,17 @@ describe("画面", () => {
     expect(html).not.toContain("記録を読んでいます");
   });
 
+  it("セキュリティと設定は、入口を呼ぶ口が無ければ、仮のデータを出さず読めなかった事を出す", () => {
+    const guard = renderToString(<App url="/guard" />);
+    expect(guard).toContain("止めている物を読めませんでした");
+    expect(guard).toContain("止めた記録を読めませんでした");
+    expect(guard).toContain("基準を読めませんでした");
+    const settings = renderToString(<App url="/settings" />);
+    expect(settings).toContain("全体のルールを読めませんでした");
+    expect(settings).toContain("セッションを読めませんでした");
+    expect(settings).toContain("パスキーを読めませんでした");
+  });
+
   it("記録の内訳は、読んでいる間を status で知らせる", () => {
     // 返事の来ない入口にして、読んでいる間の形を描く
     const api = createApi("http://gate.invalid", () => new Promise<Response>(() => undefined));

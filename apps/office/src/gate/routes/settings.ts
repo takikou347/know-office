@@ -1,19 +1,15 @@
 // 設定: office の設定とサービスの初期値、サービスごとの設定 (ルートの一覧の 1.12、サービスと拡張の 3.3)
-import type { D1Database } from "@cloudflare/workers-types";
 import { createRoute, z } from "@hono/zod-openapi";
-import { DEFAULT_SCHEDULE, INHERITED_KEYS, Setting, UpdateSettingInput } from "@know-office/core";
-import { and, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { INHERITED_KEYS, Setting, StaffId, UpdateSettingInput } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { requireStepUp } from "../auth/passkey.ts";
 import { MERGE_WHEN_KEY, protectRepos } from "../github/rules.ts";
-import { settings } from "../db/main.ts";
 import { loadThresholds } from "../guard/thresholds.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, ok } from "../respond.ts";
-import { DEFAULT_PREFIX, loadOfficeDefaults, loadServiceSettings, updateOfficeDefault, updateServiceSetting } from "../services/settings.ts";
-import { loadSchedule } from "../work/attendance.ts";
+import { DEFAULT_PREFIX, loadOfficeDefaults, loadScheduleSetting, loadServiceSettings, SCHEDULE_KEY, updateOfficeDefault, updateSchedule, updateServiceSetting } from "../services/settings.ts";
+import { staffDo } from "../work/loop.ts";
 
 const router = createRouter();
 
@@ -75,21 +71,6 @@ function pageOf(items: Setting[], page: { cursor?: string | undefined; limit: nu
   return { items: slice, next: from + page.limit < items.length ? (slice.at(-1)?.key ?? null) : null };
 }
 
-/**
- * 勤務の時刻の最新の版を読む
- * @param db 今の状態の D1
- * @returns 版。行が無ければ 0
- */
-async function scheduleVersion(db: D1Database): Promise<number> {
-  const [row] = await drizzle(db)
-    .select({ version: settings.version })
-    .from(settings)
-    .where(and(eq(settings.key, "workday.schedule"), eq(settings.scope, "office")))
-    .orderBy(desc(settings.version))
-    .limit(1);
-  return row?.version ?? 0;
-}
-
 /** 設定のルート */
 export const settingRoutes = router
   .openapi(listServiceSettingsRoute, async (c) => {
@@ -108,9 +89,9 @@ export const settingRoutes = router
   })
   .openapi(listSettingsRoute, async (c) => {
     const db = c.env.DB;
-    const [schedule, version, thresholds, defaults] = await Promise.all([loadSchedule(db), scheduleVersion(db), loadThresholds(db), loadOfficeDefaults(db)]);
+    const [schedule, thresholds, defaults] = await Promise.all([loadScheduleSetting(db), loadThresholds(db), loadOfficeDefaults(db)]);
     const all: Setting[] = [
-      { key: "workday.schedule", value: version === 0 ? DEFAULT_SCHEDULE : schedule, inherited: version === 0, version },
+      schedule,
       { key: "guard.thresholds", value: thresholds.thresholds, inherited: thresholds.version === 0, version: thresholds.version },
       ...INHERITED_KEYS.map((k) => ({ key: `${DEFAULT_PREFIX}${k}`, value: defaults[k].value, inherited: !defaults[k].set, version: defaults[k].version })),
     ];
@@ -120,7 +101,15 @@ export const settingRoutes = router
   .openapi(updateSettingRoute, async (c) => {
     const { key } = c.req.valid("param");
     const { version, value, reason } = c.req.valid("json");
-    const setting = await updateOfficeDefault(c.env.DB, { key, value, version, reason, now: c.var.clock.now() }, () => requireStepUp(c));
+    const now = c.var.clock.now();
+    if (key === SCHEDULE_KEY) {
+      const schedule = await updateSchedule(c.env.DB, { value, version, reason, now }, () => requireStepUp(c));
+      await audit(c, "setting.update", key, { value: schedule.value, version: schedule.version, reason });
+      // 3 人の alarm を新しい時刻で掛け直す。掛け直せなくても、次の alarm が新しい時刻から予定を作るので、変えた設定は残して成功を返す
+      await Promise.allSettled(StaffId.options.map((id) => staffDo(c.env, id).wake(now)));
+      return ok(c, schedule);
+    }
+    const setting = await updateOfficeDefault(c.env.DB, { key, value, version, reason, now }, () => requireStepUp(c));
     await audit(c, "setting.update", key, { value: setting.value, version: setting.version, reason });
     if (key === MERGE_WHEN_KEY) await protectRepos(c.env, c.var.forge);
     return ok(c, setting);

@@ -1,6 +1,6 @@
 import type { DaySummary } from "@know-office/core";
 import { describe, expect, it } from "vitest";
-import { daySummaryText, jstTime, workEntryRow } from "../src/screen/format.ts";
+import { daySummaryText, jstDateTime, jstTime, workEntryRow } from "../src/screen/format.ts";
 
 const MINUTE = 60_000;
 
@@ -21,6 +21,12 @@ describe("時刻と勤怠の文", () => {
   it("協定世界時の 0 時は日本時間の 9 時として出す", () => {
     expect(jstTime("2026-11-14T00:00:00Z")).toBe("9:00");
     expect(jstTime("2026-11-14T15:05:00Z")).toBe("0:05");
+  });
+
+  it("日の付いた時刻は、日本時間の日に直して出す", () => {
+    expect(jstDateTime("2026-11-14T00:00:00Z")).toBe("11/14 9:00");
+    // 協定世界時の 15 時 5 分は、日本時間では次の日
+    expect(jstDateTime("2026-11-14T15:05:00Z")).toBe("11/15 0:05");
   });
 
   it("勤怠の上の 1 行は 出勤、退勤、働いた時間、延長、止められていた時間 の順で、理由があれば添える", () => {

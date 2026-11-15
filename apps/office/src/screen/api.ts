@@ -28,12 +28,21 @@ async function sessionMissing(res: Response): Promise<boolean> {
 export function sessionFetch(base: string, fetcher: Fetch = (input, init) => fetch(input, init)): Fetch {
   // 同時に落ちた呼び出しが、ログインセッションを 1 つだけ作るようにまとめる
   let signing: Promise<Response> | null = null;
+  // ログインセッションを作り終えた回数。作る前に送った要求の 401 が後から届いた時に、もう 1 つ作らず呼び直すだけにする
+  let signed = 0;
   return async (input, init) => {
+    const sentAt = signed;
     const first = await fetcher(input, init);
     if (!(await sessionMissing(first))) return first;
-    signing ??= fetcher(`${base}/api/v1/sessions`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" } }).finally(() => {
-      signing = null;
-    });
+    if (signed !== sentAt) return fetcher(input, init);
+    signing ??= fetcher(`${base}/api/v1/sessions`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" } })
+      .then((res) => {
+        if (res.ok) signed += 1;
+        return res;
+      })
+      .finally(() => {
+        signing = null;
+      });
     const session = await signing;
     if (!session.ok) return session;
     return fetcher(input, init);

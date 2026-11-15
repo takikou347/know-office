@@ -56,7 +56,7 @@ test.describe("通知と手で止めるボタン", () => {
     const dialog = page.getByRole("dialog", { name: "全体を止めますか" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("止まる範囲: 全体")).toBeVisible();
-    await expect(dialog.getByText("止まる社員: 社長、作る役、見る役")).toBeVisible();
+    await expect(dialog.getByText("止まる社員: 社長、開発担当、レビュー担当")).toBeVisible();
     await expect(dialog.getByText("止まるタスク: 3 件")).toBeVisible();
     // 確認の画面を出しただけでは止めない
     expect(created).toEqual([]);

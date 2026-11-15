@@ -3,6 +3,8 @@ import type { AttendanceReason, DaySummary, WorkEntry, WorkResult } from "@know-
 
 const jst = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "numeric", minute: "2-digit", hourCycle: "h23" });
 
+const jstDay = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
+
 const MINUTE = 60_000;
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
@@ -31,6 +33,16 @@ const RESULT_LABELS: Record<WorkResult, string> = {
  */
 export function jstTime(iso: string): string {
   return jst.format(new Date(iso));
+}
+
+/**
+ * 協定世界時の時刻を、日本時間の「11/15 9:05」の形にする
+ * @param iso RFC 3339 の時刻
+ * @returns 日本時間の月、日、時、分
+ */
+export function jstDateTime(iso: string): string {
+  const at = new Date(iso);
+  return `${jstDay.format(at)} ${jst.format(at)}`;
 }
 
 /**

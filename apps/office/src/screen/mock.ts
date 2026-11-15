@@ -99,18 +99,6 @@ export const serviceLog: Record<string, { time: string; text: string }[]> = {
   "know-office": [{ time: "11/14 17:10", text: "勤怠の表の画面の経過を残した" }],
 };
 
-export const stops = [
-  { id: "x1", time: "10:12", target: "見る役", reason: "同じ道具の失敗が 5 回続いた", state: "再開した" },
-  { id: "x2", time: "16:40", target: "作る役", reason: "1 時間の切符が切れても区切りが来ない", state: "止めている" },
-];
-
-export const guardRules = [
-  "同じ道具の失敗が 5 回続いたら止める",
-  "1 つの仕事は 1 時間の切符で動き、切れたら区切りを待って止める",
-  "ルールの判断が 5 秒で返らなければ断る",
-  "1 日のトークンが上限を超えそうなら止めて聞く",
-];
-
 export const monthCost = { used: 11.4, budget: 15 };
 
 export const flows: Record<string, { id: string; time: string; title: string; text: string }[]> = {
@@ -120,8 +108,3 @@ export const flows: Record<string, { id: string; time: string; title: string; te
     { id: "f1", time: "10:45", title: "始めた", text: "社長から仕事を受けた" },
   ],
 };
-
-export const sessions = [
-  { id: "s1", device: "Mac の Chrome", last: "今", current: true },
-  { id: "s2", device: "iPhone の Safari", last: "11/13 22:10", current: false },
-];

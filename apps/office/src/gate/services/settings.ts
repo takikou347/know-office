@@ -11,13 +11,14 @@ import {
   type ServiceRules,
   type Setting,
   weakens,
+  WorkSchedule,
 } from "@know-office/core";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z, type ZodType } from "zod";
 import { toFieldErrors } from "../app.ts";
 import { services, serviceSettings, settings } from "../db/main.ts";
-import { clockAt } from "../work/attendance.ts";
+import { clockAt, loadSchedule } from "../work/attendance.ts";
 
 /** office の初期値を置く `settings` のキーの頭。`service.mergeWhen` のように項目の名前を続ける */
 export const DEFAULT_PREFIX = "service.";
@@ -227,6 +228,109 @@ export async function updateOfficeDefault(
     .returning({ id: settings.id });
   if (written.length === 0) throw new AppError("conflict", "バージョンが違う");
   return { key, value, inherited: false, version: next };
+}
+
+/** 勤務の時刻を置く `settings` のキー */
+export const SCHEDULE_KEY = "workday.schedule";
+
+const DAY_MINUTES = 24 * 60;
+const WEEK_MINUTES = 7 * DAY_MINUTES;
+
+// 変える時の勤務の時刻。始まりと終わりが同じだと 24 時間の勤務になり、曜日が空だと誰も出勤しないので断る
+const ScheduleInput = WorkSchedule.refine((v) => v.start !== v.end, { message: "始まりと終わりが同じ", path: ["end"] }).refine((v) => v.days.length > 0 && new Set(v.days).size === v.days.length, {
+  message: "曜日が無いか、同じ曜日が 2 度ある",
+  path: ["days"],
+});
+
+/**
+ * HH:MM を 0 時からの分にする
+ * @param clock HH:MM
+ * @returns 分
+ */
+function minutesOf(clock: string): number {
+  return Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
+}
+
+/**
+ * 勤務の時刻が 1 週間のうちに覆う分を並べる。日曜の 0 時を 0 とし、日をまたぐ勤務は次の曜日に続ける
+ * @param schedule 勤務の時刻
+ * @returns 勤務の分
+ */
+function workedMinutes(schedule: WorkSchedule): Set<number> {
+  const start = minutesOf(schedule.start);
+  const end = minutesOf(schedule.end);
+  const length = end > start ? end - start : end + DAY_MINUTES - start;
+  const minutes = new Set<number>();
+  for (const day of schedule.days) {
+    for (let k = 0; k < length; k += 1) minutes.add((day * DAY_MINUTES + start + k) % WEEK_MINUTES);
+  }
+  return minutes;
+}
+
+/**
+ * 勤務の時刻の変更が、今の勤務の時間に無い時間を足すかを見る。足す変更は費用が増えるのでパスキーの確認を求める
+ * @param before 今の勤務の時刻
+ * @param after 変えた後の勤務の時刻
+ * @returns 終わりを遅らせる、始まりを早める、曜日を足す時に true
+ */
+export function extendsWork(before: WorkSchedule, after: WorkSchedule): boolean {
+  const was = workedMinutes(before);
+  for (const minute of workedMinutes(after)) {
+    if (!was.has(minute)) return true;
+  }
+  return false;
+}
+
+/**
+ * 勤務の時刻を、最新の版と一緒に読む
+ * @param db 今の状態の D1
+ * @returns 設定の 1 項目。行が無ければ初期値をバージョン 0 で返す
+ */
+export async function loadScheduleSetting(db: D1Database): Promise<Setting> {
+  const [[row], value] = await Promise.all([
+    drizzle(db)
+      .select({ version: settings.version })
+      .from(settings)
+      .where(and(eq(settings.key, SCHEDULE_KEY), eq(settings.scope, "office")))
+      .orderBy(desc(settings.version))
+      .limit(1),
+    loadSchedule(db),
+  ]);
+  const version = row?.version ?? 0;
+  return { key: SCHEDULE_KEY, value, inherited: version === 0, version };
+}
+
+/**
+ * 勤務の時刻を変える。読んだ版のままの時だけ書く
+ * @param db 今の状態の D1
+ * @param input 値、読んだ版、理由、今の時刻
+ * @param input.value 勤務の時刻
+ * @param input.version 読んだ版
+ * @param input.reason 理由
+ * @param input.now 今の時刻
+ * @param stepUp 勤務を延ばす変更の時に呼ぶ、パスキーの確認を求める関数
+ * @returns 変えた後の設定
+ * @throws validation_failed 値が勤務の時刻の形に合わない時、始まりと終わりが同じ時、曜日が無いか重なる時
+ * @throws step_up_required 勤務を延ばす変更で、パスキーの確認が無い時 (stepUp が投げる)
+ * @throws conflict 版が違う時
+ */
+export async function updateSchedule(db: D1Database, input: { value: unknown; version: number; reason: string; now: number }, stepUp: () => void): Promise<Setting> {
+  const { version, reason, now } = input;
+  const value = ScheduleInput.parse(checkValue(ScheduleInput, input.value));
+  const current = await loadScheduleSetting(db);
+  // 延ばすかは読んだ版の値と比べる。古い版のまま送った変更は、今の値と比べず先に断る
+  if (current.version !== version) throw new AppError("conflict", "バージョンが違う");
+  if (extendsWork(WorkSchedule.parse(current.value), value)) stepUp();
+  const next = version + 1;
+  // 読んだ版より新しい行が無い時だけ書く 1 文で、同時に変えた 2 つの片方を断る
+  const written = await drizzle(db)
+    .insert(settings)
+    .select(
+      sql`SELECT ${newId(clockAt(now))}, ${SCHEDULE_KEY}, 'office', ${JSON.stringify(value)}, ${next}, 'owner', ${reason}, ${now} WHERE NOT EXISTS (SELECT 1 FROM ${settings} WHERE ${settings.key} = ${SCHEDULE_KEY} AND ${settings.scope} = 'office' AND ${settings.version} >= ${next})`,
+    )
+    .returning({ id: settings.id });
+  if (written.length === 0) throw new AppError("conflict", "バージョンが違う");
+  return { key: SCHEDULE_KEY, value, inherited: false, version: next };
 }
 
 /**

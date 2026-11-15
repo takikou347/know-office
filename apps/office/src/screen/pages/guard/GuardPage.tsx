@@ -1,62 +1,28 @@
-// 自動停止の画面。止めている物、止めた記録、基準、効き目、蒸留した学び。手で止めるボタン、効き目、蒸留した学びはゲートウェイを呼び、ほかは仮のデータ
-import { Button, Card, Stack, Status, Table } from "knowidea-ui";
-import { useState } from "react";
-import { guardRules, stops } from "../../mock.ts";
-import { Done, Part, Section } from "../../parts/section.tsx";
+// セキュリティの画面。止めている物と再開、止めた記録と判定、基準、効き目、蒸留した学び、手で止めるボタン。どれもゲートウェイから読む (自動停止の 3.8)
+import { StaffId } from "@know-office/core";
+import { Stack } from "knowidea-ui";
+import { useCallback, useState } from "react";
+import { Part, Section } from "../../parts/section.tsx";
 import { GuardEffectView, LessonList } from "./GuardLearning.tsx";
+import { StopHistory, StoppedList } from "./GuardStops.tsx";
+import { STAFF_LABEL } from "./labels.ts";
 import { StopButton } from "./StopButton.tsx";
+import { Thresholds } from "./Thresholds.tsx";
 
 export function GuardPage() {
-  const [resumed, setResumed] = useState<string[]>([]);
-  const [done, setDone] = useState<string>();
-  const rows = stops.map((x) => ({ ...x, state: resumed.includes(x.id) ? "再開した" : x.state }));
-  const stopped = rows.filter((x) => x.state === "止めている");
+  // 止めた、再開した、判定を付けた後に、止めている物と記録を読み直す
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
   return (
     <Section>
       <Part title="止めている物">
-        {stopped.length === 0 ? <p>止めている物は無い</p> : null}
-        {stopped.map((x) => (
-          <Card
-            key={x.id}
-            title={x.target}
-            subtitle={x.time}
-            badge={<Status kind="stopped" label="止めている" />}
-            actions={
-              <Button
-                aria-label={`${x.target}を再開する`}
-                onClick={() => {
-                  setResumed((r) => [...r, x.id]);
-                  setDone(`${x.target}を再開しました`);
-                }}
-              >
-                再開する
-              </Button>
-            }
-          >
-            {x.reason}
-          </Card>
-        ))}
-        <Done text={done} />
+        <StoppedList tick={tick} onChanged={reload} />
       </Part>
       <Part title="止めた記録">
-        <Table
-          label="止めた記録"
-          rowKey={(r) => r.id}
-          rows={rows}
-          columns={[
-            { key: "time", header: "時刻", numeric: true },
-            { key: "target", header: "相手" },
-            { key: "reason", header: "理由", wrap: true },
-            { key: "state", header: "今" },
-          ]}
-        />
+        <StopHistory tick={tick} onChanged={reload} />
       </Part>
       <Part title="基準">
-        <ul>
-          {guardRules.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
+        <Thresholds />
       </Part>
       <Part title="効き目">
         <GuardEffectView />
@@ -64,9 +30,14 @@ export function GuardPage() {
       <Part title="蒸留した学び">
         <LessonList />
       </Part>
-      <Stack direction="row" gap={2}>
-        <StopButton scope="office" target="office" label="すべての社員を止める" />
-      </Stack>
+      <Part title="手で止める">
+        <Stack direction="row" gap={2} wrap>
+          {StaffId.options.map((id) => (
+            <StopButton key={id} scope="staff" target={id} label={`${STAFF_LABEL[id]}を止める`} onStopped={reload} />
+          ))}
+          <StopButton scope="office" target="office" label="すべての社員を止める" onStopped={reload} />
+        </Stack>
+      </Part>
     </Section>
   );
 }

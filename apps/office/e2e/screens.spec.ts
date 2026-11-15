@@ -179,12 +179,6 @@ test("サービスを選ぶと、その様子と記録と設定が出る", async
   await expect(page.getByText("版を上げたら npm に出す")).toBeVisible();
 });
 
-test("止めている社員を、守りの画面から再開できる", async ({ page }) => {
-  await page.goto("/guard");
-  await page.getByRole("button", { name: "作る役を再開する" }).click();
-  await expect(page.getByText("作る役を再開しました")).toBeVisible();
-});
-
 test("画面を移ると、題が変わり、中身に移る", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("main").getByRole("link", { name: /作る役/ }).first().click();

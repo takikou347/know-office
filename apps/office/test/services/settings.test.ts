@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { services } from "../../src/gate/db/main.ts";
 import { appendServiceSetting, serviceRules } from "../../src/gate/services/settings.ts";
-import { api, MINUTE, type WorkWorld, useWork } from "../helpers/work.ts";
+import { planDay } from "../../src/gate/work/plan.ts";
+import { api, at, MINUTE, type WorkWorld, useWork } from "../helpers/work.ts";
 
 const world = useWork();
 
@@ -259,5 +260,62 @@ describe("同時に変えた時の版", () => {
     expect(await count(world, `SELECT COUNT(*) AS n FROM service_settings WHERE service_id = '${ui}'`)).toBe(1);
     await expect(write(1)).resolves.toBeUndefined();
     expect(await count(world, `SELECT COUNT(*) AS n FROM service_settings WHERE service_id = '${ui}'`)).toBe(2);
+  });
+});
+
+describe("勤務の時間", () => {
+  const SCHEDULE = "/api/v1/settings/workday.schedule";
+  const ALL = [0, 1, 2, 3, 4, 5, 6];
+
+  it("勤務の時刻を変えると版が進み、次の予定が新しい時刻になる", async () => {
+    // 始まりを遅らせるだけなら勤務は延びないので、パスキー無しで通る
+    const changed = await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "10:00", end: "17:00", days: ALL }, reason: "朝を遅くする" });
+    expect(changed).toEqual({ key: "workday.schedule", value: { start: "10:00", end: "17:00", days: ALL }, inherited: false, version: 1 });
+    expect((await officeSettings(world))["workday.schedule"]).toEqual(changed);
+    expect(await planDay(world.d1.DB, "builder", "2026-12-01")).toMatchObject({ start: at(10), scheduledEnd: at(17) });
+    expect(world.gate.audits.filter((a) => a.action === "setting.update")).toEqual([
+      expect.objectContaining({ target: "workday.schedule", detail: { value: { start: "10:00", end: "17:00", days: ALL }, version: 1, reason: "朝を遅くする" } }),
+    ]);
+    // 古い版から変える事は断る
+    await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "11:00", end: "17:00", days: ALL }, reason: "古い版から" }, 409);
+  });
+
+  it("同じ版を読んだ 2 つが勤務の時刻を変えると、片方は 409", async () => {
+    const put = (start: string) =>
+      world.gate.request(SCHEDULE, {
+        method: "PUT",
+        headers: { ...world.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ version: 0, value: { start, end: "17:00", days: ALL }, reason: "同時に変える" }),
+      });
+    const statuses = (await Promise.all([put("10:00"), put("11:00")])).map((r) => r.status);
+    expect(statuses.toSorted((a, b) => a - b)).toEqual([200, 409]);
+    const rows = await world.d1.DB.prepare("SELECT version FROM settings WHERE key = 'workday.schedule'").all<{ version: number }>();
+    expect(rows.results.map((r) => r.version)).toEqual([1]);
+    expect(world.gate.audits.filter((a) => a.action === "setting.update")).toHaveLength(1);
+  });
+
+  it("勤務を延ばす変更はパスキー無しでは 401、縮める変更は通る", async () => {
+    const code = z.object({ code: z.string() }).loose();
+    // 終わりを遅らせる、曜日を足す、日をまたいで延ばす、はどれも働く時間が増える
+    expect(code.parse(await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "18:00", days: ALL }, reason: "延ばす" }, 401)).code).toBe("step_up_required");
+    expect(code.parse(await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "17:00", end: "09:00", days: ALL }, reason: "夜に働く" }, 401)).code).toBe("step_up_required");
+    expect(await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "17:00", days: [1, 2, 3, 4, 5] }, reason: "週末を休む" })).toMatchObject({ version: 1 });
+    expect(code.parse(await api(world, "PUT", SCHEDULE, { version: 1, value: { start: "09:00", end: "17:00", days: [1, 2, 3, 4, 5, 6] }, reason: "土曜を足す" }, 401)).code).toBe("step_up_required");
+    // 断った変更は書かない
+    expect((await officeSettings(world))["workday.schedule"]).toMatchObject({ version: 1 });
+    await stepUp(world);
+    expect(await api(world, "PUT", SCHEDULE, { version: 1, value: { start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5, 6] }, reason: "延ばす" })).toMatchObject({ version: 2 });
+  });
+
+  it("始まりと終わりが同じ、形の違う時刻、曜日が空は 422", async () => {
+    await stepUp(world);
+    await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "09:00", days: ALL }, reason: "同じ時刻" }, 422);
+    await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "9:00", end: "17:00", days: ALL }, reason: "形が違う" }, 422);
+    await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "24:00", days: ALL }, reason: "無い時刻" }, 422);
+    await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "17:00", days: [] }, reason: "曜日が空" }, 422);
+    await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "17:00", days: [1, 1] }, reason: "同じ曜日" }, 422);
+    await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "17:00", days: [7] }, reason: "無い曜日" }, 422);
+    await api(world, "PUT", SCHEDULE, { version: 0, value: null, reason: "消す" }, 422);
+    expect((await officeSettings(world))["workday.schedule"]).toMatchObject({ inherited: true, version: 0 });
   });
 });

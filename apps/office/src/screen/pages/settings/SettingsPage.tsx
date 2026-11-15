@@ -1,11 +1,13 @@
-// 設定の画面。外の鍵の入れ直し、全体のルール、GitHub、セッション、拡張。拡張と鍵の入れ直しは入口を呼び、ほかは仮のデータ
+// 設定の画面。外の鍵の入れ直し、全体のルールとサービスの初期値、GitHub、セッションとパスキー、拡張。どれもゲートウェイから読む
 import type { Extension } from "@know-office/core";
 import { Button, Card, List } from "knowidea-ui";
 import { useState } from "react";
-import { sessions } from "../../mock.ts";
 import type { ToggleExtension } from "../../parts/navigate.ts";
 import { Part, Section } from "../../parts/section.tsx";
 import { KeyReentry } from "./KeyReentry.tsx";
+import { OfficeRules } from "./OfficeRules.tsx";
+import { Passkey } from "./Passkey.tsx";
+import { Sessions } from "./Sessions.tsx";
 
 export interface SettingsPageProps {
   /** 入口が返した拡張 */
@@ -16,39 +18,16 @@ export interface SettingsPageProps {
 
 export function SettingsPage({ extensions, toggleExtension }: SettingsPageProps) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [ended, setEnded] = useState<string[]>([]);
   return (
     <Section>
       <KeyReentry />
-      <Card
-        title="全体のルール"
-        headingLevel={2}
-        meta={[
-          { label: "勤務の始め", value: "9:00" },
-          { label: "勤務の長さ", value: "8 時間" },
-          { label: "延長の上限", value: "30 分" },
-        ]}
-      />
-      <Card title="サービスの初期値" headingLevel={2} meta={[{ label: "見る役", value: "作る役と別のモデル" }]} />
+      <OfficeRules />
       <Card title="GitHub" headingLevel={2} actions={<Button disabled>連携する</Button>}>
         アプリの中のボタン 1 つで繋ぐ。まだ動かない
       </Card>
       <Part title="セッションと鍵">
-        <List
-          label="セッション"
-          items={sessions
-            .filter((s) => !ended.includes(s.id))
-            .map((s) => ({
-              id: s.id,
-              title: s.device,
-              meta: s.current ? "この端末" : `最後 ${s.last}`,
-              side: s.current ? undefined : (
-                <Button variant="quiet" aria-label={`${s.device}のセッションを切る`} onClick={() => setEnded((e) => [...e, s.id])}>
-                  切る
-                </Button>
-              ),
-            }))}
-        />
+        <Sessions />
+        <Passkey />
         <p>鍵は入口だけが持ち、画面には出しません</p>
       </Part>
       <Part title="拡張">

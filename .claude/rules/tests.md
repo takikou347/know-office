@@ -23,3 +23,6 @@ paths:
 - 「済み」は、要件のシナリオが入口 (画面の操作、Cron、通知、社員のツール) から画面に出るまで、代わりの Claude と GitHub と Access の上でつながって動く事。単体のテストが通るだけでは済みにしない。つながりは `apps/office/e2e/flows/<利用場面>.spec.ts` で確かめ、ここではゲートウェイの返事を差し替えない (`page.route`、`context.route`、HAR、`addInitScript` での `fetch` の差し替えのどれも)
 - 画面は `src/screen/mock.ts` を読まない。v1.yaml のルートは全部作る。残っている物は `test/screen/no-mock.test.ts` の `STILL_MOCK` と `test/gate/openapi.test.ts` の `UNBUILT` に Issue の番号と並べ、作ったら消す。足さない。`mock.ts` を再 export する中継のファイルを作らない
 - 代わりの Claude と GitHub は、本物が断る物 (違う鍵、User-Agent の無い要求、上限) を同じように断る。本物の返事を記録した見本があれば、同じ Zod の形に両方を通す
+- 利用場面の通し (`apps/office/e2e/flows/<利用場面>.spec.ts`) は Playwright の `flows` のプロジェクトで、Chrome の幅 1,280 で 1 本ずつ、ほかの通しの後に流れる。本物の D1 と DO を書き換えるので、前の通しが残した値に頼らず、終わる時に元の値へ戻す
+- パスキーの確認が要る操作は、テストの頭で `useOwnerPasskey(page)` (`e2e/flows/helpers/passkey.ts`) を呼ぶ。`flows/passkey.setup.ts` が設定の画面で登録した 1 本が仮想の認証器に入り、画面が求めた時に自動で確かめる
+- 画面から作れない前提 (社員が出した承認など) は `seedMain(sql)` (`e2e/flows/helpers/seed.ts`) で手元の D1 に置き、画面の部分は `part(page, "<h2 の見出し>")` (`e2e/flows/helpers/screen.ts`) で探す
