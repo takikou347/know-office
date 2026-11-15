@@ -170,6 +170,8 @@ export type Bindings = {
   ANTHROPIC_API_KEY?: string;
   /** know-office 自身のリポジトリ (owner/name)。見つけて直す仕組みが Issue を置く。無い間は数えるだけ */
   OFFICE_REPO?: string;
+  /** 急ぐ故障を見つけた時の調べ。費用が出るので、オーナーの はい の後に on にする。初期値は off */
+  URGENT_SCAN?: string;
 } & Partial<Record<RecordBinding, D1Database>>;
 
 /** ゲートウェイの Hono に渡す型。バインディングとミドルウェアが置く値の型を持つ */

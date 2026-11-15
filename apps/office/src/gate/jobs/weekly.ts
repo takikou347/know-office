@@ -2,7 +2,7 @@
 import { type Clock, type Fetcher, jstDay, jstDayStart, newId } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
-import { FINDINGS_JOB, syncIssues, URGENT_JOB, urgentBatches } from "../findings/scan.ts";
+import { FINDINGS_JOB, syncIssues, URGENT_JOB, URGENT_PER_DAY, urgentBatches } from "../findings/scan.ts";
 import type { IssueTracker } from "../findings/tracker.ts";
 import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
@@ -121,15 +121,29 @@ export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDep
  * @param prepared.detail 結果を入れる時に使う中身
  * @param deps 外へ頼む口
  * @param now 今の時刻
+ * @param cap 同じ種類で鍵の頭が同じ行の数の上限。上限に届いていれば送らない
+ * @param cap.prefix 鍵の頭 (急ぐ故障は日)
+ * @param cap.max 上限
  * @returns 始めた batches の行の ID。始めなかった時は null
  */
-async function submitOnce(env: Bindings, kind: BatchKind, key: string, prepared: { requests: BatchRequest[]; detail: unknown }, deps: WeeklyDeps, now: number): Promise<string | null> {
+async function submitOnce(
+  env: Bindings,
+  kind: BatchKind,
+  key: string,
+  prepared: { requests: BatchRequest[]; detail: unknown },
+  deps: WeeklyDeps,
+  now: number,
+  cap?: { prefix: string; max: number },
+): Promise<string | null> {
   const id = newId(clockOf(now));
   // 送る前に落ちて残った印は、時間がたてば取り直せるようにする
   await env.DB.prepare("DELETE FROM batches WHERE kind = ? AND week = ? AND status = 'pending' AND created_at < ?").bind(kind, key, now - STALE_PENDING_MS).run();
-  // 種類と鍵で 1 行だけを持てるので、同時に始めた 2 つの片方だけが送る
-  const claimed = await env.DB.prepare("INSERT INTO batches (id, kind, week, batch_id, status, detail, created_at, ended_at) VALUES (?, ?, ?, NULL, 'pending', ?, ?, NULL) ON CONFLICT (kind, week) DO NOTHING")
-    .bind(id, kind, key, JSON.stringify(prepared.detail), now)
+  // 種類と鍵で 1 行だけを持てるので、同時に始めた 2 つの片方だけが送る。上限は同じ 1 文の条件に入れ、同時に来ても超えない
+  const capped = cap ? "(SELECT count(*) FROM batches WHERE kind = ? AND substr(week, 1, ?) = ?) < ?" : "1 = 1";
+  const claimed = await env.DB.prepare(
+    `INSERT INTO batches (id, kind, week, batch_id, status, detail, created_at, ended_at) SELECT ?, ?, ?, NULL, 'pending', ?, ?, NULL WHERE ${capped} ON CONFLICT (kind, week) DO NOTHING`,
+  )
+    .bind(id, kind, key, JSON.stringify(prepared.detail), now, ...(cap ? [kind, cap.prefix.length, cap.prefix, cap.max] : []))
     .run();
   if (claimed.meta.changes !== 1) return null;
   try {
@@ -167,7 +181,7 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
   // 前の回に作れなかった Issue を作り直す
   await syncIssues(env, deps.tracker, now);
   // 急ぐ故障は週を待たずに調べる。結果は次の 5 分で入れる
-  for (const urgent of await urgentBatches(env, now)) await submitOnce(env, "urgent", urgent.key, urgent, deps, now);
+  for (const urgent of await urgentBatches(env, now)) await submitOnce(env, "urgent", urgent.key, urgent, deps, now, { prefix: urgent.day, max: URGENT_PER_DAY });
 }
 
 /**

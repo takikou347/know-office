@@ -172,18 +172,26 @@ async function prepare(env: Bindings, range: WeekRange): Promise<{ requests: Bat
   return { requests: entries.map((e) => requestOf(e.group, e.lines, false)), detail: { urgent: false, groups: entries.map((e) => e.group) } };
 }
 
+/** 急ぐ故障の調べを 1 回に送る原因の上限。多い順に送る */
+const URGENT_PER_RUN = 3;
+
+/** 急ぐ故障の調べを 1 日に送るバッチの上限 */
+export const URGENT_PER_DAY = 10;
+
 /**
- * 直前の 5 分に同じ原因のエラーが 3 回を超えた急ぐ故障を、原因ごとに 1 つのバッチにする物を作る。5 分ごとの定期ジョブが呼ぶ
- * @param now 今の時刻
+ * 直前の 5 分に同じ原因のエラーが 3 回を超えた急ぐ故障を、多い順に 3 原因まで、原因ごとに 1 つのバッチにする物を作る。5 分ごとの定期ジョブが呼ぶ。
+ * 費用が出るので、オーナーの はい の後に URGENT_SCAN を on にした時と、Issue を置くリポジトリが決まっている時だけ作る
  * @param env バインディング
- * @returns 原因ごとの、その日のうちに重ねないための鍵と送る物
+ * @param now 今の時刻
+ * @returns 原因ごとの、その日のうちに重ねないための鍵と送る物と、1 日の数を数える鍵の頭
  */
-export async function urgentBatches(env: Bindings, now: number): Promise<{ key: string; requests: BatchRequest[]; detail: z.input<typeof Detail> }[]> {
+export async function urgentBatches(env: Bindings, now: number): Promise<{ key: string; day: string; requests: BatchRequest[]; detail: z.input<typeof Detail> }[]> {
+  if (env.URGENT_SCAN !== "on" || officeRepo(env) === null) return [];
   // 通知 (error_burst) と同じ 5 分に 3 回を超えた物。今の時刻ちょうどの物まで含める
-  const groups = await errorGroups(env, now - BURST_WINDOW_MS, now + 1, { over: BURST_LIMIT, urgentOnly: true });
+  const groups = (await errorGroups(env, now - BURST_WINDOW_MS, now + 1, { over: BURST_LIMIT, urgentOnly: true })).slice(0, URGENT_PER_RUN);
   return groups.map((g) => {
     const { group, lines } = errorEntry(g, "u0");
-    return { key: `${jstDay(now)}:${g.fingerprint}`, requests: [requestOf(group, lines, true)], detail: { urgent: true, groups: [group] } };
+    return { key: `${jstDay(now)}:${g.fingerprint}`, day: `${jstDay(now)}:`, requests: [requestOf(group, lines, true)], detail: { urgent: true, groups: [group] } };
   });
 }
 

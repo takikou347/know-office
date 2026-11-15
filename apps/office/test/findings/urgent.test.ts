@@ -11,11 +11,32 @@ const BURST = "e".repeat(64);
 const ANSWER = answerJson({ title: "保存のたびに 500 を返す", steps: ["ノードを保存する"], needs: null, reason: "D1 の列が足りない" });
 
 /**
- * 調べる先のリポジトリを決める
+ * 調べる先のリポジトリを決め、急ぐ故障の調べを入れる。入れるのはオーナーの はい の後
  * @param w テストの物
  */
 function useRepo(w: WorkWorld): void {
-  Object.assign(w.gate.env, { OFFICE_REPO: REPO });
+  Object.assign(w.gate.env, { OFFICE_REPO: REPO, URGENT_SCAN: "on" });
+}
+
+/**
+ * 違う原因の急ぐ故障を置く。1 分ごとに起きるので、5 分の間に 6 回まで置ける
+ * @param counts 原因ごとの回数
+ * @param at 最初の時刻
+ * @param tag 指紋の頭の 1 字
+ * @returns 指紋
+ */
+async function bursts(counts: number[], at: number, tag = "a"): Promise<string[]> {
+  const prints = counts.map((_, i) => `${tag}${i.toString(16).padStart(63, "0")}`);
+  for (const [i, fingerprint] of prints.entries()) await addErrors(world, { at, fingerprint, count: counts[i] ?? 0 });
+  return prints;
+}
+
+/**
+ * 送った急ぐ故障のバッチの指紋を読む
+ * @returns 指紋
+ */
+async function sent(): Promise<string[]> {
+  return (await rows(world.d1.DB, "SELECT week FROM batches WHERE kind = 'urgent' ORDER BY week")).map((r) => String(r["week"]).split(":")[1] ?? "");
 }
 
 /**
@@ -71,5 +92,61 @@ describe("急ぐ故障", () => {
     await addErrors(world, { at: dec(3, 10), fingerprint: BURST, count: 4 });
     await Promise.all([poll(dec(3, 10, 5)), poll(dec(3, 10, 5))]);
     expect(world.gate.claude.batches).toHaveLength(1);
+  });
+});
+
+describe("急ぐ故障の調べの費用の守り", () => {
+  it("URGENT_SCAN が on でなければ送らない", async () => {
+    Object.assign(world.gate.env, { OFFICE_REPO: REPO });
+    await addErrors(world, { at: dec(3, 10), fingerprint: BURST, count: 4 });
+    await poll(dec(3, 10, 5));
+    Object.assign(world.gate.env, { URGENT_SCAN: "off" });
+    await poll(dec(3, 10, 5));
+    expect(world.gate.claude.batches).toEqual([]);
+  });
+
+  it("OFFICE_REPO が無ければ送らない", async () => {
+    Object.assign(world.gate.env, { URGENT_SCAN: "on" });
+    await addErrors(world, { at: dec(3, 10), fingerprint: BURST, count: 4 });
+    await poll(dec(3, 10, 5));
+    Object.assign(world.gate.env, { OFFICE_REPO: "not a repo" });
+    await poll(dec(3, 10, 5));
+    expect(world.gate.claude.batches).toEqual([]);
+  });
+
+  it("1 回に送るのは多い順に 3 原因まで", async () => {
+    useRepo(world);
+    const prints = await bursts([4, 4, 5, 6, 6], dec(3, 10));
+    await poll(dec(3, 10, 5));
+    expect(world.gate.claude.batches).toHaveLength(3);
+    expect(await sent()).toEqual([prints[2], prints[3], prints[4]].toSorted((a, b) => a.localeCompare(b)));
+  });
+
+  it("1 日に送るのは 10 本までで、次の日はまた送る", async () => {
+    useRepo(world);
+    // 3 本ずつ 4 回見つける。4 回目は 10 本に届いた所で止める
+    for (const [i, tag] of ["a", "b", "c", "d"].entries()) {
+      await bursts([4, 4, 4], dec(3, 10 + i), tag);
+      await poll(dec(3, 10 + i, 5));
+    }
+    expect(world.gate.claude.batches).toHaveLength(10);
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM batches WHERE kind = 'urgent'")).toEqual([{ n: 10 }]);
+    // 次の日は数え直す
+    await bursts([4], dec(4, 10), "e");
+    await poll(dec(4, 10, 5));
+    expect(world.gate.claude.batches).toHaveLength(11);
+  });
+
+  it("同時に見つけても、1 日の 10 本を超えない", async () => {
+    useRepo(world);
+    for (const [i, tag] of ["a", "b", "c"].entries()) {
+      await bursts([4, 4, 4], dec(3, 10 + i), tag);
+      await poll(dec(3, 10 + i, 5));
+    }
+    expect(world.gate.claude.batches).toHaveLength(9);
+    // 残り 1 本の所に、違う原因を見つけた 2 つの定期ジョブが同時に来る
+    await bursts([4, 4], dec(3, 13), "d");
+    await Promise.all([poll(dec(3, 13, 5)), poll(dec(3, 13, 5))]);
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM batches WHERE kind = 'urgent'")).toEqual([{ n: 10 }]);
   });
 });
