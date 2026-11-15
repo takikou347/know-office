@@ -165,4 +165,29 @@ describe("同じ原因の Issue", () => {
     expect(tracker.issues).toEqual([]);
     expect(await rows(world.d1.DB, "SELECT repo, count, issue_number FROM findings")).toEqual([{ repo: null, count: 3, issue_number: null }]);
   });
+
+  it("Claude に送る文と Issue に渡す文は、トークン、メール、ID、鍵らしい文字列を伏せ、指紋の印は残す", async () => {
+    useRepo(world);
+    const secrets = ["ghs_16C7e42F292c6912E7710c838347Ae178B4a", "taro@example.com", "0190f4a8-1c2d-7e3f-8a9b-0c1d2e3f4a5b", "0af7651916cd43dd8448eb211c80319c", "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2Rl"];
+    await addErrors(world, { at: dec(1, 10), fingerprint: SAME, count: 2, message: `TypeError: ${secrets.join(" ")} を読んだ` });
+    // Claude の答えが、読んだ文の鍵や ID をそのまま返しても外に出さない
+    const echo = answerJson({ title: `${secrets[1] ?? ""} のノード`, steps: [`${secrets[2] ?? ""} を開く`, `${secrets[0] ?? ""} で push する`], needs: null, reason: `${secrets[3] ?? ""} ${secrets[4] ?? ""}` });
+    const tracker = fakeTracker();
+    await runBatch(world, "findings", () => echo, tracker, dec(7, 4));
+    const prompt = JSON.stringify(world.gate.claude.batches[0]?.requests[0]?.params.messages);
+    expect(prompt).toContain("TypeError: [伏せた]");
+    expect(tracker.issues).toHaveLength(1);
+    const issue = tracker.issues[0];
+    expect(issue?.body).toContain(fingerprintMark(SAME));
+    expect(issue?.title).toBe("[伏せた] のノード");
+    expect(issue?.body).toContain("1. [伏せた] を開く\n2. [伏せた] で push する");
+
+    // 次の週に書き足す文も伏せる
+    await addErrors(world, { at: dec(8, 10), fingerprint: SAME, count: 1 });
+    await runBatch(world, "findings", () => echo, tracker, dec(14, 4));
+    expect(issue?.comments).toHaveLength(1);
+    for (const text of [prompt, issue?.title ?? "", issue?.body ?? "", ...(issue?.comments ?? [])]) {
+      for (const secret of secrets) expect(text).not.toContain(secret);
+    }
+  });
 });

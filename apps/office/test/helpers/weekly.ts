@@ -125,14 +125,15 @@ export async function addStop(w: WorkWorld, input: { at: number; signal: string;
  * @param input.fingerprint 指紋
  * @param input.count 件数
  * @param input.route ルート
+ * @param input.message エラーの文
  */
-export async function addErrors(w: WorkWorld, input: { at: number; fingerprint: string; count: number; route?: string }): Promise<void> {
+export async function addErrors(w: WorkWorld, input: { at: number; fingerprint: string; count: number; route?: string; message?: string }): Promise<void> {
   const db = new Date(input.at + 9 * 60 * 60_000).getUTCFullYear() === 2027 ? w.d1.REC_2027 : w.d1.REC_2026;
   if (input.count === 0) return;
   const statements = Array.from({ length: input.count }, (_, i) =>
     db
       .prepare("INSERT INTO error_events (id, at, source, level, code, message, route, status, fingerprint, trace_id) VALUES (?, ?, 'gate', 'error', 'internal', ?, ?, 500, ?, NULL)")
-      .bind(newId(clockAt(input.at + i * 60_000)), input.at + i * 60_000, "TypeError: undefined を読んだ", input.route ?? "/api/v1/nodes", input.fingerprint),
+      .bind(newId(clockAt(input.at + i * 60_000)), input.at + i * 60_000, input.message ?? "TypeError: undefined を読んだ", input.route ?? "/api/v1/nodes", input.fingerprint),
   );
   await db.batch(statements);
 }

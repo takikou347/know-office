@@ -20,6 +20,33 @@ export function redactText(text: string): string {
   return SECRET_TEXT.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), text);
 }
 
+// 外 (GitHub の Issue) に出す文で、鍵に加えて伏せる物。上から順に置き換える
+const PUBLIC_TEXT: [RegExp, string][] = [
+  // URL の userinfo (user:pass@)
+  [/\b([a-z][a-z\d+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[伏せた]@"],
+  [/eyJ[\w-]+\.[\w-]+\.[\w-]*/g, "[伏せた]"],
+  // 鍵の頭は語の途中に埋まっていても伏せる
+  [/(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/g, "[伏せた]"],
+  [/\bsk-[\w-]+/g, "[伏せた]"],
+  [/AKIA[\dA-Z]{16}/g, "[伏せた]"],
+  [/xox[bp]-[\w-]+/g, "[伏せた]"],
+  [/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, "[伏せた]"],
+  [/\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b/gi, "[伏せた]"],
+  // トレース ID、ハッシュ、鍵の ID。16 桁より短い物 (コミットの短い形) は残す
+  [/\b[\da-f]{16,}\b/gi, "[伏せた]"],
+  // 数字と英字の混じった 24 字以上の続き。base64 の鍵や署名。道の / では切る
+  [/(?=[\w+=-]*\d)(?=[\w+=-]*[a-z])[\w+=-]{24,}/gi, "[伏せた]"],
+];
+
+/**
+ * 外に出す文の、鍵、トークン、メール、ID (UUID、16 桁以上の 16 進数)、鍵らしい長い文字列を伏せる。GitHub の Issue に渡す前に通す
+ * @param text 文
+ * @returns 伏せた文
+ */
+export function redactPublic(text: string): string {
+  return PUBLIC_TEXT.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), redactText(text));
+}
+
 /**
  * 値の中の鍵らしい項目と文を伏せる
  * @param value ログに出す値

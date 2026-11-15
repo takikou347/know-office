@@ -1,12 +1,12 @@
 // 見つけて直す調べ。前の週のエラーを原因の指紋ごとにまとめてレビュー担当のモデルに送り、1 つの原因を 1 件の Issue にする (サービスと拡張の 3.7)
-import { type Clock, FindingAnswer, jstClock, jstDay, jstYear, newId, OPUS } from "@know-office/core";
+import { type Clock, FindingAnswer, jstClock, jstDay, jstYear, newId, OPUS, redactPublic } from "@know-office/core";
 import { z } from "zod";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 import { answerJson, type BatchRequest, type BatchResult, recordBatchUsage } from "../jobs/claude-batch.ts";
 import type { BatchRow, WeekRange, WeeklyDeps, WeeklyJob } from "../jobs/weekly.ts";
 import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
-import { fingerprintMark, type IssueTracker, REPO_PATTERN } from "./tracker.ts";
+import { fingerprintMark, type IssueTracker, publicTracker, REPO_PATTERN } from "./tracker.ts";
 
 /** 1 度に送る原因の上限。多い順に送る */
 const MAX_GROUPS = 100;
@@ -96,12 +96,15 @@ async function prepare(env: Bindings, range: WeekRange): Promise<{ requests: Bat
       customId: g.customId,
       model: OPUS,
       system: SYSTEM,
-      prompt: [
-        `起きた回数: ${String(g.count)}`,
-        `最初: ${jstDay(g.firstAt)} ${jstClock(g.firstAt)}、最後: ${jstDay(g.lastAt)} ${jstClock(g.lastAt)}`,
-        g.sample ? `起きた所: ${g.sample.source} ${g.sample.route ?? ""} 種類 ${g.sample.code} 状態 ${String(g.sample.status ?? "")}` : "",
-        g.sample ? `文: ${g.sample.message}` : "",
-      ].join("\n"),
+      // 答えは Issue の文になるので、送る前に ID やメールも伏せ、答えに写させない
+      prompt: redactPublic(
+        [
+          `起きた回数: ${String(g.count)}`,
+          `最初: ${jstDay(g.firstAt)} ${jstClock(g.firstAt)}、最後: ${jstDay(g.lastAt)} ${jstClock(g.lastAt)}`,
+          g.sample ? `起きた所: ${g.sample.source} ${g.sample.route ?? ""} 種類 ${g.sample.code} 状態 ${String(g.sample.status ?? "")}` : "",
+          g.sample ? `文: ${g.sample.message}` : "",
+        ].join("\n"),
+      ),
       maxTokens: MAX_TOKENS,
     })),
     detail: { groups: groups.map(({ customId, fingerprint, count, firstAt, lastAt }) => ({ customId, fingerprint, count, firstAt, lastAt })) },
@@ -130,6 +133,7 @@ async function apply(env: Bindings, deps: WeeklyDeps, row: BatchRow, results: Ba
   const { groups } = Detail.parse(row.detail);
   const db = env.DB;
   const repo = officeRepo(env);
+  const tracker = publicTracker(deps.tracker);
   const still = "EXISTS (SELECT 1 FROM batches WHERE id = ? AND status = 'submitted')";
   const answers = new Map(groups.map((g) => [g.fingerprint, answerOf(results.find((r) => r.customId === g.customId))]));
   const before = await findingsOf(env, groups.map((g) => g.fingerprint));
@@ -174,8 +178,8 @@ async function apply(env: Bindings, deps: WeeklyDeps, row: BatchRow, results: Ba
     const answer = answers.get(g.fingerprint) ?? null;
     const had = before.get(g.fingerprint)?.issue_number ?? null;
     try {
-      if (had === null) await ensureIssue(env, deps.tracker, finding, answer, { now, owned: true });
-      else await deps.tracker.comment(finding.repo, had, weekComment(g.count, finding.count, answer));
+      if (had === null) await ensureIssue(env, tracker, finding, answer, { now, owned: true });
+      else await tracker.comment(finding.repo, had, weekComment(g.count, finding.count, answer));
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: "finding_issue_failed", error }, clockOf(now));
     }
@@ -306,7 +310,7 @@ export async function syncIssues(env: Bindings, tracker: IssueTracker, now: numb
     .all();
   for (const finding of z.array(FindingRow).parse(results)) {
     try {
-      await ensureIssue(env, tracker, finding, null, { now, owned: false });
+      await ensureIssue(env, publicTracker(tracker), finding, null, { now, owned: false });
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: "finding_issue_failed", error }, clockOf(now));
     }

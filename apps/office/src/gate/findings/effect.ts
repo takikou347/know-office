@@ -10,7 +10,7 @@ import { recordError } from "../ledger/errors.ts";
 import { notifyStaff } from "../work/loop.ts";
 import { intakeProject, newNodeRow, recordCreated } from "../work/nodes.ts";
 import { recordDbs } from "./scan.ts";
-import type { IssueTracker } from "./tracker.ts";
+import { type IssueTracker, publicTracker } from "./tracker.ts";
 
 /** 比べる間 */
 const WEEK_MS = 7 * 24 * 60 * 60_000;
@@ -50,11 +50,12 @@ async function countErrors(env: Bindings, fingerprint: string, from: number, to:
 /**
  * 直してから 7 日たった物の効き目を確かめる。読んだ時に fixed のままの物だけを書き、同時に確かめた 2 つの片方だけが Issue に書く。前の回に Issue へ書けなかった物も書き直す
  * @param env バインディング
- * @param tracker GitHub の Issue
+ * @param issues GitHub の Issue。書く文は伏せてから渡す
  * @param now 今の時刻
  */
-export async function checkEffects(env: Bindings, tracker: IssueTracker, now: number): Promise<void> {
+export async function checkEffects(env: Bindings, issues: IssueTracker, now: number): Promise<void> {
   const clock: Clock = { now: () => now };
+  const tracker = publicTracker(issues);
   // 先に前の回の書き残しを書く。この回に書けなかった物は次の回に回し、同じ回で 2 度試さない
   await renote(env, tracker, now, clock);
   const { results } = await env.DB.prepare("SELECT id, fingerprint, repo, issue_number, fixed_at FROM findings WHERE status = 'fixed' AND fixed_at <= ? ORDER BY id")

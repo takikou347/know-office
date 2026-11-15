@@ -8,7 +8,7 @@ export { CONTAINER_CA, WORKSPACE_KEY_ENV } from "./container.ts";
 export { keyedId, newId } from "./id.ts";
 export { fromBase64, fromBase64url, toBase64, toBase64url } from "./encoding.ts";
 export { deriveKey, type KeyPurpose } from "./keys.ts";
-export { log, redact, redactText } from "./log.ts";
+export { log, redact, redactPublic, redactText } from "./log.ts";
 export { jstClock, jstDay, jstDayStart, jstYear } from "./time.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
 export { AuditInput, AuditRow, AuditVerification, VerifyAuditInput } from "./schemas/audit.ts";
