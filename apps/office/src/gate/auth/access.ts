@@ -13,10 +13,14 @@ export type AccessConfig = {
   aud: string;
   /** オーナーのメールアドレス */
   ownerEmail: string;
+  /** 通してよい Access の作業用の鍵の Client ID。稼働確認のルートの時だけ渡す */
+  serviceClientId?: string | undefined;
 };
 
 const Certs = z.object({ keys: z.array(z.looseObject({ kty: z.string() })) });
 const Claims = z.looseObject({ email: z.string() });
+// Access の作業用の鍵で通った要求の証明は email を持たず、common_name に Client ID を持つ
+const ServiceClaims = z.looseObject({ common_name: z.string().min(1) });
 
 /** 公開鍵をためておく時間。ログインと記録の 3.1 の 2 */
 const CACHE_MS = 60 * 60_000;
@@ -94,10 +98,10 @@ async function fetchCerts(fetcher: Fetcher, url: string): Promise<JSONWebKeySet>
 /**
  * 証明の署名、発行者、宛先、期限を確かめ、メールアドレスを返す
  * @param token Cf-Access-Jwt-Assertion の値
- * @param config 公開鍵の URL、チーム名、宛先、オーナー
+ * @param config 公開鍵の URL、チーム名、宛先、オーナー、通してよい作業用の鍵
  * @param fetcher 外への fetch
  * @param clock 時刻
- * @returns オーナーのメールアドレス
+ * @returns オーナーのメールアドレス。決めた作業用の鍵の証明なら、その Client ID
  * @throws unauthenticated 証明が無い、署名、発行者、宛先、期限が合わない時
  * @throws forbidden 証明は正しいがオーナーでない時
  */
@@ -125,7 +129,11 @@ export async function verifyAccess(token: string | undefined, config: AccessConf
     }
   }
   const claims = Claims.safeParse(payload);
-  if (!claims.success) throw new AppError("unauthenticated", "ログインの証明にメールアドレスが無い");
+  if (!claims.success) {
+    const service = ServiceClaims.safeParse(payload);
+    if (config.serviceClientId && service.success && service.data.common_name === config.serviceClientId) return service.data.common_name;
+    throw new AppError("unauthenticated", "ログインの証明にメールアドレスが無い");
+  }
   // Google のメールアドレスは大文字と小文字を区別しない
   if (claims.data.email.toLowerCase() !== config.ownerEmail.toLowerCase()) throw new AppError("forbidden", "オーナーでない");
   return claims.data.email;

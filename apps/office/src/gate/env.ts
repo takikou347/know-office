@@ -162,6 +162,8 @@ export type Bindings = {
   ACCESS_AUD: string;
   /** オーナーのメールアドレス。Access の証明の email と比べる */
   OWNER_EMAIL: string;
+  /** デプロイの後の確かめに使う Access の作業用の鍵の Client ID。稼働確認のルートだけ、この鍵の証明を通す */
+  ACCESS_SMOKE_CLIENT_ID?: string;
   /** vault の鍵を暗号にする主の鍵。32 バイトを base64 で */
   MASTER_KEY: string;
   /** 会話の記録、社員が作ったファイル、D1 の毎日の写しを置く R2 */

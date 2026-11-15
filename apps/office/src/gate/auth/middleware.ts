@@ -89,6 +89,8 @@ export const accessProof = createMiddleware<GateEnv>(async (c, next) => {
     team: c.env.ACCESS_TEAM,
     aud: c.env.ACCESS_AUD,
     ownerEmail: c.env.OWNER_EMAIL,
+    // デプロイの後の確かめ (scripts/smoke.ts) は作業用の鍵で稼働確認だけを聞く。ほかのルートには鍵の証明を通さない
+    serviceClientId: c.req.method === "GET" && c.req.path === "/api/v1/health" ? c.env.ACCESS_SMOKE_CLIENT_ID : undefined,
   };
   try {
     c.set("email", await verifyAccess(c.req.header("Cf-Access-Jwt-Assertion"), config, c.var.fetch, c.var.clock));

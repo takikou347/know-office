@@ -223,3 +223,53 @@ describe("画面と入力のセキュリティ", () => {
     expect((await gate.request("/api/v1/nothing", { headers })).status).toBe(404);
   });
 });
+
+// デプロイの後の確かめ (scripts/smoke.ts) は Access の作業用の鍵で聞く。Access はその証明に email を入れず、common_name に Client ID を入れる
+const SMOKE_CLIENT_ID = "smoke-client.access";
+
+/**
+ * 作業用の鍵で通った時の証明を出す
+ * @param commonName 証明の common_name
+ * @returns email の無い証明
+ */
+function serviceProof(commonName: string): Promise<string> {
+  return gate.access.sign({ email: undefined, sub: "", common_name: commonName });
+}
+
+describe("Access の作業用の鍵", () => {
+  beforeEach(() => {
+    gate.env.ACCESS_SMOKE_CLIENT_ID = SMOKE_CLIENT_ID;
+  });
+
+  it("決めた鍵の証明は稼働確認だけを通す", async () => {
+    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof(SMOKE_CLIENT_ID) } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ data: { ok: true, part: "gate" } });
+  });
+
+  it("決めた鍵の証明でもログインセッションは作れない", async () => {
+    const res = await gate.request("/api/v1/sessions", { method: "POST", headers: { Origin: ORIGIN, "Cf-Access-Jwt-Assertion": await serviceProof(SMOKE_CLIENT_ID) } });
+    expect(res.status).toBe(401);
+    expect(await codeOf(res)).toBe("unauthenticated");
+    expect(await d1.DB.prepare("SELECT count(*) AS n FROM sessions").first("n")).toBe(0);
+  });
+
+  it("ほかの鍵の証明は稼働確認でも 401", async () => {
+    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof("other-client.access") } });
+    expect(res.status).toBe(401);
+    expect(await codeOf(res)).toBe("unauthenticated");
+  });
+
+  it("鍵を決めていない時は稼働確認でも 401", async () => {
+    const env = { ...gate.env, ACCESS_SMOKE_CLIENT_ID: undefined };
+    const res = await gate.app.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof("") } }, env);
+    expect(res.status).toBe(401);
+  });
+
+  it("鍵の証明に email も付いていればオーナーとして確かめる", async () => {
+    const res = await gate.request("/api/v1/health", {
+      headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign({ email: "someone@example.com", common_name: SMOKE_CLIENT_ID }) },
+    });
+    expect(res.status).toBe(403);
+  });
+});

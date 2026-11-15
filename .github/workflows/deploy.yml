@@ -1,0 +1,175 @@
+# main に入ると、チェックの後に D1 のマイグレーション、画面とゲートウェイとコンテナのデプロイ、デプロイした先の確かめを順に回し、確かめが落ちたら前のバージョンに戻す。
+# プルリクエストごとに、プレビュー用の D1 と R2 を結んだプレビュー (wrangler preview) を出して確かめる。Cloudflare の鍵が無い間は、どちらも回さない
+name: Deploy
+
+on:
+  pull_request:
+    # 閉じた時はプレビューを消す
+    types: [opened, synchronize, reopened, closed]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # secrets は job の if で読めないので、ここで有無だけを出す。値は出さない
+  ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      ok: ${{ steps.keys.outputs.ok }}
+    steps:
+      - id: keys
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          OFFICE_URL: ${{ vars.OFFICE_URL }}
+        run: |
+          set -eu
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET OFFICE_URL; do
+            if [ -z "$(printenv "$name" || true)" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice::Cloudflare の鍵が無いので、デプロイとプレビューを回さない。無い物:$missing"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # check.yml と同じ中身。鍵が無い間は Check のワークフローだけが回る
+  check:
+    needs: ready
+    if: needs.ready.outputs.ok == 'true' && github.event.action != 'closed'
+    uses: ./.github/workflows/check.yml
+
+  production:
+    needs: [ready, check]
+    if: needs.ready.outputs.ok == 'true' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ vars.OFFICE_URL }}
+    # 本番のデプロイは 1 つずつ。途中で止めると、マイグレーションとデプロイの間で切れる
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # pnpm は package.json の packageManager の版を corepack で入れる。サードパーティの action を使わない
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: D1 のマイグレーション
+        working-directory: apps/office
+        # 足すだけのマイグレーションを、DB と書いている年 (日本時間) の記録の置き場に当てる
+        run: |
+          set -eu
+          year=$(TZ=Asia/Tokyo date +%Y)
+          for db in DB "REC_$year"; do pnpm exec wrangler d1 migrations apply "$db" --remote -c wrangler.jsonc; done
+      - id: deploy
+        name: 画面、ゲートウェイ、コンテナのデプロイ
+        working-directory: apps/office
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          SHA: ${{ github.sha }}
+        run: pnpm exec wrangler deploy --message "main $SHA" --var "ACCESS_SMOKE_CLIENT_ID:$CF_ACCESS_CLIENT_ID"
+      - name: デプロイした URL に聞く
+        env:
+          SMOKE_URL: ${{ vars.OFFICE_URL }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: node scripts/smoke.ts
+      # 確かめが落ちたら前のバージョンに戻す。マイグレーションは足すだけなので戻さない (運用手順の 2 章)
+      - name: 前のバージョンに戻す
+        if: failure() && steps.deploy.outcome == 'success'
+        working-directory: apps/office
+        env:
+          SHA: ${{ github.sha }}
+        run: pnpm exec wrangler rollback --name know-office --yes --message "main $SHA の確かめが落ちた"
+
+  preview:
+    needs: [ready, check]
+    # フォークからのプルリクエストには鍵を渡さない
+    if: needs.ready.outputs.ok == 'true' && github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: preview
+      url: ${{ steps.preview.outputs.url }}
+    concurrency:
+      group: preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: プレビュー用の D1 のマイグレーション
+        working-directory: apps/office
+        # wrangler.jsonc の previews の D1 だけを並べた設定を作り、本番の置き場に当てない
+        run: |
+          set -eu
+          jq '{name, d1_databases: [.previews.d1_databases | unique_by(.database_name)[] | {binding, database_name, migrations_dir}]}' dist/know_office/wrangler.json > preview-d1.json
+          for db in $(jq -r '.d1_databases[].database_name' preview-d1.json); do pnpm exec wrangler d1 migrations apply "$db" --remote -c preview-d1.json; done
+      - id: preview
+        name: プレビューを出す
+        working-directory: apps/office
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          pnpm exec wrangler preview --name "pr-$NUMBER" --json --var "ACCESS_SMOKE_CLIENT_ID:$CF_ACCESS_CLIENT_ID" > preview.json
+          url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' preview.json | head -1)
+          if [ -z "$url" ]; then echo "プレビューの URL が出ていない"; exit 1; fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: プレビューの URL に聞く
+        env:
+          SMOKE_URL: ${{ steps.preview.outputs.url }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: node scripts/smoke.ts
+
+  preview-delete:
+    needs: ready
+    if: needs.ready.outputs.ok == 'true' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: プレビューを消す
+        working-directory: apps/office
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: pnpm exec wrangler preview delete --name "pr-$NUMBER"

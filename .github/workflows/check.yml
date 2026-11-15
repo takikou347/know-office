@@ -8,6 +8,8 @@ on:
   # 毎週月曜の 0 時 (協定世界時) に、main の依存に新しく公開された弱点が無いかを確かめる
   schedule:
     - cron: "0 0 * * 1"
+  # deploy.yml がデプロイの前に同じ中身を回す
+  workflow_call:
 
 permissions:
   contents: read
