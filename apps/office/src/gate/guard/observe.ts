@@ -107,22 +107,30 @@ export async function checkOverruns(env: Bindings, now: number, deps: GuardDeps)
  * @param deps 外へ頼む口
  */
 export async function checkThresholds(env: Bindings, now: number, deps: GuardDeps): Promise<void> {
-  if (await thresholdsIntact(env)) return;
+  if (await thresholdsIntact(env, now)) return;
   await observe(env, { type: "threshold_mismatch" }, now, deps);
 }
+
+/** 基準の行を足してから、監査ログと GuardDO に書き終えるのを待つ間。この間は合わなくても止めず、次の回で見る */
+export const THRESHOLD_GRACE_MS = 2 * 60_000;
 
 /**
  * 基準の最新の行が、基準を変えるルートで入れた物のままかを返す。読めない、形が違う時は合わない事にする
  * @param env バインディング
- * @returns 合えば true
+ * @param now 今の時刻
+ * @returns 合うか、足したばかりで猶予の中なら true
  */
-async function thresholdsIntact(env: Bindings): Promise<boolean> {
+async function thresholdsIntact(env: Bindings, now: number): Promise<boolean> {
   const held = await guardDo(env).thresholdHash();
   const raw = await env.DB.prepare("SELECT id, value, version, created_at FROM settings WHERE key = 'guard.thresholds' ORDER BY version DESC LIMIT 1").first();
   // 一度も変えていない間は、GuardDO がハッシュを持たないか、初期値のハッシュを持つ
   if (raw === null) return held === null || held === (await thresholdsHash(DEFAULT_THRESHOLDS));
   const row = LatestThresholds.safeParse(raw);
-  if (!row.success || row.data.value === null || held === null) return false;
+  if (!row.success) return false;
+  // 基準を変えるルートが監査ログと GuardDO に書く途中なら待つ。先の時刻の行は猶予にしない
+  const age = now - row.data.created_at;
+  if (age >= 0 && age < THRESHOLD_GRACE_MS) return true;
+  if (row.data.value === null || held === null) return false;
   const value = parseJson(row.data.value);
   if (value === undefined) return false;
   const hash = await thresholdsHash(value);
