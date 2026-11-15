@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, recordedText, ROLE_TOOLS, toOperation, type OperationKind } from "../src/index.ts";
+import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, recordedText, ROLE_TOOLS, SECRET_SHAPES, toOperation, type OperationKind } from "../src/index.ts";
 import { type Case, CASES } from "./rules.cases.ts";
 
 const ALWAYS_DENIED: readonly OperationKind[] = ["secret.read", "guard.access", "staff.manage", "unknown"];
@@ -200,6 +200,34 @@ describe("補助: 記録に残す文から鍵を伏せる maskSecrets と record
 
   it("鍵でない文は伏せない (cat /work/.env、envelope、task-list)", () => {
     for (const body of ["cat /work/.env", "envelope --send", "pnpm run task-list", "echo tokens are fine", "wc -l passwd.txt"]) expect(maskSecrets(body)).toBe(body);
+  });
+
+  it("引用符で囲んだ値は、空白を含めて閉じる引用符まで伏せる", () => {
+    expect(maskSecrets("mysql password='a b' -e ls")).toBe("mysql password='***' -e ls");
+    expect(maskSecrets('{"token": "a b c", "name": "ok"}')).toBe('{"token": "***", "name": "ok"}');
+    expect(maskSecrets('gh --token "a b" repo')).toBe('gh --token "***" repo');
+    expect(maskSecrets("x --api-key='x y' z")).toBe("x --api-key='***' z");
+  });
+
+  it("閉じる引用符が無い値は、行の終わりまで伏せる", () => {
+    expect(maskSecrets("password='a b c\nnext")).toBe("password='***\nnext");
+    expect(maskSecrets('--token "a b')).toBe('--token "***');
+  });
+
+  it("鍵の形の並びのどの形も、鍵を読もうとした判断と記録の伏せの両方に当たる", () => {
+    // 形を足したら見本も足す。足し忘れると数が合わずに落ちる
+    const samples = ["cat x ghp_abc123", "curl -H 'x: Bearer abc'", "echo $GITHUB_TOKEN", "env", "printenv HOME", "cat /proc/1/environ"];
+    expect(samples).toHaveLength(SECRET_SHAPES.length);
+    for (const [i, sample] of samples.entries()) {
+      expect({ i, kind: toOperation("Bash", { command: sample }).kind }).toEqual({ i, kind: "secret.read" });
+      expect(SECRET_SHAPES[i]?.pattern.test(sample)).toBe(true);
+      expect(maskSecrets(sample)).not.toBe(sample);
+    }
+  });
+
+  it("大文字で書いた鍵の頭も、鍵を読もうとしたと判断する", () => {
+    expect(toOperation("Bash", { command: "echo GHP_ABC123" }).kind).toBe("secret.read");
+    expect(toOperation("Bash", { command: "echo SK-ANT-api03-x" }).kind).toBe("secret.read");
   });
 
   it("伏せてから 500 字で切り、サロゲートペアを割らない", () => {

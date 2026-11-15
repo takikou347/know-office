@@ -41,45 +41,74 @@ const STAFF_TOOL = /^mcp__staff__(\w+)$/;
 // 拡張のツールは同じ受け手が mcp__staff__ext__<拡張 ID>__<ツール> で出す。形は core の EXTENSION_ID と EXTENSION_TOOL と同じ
 const EXT_TOOL = /^mcp__staff__ext__([a-z][a-z\d]*(?:-[a-z\d]+)*)__([a-z][a-z\d]*(?:_[a-z\d]+)*)$/;
 
-// 鍵の形 (GitHub と Anthropic の鍵の頭、Bearer)、鍵の環境変数、環境変数を全部出す命令。鍵の頭は語の途中に埋めても当たるよう \b を付けない
-const SECRET_TEXT = [
-  /(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/,
-  /\bBearer\s+[\w.~+/=-]+/i,
-  /\$\{?\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\}?/i,
-  /(?:^|[\s;&|(])(?:env|export\s+-p|set)\s*(?:$|[;&|)])/,
-  /(?:^|[\s;&|(])printenv\b/,
-  /\/proc\/[^\s/]+\/environ/,
+/** 鍵の形の 1 つ。pattern は g を付けず、判断にそのまま使う。mask は記録で伏せる時の置き換え */
+export type SecretShape = {
+  /** 鍵の形 */
+  pattern: RegExp;
+  /** 伏せる時に置き換える文 */
+  mask: string;
+};
+
+/**
+ * 鍵を読もうとしたと判断し、記録でも伏せる鍵の形。判断と伏せの両方をこの並びから作り、形を足す時に片方を忘れない
+ * 鍵の頭は語の途中に埋めても当たるよう \b を付けない。大文字と小文字は分けない
+ */
+export const SECRET_SHAPES: readonly SecretShape[] = [
+  // GitHub と Anthropic の鍵の頭
+  { pattern: /(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/i, mask: "***" },
+  { pattern: /\bBearer\s+[\w.~+/=-]+/i, mask: "***" },
+  // 鍵の環境変数
+  { pattern: /\$\{?\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\}?/i, mask: "***" },
+  // 環境変数を全部出す命令。前後の区切りは残す
+  { pattern: /(?<=^|[\s;&|(])(?:env|export\s+-p|set)(?=\s*(?:$|[;&|)]))/, mask: "***" },
+  { pattern: /(?<=^|[\s;&|(])printenv\b/, mask: "***" },
+  { pattern: /\/proc\/[^\s/]+\/environ/, mask: "***" },
 ];
+
+const SECRET_TEXT = SECRET_SHAPES.map((s) => s.pattern);
 const GUARD_TEXT = /\/(?:api|ws)\/v\d+\/(?:guard|stops)\b/;
 const STAFF_TEXT = /\/(?:api|ws)\/v\d+\/staff\b/;
 
 // 鍵らしい名前 (x-api-key、authorization、password、token、secret、api_key、access_token など)。前後の語の続きも名前に含める
 const KEY_NAME = String.raw`[\w-]*(?:api[_-]?key|token|secret|password|passwd|authorization)[\w-]*`;
+// 引用符で囲んだ値。空白を含めて閉じる引用符まで、閉じていなければ行の終わりまで
+const QUOTED = String.raw`"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)`;
 
-/** 記録に入れる前に伏せる形と、置き換える文。モジュールの頭で 1 度だけ作る */
-const MASKS: readonly (readonly [RegExp, string])[] = [
+/**
+ * 名前の後の値を伏せる置き換えを作る。引用符で囲んだ値は引用符を残し、中を *** にする
+ * @param prefix 残す頭 (名前と区切り) を返す
+ * @returns replace に渡す関数
+ */
+function maskValue(prefix: (groups: string[]) => string): (match: string, ...groups: string[]) => string {
+  return (match, ...groups) => {
+    const head = prefix(groups);
+    const quote = match.slice(head.length, head.length + 1);
+    if (quote !== '"' && quote !== "'") return `${head}***`;
+    const closed = match.length > head.length + 1 && match.endsWith(quote);
+    return `${head}${quote}***${closed ? quote : ""}`;
+  };
+}
+
+/** 記録で伏せる形と、置き換える文か関数 */
+type Mask = readonly [RegExp, string | ((match: string, ...groups: string[]) => string)];
+
+/** 記録に入れる前に伏せる形。伏せるだけの形の後に、判断と同じ鍵の形をつなぐ。モジュールの頭で 1 度だけ作る */
+const MASKS: readonly Mask[] = [
   // URL の userinfo (user:pass@)
   [/\b([a-z][a-z\d+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1***@"],
   // --token 値 の形の引数
-  [new RegExp(String.raw`(-${KEY_NAME})(\s+)(?!-)[^\s"'&;|]+`, "gi"), "$1$2***"],
+  [new RegExp(String.raw`(-${KEY_NAME})(\s+)(?!-)(?:${QUOTED}|[^\s"'&;|]+)`, "gim"), maskValue(([name = "", space = ""]) => `${name}${space}`)],
   // 名前 = 値 と 名前: 値。JSON の "名前": "値" と、authorization の Bearer と Basic も含める
-  [new RegExp(String.raw`(${KEY_NAME}["']?\s*[:=]\s*["']?)(?:(?:Bearer|Basic|Token)\s+)?[^\s"'&,;}]+`, "gi"), "$1***"],
+  [new RegExp(String.raw`(${KEY_NAME}["']?\s*[:=]\s*)(?:${QUOTED}|(?:(?:Bearer|Basic|Token)\s+)?[^\s"'&,;}]+)`, "gim"), maskValue(([head = ""]) => head)],
   // JWT
   [/eyJ[\w-]+\.[\w-]+\.[\w-]*/g, "***"],
   // AWS のアクセスキー
   [/AKIA[\dA-Z]{16}/g, "***"],
   // Slack のトークン
   [/xox[bp]-[\w-]+/g, "***"],
-  // GitHub と Anthropic の鍵の頭は語の途中でも伏せる
-  [/(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/gi, "***"],
   // sk- で始まる鍵一般
   [/\bsk-[\w-]+/gi, "***"],
-  [/\bBearer\s+[\w.~+/=-]+/gi, "***"],
-  [/\$\{?\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\}?/gi, "***"],
-  // 環境変数を全部出す命令。前後の区切りは残す
-  [/(?<=^|[\s;&|(])(?:env|export\s+-p|set)(?=\s*(?:$|[;&|)]))/g, "***"],
-  [/(?<=^|[\s;&|(])printenv\b/g, "***"],
-  [/\/proc\/[^\s/]+\/environ/g, "***"],
+  ...SECRET_SHAPES.map((s): Mask => [new RegExp(s.pattern.source, `${s.pattern.flags}g`), s.mask]),
 ];
 
 /** 記録と出来事に残す文の長さの上限 (字数)。長い命令で記録が膨らまないようにする */
@@ -91,7 +120,7 @@ export const MAX_RECORDED = 500;
  * @returns 鍵の形を *** に置き換えた文
  */
 export function maskSecrets(body: string): string {
-  return MASKS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), body);
+  return MASKS.reduce((out, [pattern, replacement]) => (typeof replacement === "string" ? out.replace(pattern, replacement) : out.replace(pattern, replacement)), body);
 }
 
 /**

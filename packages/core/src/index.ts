@@ -86,7 +86,7 @@ export {
   ReviewVerdictInput,
   SeenInput,
 } from "./schemas/review.ts";
-export { MAX_RECORDED, maskSecrets, OPERATION_KINDS, recordedText, toOperation, type Operation, type OperationKind } from "./rules/operation.ts";
+export { MAX_RECORDED, maskSecrets, OPERATION_KINDS, recordedText, SECRET_SHAPES, type SecretShape, toOperation, type Operation, type OperationKind } from "./rules/operation.ts";
 export {
   AttendanceKind,
   AttendanceReason,
