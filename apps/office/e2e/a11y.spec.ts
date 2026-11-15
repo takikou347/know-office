@@ -62,10 +62,18 @@ const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
  */
 async function focusProblem(page: Page): Promise<string | null> {
   return page.evaluate(async (body) => {
-    // Safari は focus した物を画面に入れる送りを、次の描画の時に行う。送り終えてから位置を見る
-    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     const el = document.activeElement;
     if (!(el instanceof HTMLElement) || el === document.body) return body;
+    // Safari は focus した物を画面に入れる送りを、次の描画の時に行う。送りの長さに頼らず、位置が 2 回続けて同じになるまで待つ
+    let last = "";
+    let still = false;
+    for (let frame = 0; frame < 30 && !still; frame++) {
+      await new Promise((done) => requestAnimationFrame(done));
+      const box = el.getBoundingClientRect();
+      const now = `${box.top},${box.left},${scrollX},${scrollY}`;
+      still = now === last;
+      last = now;
+    }
     const name = `${el.tagName.toLowerCase()} 「${(el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 30)}」`;
     // カードのように、中のリンクに focus があると外の枠に輪を出す物もあるので、親もたどる
     let ringed = false;
