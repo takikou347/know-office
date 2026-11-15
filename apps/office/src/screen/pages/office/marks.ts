@@ -1,4 +1,4 @@
-// 子犬の頭の上に出す印。止めた赤い八角、承認の丸、差し戻しの戻す矢印。いつもカメラに向ける
+// 社員の頭の上に出す印。止めた赤い八角、承認の丸、差し戻しの戻す矢印。いつもカメラに向ける
 import { type Camera, type Color, ConeGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, TorusGeometry } from "three";
 
 /** 頭の上の印の組 */
@@ -9,7 +9,7 @@ export interface Marks {
   back: Group;
 }
 
-/** 印を出す高さ (子犬の足元から、子犬の大きさの単位) */
+/** 印を出す高さ (社員の足元から、社員の大きさの単位) */
 const MARK_Y = 1.05;
 
 /**
@@ -57,7 +57,7 @@ export function showMark(marks: Marks, kind: "stop" | "ok" | "back" | null, came
   marks.ok.visible = kind === "ok";
   marks.back.visible = kind === "back";
   marks.group.position.set(0, MARK_Y, 0);
-  // 子犬の向きを打ち消してから、カメラの向きにそろえる
+  // 社員の向きを打ち消してから、カメラの向きにそろえる
   const parent = marks.group.parent;
   if (parent) marks.group.quaternion.copy(parent.quaternion).invert().multiply(camera.quaternion);
 }

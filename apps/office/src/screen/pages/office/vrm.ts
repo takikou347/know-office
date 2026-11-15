@@ -1,19 +1,6 @@
 // VRM のモデルを読む口。モデルを指した社員だけが使い、指していなければ VRM のコードも読まない
 import type { VRMHumanBoneName } from "@pixiv/three-vrm";
-import type { Object3D } from "three";
-import type { Pose } from "./motion.ts";
-
-/** 読み込んだ VRM の姿 */
-export interface VrmAvatar {
-  /** 部屋に置く物 */
-  object: Object3D;
-  /** 形を骨に当てる */
-  applyPose: (pose: Pose) => void;
-  /** 表情と揺れ物を進める */
-  update: (seconds: number) => void;
-  /** 使った物を捨てる */
-  dispose: () => void;
-}
+import type { ModelAvatar } from "./avatars.ts";
 
 /** 部屋の姿の背の高さに合わせる倍率。VRM は人の背 (約 1.6) で作られている */
 const SCALE = 0.72;
@@ -23,7 +10,7 @@ const SCALE = 0.72;
  * @param url モデルの URL
  * @returns 読み込んだ姿
  */
-export async function loadVrmAvatar(url: string): Promise<VrmAvatar> {
+export async function loadVrmAvatar(url: string): Promise<ModelAvatar> {
   const [{ GLTFLoader }, { VRM, VRMLoaderPlugin, VRMUtils }] = await Promise.all([
     import("three/addons/loaders/GLTFLoader.js"),
     import("@pixiv/three-vrm"),

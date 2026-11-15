@@ -77,7 +77,7 @@ export const SEATS: Readonly<Record<"president" | "builder" | "reviewer", DeskSe
   reviewer: { seat: { x: 3.5, z: 3.6, face: 0 }, handoff: { x: 3.5, z: 5.5, face: Math.PI } },
 };
 
-/** 休憩所の低い机の回りの、社員ごとのおすわりの所 */
+/** 休憩所の低い机の回りの、社員ごとの座る所 */
 const REST: Readonly<Record<keyof typeof SEATS, Spot>> = {
   president: { x: 6.5, z: 6.5, face: Math.PI / 2 },
   builder: { x: 8.5, z: 6.5, face: -Math.PI / 2 },
@@ -96,9 +96,9 @@ export function seatOf(id: string): DeskSeat | null {
 }
 
 /**
- * 休憩所の、その社員のおすわりの所を返す
+ * 休憩所の、その社員の座る所を返す
  * @param id 社員の id (社長、作る役、見る役)
- * @returns おすわりの所
+ * @returns 座る所
  */
 export function restSpotOf(id: keyof typeof SEATS): Spot {
   return REST[id];

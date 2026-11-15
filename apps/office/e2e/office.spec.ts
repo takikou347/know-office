@@ -6,7 +6,7 @@ import { withoutWebgl } from "./helpers/webgl.ts";
 // 画面のデータの変わりを出来事として見せて読み上げる。画面の 3.4
 
 /** 3D のコード (three.js と部屋の作り) とエディタのコードの要求か。開発の入口は 1 つずつ、作った物は分けた塊で出す */
-const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|marks|plan|vrm|themes)|codemirror|knowidea-ui_editor|editor-/i;
+const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|marks|plan|vrm|gltf|themes)|codemirror|knowidea-ui_editor|editor-/i;
 
 /**
  * 開いたページで出た要求の URL を貯める

@@ -1,10 +1,10 @@
-// オフィスの部屋。舞台と子犬の社員を組み (組み立て)、出来事の動きを進め (動き)、状態ごとの形を当てて描き (描画)、閉じる時に捨てる (片付け)
+// オフィスの部屋。舞台と人形の社員を組み (組み立て)、出来事の動きを進め (動き)、状態ごとの形を当てて描き (描画)、閉じる時に捨てる (片付け)
 import { Color, MeshStandardMaterial, Vector3 } from "three";
 import type { Staff } from "../../mock.ts";
-import { avatarSourceOf } from "./avatars.ts";
+import { type ModelAvatar, avatarSourceOf } from "./avatars.ts";
 import { disposeScene } from "./cleanup.ts";
 import { type ActorState, createDirector } from "./director.ts";
-import { COATS, PROPS, PUPPY_SCALE, type Puppy, applyPuppyPose, buildPuppy, puppyScaleFor } from "./figure.ts";
+import { CLOTHES, DOLL_SCALE, type Doll, PROPS, applyDollPose, buildDoll, dollScaleFor } from "./figure.ts";
 import { type DeskParts, SEAT_HEIGHT, buildRoomShell, stackPaper } from "./furniture.ts";
 import { type Point, seatOf, stationOf } from "./layout.ts";
 import { buildMarks, type Marks, showMark } from "./marks.ts";
@@ -12,7 +12,8 @@ import { activityOf, poseOf } from "./motion.ts";
 import type { Actors, Step } from "./plan.ts";
 import { buildStage } from "./stage.ts";
 import type { OfficeTheme } from "./themes.ts";
-import { type VrmAvatar, loadVrmAvatar } from "./vrm.ts";
+import { loadGltfAvatar } from "./gltf.ts";
+import { loadVrmAvatar } from "./vrm.ts";
 
 /** 部屋に置く社員 */
 export interface Seat {
@@ -63,9 +64,10 @@ export interface RoomOptions {
 /** 社員の姿と状態 */
 interface Figure {
   state: Staff["state"];
-  puppy: Puppy;
+  doll: Doll;
   marks: Marks;
-  vrm?: VrmAvatar;
+  /** 差し替えたモデル。読めるまでと読めない時は人形を出す */
+  model?: ModelAvatar;
 }
 
 const atSeat = (id: string, p: Point) => {
@@ -107,23 +109,23 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
   const figures = new Map<string, Figure>();
   const states = new Map<string, ActorState>();
   for (const s of seats) {
-    const puppy = buildPuppy(COATS[s.id] ?? "#c99a6e", PROPS[s.id] ?? null, paperMat.color);
+    const doll = buildDoll(CLOTHES[s.id] ?? "#016C6C", PROPS[s.id] ?? null, paperMat.color);
     const marks = buildMarks(markColors);
-    puppy.root.add(marks.group);
-    scene.add(puppy.root);
-    const figure: Figure = { state: s.state, puppy, marks };
+    doll.root.add(marks.group);
+    scene.add(doll.root);
+    const figure: Figure = { state: s.state, doll, marks };
     figures.set(s.id, figure);
     const at = stationOf(s.id, s.state);
     states.set(s.id, { id: s.id, pos: at ?? { x: 0, z: 0 }, face: at?.face ?? 0, present: at !== null, carry: false, walking: false, giving: false, mark: null });
     const source = avatarSourceOf(s.id);
-    if (source.kind === "vrm") {
-      // 読めたら子犬と差し替え、読めなければ子犬のままにする
-      loadVrmAvatar(source.url)
-        .then((vrm) => {
-          if (disposed) return vrm.dispose();
-          puppy.body.visible = false;
-          puppy.root.add(vrm.object);
-          figure.vrm = vrm;
+    if (source.kind !== "shapes") {
+      // 読めたら人形と差し替え、読めなければ人形のままにする
+      (source.kind === "vrm" ? loadVrmAvatar(source.url) : loadGltfAvatar(source.url))
+        .then((model) => {
+          if (disposed) return model.dispose();
+          doll.body.visible = false;
+          doll.root.add(model.object);
+          figure.model = model;
         })
         .catch(() => undefined);
     }
@@ -147,9 +149,9 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
   });
   let moves = opts.moves;
   let size = { width: 1, height: 1 };
-  let scale = PUPPY_SCALE;
+  let scale = DOLL_SCALE;
 
-  // 描画: 動かさない間は時刻 0 の形 (息、打鍵、しっぽを止めた形) で描く
+  // 描画: 動かさない間は時刻 0 の形 (息、打鍵、体の揺れを止めた形) で描く
   const draw = (t: number) => {
     const at = moves ? t : 0;
     for (const [id, f] of figures) {
@@ -157,12 +159,13 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
       if (!a) continue;
       const pose = a.giving ? poseOf("walk", 0) : poseOf(a.walking ? "walk" : activityOf(f.state), at);
       const seated = pose.posture === "sit" && atSeat(id, a.pos);
-      applyPuppyPose(f.puppy, { ...pose, visible: a.present && (a.walking || pose.visible) });
-      f.vrm?.applyPose(pose);
-      f.vrm?.update(1 / 30);
-      f.puppy.root.position.set(a.pos.x, seated ? SEAT_HEIGHT : 0, a.pos.z);
-      f.puppy.root.rotation.y = a.face;
-      f.puppy.paper.visible = a.carry;
+      // 書類を運ぶかを先に決め、人形の腕を前へ出す
+      f.doll.paper.visible = a.carry;
+      applyDollPose(f.doll, { ...pose, visible: a.present && (a.walking || pose.visible) });
+      f.model?.applyPose(pose);
+      f.model?.update(1 / 30);
+      f.doll.root.position.set(a.pos.x, seated ? SEAT_HEIGHT : 0, a.pos.z);
+      f.doll.root.rotation.y = a.face;
       // 歩いている間は止めた印を出さない
       const stopMark = a.walking ? null : pose.mark;
       showMark(f.marks, a.mark?.kind ?? stopMark, camera);
@@ -182,8 +185,8 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     resize: (width, height) => {
       size = { width: Math.max(1, width), height: Math.max(1, height) };
       fit(size.width, size.height);
-      scale = puppyScaleFor(size.width);
-      for (const f of figures.values()) f.puppy.root.scale.setScalar(scale);
+      scale = dollScaleFor(size.width);
+      for (const f of figures.values()) f.doll.root.scale.setScalar(scale);
       draw(0);
     },
     boxes: () =>
@@ -237,7 +240,7 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     dispose: () => {
       disposed = true;
       canvas.removeEventListener("webglcontextlost", lost);
-      for (const f of figures.values()) f.vrm?.dispose();
+      for (const f of figures.values()) f.model?.dispose();
       disposeScene(scene, materials.values());
       sun.shadow.map?.dispose();
       renderer.dispose();

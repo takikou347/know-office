@@ -1,11 +1,13 @@
+import { Color } from "three";
 import { describe, expect, it } from "vitest";
 import { avatarSourceOf } from "../../src/screen/pages/office/avatars.ts";
-import { puppyScaleFor } from "../../src/screen/pages/office/figure.ts";
+import { DOLL_HEIGHT, applyDollPose, buildDoll, dollScaleFor } from "../../src/screen/pages/office/figure.ts";
+import { fitToHeight } from "../../src/screen/pages/office/gltf.ts";
 import { activityOf, poseOf } from "../../src/screen/pages/office/motion.ts";
 import { canShow3d } from "../../src/screen/pages/office/support.ts";
 import { OFFICE_THEME, type OfficeThemeId, THEME_IDS, officeThemes, themeOf } from "../../src/screen/pages/office/themes.ts";
 
-// オフィスの 3D の部屋の、three.js を使わずに決まる所 (子犬の形、出せるか、案、姿の元)。画面の 3.4
+// オフィスの 3D の部屋の、three.js を使わずに決まる所 (人形の形、出せるか、案、姿の元)。画面の 3.4
 
 /**
  * 時刻 (ミリ秒) を刻んだ並びを作る
@@ -31,12 +33,12 @@ describe("社員の動き", () => {
     expect(span(poses.map((p) => p.paws))).toBeGreaterThan(0.2);
   });
 
-  it("待つ時はおすわりで息をし、時々しっぽを振る", () => {
+  it("待つ時は座って息をし、時々体を揺らす", () => {
     const poses = ticks(100, 100).map((t) => poseOf("wait", t));
     expect(poses.every((p) => p.posture === "sit" && p.paws === 0)).toBe(true);
     expect(span(poses.map((p) => p.lift))).toBeGreaterThan(0);
     expect(span(poses.map((p) => p.lift))).toBeLessThan(0.05);
-    expect(span(poses.map((p) => p.tail))).toBeGreaterThan(0.3);
+    expect(span(poses.map((p) => p.sway))).toBeGreaterThan(0.3);
   });
 
   it("まばたきは時々だけ目を閉じる", () => {
@@ -46,12 +48,12 @@ describe("社員の動き", () => {
     expect(closed).toBeLessThan(0.15);
   });
 
-  it("歩く時は立って、足と耳としっぽが揺れる", () => {
+  it("歩く時は立って、足と体が揺れる", () => {
     const poses = ticks(20, 50).map((t) => poseOf("walk", t));
     expect(poses.every((p) => p.posture === "stand")).toBe(true);
     expect(span(poses.map((p) => p.legs))).toBeGreaterThan(0.3);
-    expect(span(poses.map((p) => p.ears))).toBeGreaterThan(0.05);
-    expect(span(poses.map((p) => p.tail))).toBeGreaterThan(0.1);
+    expect(span(poses.map((p) => p.sway))).toBeGreaterThan(0.1);
+    expect(poses.every((p) => !("ears" in p) && !("tail" in p))).toBe(true);
   });
 
   it("止めた時は困り顔で赤い印を出し、時刻が進んでも形が変わらない", () => {
@@ -114,17 +116,83 @@ describe("部屋の案", () => {
 });
 
 describe("社員の姿", () => {
-  it("電話の幅では子犬を大きくし、広い幅では机と釣り合う大きさにする", () => {
-    expect(puppyScaleFor(360)).toBeGreaterThan(puppyScaleFor(1280));
-    expect(puppyScaleFor(599)).toBe(puppyScaleFor(360));
-    expect(puppyScaleFor(600)).toBe(puppyScaleFor(1280));
+  it("電話の幅では人形を大きくし、広い幅では机と釣り合う大きさにする", () => {
+    expect(dollScaleFor(360)).toBeGreaterThan(dollScaleFor(1280));
+    expect(dollScaleFor(599)).toBe(dollScaleFor(360));
+    expect(dollScaleFor(600)).toBe(dollScaleFor(1280));
   });
 
-  it("VRM のモデルが無い社員は、形を組み合わせた子犬にする", () => {
+  it("モデルが無い社員は、形を組み合わせた人形にする", () => {
     expect(avatarSourceOf("builder", {})).toEqual({ kind: "shapes" });
   });
 
   it("VRM のモデルを指した社員は、その URL から読む", () => {
     expect(avatarSourceOf("builder", { builder: "/models/builder.vrm" })).toEqual({ kind: "vrm", url: "/models/builder.vrm" });
+  });
+
+  it.each([
+    ["/models/staff/builder.glb", { kind: "gltf", url: "/models/staff/builder.glb" }],
+    ["/models/staff/builder.gltf", { kind: "gltf", url: "/models/staff/builder.gltf" }],
+    ["/models/staff/builder.GLB", { kind: "gltf", url: "/models/staff/builder.GLB" }],
+    ["/models/staff/builder.glb?v=2", { kind: "gltf", url: "/models/staff/builder.glb?v=2" }],
+    ["/models/staff/builder.vrm#face", { kind: "vrm", url: "/models/staff/builder.vrm#face" }],
+    ["/models/staff/builder.obj", { kind: "shapes" }],
+    ["/models/staff/builder", { kind: "shapes" }],
+  ])("モデルの拡張子で読み方を決める (%s)", (url, source) => {
+    expect(avatarSourceOf("builder", { builder: url })).toEqual(source);
+  });
+
+  it("glTF のモデルは、人形と同じ背の高さに縮め、足を床に、中心を足元に合わせる", () => {
+    const fit = fitToHeight({ x: -1, y: -1.5, z: 2 }, { x: 3, y: 1.5, z: 4 }, DOLL_HEIGHT);
+    expect(fit.scale).toBeCloseTo(DOLL_HEIGHT / 3);
+    // 縮めた後の足元が (0, 0, 0) に来る
+    expect(fit.offset.x + 1 * fit.scale).toBeCloseTo(0);
+    expect(fit.offset.y - 1.5 * fit.scale).toBeCloseTo(0);
+    expect(fit.offset.z + 3 * fit.scale).toBeCloseTo(0);
+  });
+
+  it.each([
+    ["高さの無いモデル", { x: 0, y: 1, z: 0 }, { x: 1, y: 1, z: 1 }, DOLL_HEIGHT],
+    ["上下が逆の箱", { x: 0, y: 1, z: 0 }, { x: 1, y: -1, z: 1 }, DOLL_HEIGHT],
+    ["0 の背の高さ", { x: 0, y: 0, z: 0 }, { x: 1, y: 2, z: 1 }, 0],
+  ])("%s は縮めずに置き、数にならない値を出さない", (_, min, max, height) => {
+    const fit = fitToHeight(min, max, height);
+    expect(fit.scale).toBe(1);
+    expect([fit.offset.x, fit.offset.y, fit.offset.z].every(Number.isFinite)).toBe(true);
+  });
+});
+
+describe("人形の形", () => {
+  const paper = new Color("#ffffff");
+
+  it("座ると太ももを前へ、すねを下へ曲げる", () => {
+    const doll = buildDoll("#016C6C", null, paper);
+    applyDollPose(doll, poseOf("work", 0));
+    for (const leg of doll.legs) expect(leg.rotation.x).toBeCloseTo(-Math.PI / 2);
+    for (const knee of doll.knees) expect(knee.rotation.x).toBeCloseTo(Math.PI / 2);
+  });
+
+  it("歩くと足を前後に振り、腕を足と逆に振る", () => {
+    const doll = buildDoll("#016C6C", null, paper);
+    applyDollPose(doll, poseOf("work", 0));
+    applyDollPose(doll, { ...poseOf("walk", 0), legs: 0.4 });
+    expect(doll.legs[0].rotation.x).toBeCloseTo(0.4);
+    expect(doll.legs[1].rotation.x).toBeCloseTo(-0.4);
+    expect(Math.sign(doll.arms[0].rotation.x)).toBe(-Math.sign(doll.legs[0].rotation.x));
+    expect(doll.knees[0].rotation.x).toBe(0);
+  });
+
+  it("書類を持つと両腕を前へ出す", () => {
+    const doll = buildDoll("#016C6C", null, paper);
+    doll.paper.visible = true;
+    applyDollPose(doll, { ...poseOf("walk", 0), legs: 0.4 });
+    for (const arm of doll.arms) expect(arm.rotation.x).toBeLessThan(-1);
+  });
+
+  it("目を閉じる時は目を縦につぶし、困った時は眉を出す", () => {
+    const doll = buildDoll("#016C6C", null, paper);
+    applyDollPose(doll, { ...poseOf("wait", 0), blink: true, face: "trouble" });
+    for (const e of doll.eyes) expect(e.scale.y).toBeLessThan(0.3);
+    for (const b of doll.brows) expect(b.visible).toBe(true);
   });
 });
