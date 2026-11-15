@@ -10,7 +10,7 @@ import { toggleExtension } from "../../src/gate/extensions/state.ts";
 import { finishTask } from "../../src/gate/work/loop.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { wrapDb } from "../helpers/github.ts";
-import { api, clockIn, idOf, purposeAndGoal, rows, staffOf, useWork, type WorkWorld } from "../helpers/work.ts";
+import { advance, api, clockIn, idOf, MINUTE, purposeAndGoal, rows, staffOf, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork();
 
@@ -187,6 +187,65 @@ describe("社員のツールの口", () => {
     expect(await problem(await call(world, before, "ask_owner", ASK_OWNER))).toEqual({ status: 409, code: "conflict" });
     expect(await approvals(world.d1.DB)).toEqual([]);
     expect(await statusOf(world.d1.DB, now.nodeId)).toBe("doing");
+  });
+
+  it("前のタスクの作業トークンでは、今のタスクを読まないツールと拡張のツールも動かさず、何も書かない", async () => {
+    let ran = 0;
+    const counter = defineExtension({
+      id: "test-counter",
+      title: "数える",
+      ownerData: false,
+      routes: [],
+      tools: { count_up: { schema: z.object({}).strict(), run: () => Promise.resolve({ count: (ran += 1) }) } },
+    });
+    const extensions = [...INSTALLED, counter];
+    const before = await builderAtWork(world);
+    await toggleExtension(world.d1.DB, { id: "test-counter", enabled: true, now: world.clock.now() }, 0);
+    await finishTask(world.gate.env, "builder", before.nodeId, world.clock.now());
+    const now = await startWork(world, "builder");
+    expect(now.nodeId).not.toBe(before.nodeId);
+    const count = async () => [await rows(world.d1.DB, "SELECT id FROM services"), await rows(world.d1.DB, "SELECT id FROM nodes")].map((r) => r.length);
+    const written = await count();
+
+    const idea = { title: "勤怠の表", kind: "web_app", aim: "勤怠を見る", users: "オーナー", costEstimateMicroUsd: 0, revenueEstimateMicroUsd: 0 };
+    expect(await problem(await call(world, before, "idea_add", idea))).toEqual({ status: 409, code: "conflict" });
+    expect(await problem(await call(world, before, "ask_boss", { reason: "次のタスクが無い" }))).toEqual({ status: 409, code: "conflict" });
+    expect(await problem(await call(world, before, "ext__test-counter__count_up", {}, extensions))).toEqual({ status: 409, code: "conflict" });
+    expect(await count()).toEqual(written);
+    expect(ran).toBe(0);
+    // 今のタスクの作業トークンでは動く
+    expect((await call(world, now, "ext__test-counter__count_up", {}, extensions)).status).toBe(200);
+    expect(ran).toBe(1);
+  });
+
+  it("タスクを終えた社長の前の作業トークンでは、タスクを作らない", async () => {
+    const { goal } = await purposeAndGoal(world);
+    await clockIn(world, "president", "builder");
+    await staffOf(world, "builder").pull(world.clock.now());
+    const before = await startWork(world, "president");
+    await finishTask(world.gate.env, "president", before.nodeId, world.clock.now());
+    const nodes = (await rows(world.d1.DB, "SELECT id FROM nodes")).length;
+    expect(await problem(await call(world, before, "node_create", { kind: "project", parentId: goal, title: "勤怠" }))).toEqual({ status: 409, code: "conflict" });
+    expect((await rows(world.d1.DB, "SELECT id FROM nodes")).length).toBe(nodes);
+  });
+
+  it("期限が切れた作業トークンは 401 で断り、承認を書かない", async () => {
+    const work = await builderAtWork(world);
+    // 作業トークンは発行から 1 時間で切れる
+    await advance(world, world.clock.now() + 60 * MINUTE + 1000);
+    expect(await problem(await call(world, work, "ask_owner", ASK_OWNER))).toEqual({ status: 401, code: "unauthenticated" });
+    expect(await approvals(world.d1.DB)).toEqual([]);
+    expect(await statusOf(world.d1.DB, work.nodeId)).toBe("doing");
+  });
+
+  it("失効させた作業トークンは 401 で断り、承認を書かない", async () => {
+    const work = await builderAtWork(world);
+    const old = await issueTicket(world.gate.env, "builder", work.nodeId, world.clock.now());
+    await staffOf(world, "builder").revokeTokens([old.jti]);
+    expect(await problem(await call(world, { ...work, token: old.token }, "ask_owner", ASK_OWNER))).toEqual({ status: 401, code: "unauthenticated" });
+    expect(await approvals(world.d1.DB)).toEqual([]);
+    // 失効させていない作業トークンは通る
+    expect((await call(world, work, "ask_owner", ASK_OWNER)).status).toBe(200);
   });
 
   it("同じ社員が同時に 2 回オーナーに上げると、承認は 1 件だけ足し、もう 1 回は 409 で断る", async () => {

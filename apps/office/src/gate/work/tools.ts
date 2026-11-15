@@ -46,8 +46,6 @@ export type ToolCall = {
   now: number;
   /** 要求のトレース ID */
   traceId?: string;
-  /** 作業トークンのタスク。ルートは必ず渡し、今のタスクと違えば断る */
-  nodeId?: string;
   /** 自動停止が外へ頼む口。ルールの外の操作を数える時に使う。無ければつないでいない口 */
   guard?: GuardDeps;
 };
@@ -82,8 +80,6 @@ function actorOf(call: ToolCall): Actor {
 async function currentTask(env: Bindings, call: ToolCall): Promise<NodeRow> {
   const { nodeId } = await staffDo(env, call.staffId).status(call.now);
   if (nodeId === null) throw new AppError("conflict", "今のタスクが無い");
-  // 前のタスクの作業トークンで、今のタスクを動かさない
-  if (call.nodeId !== undefined && call.nodeId !== nodeId) throw new AppError("conflict", "作業トークンのタスクは今のタスクでない");
   return findNode(env.DB, nodeId);
 }
 
@@ -381,7 +377,7 @@ export async function runTool(env: Bindings, forge: Forge, call: ToolCall, exten
 }
 
 /**
- * 社員のツールを探し、入力を確かめて、動かす関数を返す。`POST /ws/v1/tools/{toolName}` は、これを通した後にルールの判断をしてから動かす
+ * 社員のツールを探し、入力を確かめて、動かす関数を返す。`POST /ws/v1/tools/{toolName}` は、作業トークンのタスクが今のタスクである事を確かめてからこれを通し、ルールの判断をしてから動かす
  * @param env バインディング
  * @param forge GitHub を呼ぶ口
  * @param call 呼び出し

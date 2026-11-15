@@ -1,9 +1,9 @@
-// 社員のツールを呼ぶ口 (POST /ws/v1/tools/{toolName})。作業トークン、止まり、役、入力、ルールの判断を確かめてからゲートウェイが動かす (社員が考えるの 3.5、タスクとレビューの 1.2)
+// 社員のツールを呼ぶ口 (POST /ws/v1/tools/{toolName})。作業トークン、止まり、今のタスク、役、入力、ルールの判断を確かめてからゲートウェイが動かす (社員が考えるの 3.5、タスクとレビューの 1.2)
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import { AppError, decide, recordedText, TOOL_NAME, TOOL_NAME_MAX, ToolCallInput, ToolResult, toOperation } from "@know-office/core";
 import type { GateEnv } from "../env.ts";
 import type { ExtensionDefinition } from "../extensions/define.ts";
-import { ensureRunning } from "../guard/actions.ts";
+import { ensureRunning, staffOf } from "../guard/actions.ts";
 import { observe } from "../guard/observe.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
@@ -36,7 +36,10 @@ export function toolRoutes(app: OpenAPIHono<GateEnv>, caller: Caller, extensions
     const now = c.var.clock.now();
     const { staffId, nodeId } = await ticketTask(c.env, bearer(c.req.header("authorization")), caller, now);
     await ensureRunning(c.env, staffId, nodeId);
-    const call = { staffId, nodeId, tool: toolName, input: toolInput, now, traceId: c.var.traceId, guard: c.var.guard };
+    // 前のタスクの作業トークンでは、今のタスクを読まないツールと拡張のツールも動かさない。タスクを持っていない時も断る
+    const current = await staffOf(c.env, staffId).status(now);
+    if (current.nodeId !== nodeId) throw new AppError("conflict", "作業トークンのタスクは今のタスクでない");
+    const call = { staffId, tool: toolName, input: toolInput, now, traceId: c.var.traceId, guard: c.var.guard };
     // 役で使えないツールは 404、形の違う入力は 422 で、ルールの判断より先に断る
     const run = await prepareTool(c.env, c.var.forge, call, extensions);
     // フックが聞いた判断の後に役や拡張が変わっても、動かす前に判断し直す。tool_calls と tool_call の数えは判断のルートが持つので重ねない
