@@ -10,12 +10,9 @@ export type Scenario = { capability: string; requirement: string; scenario: stri
 export type Row = Scenario & { where: string };
 
 /**
- * テストがまだ作れないシナリオと、作るタスクの番号。作る物 (GitHub の通知の受け取り) が無いため
+ * テストがまだ作れないシナリオと、作るタスクの番号。作る物が無いシナリオができたらここに足す
  */
-export const PENDING: ReadonlyMap<string, string> = new Map([
-  ["偽の通知", "8.3"],
-  ["同じ通知が 2 度届く", "8.3"],
-]);
+export const PENDING: ReadonlyMap<string, string> = new Map<string, string>();
 
 const SKIP_DIRS = new Set(["node_modules", "dist", ".wrangler", "test-results", "playwright-report", ".git", ".claude"]);
 const TEST_FILE = /\.(test|spec)\.tsx?$/;

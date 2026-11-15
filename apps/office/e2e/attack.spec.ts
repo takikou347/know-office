@@ -23,8 +23,8 @@ const routes = Object.entries(v1.paths)
       }),
   );
 const writes = routes.filter((r) => r.method !== "GET");
-/** ログインセッションを確かめないルート。セッションを作る所と稼働確認 */
-const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health"]);
+/** ログインセッションを確かめないルート。セッションを作る所と稼働確認と、SameSite=Strict のクッキーが付かない GitHub からの戻り */
+const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health", "GET /api/v1/github/callback", "GET /api/v1/github/installed"]);
 
 type Route = (typeof routes)[number];
 /** 1 つの要求の答え。状態コードと、problem+json の code (無ければ空) */

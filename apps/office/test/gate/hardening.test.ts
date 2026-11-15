@@ -41,9 +41,6 @@ const codeRoutes = [
   const [method = "", path = ""] = key.split(" ");
   return { key, method, path };
 });
-const writeRoutes = codeRoutes.filter((r) => !SAFE.has(r.method));
-/** 本文を受けるメソッドのルート。DELETE は本文を読まない */
-const bodyRoutes = codeRoutes.filter((r) => ["POST", "PUT", "PATCH"].includes(r.method));
 
 /**
  * 認証を外してよい操作と、その代わりの守り。ここに足す時は API の決まりの 3.6 の 1 を直してから
@@ -55,8 +52,14 @@ const WITHOUT_LOGIN = new Map([
   ["GET /v1/health", "ワークスペースの中のサーバー。社員 DO からしか届かない"],
 ]);
 
-/** ログインセッションを確かめないルート。middleware.ts の WITHOUT_SESSION と同じ */
-const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health"]);
+/** 入口のミドルウェアが掛かる /api/ のルート。認証を外したルートは、それぞれの代わりの守りをそのテストで確かめる (GitHub の通知は test/github/hooks.test.ts) */
+const apiRoutes = codeRoutes.filter((r) => !WITHOUT_LOGIN.has(r.key));
+const writeRoutes = apiRoutes.filter((r) => !SAFE.has(r.method));
+/** 本文を受けるメソッドのルート。DELETE は本文を読まない */
+const bodyRoutes = apiRoutes.filter((r) => ["POST", "PUT", "PATCH"].includes(r.method));
+
+/** ログインセッションを確かめないルート。middleware.ts の WITHOUT_SESSION と同じ。GitHub から戻る 2 つは SameSite=Strict のクッキーが付かないので、Access の証明と state か installation_id で確かめる */
+const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health", "GET /api/v1/github/callback", "GET /api/v1/github/installed"]);
 
 /**
  * パスの変数を埋めた URL を作る
@@ -135,10 +138,12 @@ describe("WAF が無い時の守り", () => {
     expect(open.toSorted()).toEqual([...WITHOUT_LOGIN.keys()].toSorted());
   });
 
-  it("コードのルートはどれも v1.yaml でログインを求め、入口のミドルウェアが掛かる /api/ の下にある", () => {
-    expect(codeRoutes.length).toBeGreaterThan(0);
-    expect(codeRoutes.filter((r) => !r.path.startsWith("/api/")).map((r) => r.key)).toEqual([]);
-    const withoutLogin = codeRoutes.filter((r) => {
+  it("コードのルートはどれも、認証を外す決めた物のほかは v1.yaml でログインを求め、入口のミドルウェアが掛かる /api/ の下にある", () => {
+    expect(apiRoutes.length).toBeGreaterThan(0);
+    expect(apiRoutes.filter((r) => !r.path.startsWith("/api/")).map((r) => r.key)).toEqual([]);
+    // 認証を外したコードのルートは /api/ の外に置き、入口のミドルウェアを掛けない
+    expect(codeRoutes.filter((r) => WITHOUT_LOGIN.has(r.key)).map((r) => r.key)).toEqual(["POST /hooks/v1/github"]);
+    const withoutLogin = apiRoutes.filter((r) => {
       const security = specOps.get(r.key)?.security;
       return !Array.isArray(security) || !JSON.stringify(security).includes("accessJwt");
     });
@@ -150,7 +155,7 @@ describe("WAF が無い時の守り", () => {
   });
 
   it("どのルートも、壊れたクッキーを 401 で断る", async () => {
-    const routes = codeRoutes.filter((r) => !WITHOUT_SESSION.has(r.key));
+    const routes = apiRoutes.filter((r) => !WITHOUT_SESSION.has(r.key));
     const proof = signedIn["Cf-Access-Jwt-Assertion"] ?? "";
     const result = await statuses(routes, () => ({
       headers: { "Cf-Access-Jwt-Assertion": proof, Cookie: "__Host-ko_session=broken.%00.cookie", Origin: ORIGIN },
