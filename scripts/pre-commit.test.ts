@@ -27,6 +27,16 @@ void describe("コミットの前に、作者とメールアドレスを確か�
     assert.deepEqual(addedEmails(diff), [owner]);
   });
 
+  void it("パッケージの版と、diff の印の + はメールアドレスとして数えない", () => {
+    const diff = ['+"packageManager": "pnpm@10.28.0",', "+      zod: 4.6.7(zod@4.6.7)(react@19.3.1)", "+noreply@knowidea.invalid が作者"].join("\n");
+    assert.deepEqual(addedEmails(diff), []);
+  });
+
+  void it("noreply でも、CI と同じドメインの物だけを通し、大文字小文字は区別しない", () => {
+    const other = ["noreply", "mail.jp"].join("@");
+    assert.deepEqual(addedEmails(`+${other}\n+NoReply@KnowIdea.Invalid\n+User@Example.COM`), [other]);
+  });
+
   void it("ファイルの名前の行はメールアドレスとして数えない", () => {
     assert.deepEqual(addedEmails(`+++ b/docs/${["someone", "mail.jp"].join("@")}.md\n+text`), []);
   });

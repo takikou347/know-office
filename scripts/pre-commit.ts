@@ -4,9 +4,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const IDENT = "KNOW IDEA <noreply@knowidea.invalid>";
-const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
-// noreply の物、例の物、届かない事が決まっている名前 (RFC 2606 の .test、.example、.invalid、.localhost)、GitHub の bot は通す
-const ALLOWED = /^(?:noreply@.+|.+@example\.(?:com|org|net)|.+\.(?:test|example|invalid|localhost)|\d+\+[^@]+\[bot\]@users\.noreply\.github\.com)$/;
+// 最後が英字の TLD で終わる物だけを数え、pnpm@10.28.0 のようなパッケージの版は数えない
+const EMAIL = /[\w.+-]+@(?:[\w-]+\.)+[a-z]{2,}\b/gi;
+// CI と同じ noreply の物、例の物、届かない事が決まっている名前 (RFC 2606 の .test、.example、.invalid、.localhost)、GitHub の bot と ssh の宛先は通す
+const ALLOWED =
+  /^(?:git@github\.com|noreply@(?:knowidea\.invalid|anthropic\.com|github\.com|example\.com)|.+@example\.(?:com|org|net)|.+\.(?:test|example|invalid|localhost)|\d+\+[^@]+\[bot\]@users\.noreply\.github\.com)$/i;
 
 /**
  * git var の作者か入れた者の名乗りを確かめる
@@ -26,7 +28,8 @@ export function addedEmails(diff: string): string[] {
   return diff
     .split("\n")
     .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-    .flatMap((line) => line.match(EMAIL) ?? [])
+    // 行頭の + は diff の印なので外してから探す
+    .flatMap((line) => line.slice(1).match(EMAIL) ?? [])
     .filter((email) => !ALLOWED.test(email));
 }
 
