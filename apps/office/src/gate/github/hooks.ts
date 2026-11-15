@@ -9,6 +9,7 @@ import {
   GitHubWebhookHead,
   HubSignature,
   IssuesEvent,
+  log,
   newId,
   PullRequestEvent,
   PullRequestReviewCommentEvent,
@@ -261,7 +262,7 @@ const REVIEW_STATES: ReadonlyMap<string, "approve" | "request_changes"> = new Ma
 
 /** GitHub から写す、オーナーの可か不可か、行のコメント */
 type FromGitHub =
-  | { kind: "review"; githubId: number; pr: number; verdict: "approve" | "request_changes"; body: string }
+  | { kind: "review"; githubId: number; pr: number; verdict: "approve" | "request_changes"; body: string; commitId: string }
   | { kind: "comment"; githubId: number; pr: number; path: string; line: number; side: "old" | "new"; body: string };
 
 /**
@@ -291,7 +292,7 @@ function fromGitHub(hook: Hook): FromGitHub | null {
     if (!byOwner(hook, review.user, review.author_association)) return null;
     const verdict = REVIEW_STATES.get(review.state);
     if (verdict === undefined) return null;
-    return { kind: "review", githubId: review.id, pr: pull.number, verdict, body: review.body ?? "" };
+    return { kind: "review", githubId: review.id, pr: pull.number, verdict, body: review.body ?? "", commitId: review.commit_id };
   }
   if (hook.event === "pull_request_review_comment" && hook.action === "created") {
     const parsed = PullRequestReviewCommentEvent.safeParse(hook.payload);
@@ -345,9 +346,14 @@ async function applyFromGitHub(env: Bindings, found: FromGitHub, review: { id: s
   const db = env.DB;
   const actor: Actor = { by: "github", now };
   if (found.kind === "review") {
-    const statements = [db.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ?").bind(found.verdict, review.id)];
-    if (found.verdict === "request_changes") statements.push(backToTodo(db, review.node_id, now));
-    await db.batch(statements);
+    // レビューしたコミットがレビューの今の先の時だけ写す。古い先へのレビューを、新しい先の判断にしない
+    const statements = [db.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ? AND head_sha = ?").bind(found.verdict, review.id, found.commitId)];
+    if (found.verdict === "request_changes") statements.push(backToTodo(db, review.node_id, now, { sql: "EXISTS (SELECT 1 FROM reviews WHERE id = ? AND head_sha = ?)", args: [review.id, found.commitId] }));
+    const [updated] = await db.batch(statements);
+    if ((updated?.meta.changes ?? 0) === 0) {
+      log("info", "github_review_stale", { reviewId: review.id, githubReviewId: found.githubId });
+      return;
+    }
     // 出来事の node_events は年ごとの記録の D1 にあり、D1 のバッチは 1 つの D1 の中だけなので、同じバッチに入れられない
     const kind = found.verdict === "approve" ? "owner_approved" : "review_rejected";
     await appendNodeEvent(env, { nodeId: review.node_id, staffId: null, kind, detail: { by: "owner", summary: found.body, githubReviewId: found.githubId } }, actor);

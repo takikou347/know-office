@@ -91,11 +91,12 @@ export async function deliverSent(w: WorkWorld, c: Connected): Promise<number[]>
  * @param state approved か changes_requested か commented
  * @param body 本文
  * @param association 書いた者とリポジトリの関わり。オーナーは OWNER
+ * @param commitId レビューしたコミット
  * @returns 本文
  */
-export function reviewHook(c: Connected, state: string, body: string, association = "OWNER") {
+export function reviewHook(c: Connected, state: string, body: string, association = "OWNER", commitId: string = HEAD) {
   const user = { login: association === "OWNER" ? "example" : "someone", type: "User" };
-  return { action: "submitted", review: { id: 9001, state, body, user, author_association: association }, pull_request: { number: 1 }, repository: { full_name: REPO }, installation: { id: c.installationId }, sender: user };
+  return { action: "submitted", review: { id: 9001, state, body, user, author_association: association, commit_id: commitId }, pull_request: { number: 1 }, repository: { full_name: REPO }, installation: { id: c.installationId }, sender: user };
 }
 
 /**

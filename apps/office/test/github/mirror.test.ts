@@ -88,6 +88,33 @@ describe("GitHub に写す", () => {
     expect((await eventsOf(world, task)).find((e) => e.kind === "owner_approved")).toEqual({ kind: "owner_approved", staffId: null, detail: { by: "owner", summary: "", githubReviewId: 9001 } });
   });
 
+  it("古い先へのオーナーのレビューが synchronize の後に届いても、新しい先の承認にしない", async () => {
+    const { c, task } = await openReview(world);
+    const next = "c".repeat(40);
+    await hook(world, { event: "pull_request", payload: { action: "synchronize", pull_request: { number: 1, head: { sha: next } }, repository: { full_name: REPO }, installation: { id: c.installationId } }, secret: c.webhookSecret });
+    expect((await hook(world, { event: "pull_request_review", payload: reviewHook(c, "approved", "よい", "OWNER", HEAD), secret: c.webhookSecret })).status).toBe(204);
+    expect((await reviewState(task)).verdict).toBeNull();
+    expect((await eventsOf(world, task)).find((e) => e.kind === "owner_approved")).toBeUndefined();
+    // 古い先への不可も、作った社員のタスクを戻さない
+    expect((await hook(world, { event: "pull_request_review", payload: { ...reviewHook(c, "changes_requested", "直す", "OWNER", HEAD), review: { ...reviewHook(c, "changes_requested", "直す", "OWNER", HEAD).review, id: 9002 } }, secret: c.webhookSecret })).status).toBe(204);
+    expect((await reviewState(task)).verdict).toBeNull();
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
+    // 今の先へのレビューは写す
+    await hook(world, { event: "pull_request_review", payload: { ...reviewHook(c, "approved", "新しい先もよい", "OWNER", next), review: { ...reviewHook(c, "approved", "新しい先もよい", "OWNER", next).review, id: 9003 } }, secret: c.webhookSecret });
+    expect((await reviewState(task)).verdict).toBe("approve");
+  });
+
+  it("commit_id の形が違うオーナーのレビューは写さない", async () => {
+    const { c, task } = await openReview(world);
+    for (const bad of ["", "zzz", "B".repeat(40)]) {
+      await hook(world, { event: "pull_request_review", payload: reviewHook(c, "approved", "よい", "OWNER", bad), secret: c.webhookSecret });
+    }
+    const missing = reviewHook(c, "approved", "よい");
+    const { commit_id: _drop, ...noCommit } = missing.review;
+    await hook(world, { event: "pull_request_review", payload: { ...missing, review: noCommit }, secret: c.webhookSecret });
+    expect((await reviewState(task)).verdict).toBeNull();
+  });
+
   it("GitHub でオーナーが書いた行のコメントを、指摘として写して作った社員のタスクに戻す", async () => {
     const { c, task } = await openReview(world);
     await hook(world, { event: "pull_request_review_comment", payload: commentHook(c, "ここは 0 を返す"), secret: c.webhookSecret });

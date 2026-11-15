@@ -234,11 +234,11 @@ export const GitHubPostedList = z.array(z.object({ id: GitHubId, body: z.string(
 /** GET /repos/{o}/{r}/git/commits/{sha} の返事のうち使う所 */
 export const GitHubGitCommit = z.object({ sha: Sha, tree: z.object({ sha: Sha }).loose() }).loose();
 
-/** pull_request_review の通知のうち使う所 */
+/** pull_request_review の通知のうち使う所。commit_id はレビューしたコミットで、レビューの今の先と同じ時だけ写す */
 export const PullRequestReviewEvent = z
   .object({
     review: z
-      .object({ id: GitHubId, state: z.string().max(64), body: z.string().max(65_536).nullable().optional(), user: GitHubUser.nullable(), author_association: AuthorAssociation })
+      .object({ id: GitHubId, state: z.string().max(64), body: z.string().max(65_536).nullable().optional(), user: GitHubUser.nullable(), author_association: AuthorAssociation, commit_id: Sha })
       .loose(),
     pull_request: z.object({ number: z.number().int().positive() }).loose(),
   })
