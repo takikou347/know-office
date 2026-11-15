@@ -19,9 +19,10 @@ export type QueryFn = (params: { prompt: string; options: Options }) => AsyncIte
  * ワークスペースが決めた options を SDK の形に直す
  * 権限は dontAsk にし、フックが通したツールのほかは断る。設定の置き場は読まない
  * @param options ワークスペースが決めた options
+ * @param spawn 子のプロセスを起こす関数。本番は staff に落とす staffSpawner。省くと SDK の既定
  * @returns SDK の options
  */
-export function sdkOptions(options: AgentOptions): Options {
+export function sdkOptions(options: AgentOptions, spawn?: Options["spawnClaudeCodeProcess"]): Options {
   return {
     model: options.model,
     effort: options.effort,
@@ -37,18 +38,20 @@ export function sdkOptions(options: AgentOptions): Options {
     permissionMode: "dontAsk",
     abortController: options.abortController,
     ...(options.resume === undefined ? {} : { resume: options.resume }),
+    ...(spawn === undefined ? {} : { spawnClaudeCodeProcess: spawn }),
   };
 }
 
 /**
  * SDK を 1 回呼んで終わるまで待つ Agent を作る
  * @param run SDK の query()。省くと本物を使う
+ * @param spawn 子のプロセスを起こす関数。省くと SDK の既定
  * @returns Agent
  */
-export function sdkAgent(run: QueryFn = query): Agent {
+export function sdkAgent(run: QueryFn = query, spawn?: Options["spawnClaudeCodeProcess"]): Agent {
   return async (call) => {
     let sessionId: string | undefined;
-    for await (const message of run({ prompt: call.prompt, options: sdkOptions(call.options) })) {
+    for await (const message of run({ prompt: call.prompt, options: sdkOptions(call.options, spawn) })) {
       if (sessionId === undefined && message.session_id !== undefined) {
         sessionId = message.session_id;
         call.onSession(sessionId);

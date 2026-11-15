@@ -2,7 +2,8 @@
 # Node 22.23.5。版は digest で固定する
 FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
-# 社員は root でない staff で動く。Debian の staff の組は /usr/local に書ける事があるので、組は別の office にする
+# 社員は root でない staff (uid 10001) で動く。Debian の staff の組は /usr/local に書ける事があるので、組は別の office にする
+# サーバーは root で動き、SDK の子のプロセスだけを staff に落とす (src/spawn.ts)。社員はサーバーの環境、メモリ、8080 番に触れない
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ripgrep ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
@@ -24,7 +25,7 @@ RUN chown -R root:root /opt/workspace && chmod -R go-w /opt/workspace
 # 社員が書けるのはタスクのリポジトリを置く /work だけ
 RUN mkdir /work && chown staff:office /work
 
-USER staff
+# USER を置かず root で起こす。uid を落とすには root が要る
 WORKDIR /work
 # Containers が外向きの HTTPS を受け手に回すための CA を信じる
 ENV NODE_EXTRA_CA_CERTS=/etc/cloudflare/certs/cloudflare-containers-ca.crt

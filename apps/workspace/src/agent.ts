@@ -7,11 +7,11 @@ import type { PreToolUseOutput } from "./hooks.ts";
 export const WORK_ROOT = "/work";
 
 /**
- * SDK に渡すホームを返す。SDK は会話の記録をこの下に書く
- * @returns ホーム
+ * SDK に渡すホームを返す。SDK は会話の記録をこの下に書く。サーバーは root で動くので、サーバーの HOME は使わない
+ * @returns 社員のホーム
  */
 export function staffHome(): string {
-  return process.env.HOME ?? "/home/staff";
+  return "/home/staff";
 }
 
 /** SDK の query() に渡す options のうち、ワークスペースが決める所 */

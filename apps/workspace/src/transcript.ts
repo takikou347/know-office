@@ -29,6 +29,8 @@ export type ShipperDeps = {
   home: string;
   /** SDK の動く置き場 */
   cwd: string;
+  /** 戻した記録の置き場とファイルを社員の持ち物にする。本番は staff に chown する。省くと変えない */
+  own?: (path: string) => Promise<void>;
 };
 
 /** session ごとの、送り終えた所と次の通し番号 */
@@ -62,6 +64,7 @@ export class TranscriptShipper {
   readonly #fetcher: Fetcher;
   readonly #home: string;
   readonly #cwd: string;
+  readonly #own: (path: string) => Promise<void>;
   readonly #progress = new Map<string, Progress>();
   /** 送っている途中の物。同じ時に 2 度送らないよう、送りを 1 本ずつ流す */
   #chain: Promise<unknown> = Promise.resolve();
@@ -74,6 +77,7 @@ export class TranscriptShipper {
     this.#fetcher = deps.fetcher;
     this.#home = deps.home;
     this.#cwd = deps.cwd;
+    this.#own = deps.own ?? (() => Promise.resolve());
   }
 
   /**
@@ -86,6 +90,9 @@ export class TranscriptShipper {
     const file = sessionFile(this.#home, this.#cwd, input.sessionId);
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, bytes);
+    // サーバーは root で書くので、続きを書く SDK (staff) が書けるよう、ホームの下の置き場とファイルを渡す
+    const projects = join(this.#home, ".claude", "projects");
+    for (const path of [join(this.#home, ".claude"), projects, dirname(file), file]) await this.#own(path);
     this.#progress.set(input.sessionId, { offset: bytes.byteLength, seq: input.nextSeq });
   }
 

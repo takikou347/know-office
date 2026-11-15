@@ -111,6 +111,16 @@ describe("会話の記録を送る", () => {
     expect(sent.map((s) => [s.seq, s.text])).toEqual([[2, '{"n":3}\n']]);
   });
 
+  it("戻した会話の記録は、置き場もファイルも staff の持ち物にする", async () => {
+    const dir = home();
+    const { fetcher } = gate();
+    const owned: string[] = [];
+    const shipper = new TranscriptShipper({ fetcher, home: dir, cwd: WORK, own: (path) => Promise.resolve(void owned.push(path)) });
+    await shipper.restore({ sessionId: SESSION, transcript: Buffer.from('{"n":1}\n').toString("base64"), nextSeq: 1 });
+    const file = sessionFile(dir, WORK, SESSION);
+    expect(owned).toEqual([join(dir, ".claude"), join(dir, ".claude", "projects"), dirname(file), file]);
+  });
+
   it("SDK の置き場は、動く置き場の名前の記号を - にした所", () => {
     expect(sessionFile("/home/staff", "/work", SESSION)).toBe(`/home/staff/.claude/projects/-work/${SESSION}.jsonl`);
   });

@@ -1,10 +1,24 @@
-// 作ったワークスペースのイメージで、社員がフックと実行物を書き換えられない事を Docker で確かめる (社員が考えるの 3.1、4 章)
-// Docker が要るので pnpm test では流さず、イメージを作った後に pnpm --filter @know-office/workspace test:image で流す
+// 作ったワークスペースのイメージで、社員がフックと実行物を書き換えられず、サーバーの鍵とメモリと 8080 番に触れない事を Docker で確かめる (社員が考えるの 3.1、4 章)
+// Docker が要るので pnpm test では流さず、イメージを作った後に pnpm --filter @know-office/workspace test:image で流す。CI は check.yml の image で流す
 import { execFileSync, spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /** 確かめるイメージ。WORKSPACE_IMAGE で替える */
 const IMAGE = process.env.WORKSPACE_IMAGE ?? "know-office-workspace:test";
+/** サーバーに渡す鍵。社員から読めない事を確かめる */
+const KEY = "k".repeat(43);
+
+/**
+ * 動いているコンテナの中で、社員の利用者 (staff) か root で sh の命令を走らせる
+ * @param id コンテナ
+ * @param script 命令
+ * @param user 利用者
+ * @returns 終わりのコードと出力
+ */
+function inServer(id: string, script: string, user = "staff"): { code: number; out: string } {
+  const run = spawnSync("docker", ["exec", "-u", user, id, "sh", "-c", script], { encoding: "utf8", timeout: 30_000 });
+  return { code: run.status ?? 1, out: `${run.stdout}${run.stderr}`.trim() };
+}
 
 /**
  * イメージの中で sh の命令を社員の利用者で走らせる
@@ -12,7 +26,7 @@ const IMAGE = process.env.WORKSPACE_IMAGE ?? "know-office-workspace:test";
  * @returns 終わりのコードと出力
  */
 function inImage(script: string): { code: number; out: string } {
-  const run = spawnSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", "sh", IMAGE, "-c", script], { encoding: "utf8", timeout: 30_000 });
+  const run = spawnSync("docker", ["run", "--rm", "--network", "none", "--user", "staff", "--entrypoint", "sh", IMAGE, "-c", script], { encoding: "utf8", timeout: 30_000 });
   return { code: run.status ?? 1, out: `${run.stdout}${run.stderr}`.trim() };
 }
 
@@ -43,7 +57,7 @@ describe("ワークスペースのサーバー", () => {
   let id = "";
 
   beforeAll(() => {
-    id = execFileSync("docker", ["run", "-d", "--rm", "--network", "none", IMAGE], { encoding: "utf8" }).trim();
+    id = execFileSync("docker", ["run", "-d", "--rm", "--network", "none", "-e", `WORKSPACE_KEY=${KEY}`, IMAGE], { encoding: "utf8" }).trim();
   });
 
   afterAll(() => {
@@ -58,4 +72,42 @@ describe("ワークスペースのサーバー", () => {
     }
     expect(out).toContain('"part":"workspace"');
   }, 15_000);
+
+  it("サーバーは root で、社員の子のプロセスは staff で動く", () => {
+    expect(inServer(id, "stat -c %u /proc/1", "root")).toEqual({ code: 0, out: "0" });
+    // サーバーと同じ staffSpawner で子を起こし、利用者と組を見る
+    const script = [
+      "import('/opt/workspace/apps/workspace/src/spawn.ts').then(({ staffSpawner }) => {",
+      "  const child = staffSpawner()({ command: 'sh', args: ['-c', 'id -u; id -g; id -G'], env: { PATH: process.env.PATH }, signal: new AbortController().signal });",
+      "  child.stdout.pipe(process.stdout);",
+      "});",
+    ].join("\n");
+    const run = spawnSync("docker", ["exec", id, "node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 30_000 });
+    expect(run.stdout.trim()).toBe("10001\n10001\n10001");
+  });
+
+  it("社員はサーバーの /proc/<pid>/environ を読めない", () => {
+    const read = inServer(id, "cat /proc/1/environ");
+    expect(read.code).not.toBe(0);
+    expect(read.out).not.toContain(KEY);
+  });
+
+  it("社員はサーバーのメモリを読めない", () => {
+    for (const script of ["head -c 1 /proc/1/mem", "cat /proc/1/maps", "ls /proc/1/fd"]) {
+      expect({ script, code: inServer(id, script).code }).not.toEqual({ script, code: 0 });
+    }
+  });
+
+  it("社員はサーバーを止められない", () => {
+    expect(inServer(id, "kill 1").code).not.toBe(0);
+    expect(inServer(id, "kill -9 1").code).not.toBe(0);
+    expect(inServer(id, "stat -c %u /proc/1", "root")).toEqual({ code: 0, out: "0" });
+  });
+
+  it("社員は 8080 番で listen できない", () => {
+    for (const host of ["0.0.0.0", "127.0.0.1"]) {
+      const listen = inServer(id, `node -e "require('net').createServer().on('error',()=>process.exit(1)).listen(8080,'${host}',()=>process.exit(0))"`);
+      expect({ host, code: listen.code }).toEqual({ host, code: 1 });
+    }
+  });
 });

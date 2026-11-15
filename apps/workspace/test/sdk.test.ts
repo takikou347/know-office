@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Fetcher } from "@know-office/core";
 import { afterEach, describe, expect, it } from "vitest";
-import { agentOptions, type AgentCall } from "../src/agent.ts";
+import { EventEmitter } from "node:events";
+import { agentOptions, type AgentCall, staffHome } from "../src/agent.ts";
 import { preToolUse } from "../src/hooks.ts";
 import { type QueryFn, sdkAgent, sdkOptions } from "../src/sdk.ts";
+import { STAFF_GID, STAFF_UID, staffSpawner } from "../src/spawn.ts";
 import { staffServer } from "../src/staff-tools.ts";
 import { sessionFile, TranscriptShipper } from "../src/transcript.ts";
 
@@ -197,6 +199,37 @@ describe("ワークスペースの Claude Agent SDK", () => {
     expect(options?.strictMcpConfig).toBe(true);
     expect(options?.resume).toBeUndefined();
     expect(sessions).toEqual(["session-1"]);
+  });
+
+  it("社員の SDK とコマンドは staff の uid と gid で起こす", () => {
+    const seen: unknown[][] = [];
+    const child = new EventEmitter();
+    const spawner = staffSpawner({ spawn: (...args: unknown[]) => (seen.push(args), child), uid: () => 0 });
+    const signal = new AbortController().signal;
+    expect(spawner({ command: "node", args: ["cli.js"], cwd: "/work", env: { A: "1" }, signal })).toBe(child);
+    expect(seen).toEqual([["node", ["cli.js"], { cwd: "/work", env: { A: "1" }, signal, uid: STAFF_UID, gid: STAFF_GID, stdio: ["pipe", "pipe", "ignore"] }]]);
+    expect([STAFF_UID, STAFF_GID]).toEqual([10001, 10001]);
+    // SDK には渡した時だけ付ける
+    const call = task(gate(true, []), []);
+    expect(sdkOptions(call.options, spawner).spawnClaudeCodeProcess).toBe(spawner);
+    expect(sdkOptions(call.options).spawnClaudeCodeProcess).toBeUndefined();
+  });
+
+  it("root でないサーバーは社員を起こさず断る", () => {
+    let spawned = 0;
+    const spawner = staffSpawner({ spawn: () => ((spawned += 1), new EventEmitter()), uid: () => 10002 });
+    expect(() => spawner({ command: "node", args: [], env: {}, signal: new AbortController().signal })).toThrow(/root/);
+    expect(spawned).toBe(0);
+  });
+
+  it("SDK に渡すホームは、サーバーの HOME でなく社員のホーム", () => {
+    const before = process.env["HOME"];
+    process.env["HOME"] = "/root";
+    try {
+      expect(staffHome()).toBe("/home/staff");
+    } finally {
+      process.env["HOME"] = before;
+    }
   });
 
   it("続きから呼ぶ時は session と止める口を渡す", () => {

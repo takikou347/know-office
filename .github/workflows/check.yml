@@ -161,3 +161,23 @@ jobs:
             apps/office/test-results/
             !apps/office/test-results/.session-*.json
           retention-days: 7
+
+  # ワークスペースのイメージを作り、社員がフックと実行物を書き換えられず、サーバーの鍵とメモリと 8080 番に触れない事を Docker で確かめる
+  image:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # 置き場の node_modules をイメージの文脈に入れないよう、入れる前に作る
+      - run: docker build -f apps/workspace/Dockerfile -t know-office-workspace:test .
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @know-office/workspace test:image
