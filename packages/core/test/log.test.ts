@@ -45,6 +45,9 @@ describe("外に出す文を伏せる", () => {
     ["鍵らしい長い文字列", "signature Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2Rl mismatch", "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2Rl"],
     ["URL の userinfo", "fetch https://user:hunter2@api.test/x", "hunter2"],
     ["名前=値", "api_key=abc123&x=1", "abc123"],
+    ["Bearer の短い値", "upstream said Bearer x9 rejected", "x9"],
+    ["Bearer: の後の値", "header bearer: q7z invalid", "q7z"],
+    ["3 つ目の部分の無い JWT 風の文字列", "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0 cut", "eyJzdWIiOiJ4In0"],
   ])("%s を伏せる", (_, text, value) => {
     const out = redactPublic(text);
     expect(out).not.toContain(value);
@@ -53,6 +56,11 @@ describe("外に出す文を伏せる", () => {
 
   it("鍵や ID の無い文は変えない", () => {
     const text = "GET /api/v1/nodes が 500 を返した。TypeError: undefined を読んだ (12 回、2026-12-01 10:00)";
+    expect(redactPublic(text)).toBe(text);
+  });
+
+  it("識別子は残す", () => {
+    const text = "staff_rule_denied_count_2026_limit と max_retry_per_task_v2_threshold と workspace-heartbeat-timeout-v2 を超えた";
     expect(redactPublic(text)).toBe(text);
   });
 

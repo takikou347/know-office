@@ -21,7 +21,7 @@ test.describe("蒸留", () => {
     const lessons = page.getByRole("region", { name: "蒸留した学び" });
     await expect(lessons.getByRole("row").filter({ hasText: "push の前にブランチを確かめる" })).toContainText("入れた");
     await page.getByRole("button", { name: "main に push しないを承認する" }).click();
-    await expect(page.getByRole("status").filter({ hasText: "案を承認しました" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "承認して入れました" })).toBeVisible();
     await expect(page.getByRole("button", { name: "main に push しないを承認する" })).toBeHidden();
     expect(decisions).toEqual([{ decision: "approve", reason: "オーナーが画面で承認した" }]);
   });

@@ -191,7 +191,7 @@ export function LessonList() {
     }
     const next = (await res.json()).data;
     setDecided((d) => ({ ...d, [lesson.id]: next.status }));
-    setDone(decision === "approve" ? "案を承認しました" : "案を差し戻しました");
+    setDone(decision === "approve" ? "承認して入れました" : "案を差し戻しました");
   };
 
   const rows = loaded.data.map((l) => ({ ...l, status: decided[l.id] ?? l.status }));
