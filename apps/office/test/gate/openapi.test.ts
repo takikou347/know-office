@@ -114,12 +114,14 @@ const workspaceSource = sources(join(import.meta.dirname, "../../../workspace/sr
 /**
  * ゲートウェイの OpenAPI の文書に入らないルート (ワークスペースからの /ws/v1/ と、ワークスペースの /v1/) が作られているか
  * @param key 「メソッド パス」
- * @returns /ws/v1/ は createRoute の path、/v1/ はワークスペースのサーバーの「メソッド パス」が書かれていれば true
+ * @returns /ws/v1/ は同じメソッドとパスの createRoute、/v1/ はワークスペースのサーバーの振り分けがあれば true
  */
 function builtElsewhere(key: string): boolean {
-  const [, path = ""] = key.split(" ");
-  if (path.startsWith("/ws/v1/")) return gateSource.includes(`path: "${path}"`);
-  if (path.startsWith("/v1/")) return workspaceSource.includes(`"${key}"`);
+  const [method = "", path = ""] = key.split(" ");
+  // createRoute の method と path は続く 2 行に書く。コメントや別のメソッドの同じパスでは作った事にしない
+  if (path.startsWith("/ws/v1/")) return gateSource.includes(`createRoute({\n  method: "${method.toLowerCase()}",\n  path: "${path}",`);
+  // ワークスペースのサーバーは「メソッド パス」を route と比べて振り分ける
+  if (path.startsWith("/v1/")) return workspaceSource.includes(`route === "${key}"`);
   return false;
 }
 
