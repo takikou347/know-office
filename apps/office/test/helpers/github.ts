@@ -236,3 +236,12 @@ export function push(w: WorkWorld, work: Work, repo: string, updates: { ref: str
     }),
   );
 }
+
+/**
+ * 代わりの GitHub が受けた要求の URL を文字で返す
+ * @param input 要求か URL
+ * @returns URL
+ */
+export function urlOf(input: RequestInfo | URL): string {
+  return input instanceof Request ? input.url : input.toString();
+}

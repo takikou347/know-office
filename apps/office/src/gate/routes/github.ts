@@ -94,6 +94,8 @@ export const githubRoutes = router
   .openapi(connectGitHubRoute, async (c) => {
     const link = await loadLink(c.env);
     if (link.installation) throw new AppError("conflict", "すでに連携済み");
+    // 作った App を入れないまま離れた時は、作り直さずにその App のインストール先へ戻す
+    if (link.app) return ok(c, { action: `${endpoints(c.env).githubWeb}/apps/${link.app.slug}/installations/new`, manifest: null, state: null });
     const state = await signState(c.env, c.var.clock);
     return ok(c, { action: `${endpoints(c.env).githubWeb}/settings/apps/new?state=${state}`, manifest: appManifest(new URL(c.req.url).origin), state });
   })

@@ -19,7 +19,7 @@ import {
 import { SignJWT } from "jose";
 import { z, type ZodType } from "zod";
 import { signingKey } from "../auth/session.ts";
-import { readStored, revokeStatement, vaultKey } from "../auth/vault.ts";
+import { readStored, vaultKey } from "../auth/vault.ts";
 import { endpoints } from "../endpoints.ts";
 import type { Bindings } from "../env.ts";
 import { auditFrom } from "../ledger/record.ts";
@@ -152,11 +152,24 @@ export async function appJwt(app: Pick<GitHubApp, "appId" | "privateKey">, now: 
 export async function callGitHub(env: Bindings, fetcher: Fetcher, path: string, init: RequestInit): Promise<Response> {
   const root = `${endpoints(env).github.replace(/\/$/, "")}/`;
   const headers = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...Object.fromEntries(new Headers(init.headers).entries()) };
+  let res: Response;
   try {
-    return await allowedFetch(fetcher, `${root}${path}`, [root], { ...init, headers });
+    // 追った先に鍵を送らないよう、リダイレクトは追わずに断る
+    res = await allowedFetch(fetcher, `${root}${path}`, [root], { ...init, headers, redirect: "manual" });
   } catch {
     throw new AppError("upstream_failed", "GitHub に届かない");
   }
+  if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
+  return res;
+}
+
+/**
+ * 返事がリダイレクト (3xx) かを返す。redirect: "manual" の Workers は 3xx をそのまま返す
+ * @param res 返事
+ * @returns 3xx なら true
+ */
+export function isRedirect(res: Response): boolean {
+  return res.status >= 300 && res.status < 400;
 }
 
 /**
@@ -281,21 +294,22 @@ export async function checkInstallation(env: Bindings, fetcher: Fetcher, app: Gi
   if (found.app_id !== app.appId || found.id !== installationId) throw new AppError("forbidden", "自分の App のインストールではない");
 }
 
+/** 読んだインストールの版がまだ使える時だけ、App とインストールのまだ使える鍵をすべて取り消す文。片方だけ残さない */
+export const DROP_LINK = "UPDATE vault SET revoked_at = ? WHERE name IN ('github_app', 'github_installation') AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM vault WHERE name = 'github_installation' AND version = ? AND revoked_at IS NULL)";
+
 /**
- * インストールを外した事にする。まだ使える版の時だけ、インストールと App の鍵を 1 回の batch で取り消し、取り消せた時だけ監査ログに残す。もう一度つなぐ時は新しい App を作る
+ * インストールを外した事にする。読んだ版がまだ使える時だけ、インストールと App の鍵を 1 文で取り消し、取り消せた時だけ監査ログに残す。もう一度つなぐ時は新しい App を作る
  * @param env バインディング
  * @param installation 外れたインストール
  * @param installation.id インストール ID
  * @param installation.version vault の版
- * @param app 外れたインストールの App
- * @param app.version vault の版
  * @param now 今の時刻
  * @param why 気づいたきっかけ
  * @returns 取り消せたら true
  */
-export async function dropInstallation(env: Bindings, installation: { id: number; version: number }, app: { version: number }, now: number, why: "webhook" | "token_404"): Promise<boolean> {
-  const [result] = await env.DB.batch([revokeStatement(env.DB, "github_installation", installation.version, now), revokeStatement(env.DB, "github_app", app.version, now)]);
-  if ((result?.meta.changes ?? 0) === 0) return false;
+export async function dropInstallation(env: Bindings, installation: { id: number; version: number }, now: number, why: "webhook" | "token_404"): Promise<boolean> {
+  const result = await env.DB.prepare(DROP_LINK).bind(now, installation.version).run();
+  if (result.meta.changes === 0) return false;
   await auditFrom(env, { at: now, actor: "system", action: "github.uninstalled", target: String(installation.id), scope: "office", detail: { why } });
   return true;
 }
@@ -419,7 +433,7 @@ export async function githubToken(env: Bindings, deps: TokenDeps, repo: string |
   });
   if (res.status === 404) {
     // App を外した通知が届かなくても、ここで連携を切る (タスクとレビューの 3.2 の 5)
-    await dropInstallation(env, link.installation, link.app, now, "token_404");
+    await dropInstallation(env, link.installation, now, "token_404");
     throw new AppError("upstream_failed", "GitHub App が外された");
   }
   if (res.status === 422 && repo !== null) throw new AppError("rule_denied", "連携で選んでいないリポジトリ");

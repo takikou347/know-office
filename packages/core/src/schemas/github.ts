@@ -88,8 +88,8 @@ export const AppSlug = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/
 export const GitHubManifest = z
   .object({
     action: z.url(),
-    manifest: z.record(z.string(), z.unknown()),
-    state: z.string(),
+    manifest: z.record(z.string(), z.unknown()).nullable(),
+    state: z.string().nullable(),
   })
   .strict()
   .meta({ id: "GitHubManifest" });

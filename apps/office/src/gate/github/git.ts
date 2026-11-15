@@ -8,7 +8,7 @@ import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { findNode } from "../work/nodes.ts";
 import type { TicketClaims } from "../work/ticket.ts";
-import { callGitHub, githubToken, parseGitHub } from "./app.ts";
+import { callGitHub, githubToken, isRedirect, parseGitHub } from "./app.ts";
 import type { Permissions } from "./forge.ts";
 import { repoScope } from "./rules.ts";
 
@@ -247,7 +247,8 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
     if (value !== undefined) headers.set(name, value);
   }
   // 流れの本文は duplex を要る所がある
-  const init: RequestInit & { duplex?: "half" } = { method: c.req.method, headers, ...(relay ? { body: relay.stream, duplex: "half" } : {}) };
+  // 追った先に鍵を送らないよう、リダイレクトは追わない
+  const init: RequestInit & { duplex?: "half" } = { method: c.req.method, headers, redirect: "manual", ...(relay ? { body: relay.stream, duplex: "half" } : {}) };
   let res: Response | null = null;
   try {
     res = await allowedFetch(c.var.fetch, `${root}${repo.data}.git/${match[3] ?? ""}${url.search}`, [root], init);
@@ -262,6 +263,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
     : { action: "github.read", detail: { nodeId: ticket.nodeId, via: "git", path: match[3] ?? "", status } };
   await auditFrom(c.env, { at: c.var.clock.now(), actor: ticket.staffId, target: repo.data, scope: "office", traceId: c.var.traceId, ...entry });
   if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
+  if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
   return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/octet-stream" } });
 }
 
@@ -300,6 +302,7 @@ export async function relayGitHubApi(c: Context<GateEnv>, ticket: TicketClaims):
   try {
     res = await allowedFetch(c.var.fetch, `${root}repos/${repo.data}${match[2] ?? ""}${url.search}`, [root], {
       headers: { authorization: `Bearer ${token.reveal()}`, accept: c.req.header("accept") ?? "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+      redirect: "manual",
     });
   } catch {
     res = null;
@@ -314,5 +317,6 @@ export async function relayGitHubApi(c: Context<GateEnv>, ticket: TicketClaims):
     traceId: c.var.traceId,
   });
   if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
+  if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
   return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
 }

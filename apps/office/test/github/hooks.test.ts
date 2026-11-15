@@ -182,6 +182,14 @@ describe("なりすましと偽の通知を断る", () => {
     expect((await planTasks()).length).toBe(1);
   });
 
+  it("同じ本文の送り直し 61 回の後でも、新しい本文の通知は通る", async () => {
+    const c = await connect(world);
+    const same = { zen: "同じ", installation: { id: c.installationId } };
+    for (let i = 0; i < 61; i += 1) expect((await hook(world, { event: "ping", payload: same, secret: c.webhookSecret })).status).toBe(204);
+    expect((await hook(world, { event: "issues", payload: issueOpened(c, 2), secret: c.webhookSecret })).status).toBe(204);
+    expect((await planTasks()).map((t) => t["issue_number"])).toEqual([2]);
+  });
+
   it("署名の合う通知は 1 分に 60 回まで受け、61 回目は 429", async () => {
     const c = await connect(world);
     const ping = (i: number) => hook(world, { event: "ping", payload: { zen: String(i), installation: { id: c.installationId } }, secret: c.webhookSecret });

@@ -118,18 +118,6 @@ export async function storeStatements(
 }
 
 /**
- * 置いた鍵の 1 つの版を取り消す文を作る
- * @param db 今の状態の D1
- * @param name 鍵の名前
- * @param version 取り消す版
- * @param now 今の時刻
- * @returns 取り消す文。まだ使える時だけ書く
- */
-export function revokeStatement(db: D1Database, name: StoredName, version: number, now: number): D1PreparedStatement {
-  return db.prepare("UPDATE vault SET revoked_at = ? WHERE name = ? AND version = ? AND revoked_at IS NULL").bind(now, name, version);
-}
-
-/**
  * vault のまだ使える鍵をすべて新しいバージョンに取り替え、古いバージョンに revoked_at を入れる。全体を止めた時に呼ぶ (自動停止の 3.5)
  * @param db 今の状態の D1
  * @param master MASTER_KEY

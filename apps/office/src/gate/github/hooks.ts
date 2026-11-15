@@ -9,7 +9,7 @@ import type { Bindings, GateEnv } from "../env.ts";
 import { guardOf } from "../auth/middleware.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { intakeTask } from "../work/loop.ts";
-import { type GitHubLink, loadLink } from "./app.ts";
+import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
 
 /** 受ける本文の上限 (5MB)。GitHub の通知の上限に合わせる */
@@ -77,7 +77,7 @@ export function deliveryTime(id: string): number | null {
  * @param c 要求の文脈
  * @throws payload_too_large 本文が 5MB を超える時
  * @throws unauthenticated 連携していない、署名が無い、合わない時
- * @throws rate_limited 署名の合った通知が 1 分に 60 回を超えた時
+ * @throws rate_limited 署名の合った新しい通知が 1 分に 60 回を超えた時
  * @throws malformed_request 配信 ID、種類、本文の形が違う時
  */
 export async function receiveHook(c: Context<GateEnv>): Promise<void> {
@@ -92,9 +92,6 @@ export async function receiveHook(c: Context<GateEnv>): Promise<void> {
   // HMAC の verify は時間が一定の比べ方をする。API の決まりの 3.6 の 3
   if (!(await crypto.subtle.verify("HMAC", key, hexBytes(signature.data.slice("sha256=".length)), raw))) throw new AppError("unauthenticated", "署名が合わない");
   const now = c.var.clock.now();
-  // 通知の全体の数は署名の合った物だけで数え、署名の無い要求で本物の通知を締め出させない
-  const { retryAfter } = await guardOf(c).admit("hooks:github", "hook", now);
-  if (retryAfter !== null) throw new AppError("rate_limited", "通知が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
   const delivery = DeliveryId.safeParse(c.req.header("X-GitHub-Delivery"));
   const event = GitHubEventName.safeParse(c.req.header("X-GitHub-Event"));
   if (!delivery.success || !event.success) throw new AppError("malformed_request", "配信 ID か種類の形が違う");
@@ -102,6 +99,11 @@ export async function receiveHook(c: Context<GateEnv>): Promise<void> {
   const sent = deliveryTime(delivery.data);
   if (sent !== null && Math.abs(now - sent) > HOOK_WINDOW_MS) return;
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)), (b) => b.toString(16).padStart(2, "0")).join("");
+  // 2 度目と分かった通知は何も直さないので、全体の数に入れずに受ける。書く時の重なりは FRESH で決める
+  if (await c.env.DB.prepare("SELECT 1 FROM github_deliveries WHERE body_sha256 = ?").bind(digest).first()) return;
+  // 通知の全体の数は署名の合った新しい通知だけで数え、署名の無い要求や送り直しで本物の通知を締め出させない
+  const { retryAfter } = await guardOf(c).admit("hooks:github", "hook", now);
+  if (retryAfter !== null) throw new AppError("rate_limited", "通知が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
   let payload: unknown;
   try {
     payload = JSON.parse(new TextDecoder().decode(raw));
@@ -184,12 +186,10 @@ function changes(env: Bindings, hook: Hook): D1PreparedStatement[] {
     const { number, head } = pull.data.pull_request;
     return [db.prepare(`UPDATE reviews SET head_sha = ?, checks = '[]' WHERE repo = ? AND pr_number = ? AND ${FRESH}`).bind(head.sha, hook.repo, number, hook.digest)];
   }
-  const { installation, app } = hook.link;
-  if (hook.event === "installation" && installation && app && (hook.action === "deleted" || hook.action === "suspend")) {
-    // 外された App の元の鍵も取り消し、もう一度つなぐ時は新しい App を作る
-    const revoke = (name: string, version: number) =>
-      db.prepare(`UPDATE vault SET revoked_at = ? WHERE name = ? AND version = ? AND revoked_at IS NULL AND ${FRESH}`).bind(hook.now, name, version, hook.digest);
-    return [revoke("github_installation", installation.version), revoke("github_app", app.version)];
+  const installation = hook.link.installation;
+  if (hook.event === "installation" && installation && (hook.action === "deleted" || hook.action === "suspend")) {
+    // 外された App の元の鍵も 1 文で取り消し、片方だけ残さない。もう一度つなぐ時は新しい App を作る
+    return [db.prepare(`${DROP_LINK} AND ${FRESH}`).bind(hook.now, installation.version, hook.digest)];
   }
   return [];
 }

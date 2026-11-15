@@ -1,10 +1,10 @@
 // App の鍵。GitHub を呼ぶたびに、リポジトリ 1 つと要る権限だけに絞った 1 時間の鍵をゲートウェイが作って付ける (タスクとレビューの 3.3)
 import { gzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MINUTE, rows, useWork } from "../helpers/work.ts";
 import { loadLink } from "../../src/gate/github/app.ts";
-import { connect, fromWorkspace, push, pushBody, startTask, stepUp } from "../helpers/github.ts";
+import { connect, fromWorkspace, push, pushBody, startTask, stepUp, urlOf } from "../helpers/github.ts";
 
 const world = useWork();
 
@@ -119,6 +119,22 @@ describe("App の鍵", () => {
     expect(world.gate.githubCache.size).toBe(0);
     // 元の鍵は取り替えられ、know-office で使えない
     expect((await loadLink(world.gate.env)).app).toBeNull();
+  });
+
+  it("全体を止める時は、鍵を取り替えて外の鍵を止めてから 1 時間の鍵を取り消す", async () => {
+    await connect(world);
+    const work = await startTask(world, UI);
+    expect((await push(world, work, UI, [{ ref: "refs/heads/ko/x" }])).status).toBe(200);
+    const real = world.gate.github.app.request.bind(world.gate.github.app);
+    const atRevoke: { rotated: boolean; held: boolean }[] = [];
+    const spy = vi.spyOn(world.gate.github.app, "request").mockImplementation(async (input, init, ...rest) => {
+      if (urlOf(input).includes("/installation/token") && init?.method === "DELETE") atRevoke.push({ rotated: (await loadLink(world.gate.env)).app === null, held: await world.gate.office.keysHeld() });
+      return real(input, init, ...rest);
+    });
+    const res = await world.gate.request("/api/v1/guard/stops", { method: "POST", headers: { ...world.headers, "Content-Type": "application/json" }, body: JSON.stringify({ scope: "office", target: "office", reason: "確かめ" }) });
+    spy.mockRestore();
+    expect(res.status).toBe(201);
+    expect(atRevoke).toEqual([{ rotated: true, held: true }]);
   });
 
   it("同じ組の鍵は 50 分ためる", async () => {
@@ -313,5 +329,26 @@ describe("App を通した操作を記録する (ワークスペース)", () => 
     const detail = z.object({ nodeId: z.string(), refs: z.array(z.string()), status: z.number() }).parse(entry?.detail);
     expect({ nodeId: detail.nodeId, status: detail.status }).toEqual({ nodeId: work.nodeId, status: 500 });
     expect(detail.refs[0]?.length).toBeLessThan(long.length);
+  });
+});
+
+describe("GitHub の 3xx は追わない", () => {
+  it.each([
+    { name: "git", route: `/${UI}.git/info/refs`, call: (token: string) => new Request(`https://github.com/${UI}.git/info/refs?service=git-upload-pack`, { headers: { authorization: `Basic ${btoa(`x-access-token:${token}`)}` } }) },
+    { name: "api.github.com", route: `/repos/${UI}/pulls`, call: (token: string) => new Request(`https://api.github.com/repos/${UI}/pulls`, { headers: { authorization: `Bearer ${token}` } }) },
+  ])("$name", async ({ route, call }) => {
+    await connect(world);
+    const work = await startTask(world, UI);
+    const real = world.gate.github.app.request.bind(world.gate.github.app);
+    const seen: (string | undefined)[] = [];
+    const spy = vi.spyOn(world.gate.github.app, "request").mockImplementation(async (input, init, ...rest) => {
+      if (!urlOf(input).includes(route)) return real(input, init, ...rest);
+      seen.push(init?.redirect);
+      return new Response(null, { status: 302, headers: { location: "https://evil.example/" } });
+    });
+    const res = await fromWorkspace(world, work, call(work.token));
+    spy.mockRestore();
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 502, code: "upstream_failed" });
+    expect(seen).toEqual(["manual"]);
   });
 });

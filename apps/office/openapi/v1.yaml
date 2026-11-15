@@ -3516,8 +3516,8 @@ paths:
       operationId: connectGitHub
       tags:
       - github
-      summary: GitHub App の作成情報を返す。パスキーの確認が必要
-      description: '15 分以内のパスキーの確認が必要。画面がこの manifest を GitHub に送信する。
+      summary: GitHub App の作成情報か、作ったまま入れていない App のインストール先を返す。パスキーの確認が必要
+      description: '15 分以内のパスキーの確認が必要。画面は `manifest` があれば `action` へ送信し、`null` なら `action` へ移る。
 
 
         処理の流れ:
@@ -3525,9 +3525,11 @@ paths:
 
         1. パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
 
-        2. 使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する
+        2. 作ったまま入れていない App があれば、作り直さず、その App のインストール先を `action` に入れ、`manifest` と `state` を `null` にして返す
 
-        3. GitHub App の manifest と GitHub の URL を返す
+        3. 使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する
+
+        4. GitHub App の manifest と GitHub の URL を返す
 
 
         このルート固有のエラー:
@@ -3536,6 +3538,7 @@ paths:
         - 409 `conflict`: すでに連携済み'
       x-steps:
       - パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
+      - 作ったまま入れていない App があれば、作り直さず、その App のインストール先を `action` に入れ、`manifest` と `state` を `null` にして返す
       - 使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する
       - GitHub App の manifest と GitHub の URL を返す
       x-errors:
@@ -7917,10 +7920,14 @@ components:
           type: string
           format: uri
         manifest:
-          type: object
+          type:
+          - object
+          - 'null'
           additionalProperties: {}
         state:
-          type: string
+          type:
+          - string
+          - 'null'
       required:
       - action
       - manifest
