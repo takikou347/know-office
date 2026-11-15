@@ -5,6 +5,9 @@ import {
   type Fetcher,
   GitHubCheckRuns,
   GitHubCompare,
+  GitHubGitCommit,
+  GitHubGitObject,
+  GitHubPosted,
   GitHubPull,
   GitHubRef,
   GitHubRepo,
@@ -47,6 +50,20 @@ function branchPath(branch: string): string {
 }
 
 /**
+ * 返事を形で確かめる
+ * @param res GitHub の返事
+ * @param schema 返事の形
+ * @returns 確かめた返事
+ * @throws upstream_failed GitHub が失敗を返した時、返事の形が違う時
+ */
+async function parse<T>(res: Response, schema: ZodType<T>): Promise<T> {
+  if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
+  const parsed = schema.safeParse(await res.json().catch(() => null));
+  if (!parsed.success) throw new AppError("upstream_failed", "GitHub の返事の形が違う");
+  return parsed.data;
+}
+
+/**
  * GitHub の REST API を呼ぶ口を作る
  * @param base GitHub の REST API の宛先 (本番は https://api.github.com)
  * @param fetcher 外への fetch
@@ -55,6 +72,35 @@ function branchPath(branch: string): string {
  */
 export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess): Forge {
   const root = `${base.replace(/\/$/, "")}/`;
+
+  /**
+   * 1 回呼ぶ。失敗のステータスも返事として返す
+   * @param repo リポジトリ。形を確かめてから道に入れる
+   * @param permissions 鍵に付ける権限
+   * @param route メソッドと、/repos/{repo} より後ろの道
+   * @param route.method メソッド
+   * @param route.path 道
+   * @param body 本文
+   * @returns GitHub の返事
+   * @throws upstream_failed リポジトリの形が違う時、GitHub に届かない時
+   */
+  async function send(repo: string, permissions: Permissions, route: { method: string; path: string }, body?: unknown): Promise<Response> {
+    const name = RepoName.safeParse(repo);
+    if (!name.success) throw new AppError("upstream_failed", "リポジトリの名前の形が違う");
+    const token = await access.token(name.data, permissions);
+    const init: RequestInit = {
+      method: route.method,
+      // GitHub への呼び出しはリダイレクトを追わず、3xx は失敗として断る (タスクとレビューの 3.3)
+      redirect: "manual",
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    try {
+      return await allowedFetch(fetcher, `${root}repos/${name.data}${route.path}`, [root], init);
+    } catch {
+      throw new AppError("upstream_failed", "GitHub に届かない");
+    }
+  }
 
   /**
    * 1 回呼び、返事を形で確かめる
@@ -69,29 +115,39 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
    * @throws upstream_failed リポジトリの形が違う時、GitHub が失敗を返した時、返事の形が違う時
    */
   async function call<T>(repo: string, permissions: Permissions, route: { method: string; path: string }, schema: ZodType<T>, body?: unknown): Promise<T> {
-    const name = RepoName.safeParse(repo);
-    if (!name.success) throw new AppError("upstream_failed", "リポジトリの名前の形が違う");
-    const token = await access.token(name.data, permissions);
-    const init: RequestInit = {
-      method: route.method,
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body === undefined ? {} : { "content-type": "application/json" }) },
-    };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    let res: Response;
-    try {
-      res = await allowedFetch(fetcher, `${root}repos/${name.data}${route.path}`, [root], init);
-    } catch {
-      throw new AppError("upstream_failed", "GitHub に届かない");
-    }
-    if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
-    const parsed = schema.safeParse(await res.json().catch(() => null));
-    if (!parsed.success) throw new AppError("upstream_failed", "GitHub の返事の形が違う");
-    return parsed.data;
+    return parse(await send(repo, permissions, route, body), schema);
   }
 
   const read: Permissions = { metadata: "read" };
+  const writePulls: Permissions = { pull_requests: "write" };
+  const writeContents: Permissions = { contents: "write" };
   return {
     connected: () => Promise.resolve(true),
+    postReview: async (repo, pr, review) => {
+      const path = `/pulls/${String(pr)}/reviews`;
+      const res = await send(repo, writePulls, { method: "POST", path }, { event: review.event, body: review.body, commit_id: review.commitId });
+      // プルリクエストは App が出すので、GitHub は App が自分で可と不可を付ける事を 422 で断る。その時は判断を本文の頭に書いたコメントのレビューにする
+      if (res.status === 422) {
+        const label = review.event === "APPROVE" ? "承認" : "差し戻し";
+        return (await call(repo, writePulls, { method: "POST", path }, GitHubPosted, { event: "COMMENT", body: `[${label}] ${review.body}`, commit_id: review.commitId })).id;
+      }
+      return (await parse(res, GitHubPosted)).id;
+    },
+    postComment: async (repo, pr, comment) => {
+      const posted = await call(repo, writePulls, { method: "POST", path: `/pulls/${String(pr)}/comments` }, GitHubPosted, { body: comment.body, commit_id: comment.commitId, path: comment.path, line: comment.line, side: comment.side });
+      return posted.id;
+    },
+    commitFile: async (repo, branch, change) => {
+      const parent = await call(repo, { contents: "read" }, { method: "GET", path: `/git/commits/${change.parent}` }, GitHubGitCommit);
+      const blob = await call(repo, writeContents, { method: "POST", path: "/git/blobs" }, GitHubGitObject, { content: change.content, encoding: "utf-8" });
+      const tree = await call(repo, writeContents, { method: "POST", path: "/git/trees" }, GitHubGitObject, { base_tree: parent.tree.sha, tree: [{ path: change.path, mode: "100644", type: "blob", sha: blob.sha }] });
+      const commit = await call(repo, writeContents, { method: "POST", path: "/git/commits" }, GitHubGitObject, { message: change.message, tree: tree.sha, parents: [change.parent] });
+      // force を付けず、ブランチの先が親のままの時だけ進める。進んでいれば GitHub が 422 を返す
+      const res = await send(repo, writeContents, { method: "PATCH", path: `/git/refs/heads/${branchPath(branch)}` }, { sha: commit.sha, force: false });
+      if (res.status === 422) throw new AppError("conflict", "ブランチの先が進んだ");
+      await parse(res, GitHubRef);
+      return commit.sha;
+    },
     openPull: async (input) => {
       const pull = await call(input.repo, { pull_requests: "write" }, { method: "POST", path: "/pulls" }, GitHubPull, { title: input.title, head: input.branch, base: "main", body: input.body });
       return { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };

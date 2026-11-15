@@ -31,6 +31,8 @@ export type FakeForge = Forge & {
   pulls: { repo: string; branch: string; title: string }[];
   /** main に入れたブランチ */
   merged: string[];
+  /** 出したレビューと行のコメント */
+  posted: { repo: string; pr: number; kind: "review" | "comment"; body: unknown }[];
   /** チェックが通っているか */
   checks: boolean;
   /** プルリクエストを出す間と main に入れる間に、ほかの要求を挟む */
@@ -54,6 +56,7 @@ function fakeForge(): FakeForge {
   const forge: FakeForge = {
     pulls: [],
     merged: [],
+    posted: [],
     checks: true,
     during: {},
     openPull: async (input) => {
@@ -69,6 +72,9 @@ function fakeForge(): FakeForge {
       await forge.during.merge?.();
       forge.merged.push(branch);
     },
+    postReview: (repo, pr, review) => Promise.resolve(forge.posted.push({ repo, pr, kind: "review", body: review })),
+    postComment: (repo, pr, comment) => Promise.resolve(forge.posted.push({ repo, pr, kind: "comment", body: comment })),
+    commitFile: () => Promise.resolve("c".repeat(40)),
   };
   return forge;
 }

@@ -18,6 +18,7 @@ import { noticeRoutes } from "./routes/notices.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { passkeyRoutes } from "./routes/passkeys.ts";
 import { recordRoutes } from "./routes/records.ts";
+import { reviewRoutes } from "./routes/reviews.ts";
 import { serviceRoutes } from "./routes/services.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { settingRoutes } from "./routes/settings.ts";
@@ -37,6 +38,7 @@ import { system } from "./routes/system.ts";
 export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps; extensions?: readonly ExtensionDefinition[]; github?: GitHubAccess; githubTokens?: TokenCache } = {}) {
   const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", guardKeyRoutes).route("/", attendanceRoutes)
     .route("/", nodeRoutes)
+    .route("/", reviewRoutes)
     .route("/", orgRoutes)
     .route("/", serviceRoutes)
     .route("/", settingRoutes)

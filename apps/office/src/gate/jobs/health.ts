@@ -1,9 +1,11 @@
-// 5 分ごとの定期ジョブ。D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止め、送ったバッチ処理の結果を入れる (ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6)
+// 5 分ごとの定期ジョブ。D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
 import { type Clock, newId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
+import { SHARED_TOKENS, vaultForge } from "../github/app.ts";
+import { retryMirrors } from "../github/mirror.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { checkOverruns } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
@@ -58,11 +60,13 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
  * @param ctx 返事の後も処理を続けさせる waitUntil
  * @param ctx.waitUntil 待たせる Promise を渡す
  * @param clock 時刻
- * @param weekly 週のバッチ処理が外へ頼む口。渡した時は、送ったバッチの終わりを見て結果を入れる
+ * @param weekly 週のバッチ処理が外へ頼む口。渡した時は、送ったバッチの終わりを見て結果を入れ、その fetch で GitHub に写し直す
  */
 export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }, clock: Clock, weekly?: WeeklyDeps): void {
   if (weekly) {
     ctx.waitUntil(pollBatches(env, weekly, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "batch_poll_failed", error }, clock)));
+    const forge = vaultForge(env, { fetcher: weekly.fetch, clock, cache: SHARED_TOKENS });
+    ctx.waitUntil(retryMirrors(env, forge, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "mirror_retry_failed", error }, clock)));
   }
   ctx.waitUntil(
     checkStorage(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "storage_check_failed", error }, clock)),

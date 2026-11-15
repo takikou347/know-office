@@ -36,11 +36,16 @@ export {
   GitHubInstallationKey,
   GitHubInstallationRepos,
   GitHubInstalledQuery,
+  GitHubGitCommit,
+  GitHubGitObject,
   GitHubManifest,
+  GitHubPosted,
   GitHubWebhookHead,
   HubSignature,
   IssuesEvent,
   PullRequestEvent,
+  PullRequestReviewCommentEvent,
+  PullRequestReviewEvent,
   Repo,
   GitHubCheckRuns,
   GitHubCompare,
@@ -54,6 +59,19 @@ export {
   RepoName,
   UpdateGitHubRulesInput,
 } from "./schemas/github.ts";
+export {
+  Commit,
+  CreateCommitInput,
+  CreateNoteInput,
+  MirrorCommentPayload,
+  MirrorReviewPayload,
+  NoteSide,
+  OwnerVerdict,
+  RepoPath,
+  ReviewNote,
+  ReviewVerdict,
+  ReviewVerdictInput,
+} from "./schemas/review.ts";
 export { MAX_RECORDED, maskSecrets, OPERATION_KINDS, recordedText, toOperation, type Operation, type OperationKind } from "./rules/operation.ts";
 export {
   AttendanceKind,

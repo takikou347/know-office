@@ -201,3 +201,46 @@ export const IssuesEvent = z
     sender: z.object({ type: z.string().max(64) }).loose().optional(),
   })
   .loose();
+
+/** 通知とレビューの API に載る GitHub の利用者のうち使う所 */
+const GitHubUser = z.object({ login: z.string().min(1).max(255), type: z.string().max(64) }).loose();
+
+/** 書いた者とリポジトリの関わり。OWNER はリポジトリの持ち主 */
+const AuthorAssociation = z.string().max(64);
+
+/** POST /repos/{o}/{r}/pulls/{n}/reviews と /comments の返事のうち使う所 */
+export const GitHubPosted = z.object({ id: GitHubId }).loose();
+
+/** Git の API (blobs、trees、commits) の返事のうち使う所 */
+export const GitHubGitObject = z.object({ sha: Sha }).loose();
+
+/** GET /repos/{o}/{r}/git/commits/{sha} の返事のうち使う所 */
+export const GitHubGitCommit = z.object({ sha: Sha, tree: z.object({ sha: Sha }).loose() }).loose();
+
+/** pull_request_review の通知のうち使う所 */
+export const PullRequestReviewEvent = z
+  .object({
+    review: z
+      .object({ id: GitHubId, state: z.string().max(64), body: z.string().max(65_536).nullable().optional(), user: GitHubUser.nullable(), author_association: AuthorAssociation })
+      .loose(),
+    pull_request: z.object({ number: z.number().int().positive() }).loose(),
+  })
+  .loose();
+
+/** pull_request_review_comment の通知のうち使う所。line は古い差分に付いたコメントでは null */
+export const PullRequestReviewCommentEvent = z
+  .object({
+    comment: z
+      .object({
+        id: GitHubId,
+        body: z.string().min(1).max(65_536),
+        path: z.string().min(1).max(4096),
+        line: z.number().int().positive().nullable().optional(),
+        side: z.enum(["LEFT", "RIGHT"]).optional(),
+        user: GitHubUser.nullable(),
+        author_association: AuthorAssociation,
+      })
+      .loose(),
+    pull_request: z.object({ number: z.number().int().positive() }).loose(),
+  })
+  .loose();

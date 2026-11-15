@@ -10,31 +10,28 @@ import {
   PrOpenTool,
   ReviewSubmitTool,
   ServiceCloseRequestTool,
-  decideRepo,
-  missingConditions,
-  type RepoAction,
   recordedText,
   type StaffId,
   StaffRequestTool,
   StudySubmitTool,
   type ToolResult,
 } from "@know-office/core";
-import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { ZodType } from "zod";
-import { approvals, nodes, reviews } from "../db/main.ts";
+import { approvals, reviews } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import type { ExtensionDefinition, ExtensionTool } from "../extensions/define.ts";
 import { INSTALLED } from "../extensions/installed.ts";
 import { enabledExtensions, extensionStore } from "../extensions/state.ts";
-import { repoScope } from "../github/rules.ts";
 import { type GuardDeps, UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
+import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
-import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, revertNode, updateNode } from "./nodes.ts";
+import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, updateNode } from "./nodes.ts";
+import { findReview, madeTaskOf, mergeIfReady, repoRefusal } from "./review.ts";
 
 /** 呼び出し 1 回 */
 export type ToolCall = {
@@ -271,74 +268,6 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
 }
 
 /**
- * リポジトリへの操作をルールと照らす。触れるリポジトリ、手で止める、できる操作を先に見て、通る時だけ GitHub から変えたファイルを読んで触れない所を見る
- * @param env バインディング
- * @param forge GitHub
- * @param req 操作、リポジトリ、ブランチ
- * @param req.action 操作の種類
- * @param req.repo リポジトリ
- * @param req.branch 変えたブランチ
- * @returns 断る理由と当たった道。通すなら null
- * @throws upstream_failed 変えたファイルを GitHub から読めない時
- */
-async function repoRefusal(env: Bindings, forge: Forge, req: { action: RepoAction; repo: string; branch: string }): Promise<{ reason: string; path?: string } | null> {
-  const scope = await repoScope(env.DB, req.repo);
-  const first = decideRepo({ action: req.action, repo: req.repo, paths: [] }, scope);
-  if (!first.allow) return { reason: first.reason };
-  const decision = decideRepo({ action: req.action, repo: req.repo, paths: await forge.changedPaths(req.repo, req.branch) }, scope);
-  if (decision.allow) return null;
-  return decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path };
-}
-
-/** main に入れられるかの答え。入れられない時は、ルールで断ったか条件を待つか */
-type MergeGate = { kind: "ready" } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string };
-
-/**
- * 承認の後に main に入れられるかを決める。できる操作と触れない所をルールと照らし、main に入れる条件 (タスクとレビューの 3.4) がそろったかを見る
- * @param env バインディング
- * @param forge GitHub
- * @param made 確かめたタスク
- * @param review リポジトリ、ブランチ、プルリクエストの番号
- * @param review.repo リポジトリ
- * @param review.branch ブランチ
- * @param review.prNumber プルリクエストの番号
- * @returns 入れられるか、断ったか、待つ条件
- * @throws upstream_failed GitHub から読めない時
- */
-async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; prNumber: number }): Promise<MergeGate> {
-  const refusal = await repoRefusal(env, forge, { action: "merge", repo: review.repo, branch: review.branch });
-  if (refusal !== null) return { kind: "refused", reason: refusal.reason };
-  const { rules } = await repoScope(env.DB, review.repo);
-  const [row] = await drizzle(env.DB).select({ ownerVerdict: reviews.ownerVerdict }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
-  // チェックが分からない時は入れない。レビュー担当の承認はこの呼び出しが出した物
-  const checks = rules.mergeWhen.includes("checks") ? await forge.checksPassed(review.repo, review.prNumber) : true;
-  const missing = missingConditions(rules.mergeWhen, { checks, reviewer: true, owner: row?.ownerVerdict === "approve" });
-  return missing.length === 0 ? { kind: "ready" } : { kind: "waiting", reason: missing.join(",") };
-}
-
-/**
- * 承認されたタスクを done にしてから main に入れる。入れられなければ review に戻す
- * @param env バインディング
- * @param forge GitHub
- * @param made 確かめたタスク
- * @param review レビューのタスク
- * @param now 今の時刻
- * @throws conflict 確かめたタスクが読んだ後に変わった時
- */
-async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string }, now: number): Promise<void> {
-  // 先に done にして、同じタスクを 2 度入れない
-  const done = await moveNode(env.DB, made, "done", now);
-  if (!done) throw new AppError("conflict", "確かめるタスクが変わった");
-  try {
-    await forge.merge(review.repo, review.branch);
-  } catch (error) {
-    await revertNode(env.DB, made.id, "done", "review", now);
-    throw error;
-  }
-  // TODO(#54): main に入れた事を guard.observe に渡す
-}
-
-/**
  * レビュー担当が今のレビューのタスクに承認か差し戻しを出す。差し戻しは理由と一緒に作った社員のタスクに戻し、承認はチェックが通っていれば main に入れる
  * @param env バインディング
  * @param forge GitHub
@@ -350,12 +279,7 @@ async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { r
 async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: ReviewSubmitTool): Promise<{ merged: boolean }> {
   const review = await currentTask(env, call);
   if (review.taskKind !== "review" || review.repo === null || review.prNumber === null || review.branch === null) throw new AppError("conflict", "今のタスクはレビューでない");
-  const orm = drizzle(env.DB);
-  const [made] = await orm
-    .select()
-    .from(nodes)
-    .where(and(eq(nodes.repo, review.repo), eq(nodes.prNumber, review.prNumber), ne(nodes.taskKind, "review")))
-    .limit(1);
+  const made = await madeTaskOf(env.DB, review.repo, review.prNumber);
   if (!made) throw new AppError("conflict", "確かめるタスクが無い");
   // 見送られたタスクや、もう入れたタスクを main に入れない
   if (made.status !== "review") throw new AppError("conflict", "確かめるタスクがレビューを待っていない");
@@ -365,18 +289,19 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
     if (!(await moveNode(env.DB, made, "todo", call.now))) throw new AppError("conflict", "確かめるタスクが変わった");
     await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_rejected", detail: { summary: input.summary } }, actor);
   } else {
-    const gate = await mergeGate(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber });
-    merged = gate.kind === "ready";
-    if (merged) await mergeMade(env, forge, made, { repo: review.repo, branch: review.branch }, call.now);
-    await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } }, actor);
-    if (gate.kind === "ready") await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch } }, actor);
-    else if (gate.kind === "refused") await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merge_refused", detail: { reason: gate.reason } }, actor);
-    else await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merge_waiting", detail: { reason: gate.reason } }, actor);
+    const approved = { staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } };
+    merged = await mergeIfReady(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: true }, approved, actor);
   }
-  await orm.update(reviews).set({ reviewerVerdict: input.verdict, reviewerSummary: input.summary }).where(eq(reviews.nodeId, made.id));
+  // 判断と、GitHub に写す順番待ちを一緒に書く
+  const row = await findReview(env.DB, made.id);
+  const clock = clockAt(call.now);
+  const mirror = enqueueMirror(env, row.id, { kind: "review", payload: { event: input.verdict === "approve" ? "APPROVE" : "REQUEST_CHANGES", body: input.summary, commitId: row.headSha } }, clock);
+  await env.DB.batch([env.DB.prepare("UPDATE reviews SET reviewer_verdict = ?, reviewer_summary = ? WHERE id = ?").bind(input.verdict, input.summary, row.id), mirror.statement]);
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "review.submit", target: made.id, scope: made.scope, detail: { verdict: input.verdict, merged }, traceId: call.traceId });
   await finishTask(env, call.staffId, review.id, call.now);
   if (input.verdict === "reject" && made.assignee !== null) await notifyStaff(env, made.assignee, call.now, false);
+  // 写せなければ記録に残し、5 分ごとの定期ジョブが写し直す
+  await sendMirror(env, forge, mirror.id, clock);
   return { merged };
 }
 

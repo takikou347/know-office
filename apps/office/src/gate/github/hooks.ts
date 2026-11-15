@@ -1,6 +1,19 @@
-// GitHub の通知の受け手。署名、時刻、本文の SHA-256 を確かめ、チェック、プルリクエスト、Issue、App を外した事を受ける (タスクとレビューの 3.5)
+// GitHub の通知の受け手。署名、時刻、本文の SHA-256 を確かめ、チェック、プルリクエスト、レビュー、Issue、App を外した事を受ける (タスクとレビューの 3.5、3.6)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
-import { AppError, CheckRunEvent, CheckSuiteEvent, DeliveryId, GitHubEventName, GitHubWebhookHead, HubSignature, IssuesEvent, PullRequestEvent } from "@know-office/core";
+import {
+  AppError,
+  CheckRunEvent,
+  CheckSuiteEvent,
+  DeliveryId,
+  GitHubEventName,
+  GitHubWebhookHead,
+  HubSignature,
+  IssuesEvent,
+  newId,
+  PullRequestEvent,
+  PullRequestReviewCommentEvent,
+  PullRequestReviewEvent,
+} from "@know-office/core";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
@@ -8,7 +21,10 @@ import { services } from "../db/main.ts";
 import type { Bindings, GateEnv } from "../env.ts";
 import { guardOf } from "../auth/middleware.ts";
 import { auditFrom } from "../ledger/record.ts";
+import { clockAt } from "../work/attendance.ts";
 import { intakeTask } from "../work/loop.ts";
+import { type Actor, appendNodeEvent, findNode } from "../work/nodes.ts";
+import { returnToMaker } from "../work/review.ts";
 import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
 
@@ -145,6 +161,10 @@ async function handle(env: Bindings, hook: Hook): Promise<void> {
     await intakeIssue(env, hook, record);
     return;
   }
+  if (hook.event === "pull_request_review" || hook.event === "pull_request_review_comment") {
+    await intakeReview(env, hook, record);
+    return;
+  }
   const effects = changes(env, hook);
   const results = await db.batch([...effects, record]);
   // App を外した通知は、取り消せた時だけ記録に残す
@@ -224,4 +244,114 @@ async function intakeIssue(env: Bindings, hook: Hook, record: D1PreparedStatemen
     await env.DB.prepare("DELETE FROM github_deliveries WHERE body_sha256 = ?").bind(hook.digest).run();
     throw error;
   }
+}
+
+/** GitHub のレビューの状態から know-office の判断。コメントだけのレビューと取り下げは写さない */
+const REVIEW_STATES: ReadonlyMap<string, "approve" | "request_changes"> = new Map([
+  ["approved", "approve"],
+  ["changes_requested", "request_changes"],
+]);
+
+/** GitHub から写す、オーナーの可か不可か、行のコメント */
+type FromGitHub =
+  | { kind: "review"; githubId: number; pr: number; verdict: "approve" | "request_changes"; body: string }
+  | { kind: "comment"; githubId: number; pr: number; path: string; line: number; side: "old" | "new"; body: string };
+
+/**
+ * GitHub の利用者が、写してよいオーナーかを返す。App が写した物 (App のボット) と、持ち主でない者の物は写さない
+ * 公開のリポジトリには誰でもレビューを書けるので、持ち主の印 (author_association が OWNER) の無い物でタスクを動かさない
+ * @param hook 確かめた通知
+ * @param user 書いた者
+ * @param association 書いた者とリポジトリの関わり
+ * @returns 写してよければ true
+ */
+function byOwner(hook: Hook, user: { login: string; type: string } | null, association: string): boolean {
+  if (!user || user.type === "Bot") return false;
+  if (hook.link.app && user.login === `${hook.link.app.slug}[bot]`) return false;
+  return association === "OWNER";
+}
+
+/**
+ * 通知から、写すオーナーのレビューか行のコメントを読む
+ * @param hook 確かめた通知
+ * @returns 写す物。写さない通知なら null
+ */
+function fromGitHub(hook: Hook): FromGitHub | null {
+  if (hook.event === "pull_request_review" && hook.action === "submitted") {
+    const parsed = PullRequestReviewEvent.safeParse(hook.payload);
+    if (!parsed.success) return null;
+    const { review, pull_request: pull } = parsed.data;
+    if (!byOwner(hook, review.user, review.author_association)) return null;
+    const verdict = REVIEW_STATES.get(review.state);
+    if (verdict === undefined) return null;
+    return { kind: "review", githubId: review.id, pr: pull.number, verdict, body: review.body ?? "" };
+  }
+  if (hook.event === "pull_request_review_comment" && hook.action === "created") {
+    const parsed = PullRequestReviewCommentEvent.safeParse(hook.payload);
+    if (!parsed.success) return null;
+    const { comment, pull_request: pull } = parsed.data;
+    // 古い差分に付いて行の無いコメントは、行の指摘として置けない
+    if (!byOwner(hook, comment.user, comment.author_association) || comment.line === null || comment.line === undefined) return null;
+    return { kind: "comment", githubId: comment.id, pr: pull.number, path: comment.path, line: comment.line, side: comment.side === "LEFT" ? "old" : "new", body: comment.body };
+  }
+  return null;
+}
+
+/**
+ * オーナーが GitHub の画面で出した可と不可、行のコメントを know-office のレビューに写す (タスクとレビューの 3.5、3.6)
+ * know-office が写した物の通知は写し返さない。受けた記録を先に 1 文で取り、取れた側だけが写す。写せなければ記録を消し、GitHub の送り直しで受け直す
+ * @param env バインディング
+ * @param hook 確かめた通知
+ * @param record 受けた記録を書く文
+ */
+async function intakeReview(env: Bindings, hook: Hook, record: D1PreparedStatement): Promise<void> {
+  const found = fromGitHub(hook);
+  const review =
+    found && hook.repo !== null
+      ? await env.DB.prepare("SELECT id, node_id FROM reviews WHERE repo = ? AND pr_number = ?").bind(hook.repo, found.pr).first<{ id: string; node_id: string }>()
+      : null;
+  if (!found || !review) {
+    await record.run();
+    return;
+  }
+  const taken = await record.run();
+  if (taken.meta.changes === 0) return;
+  try {
+    await applyFromGitHub(env, found, review, hook.now);
+  } catch (error) {
+    await env.DB.prepare("DELETE FROM github_deliveries WHERE body_sha256 = ?").bind(hook.digest).run();
+    throw error;
+  }
+}
+
+/**
+ * 写す物をレビューに置き、作った社員のタスクの出来事に足す。不可と行のコメントはタスクを todo に戻す
+ * @param env バインディング
+ * @param found 写す物
+ * @param review レビューの ID と、作った社員のタスク ID
+ * @param review.id レビュー ID
+ * @param review.node_id 作った社員のタスク ID
+ * @param now 今の時刻
+ */
+async function applyFromGitHub(env: Bindings, found: FromGitHub, review: { id: string; node_id: string }, now: number): Promise<void> {
+  const actor: Actor = { by: "github", now };
+  const made = await findNode(env.DB, review.node_id);
+  if (found.kind === "review") {
+    await env.DB.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ?").bind(found.verdict, review.id).run();
+    const kind = found.verdict === "approve" ? "owner_approved" : "review_rejected";
+    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind, detail: { by: "owner", summary: found.body, githubReviewId: found.githubId } }, actor);
+    // TODO(#55): GitHub で出た可の後に、main に入れる条件がそろっていれば main に入れる
+    if (found.verdict === "request_changes") await returnToMaker(env, made, now);
+    return;
+  }
+  const id = newId(clockAt(now));
+  // 同じコメントを配信 ID を替えて 2 度受けても、指摘は 1 つ
+  const inserted = await env.DB.prepare(
+    "INSERT INTO review_notes (id, review_id, at, by, path, line, side, body, github_comment_id) SELECT ?, ?, ?, 'owner', ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM review_notes WHERE github_comment_id = ?)",
+  )
+    .bind(id, review.id, now, found.path, found.line, found.side, found.body, found.githubId, found.githubId)
+    .run();
+  if (inserted.meta.changes === 0) return;
+  await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "review_note", detail: { by: "owner", noteId: id, path: found.path, line: found.line, side: found.side, body: found.body, githubCommentId: found.githubId } }, actor);
+  await returnToMaker(env, made, now);
 }

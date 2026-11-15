@@ -38,7 +38,7 @@ const APP_JWT_S = { back: 60, ahead: 540 };
 /** App の権限。非公開で、workflows の権限は持たない (タスクとレビューの 3.2 の 2) */
 export const APP_PERMISSIONS = { contents: "write", pull_requests: "write", issues: "write", checks: "read", statuses: "read", administration: "write", metadata: "read" } as const;
 /** App が受ける通知の種類 (タスクとレビューの 3.5)。installation は App に必ず届く */
-const APP_EVENTS = ["check_run", "check_suite", "pull_request", "pull_request_review", "issues"];
+const APP_EVENTS = ["check_run", "check_suite", "pull_request", "pull_request_review", "pull_request_review_comment", "issues"];
 
 /** vault から読んだ GitHub App */
 export type GitHubApp = {
@@ -478,5 +478,8 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
     changedPaths: async (repo, branch) => (await load()).changedPaths(repo, branch),
     protectMain: async (repo, when) => (await load()).protectMain(repo, when),
     connected: async () => (await load()).connected(),
+    postReview: async (repo, pr, review) => (await load()).postReview(repo, pr, review),
+    postComment: async (repo, pr, comment) => (await load()).postComment(repo, pr, comment),
+    commitFile: async (repo, branch, change) => (await load()).commitFile(repo, branch, change),
   };
 }

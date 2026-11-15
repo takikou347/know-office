@@ -1,0 +1,169 @@
+// レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
+import { AppError, decideRepo, missingConditions, type RepoAction } from "@know-office/core";
+import { and, eq, ne } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { D1Database } from "@cloudflare/workers-types";
+import { nodes, reviews } from "../db/main.ts";
+import type { Bindings } from "../env.ts";
+import { repoScope } from "../github/rules.ts";
+import { type Forge, notifyStaff } from "./loop.ts";
+import { type Actor, appendNodeEvent, moveNode, type NodeRow, revertNode } from "./nodes.ts";
+
+/** レビューの行 */
+export type ReviewRow = typeof reviews.$inferSelect;
+
+/**
+ * リポジトリへの操作をルールと照らす。触れるリポジトリ、手で止める、できる操作を先に見て、通る時だけ変わるファイルを読んで触れない所を見る
+ * @param env バインディング
+ * @param forge GitHub
+ * @param req 操作、リポジトリ、ブランチか変わるファイル
+ * @param req.action 操作の種類
+ * @param req.repo リポジトリ
+ * @param req.branch 変えたブランチ。paths が無い時は GitHub から変えたファイルを読む
+ * @param req.paths 変わるファイル。分かっている時に渡す
+ * @returns 断る理由と当たった道。通すなら null
+ * @throws upstream_failed 変えたファイルを GitHub から読めない時
+ */
+export async function repoRefusal(env: Bindings, forge: Forge, req: { action: RepoAction; repo: string; branch: string; paths?: readonly string[] }): Promise<{ reason: string; path?: string } | null> {
+  const scope = await repoScope(env.DB, req.repo);
+  const first = decideRepo({ action: req.action, repo: req.repo, paths: [] }, scope);
+  if (!first.allow) return { reason: first.reason };
+  const decision = decideRepo({ action: req.action, repo: req.repo, paths: req.paths ?? (await forge.changedPaths(req.repo, req.branch)) }, scope);
+  if (decision.allow) return null;
+  return decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path };
+}
+
+/** main に入れられるかの答え。入れられない時は、ルールで断ったか条件を待つか */
+export type MergeGate = { kind: "ready" } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string };
+
+/**
+ * 承認の後に main に入れられるかを決める。できる操作と触れない所をルールと照らし、main に入れる条件 (タスクとレビューの 3.4) がそろったかを見る
+ * レビュー担当とオーナーの承認が足りない間は、GitHub にチェックを聞かずに待つ
+ * @param env バインディング
+ * @param forge GitHub
+ * @param made 確かめたタスク
+ * @param review リポジトリ、ブランチ、プルリクエストの番号、この呼び出しが出した承認
+ * @param review.repo リポジトリ
+ * @param review.branch ブランチ
+ * @param review.prNumber プルリクエストの番号
+ * @param review.reviewer レビュー担当が承認しているか。null なら reviews の行から読む
+ * @returns 入れられるか、断ったか、待つ条件
+ * @throws upstream_failed GitHub から読めない時
+ */
+export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; prNumber: number; reviewer: boolean | null }): Promise<MergeGate> {
+  const refusal = await repoRefusal(env, forge, { action: "merge", repo: review.repo, branch: review.branch });
+  if (refusal !== null) return { kind: "refused", reason: refusal.reason };
+  const { rules } = await repoScope(env.DB, review.repo);
+  const [row] = await drizzle(env.DB).select({ ownerVerdict: reviews.ownerVerdict, reviewerVerdict: reviews.reviewerVerdict }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
+  const approvals = { reviewer: review.reviewer ?? row?.reviewerVerdict === "approve", owner: row?.ownerVerdict === "approve" };
+  const others = missingConditions(rules.mergeWhen, { checks: true, ...approvals });
+  if (others.length > 0) return { kind: "waiting", reason: others.join(",") };
+  // チェックが分からない時は入れない
+  const checks = rules.mergeWhen.includes("checks") ? await forge.checksPassed(review.repo, review.prNumber) : true;
+  const missing = missingConditions(rules.mergeWhen, { checks, ...approvals });
+  return missing.length === 0 ? { kind: "ready" } : { kind: "waiting", reason: missing.join(",") };
+}
+
+/**
+ * 承認されたタスクを done にしてから main に入れる。入れられなければ review に戻す
+ * @param env バインディング
+ * @param forge GitHub
+ * @param made 確かめたタスク
+ * @param review レビューのタスク
+ * @param review.repo リポジトリ
+ * @param review.branch ブランチ
+ * @param now 今の時刻
+ * @throws conflict 確かめたタスクが読んだ後に変わった時
+ */
+export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string }, now: number): Promise<void> {
+  // 先に done にして、同じタスクを 2 度入れない
+  const done = await moveNode(env.DB, made, "done", now);
+  if (!done) throw new AppError("conflict", "確かめるタスクが変わった");
+  try {
+    await forge.merge(review.repo, review.branch);
+  } catch (error) {
+    await revertNode(env.DB, made.id, "done", "review", now);
+    throw error;
+  }
+  // TODO(#54): main に入れた事を guard.observe に渡す
+}
+
+/**
+ * 承認の後に、main に入れられれば入れ、入れたか断ったか待つかをタスクの出来事に残す
+ * @param env バインディング
+ * @param forge GitHub
+ * @param made 確かめたタスク
+ * @param review リポジトリ、ブランチ、プルリクエストの番号、この呼び出しが出した承認
+ * @param review.repo リポジトリ
+ * @param review.branch ブランチ
+ * @param review.prNumber プルリクエストの番号
+ * @param review.reviewer レビュー担当が承認しているか。null なら reviews の行から読む
+ * @param approved 承認の出来事。main に入れた後、入れた出来事の前に残す
+ * @param approved.staffId 承認した社員。オーナーは null
+ * @param approved.kind 出来事の種類
+ * @param approved.detail 出来事の中身
+ * @param actor 誰がいつ
+ * @returns main に入れたか
+ * @throws conflict 確かめたタスクが読んだ後に変わった時
+ * @throws upstream_failed GitHub から読めないか、main を進められない時
+ */
+export async function mergeIfReady(
+  env: Bindings,
+  forge: Forge,
+  made: NodeRow,
+  review: { repo: string; branch: string; prNumber: number; reviewer: boolean | null },
+  approved: { staffId: string | null; kind: string; detail: Record<string, unknown> },
+  actor: Actor,
+): Promise<boolean> {
+  const gate = await mergeGate(env, forge, made, review);
+  if (gate.kind === "ready") await mergeMade(env, forge, made, review, actor.now);
+  await appendNodeEvent(env, { nodeId: made.id, ...approved }, actor);
+  if (gate.kind === "ready") {
+    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch } }, actor);
+    return true;
+  }
+  await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: gate.kind === "refused" ? "merge_refused" : "merge_waiting", detail: { reason: gate.reason } }, actor);
+  return false;
+}
+
+/**
+ * レビューの行を、作った社員のタスク ID から読む
+ * @param db 今の状態の D1
+ * @param nodeId 作った社員のタスク ID
+ * @returns レビューの行
+ * @throws not_found レビューが無い時
+ */
+export async function findReview(db: D1Database, nodeId: string): Promise<ReviewRow> {
+  const [row] = await drizzle(db).select().from(reviews).where(eq(reviews.nodeId, nodeId)).limit(1);
+  if (!row) throw new AppError("not_found", "レビューが無い");
+  return row;
+}
+
+/**
+ * プルリクエストから、確かめるタスク (レビューのタスクでない方) を読む
+ * @param db 今の状態の D1
+ * @param repo リポジトリ
+ * @param prNumber プルリクエストの番号
+ * @returns 作った社員のタスク。無ければ null
+ */
+export async function madeTaskOf(db: D1Database, repo: string, prNumber: number): Promise<NodeRow | null> {
+  const [made] = await drizzle(db)
+    .select()
+    .from(nodes)
+    .where(and(eq(nodes.repo, repo), eq(nodes.prNumber, prNumber), ne(nodes.taskKind, "review")))
+    .limit(1);
+  return made ?? null;
+}
+
+/**
+ * 作った社員のタスクがレビューを待っていれば todo に戻し、担当の社員を呼ぶ。オーナーの差し戻しと指摘に使う
+ * @param env バインディング
+ * @param made 作った社員のタスク
+ * @param now 今の時刻
+ */
+export async function returnToMaker(env: Bindings, made: NodeRow, now: number): Promise<void> {
+  if (made.status !== "review") return;
+  const moved = await moveNode(env.DB, made, "todo", now);
+  // オーナーの指摘は、勤務時間外の社員を呼び出してでも直させる
+  if (moved && moved.assignee !== null) await notifyStaff(env, moved.assignee, now, true);
+}

@@ -76,6 +76,26 @@ export const reviewNotes = sqliteTable("review_notes", {
   githubCommentId: integer("github_comment_id"),
 });
 
+/**
+ * know-office の中のレビューを GitHub のプルリクエストに写す順番待ち。承認と差し戻しはレビュー、指摘は行のコメントとして送る
+ * 送れたら github_id と sent_at を置く。送れない間は attempts を数え、5 分ごとの定期ジョブが送り直す。claimed_until は送る者を 1 つにする印
+ */
+export const githubMirrors = sqliteTable(
+  "github_mirrors",
+  {
+    id: id(),
+    reviewId: text("review_id").notNull(),
+    kind: text("kind", { enum: ["review", "comment"] }).notNull(),
+    payload: json("payload").notNull(),
+    createdAt: time("created_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    claimedUntil: time("claimed_until"),
+    githubId: integer("github_id"),
+    sentAt: time("sent_at"),
+  },
+  (t) => [index("github_mirrors_pending").on(t.sentAt, t.id)],
+);
+
 /** 受けた GitHub の通知。送り直しは配信 ID が変わるので、本文の SHA-256 で同じ通知を 2 度受けない */
 export const githubDeliveries = sqliteTable("github_deliveries", {
   deliveryId: text("delivery_id").primaryKey(),

@@ -1,101 +1,17 @@
-// 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、署名付きの通知を GitHub と同じ形で持つ
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+// 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、プルリクエストのレビューと行のコメント、Git の API のコミットを GitHub と同じ形で持つ
+import { generateKeyPairSync } from "node:crypto";
 import { Hono } from "hono";
 import { renewAppKey } from "./github-keys.ts";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
+import { createFakePulls, type FakeActor } from "./github-pulls.ts";
+import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, type GitHubRequest, Manifest, Permission } from "./github-types.ts";
+
+export type { FakeApp, FakeGitHub, FakeGitHubOptions, FakeToken, GitHubRequest } from "./github-types.ts";
 
 const FakeRoute = z.object({ route: z.string(), body: z.unknown() });
 
-/** 代わりの GitHub の App が持てる権限。know-office の manifest と同じ */
-const Permission = z.enum(["read", "write"]);
-const Manifest = z
-  .object({
-    name: z.string().min(1),
-    url: z.string(),
-    redirect_url: z.string(),
-    setup_url: z.string(),
-    hook_attributes: z.object({ url: z.string() }).loose(),
-    public: z.boolean(),
-    default_permissions: z.record(z.string(), Permission),
-    default_events: z.array(z.string()),
-  })
-  .loose();
 const TokenRequest = z.object({ repositories: z.array(z.string()).optional(), permissions: z.record(z.string(), Permission).optional() }).strict();
-
-/** 届いた要求 */
-export type GitHubRequest = {
-  /** 「メソッド パス」 */
-  route: string;
-  /** 本文。JSON でなければ null */
-  body: unknown;
-  /** 付いていた鍵。Bearer か、git の Basic の合言葉 */
-  token: string | null;
-};
-
-/** 代わりの GitHub が作った App */
-export type FakeApp = {
-  /** App ID */
-  id: number;
-  /** URL に入る名前 */
-  slug: string;
-  /** 受けた manifest */
-  manifest: z.infer<typeof Manifest>;
-  /** 通知の秘密 */
-  webhookSecret: string;
-  /** 秘密鍵に対の公開鍵。App の JWT を確かめる */
-  publicKey: KeyObject;
-};
-
-/** 代わりの GitHub が出した、インストールの 1 時間の鍵 */
-export type FakeToken = {
-  /** インストール ID */
-  installationId: number;
-  /** 届くリポジトリ (owner/name)。null はインストールで選んだすべて */
-  repos: string[] | null;
-  /** 権限 */
-  permissions: Record<string, "read" | "write">;
-  /** 期限 (協定世界時のミリ秒) */
-  expiresAt: number;
-};
-
-/** 代わりの GitHub */
-export type FakeGitHub = {
-  /** GitHub の REST API、画面、git の形の Hono。画面は /web、git は /git の下 */
-  app: Hono;
-  /** 届いた要求 */
-  requests: GitHubRequest[];
-  /** git の受け口に届いた本文のバイト数と Content-Encoding */
-  gitBodies: { route: string; bytes: number; encoding: string | null }[];
-  /** 次に git の受け口が返すステータス。null なら確かめた上で 200 */
-  gitStatus: number | null;
-  /** 次に出す 1 時間の鍵の返事に被せる中身。広い鍵を返す GitHub の代わり */
-  nextMint: { repositories?: { full_name: string }[]; permissions?: Record<string, "read" | "write"> } | null;
-  /** 取り消された 1 時間の鍵 */
-  revoked: string[];
-  /** リポジトリの既定のブランチ。無ければ main */
-  defaultBranches: Map<string, string>;
-  /** 「メソッド パス」に返す本文を置く。undefined は置いた本文を消し、404 に戻す */
-  set(route: string, body: unknown): void;
-  /** 作った App。ID から */
-  apps: Map<number, FakeApp>;
-  /** インストール。ID から、App ID と選んだリポジトリ */
-  installations: Map<number, { appId: number; repos: string[] }>;
-  /** 出した 1 時間の鍵。鍵から */
-  tokens: Map<string, FakeToken>;
-  /** 次のインストールでオーナーが選ぶリポジトリと、公開か */
-  pick: { fullName: string; private: boolean }[];
-  /** オーナーが GitHub の画面で App を外す */
-  uninstall(installationId: number): void;
-  /** オーナーが GitHub App の画面で秘密鍵を作り直し、前の秘密鍵を消す。新しい秘密鍵 (PKCS#1 の PEM) を返す */
-  newPrivateKey(appId: number): string;
-};
-
-/** 代わりの GitHub の設定 */
-export type FakeGitHubOptions = {
-  /** 今の時刻。1 時間の鍵の期限と、App の JWT の期限に使う */
-  now?: () => number;
-};
 
 /** App の JWT の長さの上限 (10 分)。GitHub の決まり */
 const APP_JWT_MAX_S = 600;
@@ -120,6 +36,9 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const defaultBranches = new Map<string, string>();
   const state = { gitStatus: null as number | null, nextMint: null as FakeGitHub["nextMint"] };
   const visibility = new Map<string, boolean>();
+  const sent: FakeGitHub["sent"] = [];
+  const failures = new Map<string, number>();
+  const heads = new Map<string, string>();
   const pick: FakeGitHub["pick"] = [
     { fullName: "example/knowidea-ui", private: false },
     { fullName: "example/know-office", private: false },
@@ -187,6 +106,34 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     const has = t.permissions[need.name];
     return has === "write" || has === need.level;
   };
+
+  /**
+   * 鍵から、GitHub で操作した者を決める。代わりの GitHub が出した鍵は App のボット、テストが手で渡す鍵は鍵ごとの者
+   * @param token 鍵
+   * @returns 者の印と、通知に載るログイン名
+   */
+  const actorOf = (token: string | null): FakeActor => {
+    const t = token === null ? undefined : tokens.get(token);
+    const a = t ? apps.get(installations.get(t.installationId)?.appId ?? 0) : undefined;
+    if (a) return { key: `app:${String(a.id)}`, login: `${a.slug}[bot]` };
+    return { key: `token:${token ?? ""}`, login: "test-app[bot]" };
+  };
+
+  /**
+   * 鍵がリポジトリへの権限を持つか。テストが手で渡す鍵は、鍵の出し手の側で権限を確かめるので通す
+   * @param token 鍵
+   * @param repo owner/name
+   * @param name 権限の名前
+   * @param level 読むか書くか
+   * @returns 持てば true
+   */
+  const allows = (token: string | null, repo: string, name: string, level: "read" | "write"): boolean => {
+    if (!token?.startsWith("ghs_fake")) return true;
+    const t = live(token);
+    return t !== null && reaches(t, repo, { name, level });
+  };
+
+  const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, sent, heads });
 
   const app = new Hono()
     .post("/__fake/routes", async (c) => {
@@ -335,7 +282,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       if (!header) return c.json({ message: "Requires authentication" }, 401);
       const route = `${c.req.method} ${c.req.path}`;
       const token = /^Bearer (.+)$/.exec(header)?.[1] ?? null;
-      remember(route, await c.req.text(), token);
+      const text = await c.req.text();
+      remember(route, text, token);
       // 代わりの GitHub が出した鍵は、届くリポジトリと期限を確かめる。テストが手で渡す鍵はそのまま通す
       if (token?.startsWith("ghs_fake")) {
         const t = live(token);
@@ -351,8 +299,18 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       if (/^POST \/app\/installations\/\d+\/access_tokens$/.test(route)) {
         return c.json({ token: `ghs_test${String(next())}`, expires_at: "2099-01-01T00:00:00Z" }, 201);
       }
-      if (!routes.has(route)) return c.json({ message: "Not Found" }, 404);
-      return c.json(routes.get(route));
+      const failure = failures.get(route);
+      if (failure !== undefined) {
+        failures.delete(route);
+        return new Response(JSON.stringify({ message: "fake failure" }), { status: failure, headers: { "content-type": "application/json" } });
+      }
+      if (!routes.has(route)) return pulls.answer(route, text, token) ?? c.json({ message: "Not Found" }, 404);
+      const body = routes.get(route);
+      // 出したプルリクエストは、出した者を覚える。自分で可を付ける事を断るのに使う
+      const opened = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
+      const number = z.object({ number: z.number() }).loose().safeParse(body);
+      if (opened !== undefined && number.success) pulls.opened(opened, number.data.number, token);
+      return c.json(body);
     });
 
   const set = (route: string, body: unknown): void => {
@@ -384,5 +342,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     pick,
     uninstall: (installationId: number): void => void installations.delete(installationId),
     newPrivateKey: (appId: number): string => renewAppKey(apps.get(appId)),
+    sent,
+    failNext: (route: string, status: number): void => void failures.set(route, status),
+    heads,
   };
 }

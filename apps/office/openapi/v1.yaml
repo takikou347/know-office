@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.11.0
+  version: 1.12.0
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -3399,12 +3399,15 @@ paths:
       tags:
       - reviews
       summary: 行へのコメント
-      description: '処理の流れ:
+      description: 'GitHub に写せない時も指摘は残し、写し直しを待つ。
 
 
-        1. `review_notes` に追加する
+        処理の流れ:
 
-        2. GitHub のレビューコメントとして投稿する
+
+        1. `review_notes` への追加と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く
+
+        2. App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストの行のコメント (本文の頭に「オーナー」、前の行は LEFT、後の行は RIGHT) として写す。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す
 
         3. 作成した社員のタスクに `node_events` で追加し、タスクを `todo` に戻す
 
@@ -3412,16 +3415,13 @@ paths:
         このルート固有のエラー:
 
 
-        - 404 `not_found`: レビューが存在しない
-
-        - 502 `upstream_failed`: GitHub がエラーを返した'
+        - 404 `not_found`: レビューが存在しない'
       x-steps:
-      - '`review_notes` に追加する'
-      - GitHub のレビューコメントとして投稿する
+      - '`review_notes` への追加と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く'
+      - App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストの行のコメント (本文の頭に「オーナー」、前の行は LEFT、後の行は RIGHT) として写す。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す
       - 作成した社員のタスクに `node_events` で追加し、タスクを `todo` に戻す
       x-errors:
       - '404 `not_found`: レビューが存在しない'
-      - '502 `upstream_failed`: GitHub がエラーを返した'
       parameters:
       - name: nodeId
         in: path
@@ -3484,12 +3484,15 @@ paths:
       tags:
       - reviews
       summary: 承認または差し戻し
-      description: '処理の流れ:
+      description: 'GitHub に写せない時も判断は残し、写し直しを待つ。
 
 
-        1. `baseSha` が現在の `head_sha` と一致することを確認する
+        処理の流れ:
 
-        2. `owner_verdict` を更新し、GitHub のレビューとして投稿する
+
+        1. `baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く
+
+        2. App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストのレビュー (承認は APPROVE、差し戻しは REQUEST_CHANGES、本文の頭に「オーナー」) として写す。App が出したプルリクエストで GitHub が 422 を返した時は、判断を本文の頭に書いた COMMENT のレビューにする。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す
 
         3. 承認の場合はマージの条件を確認して main を進め、差し戻しの場合はタスクを `todo` に戻す
 
@@ -3499,17 +3502,20 @@ paths:
         このルート固有のエラー:
 
 
+        - 404 `not_found`: レビューが存在しない
+
         - 409 `conflict`: 確認した後に変更が追加された
 
-        - 502 `upstream_failed`: GitHub がエラーを返した'
+        - 502 `upstream_failed`: main を進める時に GitHub がエラーを返した'
       x-steps:
-      - '`baseSha` が現在の `head_sha` と一致することを確認する'
-      - '`owner_verdict` を更新し、GitHub のレビューとして投稿する'
+      - '`baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く'
+      - App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストのレビュー (承認は APPROVE、差し戻しは REQUEST_CHANGES、本文の頭に「オーナー」) として写す。App が出したプルリクエストで GitHub が 422 を返した時は、判断を本文の頭に書いた COMMENT のレビューにする。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す
       - 承認の場合はマージの条件を確認して main を進め、差し戻しの場合はタスクを `todo` に戻す
       - 監査ログに `review.verdict` を記録する
       x-errors:
+      - '404 `not_found`: レビューが存在しない'
       - '409 `conflict`: 確認した後に変更が追加された'
-      - '502 `upstream_failed`: GitHub がエラーを返した'
+      - '502 `upstream_failed`: main を進める時に GitHub がエラーを返した'
       parameters:
       - name: nodeId
         in: path
@@ -3563,6 +3569,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
   /api/v1/reviews/{nodeId}/commits:
     post:
       operationId: createReviewCommit
@@ -3576,9 +3584,11 @@ paths:
 
         2. 変更禁止のパスを変えていないかをルールで確認する
 
-        3. Git Data API でブランチにコミットを追加する
+        3. App の contents の書きに絞った鍵で、Git Data API でブランチにコミットを追加し、force なしでブランチの先を進める
 
-        4. 監査ログに `review.commit` を記録する
+        4. `baseSha` のままの時だけ `head_sha` を新しいコミットにし、チェックの結果を空にする
+
+        5. 監査ログに `review.commit` を記録する
 
 
         このルート固有のエラー:
@@ -3586,17 +3596,21 @@ paths:
 
         - 403 `rule_denied`: 変更禁止のパスを含む
 
-        - 409 `conflict`: 確認した後に変更が追加された
+        - 404 `not_found`: レビューが存在しない
+
+        - 409 `conflict`: 確認した後に変更が追加された、または GitHub の側でブランチの先が進んだ
 
         - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
       - '`baseSha` が現在の `head_sha` と一致することを確認する'
       - 変更禁止のパスを変えていないかをルールで確認する
-      - Git Data API でブランチにコミットを追加する
+      - App の contents の書きに絞った鍵で、Git Data API でブランチにコミットを追加し、force なしでブランチの先を進める
+      - '`baseSha` のままの時だけ `head_sha` を新しいコミットにし、チェックの結果を空にする'
       - 監査ログに `review.commit` を記録する
       x-errors:
       - '403 `rule_denied`: 変更禁止のパスを含む'
-      - '409 `conflict`: 確認した後に変更が追加された'
+      - '404 `not_found`: レビューが存在しない'
+      - '409 `conflict`: 確認した後に変更が追加された、または GitHub の側でブランチの先が進んだ'
       - '502 `upstream_failed`: GitHub がエラーを返した'
       parameters:
       - name: nodeId
@@ -4128,6 +4142,8 @@ paths:
 
         4. Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければその記録を消す
 
+        5. レビュー (`pull_request_review`) と行のコメント (`pull_request_review_comment`) は、App が写した物と、持ち主 (`author_association` が OWNER) でない者の物を捨てる。残りは Issue と同じく先に `github_deliveries` に追加し、可と不可は `owner_verdict` に、行のコメントは `review_notes` に写して、不可と行のコメントは作った社員のタスクを `todo` に戻す
+
 
         このルート固有のエラー:
 
@@ -4144,6 +4160,7 @@ paths:
       - '`X-GitHub-Delivery` は UUID の形だけを確かめ、時刻の入った版 1 なら時刻が今から 5 分より離れた通知を捨てる。ほかのインストールの通知も捨てる'
       - イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` に同じ本文の SHA-256 がある通知 (配信 ID を変えた送り直しも) では何も直さない
       - Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければその記録を消す
+      - レビュー (`pull_request_review`) と行のコメント (`pull_request_review_comment`) は、App が写した物と、持ち主 (`author_association` が OWNER) でない者の物を捨てる。残りは Issue と同じく先に `github_deliveries` に追加し、可と不可は `owner_verdict` に、行のコメントは `review_notes` に写して、不可と行のコメントは作った社員のタスクを `todo` に戻す
       x-errors:
       - '400 `malformed_request`: 配信 ID か種類か本文の形が違う'
       - '401 `unauthenticated`: 連携していない、署名がない、または一致しない'
@@ -8055,8 +8072,13 @@ components:
       properties:
         path:
           type: string
+          minLength: 1
+          maxLength: 4096
+          description: リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422
         line:
           type: integer
+          minimum: 1
+          maximum: 1000000
         side:
           type: string
           enum:
@@ -8064,6 +8086,8 @@ components:
           - new
         body:
           type: string
+          minLength: 1
+          maxLength: 20000
       required:
       - path
       - line
@@ -8112,9 +8136,15 @@ components:
           - request_changes
         body:
           type: string
+          maxLength: 20000
+        baseSha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+          description: 確かめた時の `head_sha`。現在と異なる場合は 409 conflict
       required:
       - verdict
       - body
+      - baseSha
       additionalProperties: false
     ReviewVerdict:
       type: object
@@ -8137,12 +8167,20 @@ components:
       properties:
         path:
           type: string
+          minLength: 1
+          maxLength: 4096
+          description: リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422
         content:
           type: string
+          maxLength: 500000
         baseSha:
           type: string
+          pattern: ^[0-9a-f]{40}$
+          description: 確かめた時の `head_sha`。現在と異なる場合は 409 conflict
         message:
           type: string
+          minLength: 1
+          maxLength: 1000
       required:
       - path
       - content
