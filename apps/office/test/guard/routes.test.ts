@@ -107,7 +107,9 @@ describe("再開", () => {
     await stepUp();
     // 外の鍵を入れ直すまでは再開しない
     expect((await call("POST", path, headers)).status).toBe(409);
-    await w.gate.office.releaseKeys();
+    const { generation } = await w.gate.office.keyState();
+    await w.gate.office.releaseKeys("github_app", generation);
+    await w.gate.office.releaseKeys("claude", generation);
     const res = await call("POST", path, headers);
     expect(res.status).toBe(200);
     expect(await data(res)).toEqual({ resumedAt: new Date(w.clock.now()).toISOString() });

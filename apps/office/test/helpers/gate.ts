@@ -233,6 +233,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     observe: office.observe.bind(office),
     holdKeys: office.holdKeys.bind(office),
     keysHeld: office.keysHeld.bind(office),
+    keyState: office.keyState.bind(office),
     releaseKeys: office.releaseKeys.bind(office),
     claimStop: office.claimStop.bind(office),
     releaseStop: office.releaseStop.bind(office),

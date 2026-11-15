@@ -1,10 +1,10 @@
 // 全体のセキュリティ DO。ロックアウト、レート制限、パスキーの challenge を 1 か所で数える (ログインと記録の 1.2)
 import { DurableObject } from "cloudflare:workers";
-import { newId, systemClock } from "@know-office/core";
+import { type GuardKeys, newId, systemClock } from "@know-office/core";
 import { type Admission, type Challenge, GuardBook, type RateBucket } from "../auth/guard-book.ts";
 import type { Bindings, Guard } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
-import { OfficeGuard } from "../guard/office-guard.ts";
+import { type KeyState, OfficeGuard } from "../guard/office-guard.ts";
 
 /** 全体のセキュリティ DO。ゲートウェイだけが RPC で呼ぶ。時刻は呼ぶ側の Clock で渡す */
 export class GuardDO extends DurableObject<Bindings> implements Guard {
@@ -45,11 +45,22 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
   }
 
   /**
-   * 外の鍵の印を外す
-   * @returns 無し
+   * 入れ直す鍵の今と、印を付けた世代を返す
+   * @returns 印、まだ入れ直していない鍵、世代
    */
-  releaseKeys(): Promise<null> {
-    return this.#office.releaseKeys();
+  keyState(): Promise<KeyState> {
+    return this.#office.keyState();
+  }
+
+  /**
+   * 入れ直した鍵の印を外す。読んだ世代が今と違えば何も変えない
+   * @param kind 入れ直した鍵
+   * @param generation 入れ直す前に読んだ世代
+   * @returns 入れ直す鍵の今
+   * @throws validation_failed 鍵の種類か世代の形が違う時
+   */
+  releaseKeys(kind: unknown, generation: unknown): Promise<GuardKeys> {
+    return this.#office.releaseKeys(kind, generation);
   }
 
   /**

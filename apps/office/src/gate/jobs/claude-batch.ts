@@ -1,9 +1,10 @@
 // Claude のバッチ処理の API を呼ぶ口。送る、終わったかを見る、結果を読む。急がないタスクはワークスペースを通さずここから回す (サービスと拡張の 3.6、社員が考えるの 3.3)
-import { allowedFetch, AppError, batchCostMicroUsd, type ClaudeUsage, type Fetcher, newId, OPUS, Secret } from "@know-office/core";
+import { allowedFetch, AppError, batchCostMicroUsd, type ClaudeUsage, type Fetcher, newId, OPUS } from "@know-office/core";
 import { z } from "zod";
 import { endpoints } from "../endpoints.ts";
 import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
+import { claudeKey } from "../work/claude-key.ts";
 import { recordsOf } from "../work/nodes.ts";
 
 /** Anthropic の API の版 */
@@ -65,13 +66,11 @@ const Line = z.looseObject({
  * @param init メソッドと本文
  * @param timeoutMs 待つ上限
  * @returns 返事
- * @throws unavailable 鍵が無い時
+ * @throws unavailable 鍵が無い時、全体を止めた後でまだ入れ直していない時
  * @throws upstream_failed 届かない時か、2xx でない時
  */
 async function call(env: Bindings, fetch: Fetcher, path: string, init: { method: "GET" | "POST"; body?: string }, timeoutMs = 10_000): Promise<Response> {
-  const key = env.ANTHROPIC_API_KEY ?? "";
-  if (key === "") throw new AppError("unavailable", "Claude API の鍵が入っていない");
-  const secret = new Secret(key);
+  const secret = await claudeKey(env);
   const base = endpoints(env).anthropic;
   const headers = new Headers({ "anthropic-version": ANTHROPIC_VERSION, "x-api-key": secret.reveal() });
   if (init.body !== undefined) headers.set("content-type", "application/json");

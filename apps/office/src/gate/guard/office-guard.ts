@@ -1,5 +1,5 @@
 // 全体とサービスのシグナルの数と、全体を止めた後の外の鍵の印。GuardDO が持ち、テストは同じ物を手元の入れ物で使う (自動停止の 2 章、3.5)
-import { AppError, countOffice, isStaffEvent, emptyOfficeCounts, GuardEvent, OfficeCounts, Thresholds } from "@know-office/core";
+import { AppError, countOffice, isStaffEvent, emptyOfficeCounts, GuardEvent, type GuardKeys, KeyKind, OfficeCounts, Thresholds } from "@know-office/core";
 import { z } from "zod";
 import type { GuardStorage } from "../auth/guard-book.ts";
 import type { Observed } from "./deps.ts";
@@ -7,6 +7,12 @@ import { RECENT_OPS } from "./staff-guard.ts";
 
 const OpenStops = z.record(z.string(), z.string());
 const Released = z.array(z.string());
+/** GuardDO に置く、入れ直す鍵の今。世代は全体を止めるたびに 1 つ進む */
+const StoredKeyState = z.object({ held: z.boolean(), pending: z.array(KeyKind), generation: z.number().int().nonnegative() }).strict();
+
+/** 入れ直す鍵の今と、印を付けた世代 */
+export type KeyState = z.infer<typeof StoredKeyState>;
+
 const RecentOps = z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /** 全体とサービスのシグナルを数える。時刻はすべて引数で受ける */
@@ -44,12 +50,15 @@ export class OfficeGuard {
   }
 
   /**
-   * 全体を止めた時に、外の鍵 (GitHub App と Claude) を入れ直すまで使えない印を付ける
+   * 全体を止めた時に、外の鍵 (GitHub App と Claude) を入れ直すまで使えない印を付ける。止め直すたびに世代を 1 つ進め、2 つとも入れ直す事にする
    * @returns 無し
    */
-  async holdKeys(): Promise<null> {
-    await this.storage.put("keys_held", true);
-    return null;
+  holdKeys(): Promise<null> {
+    return this.#serial(async () => {
+      const now = await this.keyState();
+      await this.storage.put("key_state", { held: true, pending: [...KeyKind.options], generation: now.generation + 1 });
+      return null;
+    });
   }
 
   /**
@@ -57,17 +66,36 @@ export class OfficeGuard {
    * @returns 印が付いているか
    */
   async keysHeld(): Promise<boolean> {
-    return (await this.storage.get("keys_held")) === true;
+    return (await this.keyState()).held;
   }
 
   /**
-   * 外の鍵を入れ直した時に印を外す。入れ直すルートはまだ無く、今はテストだけが呼ぶ
-   * @returns 無し
+   * 入れ直す鍵の今と、印を付けた世代を返す
+   * @returns 印、まだ入れ直していない鍵、世代
    */
-  // TODO(#47): GitHub App と Claude の鍵を入れ直すルートから呼ぶ
-  async releaseKeys(): Promise<null> {
-    await this.storage.put("keys_held", false);
-    return null;
+  async keyState(): Promise<KeyState> {
+    const stored = await this.storage.get("key_state");
+    return stored === undefined ? { held: false, pending: [], generation: 0 } : StoredKeyState.parse(stored);
+  }
+
+  /**
+   * 入れ直した鍵の印を外し、2 つとも入れ直したら全体を再開できるようにする。入れ直している間に止め直していれば、読んだ世代が古いので何も変えない
+   * @param kind 入れ直した鍵
+   * @param generation 入れ直す前に読んだ世代
+   * @returns 入れ直す鍵の今
+   * @throws validation_failed 鍵の種類か世代の形が違う時
+   */
+  releaseKeys(kind: unknown, generation: unknown): Promise<GuardKeys> {
+    const k = KeyKind.safeParse(kind);
+    const g = z.number().int().nonnegative().safeParse(generation);
+    if (!k.success || !g.success) return Promise.reject(new AppError("validation_failed", "鍵の種類か世代の形が違う"));
+    return this.#serial(async () => {
+      const now = await this.keyState();
+      if (!now.held || now.generation !== g.data) return { held: now.held, pending: now.pending };
+      const pending = now.pending.filter((p) => p !== k.data);
+      await this.storage.put("key_state", { held: pending.length > 0, pending, generation: now.generation });
+      return { held: pending.length > 0, pending };
+    });
   }
 
   /**

@@ -44,8 +44,11 @@ export async function vaultKey(db: D1Database, name: VaultName, master: string, 
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext));
 }
 
-/** 外から受けて置く鍵の名前。GitHub App の元の鍵と、インストール */
-export type StoredName = "github_app" | "github_installation";
+/** 外から受けて置く鍵の名前。GitHub App の元の鍵、インストール、オーナーが入れ直した Claude の API の鍵 */
+export type StoredName = "github_app" | "github_installation" | "claude_api_key";
+
+/** 外から受けて置く鍵の名前の並び。全体を止めた時は、取り替えずに取り消すだけにする */
+const STORED_NAMES: readonly string[] = ["github_app", "github_installation", "claude_api_key"] satisfies StoredName[];
 
 /** 置いた鍵の今の値 */
 export type Stored = {
@@ -69,15 +72,40 @@ export async function readStored(db: D1Database, name: StoredName, master: strin
   const top = all[0]?.version ?? 0;
   const live = all.find((row) => row.revokedAt === null);
   if (!live) return { value: null, version: null, top };
-  const iv = fromBase64(live.iv);
-  const ciphertext = fromBase64(live.ciphertext);
-  if (!iv || !ciphertext) return { value: null, version: live.version, top };
+  // 読めない物は無い物とする
+  return { value: await decrypt(live, master), version: live.version, top };
+}
+
+/**
+ * 取り消した物も入れた、いちばん大きい版を読み、復号する。全体を止めた時に取り消した、止める前の連携の App ID とインストール ID を読む
+ * @param db 今の状態の D1
+ * @param name 鍵の名前
+ * @param master MASTER_KEY
+ * @returns いちばん大きい版の中身 (JSON の文字) と版。無いか、復号できなければ中身は null
+ */
+export async function readLatest(db: D1Database, name: StoredName, master: string): Promise<{ value: Secret | null; top: number }> {
+  const [row] = await drizzle(db).select().from(vault).where(eq(vault.name, name)).orderBy(desc(vault.version)).limit(1);
+  if (!row) return { value: null, top: 0 };
+  return { value: await decrypt(row, master), top: row.version };
+}
+
+/**
+ * vault の 1 行を復号する
+ * @param row vault の行
+ * @param row.iv AES-GCM の iv (Base64)
+ * @param row.ciphertext 暗号 (Base64)
+ * @param master MASTER_KEY
+ * @returns 中身。形が違うか、復号できなければ null
+ */
+async function decrypt(row: { iv: string; ciphertext: string }, master: string): Promise<Secret | null> {
+  const iv = fromBase64(row.iv);
+  const ciphertext = fromBase64(row.ciphertext);
+  if (!iv || !ciphertext) return null;
   try {
     const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, await deriveKey(master, "vault"), ciphertext);
-    return { value: new Secret(new TextDecoder().decode(plain)), version: live.version, top };
+    return new Secret(new TextDecoder().decode(plain));
   } catch {
-    // 全体を止めた時に乱数へ取り替えた鍵も、復号できても中身の形で断られる。ここでは読めない物を無い物とする
-    return { value: null, version: live.version, top };
+    return null;
   }
 }
 
@@ -118,11 +146,12 @@ export async function storeStatements(
 }
 
 /**
- * vault のまだ使える鍵をすべて新しいバージョンに取り替え、古いバージョンに revoked_at を入れる。全体を止めた時に呼ぶ (自動停止の 3.5)
+ * 全体を止めた時に vault の鍵を止める (自動停止の 3.5)。know-office が作る鍵は新しいバージョンに取り替えて古いバージョンに revoked_at を入れ、
+ * 外から受けた鍵 (GitHub App とインストールと Claude の API の鍵) は revoked_at を入れるだけにする。外の鍵はオーナーが入れ直す
  * @param db 今の状態の D1
  * @param master MASTER_KEY
  * @param now 今の時刻
- * @returns 取り替えた鍵の名前
+ * @returns 取り替えた鍵と、取り消した外の鍵の名前
  */
 export async function rotateVaultKeys(db: D1Database, master: string, now: number): Promise<string[]> {
   const orm = drizzle(db);
@@ -130,12 +159,14 @@ export async function rotateVaultKeys(db: D1Database, master: string, now: numbe
   const live = await orm.select().from(vault).where(isNull(vault.revokedAt));
   const statements = [];
   for (const old of live) {
+    const revoke = orm.update(vault).set({ revokedAt: now }).where(and(eq(vault.name, old.name), eq(vault.version, old.version)));
+    if (STORED_NAMES.includes(old.name)) {
+      statements.push(revoke);
+      continue;
+    }
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, crypto.getRandomValues(new Uint8Array(32)));
-    statements.push(
-      orm.insert(vault).values({ name: old.name, ciphertext: toBase64(ciphertext), iv: toBase64(iv), version: old.version + 1, createdAt: now }),
-      orm.update(vault).set({ revokedAt: now }).where(and(eq(vault.name, old.name), eq(vault.version, old.version))),
-    );
+    statements.push(orm.insert(vault).values({ name: old.name, ciphertext: toBase64(ciphertext), iv: toBase64(iv), version: old.version + 1, createdAt: now }), revoke);
   }
   const [first, ...rest] = statements;
   if (first) await orm.batch([first, ...rest]);

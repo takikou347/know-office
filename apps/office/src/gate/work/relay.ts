@@ -1,11 +1,11 @@
 // Claude のプロキシ。作業トークンを確かめた要求を、鍵を替えて Claude API へ流れのまま送り、使った量と上限の待ちを残す (社員が考えるの 3.3)
-import { allowedFetch, allowedModels, AppError, PROBLEMS, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, Secret, type StaffId } from "@know-office/core";
+import { allowedFetch, allowedModels, AppError, PROBLEMS, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { z } from "zod";
 import { usage } from "../db/records.ts";
 import { endpoints } from "../endpoints.ts";
-import type { Bindings, GateEnv, Staff } from "../env.ts";
+import type { GateEnv, Staff } from "../env.ts";
 import { ensureRunning, staffOf } from "../guard/actions.ts";
 import { observe } from "../guard/observe.ts";
 import { CLAUDE_FAILED, recordError } from "../ledger/errors.ts";
@@ -13,6 +13,7 @@ import { noticeClaudeFailures } from "../ledger/notices.ts";
 import { problemResponse } from "../problem.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { clockAt } from "./attendance.ts";
+import { claudeKey } from "./claude-key.ts";
 import { findNode, recordsOf } from "./nodes.ts";
 import type { TicketClaims } from "./ticket.ts";
 
@@ -155,13 +156,13 @@ function safeJson(text: string): unknown {
  * @param path 道
  * @param text 本文
  * @returns Claude API の返事
- * @throws unavailable 鍵が無い時
+ * @throws unavailable 鍵が無い時、全体を止めた後でまだ入れ直していない時
  * @throws upstream_timeout 10 分で返らない時
  * @throws upstream_failed 届かない時
  */
 async function callUpstream(c: Context<GateEnv>, path: string, text: string): Promise<Response> {
   const base = endpoints(c.env).anthropic;
-  const key = anthropicKey(c.env);
+  const key = await claudeKey(c.env);
   // SDK は beta の Messages API を ?beta=true で呼ぶ。ほかのクエリは送らない
   const query = new URL(c.req.url).searchParams.get("beta") === "true" ? "?beta=true" : "";
   try {
@@ -175,18 +176,6 @@ async function callUpstream(c: Context<GateEnv>, path: string, text: string): Pr
     if (error instanceof Error && error.name === "TimeoutError") throw new AppError("upstream_timeout", "Claude API が時間内に返らない");
     throw new AppError("upstream_failed", "Claude API に届かない");
   }
-}
-
-/**
- * Claude API の鍵を Secret に包んで読む
- * @param env バインディング
- * @returns 鍵
- * @throws unavailable 鍵が入っていない時
- */
-function anthropicKey(env: Bindings): Secret {
-  const key = env.ANTHROPIC_API_KEY ?? "";
-  if (key === "") throw new AppError("unavailable", "Claude API の鍵が入っていない");
-  return new Secret(key);
 }
 
 /**

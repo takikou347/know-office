@@ -3,6 +3,7 @@ import { AppError, allowedFetch, decideRepo, GitHubRepo, recordedText, RepoName 
 import type { Context } from "hono";
 import { endpoints } from "../endpoints.ts";
 import type { GateEnv } from "../env.ts";
+import { ensureRunning } from "../guard/actions.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
@@ -212,6 +213,7 @@ async function defaultBranchOf(c: Context<GateEnv>, repo: string, token: string)
  * @param ticket 確かめた作業トークン
  * @returns GitHub の返事
  * @throws not_found git の道でない時
+ * @throws stopped 全体、社員、タスクが止まっている時
  * @throws rule_denied 触れるリポジトリでない、できない操作、タスクのでないリポジトリ、main や既定のブランチ、ref を消す、崩れた ref の push の時
  * @throws malformed_request push の命令の形が違う時
  * @throws payload_too_large 本文が 100MB を超える時
@@ -223,6 +225,8 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   const service = match?.[3] === "info/refs" ? url.searchParams.get("service") : match?.[3];
   const repo = RepoName.safeParse(match ? `${match[1] ?? ""}/${match[2] ?? ""}` : "");
   if (!match || !repo.success || (service !== "git-upload-pack" && service !== "git-receive-pack")) throw new AppError("not_found", "git の道でない");
+  // 全体、社員、タスクが止まっている間は、鍵を作らず GitHub へ出さない (自動停止の 3.4)
+  await ensureRunning(c.env, ticket.staffId, ticket.nodeId);
   const push = service === "git-receive-pack";
   const scope = await repoScope(c.env.DB, repo.data);
   const decision = decideRepo({ action: push ? "push" : "read", repo: repo.data, paths: [] }, scope);
@@ -285,10 +289,12 @@ function readPermissions(rest: string): Permissions {
  * @param c 要求の文脈。作業トークンは受け手が確かめている
  * @param ticket 確かめた作業トークン
  * @returns GitHub の返事
+ * @throws stopped 全体、社員、タスクが止まっている時
  * @throws rule_denied GET でない、リポジトリの道でない、触れるリポジトリでない時
  * @throws upstream_failed つないでいない、GitHub に届かない時
  */
 export async function relayGitHubApi(c: Context<GateEnv>, ticket: TicketClaims): Promise<Response> {
+  await ensureRunning(c.env, ticket.staffId, ticket.nodeId);
   const url = new URL(c.req.url);
   const match = /^\/repos\/([^/]+\/[^/]+)(\/.*)?$/.exec(url.pathname);
   const repo = RepoName.safeParse(match?.[1] ?? "");

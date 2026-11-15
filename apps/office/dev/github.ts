@@ -1,6 +1,7 @@
 // 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、署名付きの通知を GitHub と同じ形で持つ
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { Hono } from "hono";
+import { renewAppKey } from "./github-keys.ts";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
 
@@ -86,6 +87,8 @@ export type FakeGitHub = {
   pick: { fullName: string; private: boolean }[];
   /** オーナーが GitHub の画面で App を外す */
   uninstall(installationId: number): void;
+  /** オーナーが GitHub App の画面で秘密鍵を作り直し、前の秘密鍵を消す。新しい秘密鍵 (PKCS#1 の PEM) を返す */
+  newPrivateKey(appId: number): string;
 };
 
 /** 代わりの GitHub の設定 */
@@ -122,10 +125,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     { fullName: "example/know-office", private: false },
   ];
   let serial = 0;
-  const next = () => {
-    serial += 1;
-    return serial;
-  };
+  const next = () => (serial += 1);
 
   /**
    * 届いた要求を並べる
@@ -383,5 +383,6 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     tokens,
     pick,
     uninstall: (installationId: number): void => void installations.delete(installationId),
+    newPrivateKey: (appId: number): string => renewAppKey(apps.get(appId)),
   };
 }

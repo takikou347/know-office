@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.10.0
+  version: 1.11.0
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -1443,6 +1443,205 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/keys:
+    get:
+      operationId: getGuardKeys
+      tags:
+      - guard
+      summary: 全体を止めた後に入れ直す鍵
+      description: '処理の流れ:
+
+
+        1. `GuardDO.keyState` で、全体を止めた後に入れ直す鍵の印と、まだ入れ直していない鍵を読む'
+      x-steps:
+      - '`GuardDO.keyState` で、全体を止めた後に入れ直す鍵の印と、まだ入れ直していない鍵を読む'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GuardKeys'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/guard/keys/github-app:
+    put:
+      operationId: replaceGitHubAppKey
+      tags:
+      - guard
+      summary: GitHub App の鍵を入れ直す
+      description: '15 分以内のパスキーの確認が必要。全体を止めた後、止める前の連携の App で作り直した秘密鍵と通知の秘密を入れる。連携をやり直す時は `POST /api/v1/github/connect` から入れ直す。
+
+
+        処理の流れ:
+
+
+        1. パスキーの確認を求め、全体が止まっていることを確認する
+
+        2. `vault` の `github_app` と `github_installation` の最後の版から、止める前の連携の App ID とインストール ID を読む
+
+        3. 新しい秘密鍵で作った App の JWT で、そのインストールが同じ App のものかを GitHub に問い合わせる
+
+        4. 読んだ時から `github_app` と `github_installation` の版が進んでおらず、まだ使える連携が無い時だけ、新しい秘密鍵と通知の秘密とインストールを 1 回のバッチで暗号化して `vault` に保存する
+
+        5. `GuardDO.releaseKeys` で GitHub App の鍵の印を外し、監査ログに `guard.keys_replaced` を記録する
+
+
+        このルート固有のエラー:
+
+
+        - 409 `conflict`: 全体が止まっていない、止める前の連携が無い、インストールが外れている、または同じ時に別の鍵を保存した
+
+        - 422 `validation_failed`: 秘密鍵の形が違う、または秘密鍵が App と合わない
+
+        - 502 `upstream_failed`: GitHub がエラーを返した'
+      x-steps:
+      - パスキーの確認を求め、全体が止まっていることを確認する
+      - '`vault` の `github_app` と `github_installation` の最後の版から、止める前の連携の App ID とインストール ID を読む'
+      - 新しい秘密鍵で作った App の JWT で、そのインストールが同じ App のものかを GitHub に問い合わせる
+      - 読んだ時から `github_app` と `github_installation` の版が進んでおらず、まだ使える連携が無い時だけ、新しい秘密鍵と通知の秘密とインストールを 1 回のバッチで暗号化して `vault` に保存する
+      - '`GuardDO.releaseKeys` で GitHub App の鍵の印を外し、監査ログに `guard.keys_replaced` を記録する'
+      x-errors:
+      - '409 `conflict`: 全体が止まっていない、止める前の連携が無い、インストールが外れている、または同じ時に別の鍵を保存した'
+      - '422 `validation_failed`: 秘密鍵の形が違う、または秘密鍵が App と合わない'
+      - '502 `upstream_failed`: GitHub がエラーを返した'
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceGitHubAppKeyInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GuardKeys'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+  /api/v1/guard/keys/claude:
+    put:
+      operationId: replaceClaudeKey
+      tags:
+      - guard
+      summary: Claude の API の鍵を入れ直す
+      description: '15 分以内のパスキーの確認が必要。全体を止めた後、Anthropic の画面で作り直した鍵を入れる。入れた後は環境変数の `ANTHROPIC_API_KEY` を使わない。
+
+
+        処理の流れ:
+
+
+        1. パスキーの確認を求め、全体が止まっていることを確認する
+
+        2. 読んだ時から `claude_api_key` の版が進んでいない時だけ、新しい鍵を暗号化して `vault` に保存し、前の版を取り消す
+
+        3. `GuardDO.releaseKeys` で Claude の鍵の印を外し、監査ログに `guard.keys_replaced` を記録する
+
+
+        このルート固有のエラー:
+
+
+        - 409 `conflict`: 全体が止まっていない、または同じ時に別の鍵を保存した'
+      x-steps:
+      - パスキーの確認を求め、全体が止まっていることを確認する
+      - 読んだ時から `claude_api_key` の版が進んでいない時だけ、新しい鍵を暗号化して `vault` に保存し、前の版を取り消す
+      - '`GuardDO.releaseKeys` で Claude の鍵の印を外し、監査ログに `guard.keys_replaced` を記録する'
+      x-errors:
+      - '409 `conflict`: 全体が止まっていない、または同じ時に別の鍵を保存した'
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceClaudeKeyInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GuardKeys'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -3666,7 +3865,7 @@ paths:
 
         2. 同じインストールがすでに記録されていれば、書かずに 302 で設定画面にリダイレクトする
 
-        3. 読んだ時の App の版がまだ使える時だけ `vault` に保存し、監査ログに `github.installed` を記録する
+        3. 読んだ時の App の版がまだ使える時だけ `vault` に保存し、監査ログに `github.installed` を記録する。全体を止めた後なら `GuardDO.releaseKeys` で GitHub App の鍵の印を外す
 
         4. 302 で設定画面にリダイレクトする
 
@@ -3682,7 +3881,7 @@ paths:
       x-steps:
       - '`installation_id` が自分の App のものかを GitHub に問い合わせる'
       - 同じインストールがすでに記録されていれば、書かずに 302 で設定画面にリダイレクトする
-      - 読んだ時の App の版がまだ使える時だけ `vault` に保存し、監査ログに `github.installed` を記録する
+      - 読んだ時の App の版がまだ使える時だけ `vault` に保存し、監査ログに `github.installed` を記録する。全体を止めた後なら `GuardDO.releaseKeys` で GitHub App の鍵の印を外す
       - 302 で設定画面にリダイレクトする
       x-errors:
       - '403 `forbidden`: 自分の App のインストールではない、または App を作っていない'
@@ -6960,6 +7159,51 @@ components:
       required:
       - ticket
       - expiresAt
+      additionalProperties: false
+    GuardKeys:
+      type: object
+      properties:
+        held:
+          type: boolean
+          description: 全体を止めた後で、外の鍵を入れ直すまで全体を再開できない時は true
+        pending:
+          type: array
+          items:
+            type: string
+            enum:
+            - github_app
+            - claude
+          description: まだ入れ直していない鍵
+      required:
+      - held
+      - pending
+      additionalProperties: false
+    ReplaceGitHubAppKeyInput:
+      type: object
+      properties:
+        privateKey:
+          type: string
+          maxLength: 10000
+          pattern: ^-----BEGIN (RSA )?PRIVATE KEY-----[A-Za-z0-9+/=\s]+-----END (RSA )?PRIVATE KEY-----\s*$
+          description: GitHub App の画面で作り直した秘密鍵 (PEM)
+        webhookSecret:
+          type: string
+          minLength: 16
+          maxLength: 200
+          description: GitHub App の画面で作り直した通知の秘密
+      required:
+      - privateKey
+      - webhookSecret
+      additionalProperties: false
+    ReplaceClaudeKeyInput:
+      type: object
+      properties:
+        apiKey:
+          type: string
+          pattern: ^sk-ant-[A-Za-z0-9_-]{20,300}$
+          description: Anthropic の画面で作り直した API の鍵
+      required:
+      - apiKey
       additionalProperties: false
     GuardState:
       type: object

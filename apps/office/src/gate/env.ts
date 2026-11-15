@@ -1,9 +1,10 @@
 // ゲートウェイの Hono の型。バインディングと、要求ごとの値を Variables に置く
 import type { D1Database, DurableObjectNamespace, R2Bucket, Rpc } from "@cloudflare/workers-types";
-import type { Clock, Fetcher, RestoreInput, StaffStatus } from "@know-office/core";
+import type { Clock, Fetcher, GuardKeys, KeyKind, RestoreInput, StaffStatus } from "@know-office/core";
 import type { Admission, Challenge, RateBucket } from "./auth/guard-book.ts";
 import type { SessionRow } from "./auth/session.ts";
 import type { GuardDeps, Observed } from "./guard/deps.ts";
+import type { KeyState } from "./guard/office-guard.ts";
 import type { IssuedTicket, RenewedTicket, TicketCheck } from "./guard/staff-guard.ts";
 import type { ChainCheck } from "./ledger/audit.ts";
 import type { TokenDeps } from "./github/app.ts";
@@ -37,8 +38,10 @@ export interface Guard extends Rpc.DurableObjectBranded {
   holdKeys(): Promise<null>;
   /** 外の鍵が使えない印が付いているか */
   keysHeld(): Promise<boolean>;
-  /** 外の鍵の印を外す */
-  releaseKeys(): Promise<null>;
+  /** 入れ直す鍵の今と、印を付けた世代 */
+  keyState(): Promise<KeyState>;
+  /** 入れ直した鍵の印を外す。読んだ世代が今と違えば何も変えない */
+  releaseKeys(kind: KeyKind, generation: number): Promise<GuardKeys>;
   /** その範囲と相手を止める権利を取る */
   claimStop(scope: string, target: string, stopId: string): Promise<boolean>;
   /** 止めた記録を再開する権利を取る */

@@ -164,6 +164,51 @@ export const GuardState = z
 /** 停止中の対象の型 */
 export type GuardState = z.infer<typeof GuardState>;
 
+/** 全体を止めた後に入れ直す外の鍵。GitHub App の鍵と Claude の API の鍵 */
+export const KeyKind = z.enum(["github_app", "claude"]);
+
+/** 入れ直す外の鍵の型 */
+export type KeyKind = z.infer<typeof KeyKind>;
+
+/** 全体を止めた後に入れ直す鍵の今 */
+export const GuardKeys = z
+  .object({
+    held: z.boolean().openapi({ description: "全体を止めた後で、外の鍵を入れ直すまで全体を再開できない時は true" }),
+    pending: z.array(KeyKind).openapi({ description: "まだ入れ直していない鍵" }),
+  })
+  .strict()
+  .meta({ id: "GuardKeys" });
+
+/** 入れ直す鍵の今の型 */
+export type GuardKeys = z.infer<typeof GuardKeys>;
+
+/** GitHub App の秘密鍵の PEM。GitHub は PKCS#1 で渡す */
+const PrivateKeyPem = z
+  .string()
+  .max(10_000)
+  .regex(/^-----BEGIN (RSA )?PRIVATE KEY-----[A-Za-z0-9+/=\s]+-----END (RSA )?PRIVATE KEY-----\s*$/);
+
+/** GitHub App の鍵を入れ直す入力。止める前の連携の App で作り直した秘密鍵と通知の秘密 */
+export const ReplaceGitHubAppKeyInput = z
+  .object({
+    privateKey: PrivateKeyPem.openapi({ description: "GitHub App の画面で作り直した秘密鍵 (PEM)" }),
+    webhookSecret: z.string().min(16).max(200).openapi({ description: "GitHub App の画面で作り直した通知の秘密" }),
+  })
+  .strict()
+  .meta({ id: "ReplaceGitHubAppKeyInput" });
+
+/** GitHub App の鍵を入れ直す入力の型 */
+export type ReplaceGitHubAppKeyInput = z.infer<typeof ReplaceGitHubAppKeyInput>;
+
+/** Claude の API の鍵を入れ直す入力 */
+export const ReplaceClaudeKeyInput = z
+  .object({ apiKey: z.string().regex(/^sk-ant-[A-Za-z0-9_-]{20,300}$/).openapi({ description: "Anthropic の画面で作り直した API の鍵" }) })
+  .strict()
+  .meta({ id: "ReplaceClaudeKeyInput" });
+
+/** Claude の API の鍵を入れ直す入力の型 */
+export type ReplaceClaudeKeyInput = z.infer<typeof ReplaceClaudeKeyInput>;
+
 /** 止めた記録と近かった記録の 1 行 */
 export const StopRow = z
   .object({

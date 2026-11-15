@@ -66,13 +66,16 @@ export type GitHubLink = {
   installationTop: number;
 };
 
+/** App もインストールも使える物が無い時だけ書く条件。インストールの前の App を別の code で置き換えない */
+export const NOT_LINKED = { sql: "NOT EXISTS (SELECT 1 FROM vault WHERE name IN ('github_app', 'github_installation') AND revoked_at IS NULL)", args: [] };
+
 /**
  * vault の中身を形で確かめて読む。形が違えば null
  * @param value 中身
  * @param schema 形
  * @returns 確かめた中身
  */
-function parseStored<T>(value: Secret | null, schema: ZodType<T>): T | null {
+export function parseStored<T>(value: Secret | null, schema: ZodType<T>): T | null {
   if (value === null) return null;
   try {
     const parsed = schema.safeParse(JSON.parse(value.reveal()));

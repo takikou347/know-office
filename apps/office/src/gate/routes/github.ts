@@ -5,7 +5,8 @@ import { createRouter } from "../app.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { storeStatements } from "../auth/vault.ts";
 import { endpoints } from "../endpoints.ts";
-import { appManifest, callGitHub, checkInstallation, consumeState, exchangeCode, githubToken, loadLink, parseGitHub, signState } from "../github/app.ts";
+import { appManifest, callGitHub, checkInstallation, consumeState, exchangeCode, githubToken, loadLink, NOT_LINKED, parseGitHub, signState } from "../github/app.ts";
+import { guardDo } from "../guard/actions.ts";
 import { receiveHook } from "../github/hooks.ts";
 import { loadGitHubRules, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
 import { audit } from "../ledger/record.ts";
@@ -16,9 +17,6 @@ const router = createRouter();
 
 /** 一覧のカーソル。GitHub のページの番号 */
 const PageCursor = z.string().regex(/^[1-9]\d{0,3}$/);
-
-/** App もインストールも使える物が無い時だけ書く条件。インストールの前の App を別の code で置き換えない */
-const NOT_LINKED = { sql: "NOT EXISTS (SELECT 1 FROM vault WHERE name IN ('github_app', 'github_installation') AND revoked_at IS NULL)", args: [] };
 
 const connectGitHubRoute = createRoute({
   method: "post",
@@ -117,6 +115,8 @@ export const githubRoutes = router
   })
   .openapi(receiveGitHubInstallRoute, async (c) => {
     const { installation_id: installationId } = c.req.valid("query");
+    // 全体を止めた後に連携をやり直した時は、入れ直す前の世代で GitHub App の鍵の印を外す
+    const { generation } = await guardDo(c.env).keyState();
     const link = await loadLink(c.env);
     if (!link.app) throw new AppError("forbidden", "自分の App のインストールではない");
     await checkInstallation(c.env, c.var.fetch, link.app, installationId, c.var.clock.now());
@@ -137,6 +137,7 @@ export const githubRoutes = router
       throw new AppError("conflict", "同じ時に連携が変わった");
     }
     await audit(c, "github.installed", String(installationId), { appId: link.app.appId });
+    await guardDo(c.env).releaseKeys("github_app", generation);
     return redirect(c, "/settings");
   })
   .openapi(listGitHubReposRoute, async (c) => {

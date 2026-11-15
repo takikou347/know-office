@@ -1,4 +1,4 @@
-// 8 画面と「その他」と入れた拡張の画面の中身。勤怠の表、目的と組織図、記録のサービスごとの内訳、設定の拡張のほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
+// 8 画面と「その他」と入れた拡張の画面の中身。勤怠の表、目的と組織図、記録のサービスごとの内訳、設定の拡張と鍵の入れ直しのほかはモックの仮のデータで、押した操作は画面の中だけで変わり、記録には残らない。手で止めるボタンだけはゲートウェイを呼ぶ
 import type { Extension, Health } from "@know-office/core";
 import {
   Alert,
@@ -47,6 +47,7 @@ import { StopButton } from "./pages/guard/StopButton.tsx";
 import { OfficePage } from "./pages/office/OfficePage.tsx";
 import { useWorkTasks, workFeed } from "./pages/office/feed.ts";
 import { RecordBreakdown } from "./pages/ledger/RecordBreakdown.tsx";
+import { KeyReentry } from "./pages/settings/KeyReentry.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
 import { StaffStatus } from "./parts/staff-status.tsx";
 import { type ExtensionScreenId, type ScreenId, isExtensionScreen, moreScreensWith } from "./routes.ts";
@@ -517,6 +518,7 @@ function Settings({ extensions, toggleExtension }: { extensions: readonly Extens
   const [ended, setEnded] = useState<string[]>([]);
   return (
     <Section>
+      <KeyReentry />
       <Card
         title="全体のルール"
         headingLevel={2}

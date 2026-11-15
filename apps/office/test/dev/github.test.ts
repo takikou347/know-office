@@ -35,6 +35,21 @@ describe("開発環境の代わりの物", () => {
     expect((await github.app.request(`/app/installations/${installation}/access_tokens`, { method: "POST", headers: { authorization: `Bearer ${other}` } })).status).toBe(401);
   });
 
+  it("代わりの GitHub は App の秘密鍵を作り直すと、前の秘密鍵の JWT を断る", async () => {
+    const github = createFakeGitHub();
+    const manifest = { name: "ko", url: "http://localhost", redirect_url: "http://localhost/cb", setup_url: "http://localhost/installed", hook_attributes: { url: "http://localhost/hooks" }, public: false, default_permissions: { contents: "write" }, default_events: [] };
+    const made = await github.app.request("/web/settings/apps/new?state=s1", { method: "POST", body: new URLSearchParams({ manifest: JSON.stringify(manifest) }) });
+    const code = new URL(made.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    const conversion = z.object({ id: z.number(), slug: z.string(), pem: z.string() }).loose().parse(await (await github.app.request(`/app-manifests/${code}/conversions`, { method: "POST" })).json());
+    const installed = new URL((await github.app.request(`/web/apps/${conversion.slug}/installations/new`)).headers.get("location") ?? "");
+    const path = `/app/installations/${installed.searchParams.get("installation_id") ?? ""}`;
+    const jwtOf = (pem: string) => new SignJWT({}).setProtectedHeader({ alg: "RS256" }).setIssuer(String(conversion.id)).setIssuedAt().setExpirationTime("9m").sign(createPrivateKey(pem));
+    const fresh = github.newPrivateKey(conversion.id);
+    expect(fresh).toContain("BEGIN RSA PRIVATE KEY");
+    expect((await github.app.request(path, { headers: { authorization: `Bearer ${await jwtOf(conversion.pem)}` } })).status).toBe(401);
+    expect((await github.app.request(path, { headers: { authorization: `Bearer ${await jwtOf(fresh)}` } })).status).toBe(200);
+  });
+
   it("代わりの GitHub は積んだ返事を返し、無い物は 404 で返す", async () => {
     const github = createFakeGitHub();
     github.set("GET /repos/o/r/pulls", [{ number: 1, title: "PR" }]);
