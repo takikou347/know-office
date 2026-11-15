@@ -264,6 +264,25 @@ describe("再開", () => {
     expect(await world.gate.office.releaseKeys("github_app", now.generation)).toEqual({ held: false, pending: [] });
   });
 
+  it("全体を止める時に鍵の取り替えが落ちても、外の鍵の印を付け、1 時間の鍵を取り消す", async () => {
+    await connect(world);
+    const work = await startTask(world, UI);
+    expect((await push(world, work, UI, [{ ref: "refs/heads/ko/x" }])).status).toBe(200);
+    const issued = [...world.gate.github.tokens.keys()];
+    // 取り替えの新しい版を書く所で落とす
+    const restore = wrapDb(world, {
+      prepare: (real, sql) => {
+        if (/^insert into "vault"/i.test(sql)) throw new Error("取り替えを落とす");
+        return real(sql);
+      },
+    });
+    const res = await call("POST", "/api/v1/guard/stops", { scope: "office", target: "office", reason: "確かめ" });
+    restore();
+    expect(res.status).toBe(500);
+    expect((await world.gate.office.keyState()).held).toBe(true);
+    expect(world.gate.github.revoked).toEqual(issued);
+  });
+
   it("全体を止めると、外の鍵は取り消すだけで新しい版を作らない", async () => {
     await connect(world);
     await stopOffice();

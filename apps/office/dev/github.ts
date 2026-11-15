@@ -186,6 +186,21 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         201,
       );
     })
+    .get("/app", async (c) => {
+      remember("GET /app", "", null);
+      // GitHub は消した App の JWT に 404 を返す
+      const iss = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+      let known = false;
+      try {
+        known = iss !== undefined && apps.has(Number(decodeJwt(iss).iss));
+      } catch {
+        known = false;
+      }
+      if (!known) return c.json({ message: "Integration not found" }, 404);
+      const a = await appOf(c.req.header("authorization"));
+      if (!a) return c.json({ message: "A JSON web token could not be decoded" }, 401);
+      return c.json({ id: a.id, slug: a.slug, name: a.manifest.name, owner: { login: "example" } });
+    })
     .get("/app/installations/:id", async (c) => {
       remember(`GET /app/installations/${c.req.param("id")}`, "", null);
       const a = await appOf(c.req.header("authorization"));

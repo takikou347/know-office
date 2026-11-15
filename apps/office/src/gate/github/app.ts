@@ -167,12 +167,13 @@ export async function callGitHub(env: Bindings, fetcher: Fetcher, path: string, 
 }
 
 /**
- * 返事がリダイレクト (3xx) かを返す。redirect: "manual" の Workers は 3xx をそのまま返す
+ * 返事がリダイレクト (304 を除く 3xx) かを返す。redirect: "manual" の Workers は 3xx をそのまま返す
  * @param res 返事
- * @returns 3xx なら true
+ * @returns 304 を除く 3xx なら true
  */
 export function isRedirect(res: Response): boolean {
-  return res.status >= 300 && res.status < 400;
+  // 304 は条件つきの要求への「変わっていない」で、行き先を持たない。RFC 9110 の 15.4.5
+  return res.status >= 300 && res.status < 400 && res.status !== 304;
 }
 
 /**
@@ -296,6 +297,27 @@ export async function checkInstallation(env: Bindings, fetcher: Fetcher, app: Gi
   const found = await parseGitHub(res, GitHubInstallation);
   if (found.app_id !== app.appId || found.id !== installationId) throw new AppError("forbidden", "自分の App のインストールではない");
 }
+
+/**
+ * 自分の App がまだ GitHub にあるかを、App の JWT で GET /app を呼んで確かめる
+ * GitHub は消した App の JWT に 404 (Integration not found) を返す。docs.github.com/en/rest/apps/apps#get-the-authenticated-app
+ * @param env バインディング
+ * @param fetcher 外への fetch
+ * @param app 自分の App
+ * @param now 今の時刻
+ * @returns あれば true、404 なら false
+ * @throws upstream_failed 404 のほかの失敗の時。時計のずれでも 401 になるので、消えたとはみなさない
+ */
+export async function appExists(env: Bindings, fetcher: Fetcher, app: GitHubApp, now: number): Promise<boolean> {
+  const res = await callGitHub(env, fetcher, "app", { headers: { authorization: `Bearer ${await appJwt(app, now)}` } });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
+  return true;
+}
+
+/** 読んだ App の版がまだ使え、インストールが無い時だけ、App の鍵を取り消す文。同じ時に入ったインストールを残す */
+export const DROP_GONE_APP =
+  "UPDATE vault SET revoked_at = ? WHERE name = 'github_app' AND version = ? AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM vault WHERE name = 'github_installation' AND revoked_at IS NULL)";
 
 /** 読んだインストールの版がまだ使える時だけ、App とインストールのまだ使える鍵をすべて取り消す文。片方だけ残さない */
 export const DROP_LINK = "UPDATE vault SET revoked_at = ? WHERE name IN ('github_app', 'github_installation') AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM vault WHERE name = 'github_installation' AND version = ? AND revoked_at IS NULL)";

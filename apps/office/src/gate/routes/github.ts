@@ -5,7 +5,7 @@ import { createRouter } from "../app.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { storeStatements } from "../auth/vault.ts";
 import { endpoints } from "../endpoints.ts";
-import { appManifest, callGitHub, checkInstallation, consumeState, exchangeCode, githubToken, loadLink, NOT_LINKED, parseGitHub, signState } from "../github/app.ts";
+import { appExists, appManifest, callGitHub, checkInstallation, consumeState, DROP_GONE_APP, exchangeCode, githubToken, loadLink, NOT_LINKED, parseGitHub, signState } from "../github/app.ts";
 import { guardDo } from "../guard/actions.ts";
 import { receiveHook } from "../github/hooks.ts";
 import { loadGitHubRules, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
@@ -26,7 +26,7 @@ const connectGitHubRoute = createRoute({
   "x-step-up": true,
   // 外部連携を始めるのでパスキーで確かめる
   middleware: [stepUpGate] as const,
-  responses: { 200: okResponse(GitHubManifest), ...problems(401, 403, 409, 429, 500) },
+  responses: { 200: okResponse(GitHubManifest), ...problems(401, 403, 409, 429, 500, 502) },
 });
 
 const redirectResponse = (description: string) => ({ description, headers: { Location: { schema: { type: "string" as const } } } });
@@ -90,8 +90,15 @@ const updateGitHubRulesRoute = createRoute({
 /** GitHub のルート。連携、リポジトリ、ルール */
 export const githubRoutes = router
   .openapi(connectGitHubRoute, async (c) => {
-    const link = await loadLink(c.env);
+    let link = await loadLink(c.env);
     if (link.installation) throw new AppError("conflict", "すでに連携済み");
+    // 作った App を GitHub で消していれば、App の鍵を取り消して作り直せるようにする
+    if (link.app && !(await appExists(c.env, c.var.fetch, link.app, c.var.clock.now()))) {
+      const dropped = await c.env.DB.prepare(DROP_GONE_APP).bind(c.var.clock.now(), link.app.version).run();
+      if (dropped.meta.changes > 0) await audit(c, "github.app_gone", String(link.app.appId), { slug: link.app.slug });
+      link = await loadLink(c.env);
+      if (link.installation) throw new AppError("conflict", "すでに連携済み");
+    }
     // 作った App を入れないまま離れた時は、作り直さずにその App のインストール先へ戻す
     if (link.app) return ok(c, { action: `${endpoints(c.env).githubWeb}/apps/${link.app.slug}/installations/new`, manifest: null, state: null });
     const state = await signState(c.env, c.var.clock);

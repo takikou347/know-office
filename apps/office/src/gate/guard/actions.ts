@@ -239,13 +239,20 @@ async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null,
     case "office":
       for (const id of ALL_STAFF) await staffOf(env, id).halt(now);
       await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
-      await rotateVaultKeys(env.DB, env.MASTER_KEY, now);
-      await guardDo(env).holdKeys();
-      // 新しい鍵を作れなくしてから、出した 1 時間の鍵を GitHub の側で取り消す。届かなくても止めるのは続ける
+      // 取り替えが落ちても、外の鍵の印と 1 時間の鍵の取り消しは必ず行う。落ちた事は投げ直して止めた記録に残す
       try {
-        await deps.revokeGitHubTokens(env);
-      } catch (error) {
-        await recordError(env, { source: "gate", level: "error", code: "github_token_revoke_failed", error }, clockAt(now));
+        await rotateVaultKeys(env.DB, env.MASTER_KEY, now);
+      } finally {
+        try {
+          await guardDo(env).holdKeys();
+        } finally {
+          // 新しい鍵を作れなくしてから、出した 1 時間の鍵を GitHub の側で取り消す。届かなくても止めるのは続ける
+          try {
+            await deps.revokeGitHubTokens(env);
+          } catch (error) {
+            await recordError(env, { source: "gate", level: "error", code: "github_token_revoke_failed", error }, clockAt(now));
+          }
+        }
       }
       return;
     default:

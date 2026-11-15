@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.14.0
+  version: 1.14.1
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -3763,7 +3763,7 @@ paths:
 
         1. パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
 
-        2. 作ったまま入れていない App があれば、作り直さず、その App のインストール先を `action` に入れ、`manifest` と `state` を `null` にして返す
+        2. 作ったまま入れていない App があれば、App の JWT で GitHub の `GET /app` を呼ぶ。404 なら GitHub で消された App として、読んだ版がまだ使えてインストールが無い時だけ 1 文で `github_app` を取り消し、取り消せたら監査ログに `github.app_gone` を残して 3 へ進む。あれば作り直さず、その App のインストール先を `action` に入れ、`manifest` と `state` を `null` にして返す
 
         3. 使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する
 
@@ -3773,14 +3773,17 @@ paths:
         このルート固有のエラー:
 
 
-        - 409 `conflict`: すでに連携済み'
+        - 409 `conflict`: すでに連携済み
+
+        - 502 `upstream_failed`: `GET /app` が 404 のほかの失敗を返した'
       x-steps:
       - パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
-      - 作ったまま入れていない App があれば、作り直さず、その App のインストール先を `action` に入れ、`manifest` と `state` を `null` にして返す
+      - 作ったまま入れていない App があれば、App の JWT で GitHub の `GET /app` を呼ぶ。404 なら GitHub で消された App として、読んだ版がまだ使えてインストールが無い時だけ 1 文で `github_app` を取り消し、取り消せたら監査ログに `github.app_gone` を残して 3 へ進む。あれば作り直さず、その App のインストール先を `action` に入れ、`manifest` と `state` を `null` にして返す
       - 使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する
       - GitHub App の manifest と GitHub の URL を返す
       x-errors:
       - '409 `conflict`: すでに連携済み'
+      - '502 `upstream_failed`: `GET /app` が 404 のほかの失敗を返した'
       x-step-up: true
       security:
       - accessJwt: []
@@ -3811,6 +3814,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
   /api/v1/github/callback:
     get:
       operationId: receiveGitHubApp

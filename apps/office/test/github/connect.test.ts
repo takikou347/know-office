@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MINUTE, rows, useWork } from "../helpers/work.ts";
+import { isRedirect } from "../../src/gate/github/app.ts";
 import { browse, connect, createGitHubApp, FAKES, hook, onGitHub, returnFromGitHub, stepUp, urlOf, wrapDb } from "../helpers/github.ts";
 
 const world = useWork();
@@ -23,6 +24,15 @@ async function liveVault(): Promise<Record<string, number>> {
  */
 function githubAudits(): string[] {
   return world.gate.audits.map((a) => a.action).filter((a) => a.startsWith("github."));
+}
+
+/**
+ * 代わりの GitHub への要求が GET /app かを見る
+ * @param input 要求
+ * @returns GET /app なら true
+ */
+function isAppRoute(input: Parameters<typeof urlOf>[0]): boolean {
+  return (urlOf(input).split("?")[0] ?? "").endsWith("/app");
 }
 
 describe("ボタン 1 つで連携する", () => {
@@ -147,6 +157,73 @@ describe("ボタン 1 つで連携する", () => {
     spy.mockRestore();
     expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 502, code: "upstream_failed" });
     expect(seen).toEqual(["manual"]);
+  });
+
+  it("作った App を GitHub で消してインストールしていない時は、App の鍵を取り消し、新しい App の作り方を返す", async () => {
+    await stepUp(world);
+    expect((await returnFromGitHub(world, await createGitHubApp(world))).status).toBe(302);
+    const gone = [...world.gate.github.apps.keys()][0] ?? 0;
+    world.gate.github.apps.delete(gone);
+    const res = await world.gate.request("/api/v1/github/connect", { method: "POST", headers: world.headers });
+    expect(res.status).toBe(200);
+    const data = z.object({ data: z.object({ action: z.string(), manifest: z.record(z.string(), z.unknown()), state: z.string() }) }).parse(await res.json()).data;
+    expect(data.action).toBe(`${FAKES}/github/web/settings/apps/new?state=${data.state}`);
+    expect(await liveVault()).toEqual({});
+    expect(githubAudits()).toEqual(["github.app_created", "github.app_gone"]);
+    // 返った作り方から作り直してつなげる
+    const made = await onGitHub(world, data.action, { method: "POST", body: new URLSearchParams({ manifest: JSON.stringify(data.manifest) }) });
+    const toInstall = await returnFromGitHub(world, made.headers.get("location") ?? "");
+    const installed = await onGitHub(world, toInstall.headers.get("location") ?? "");
+    expect((await returnFromGitHub(world, installed.headers.get("location") ?? "")).status).toBe(302);
+    expect(await liveVault()).toEqual({ github_app: 1, github_installation: 1 });
+  });
+
+  it("消えた App の取り消しと同時にインストールが入ったら、インストールを残して 409", async () => {
+    await stepUp(world);
+    expect((await returnFromGitHub(world, await createGitHubApp(world))).status).toBe(302);
+    const slug = [...world.gate.github.apps.values()][0]?.slug ?? "";
+    const real = world.gate.github.app.request.bind(world.gate.github.app);
+    // GitHub が 404 を返す前に、同じ App のインストールが戻ってくる
+    const spy = vi.spyOn(world.gate.github.app, "request").mockImplementation(async (input, init, ...rest) => {
+      if (!isAppRoute(input)) return real(input, init, ...rest);
+      spy.mockRestore();
+      const installed = await onGitHub(world, `${FAKES}/github/web/apps/${slug}/installations/new`);
+      expect((await returnFromGitHub(world, installed.headers.get("location") ?? "")).status).toBe(302);
+      return new Response(JSON.stringify({ message: "Integration not found" }), { status: 404 });
+    });
+    const res = await world.gate.request("/api/v1/github/connect", { method: "POST", headers: world.headers });
+    spy.mockRestore();
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 409, code: "conflict" });
+    expect(await liveVault()).toEqual({ github_app: 1, github_installation: 1 });
+    expect(githubAudits()).not.toContain("github.app_gone");
+  });
+
+  it("GET /app が 401 や 500 なら App を取り消さず 502", async () => {
+    await stepUp(world);
+    expect((await returnFromGitHub(world, await createGitHubApp(world))).status).toBe(302);
+    for (const status of [401, 500]) {
+      const real = world.gate.github.app.request.bind(world.gate.github.app);
+      const spy = vi.spyOn(world.gate.github.app, "request").mockImplementation(async (input, init, ...rest) =>
+        isAppRoute(input) ? new Response(JSON.stringify({ message: "x" }), { status }) : real(input, init, ...rest),
+      );
+      const res = await world.gate.request("/api/v1/github/connect", { method: "POST", headers: world.headers });
+      spy.mockRestore();
+      expect({ status, res: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status, res: 502, code: "upstream_failed" });
+    }
+    expect(await liveVault()).toEqual({ github_app: 1 });
+  });
+
+  it("304 はリダイレクトとして扱わず、GitHub の失敗として 502", async () => {
+    for (const status of [301, 302, 303, 307, 308]) expect({ status, redirect: isRedirect(new Response(null, { status })) }).toEqual({ status, redirect: true });
+    expect(isRedirect(new Response(null, { status: 304 }))).toBe(false);
+    await connect(world);
+    const real = world.gate.github.app.request.bind(world.gate.github.app);
+    const spy = vi.spyOn(world.gate.github.app, "request").mockImplementation(async (input, init, ...rest) =>
+      urlOf(input).includes("/installation/repositories") ? new Response(null, { status: 304 }) : real(input, init, ...rest),
+    );
+    const res = await browse(world, "/api/v1/github/repos");
+    spy.mockRestore();
+    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 502, code: "upstream_failed" });
   });
 
   it("連携した後にもう一度押すと 409", async () => {
