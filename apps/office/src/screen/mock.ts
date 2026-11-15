@@ -111,10 +111,6 @@ export const guardRules = [
   "1 日のトークンが上限を超えそうなら止めて聞く",
 ];
 
-export const lessons = [
-  { id: "l1", text: "テストが同じ所で落ち続けたら、直す前に落ちる理由を 1 行書く", from: "x1" },
-];
-
 export const monthCost = { used: 11.4, budget: 15 };
 
 export const flows: Record<string, { id: string; time: string; title: string; text: string }[]> = {

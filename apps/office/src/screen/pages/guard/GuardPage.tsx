@@ -1,8 +1,9 @@
-// 自動停止の画面。止めている物、止めた記録、基準、蒸留した学び。手で止めるボタンだけはゲートウェイを呼び、ほかは仮のデータ
-import { Button, Card, List, Stack, Status, Table } from "knowidea-ui";
+// 自動停止の画面。止めている物、止めた記録、基準、効き目、蒸留した学び。手で止めるボタン、効き目、蒸留した学びはゲートウェイを呼び、ほかは仮のデータ
+import { Button, Card, Stack, Status, Table } from "knowidea-ui";
 import { useState } from "react";
-import { guardRules, lessons, stops } from "../../mock.ts";
+import { guardRules, stops } from "../../mock.ts";
 import { Done, Part, Section } from "../../parts/section.tsx";
+import { GuardEffectView, LessonList } from "./GuardLearning.tsx";
 import { StopButton } from "./StopButton.tsx";
 
 export function GuardPage() {
@@ -57,8 +58,11 @@ export function GuardPage() {
           ))}
         </ul>
       </Part>
+      <Part title="効き目">
+        <GuardEffectView />
+      </Part>
       <Part title="蒸留した学び">
-        <List label="蒸留した学び" items={lessons.map((l) => ({ id: l.id, title: l.text }))} />
+        <LessonList />
       </Part>
       <Stack direction="row" gap={2}>
         <StopButton scope="office" target="office" label="すべての社員を止める" />
