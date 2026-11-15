@@ -16,7 +16,7 @@ const META = { traceId: "0".repeat(32), next: null };
 
 test("通知が上部の帯とダッシュボードに出て、読んだら帯から消える", async ({ page }) => {
   const reads: string[] = [];
-  await page.route("**/api/v1/notices?*", async (route) => {
+  await page.route("**/api/v1/notices**", async (route) => {
     await route.fulfill({ json: { data: [{ ...NOTICE, readAt: reads.length > 0 ? "2026-12-08T00:05:00.000Z" : null }], meta: META } });
   });
   await page.route("**/api/v1/notices/*/read", async (route) => {
