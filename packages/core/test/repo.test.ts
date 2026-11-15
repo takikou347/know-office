@@ -54,6 +54,10 @@ describe("オーナーの承認も要る守りのファイル", () => {
     expect(ownerGuardedPath(["packages/core/src/guard/signals.ts"])).toBe("packages/core/src/guard/signals.ts");
     expect(ownerGuardedPath(["apps/office/src/gate/guard/observe.ts"])).toBe("apps/office/src/gate/guard/observe.ts");
     expect(ownerGuardedPath(["apps/office/src/gate/auth/vault.ts"])).toBe("apps/office/src/gate/auth/vault.ts");
+    expect(ownerGuardedPath(["packages/core/src/keys.ts"])).toBe("packages/core/src/keys.ts");
+    expect(ownerGuardedPath(["apps/office/src/gate/do/guard.ts"])).toBe("apps/office/src/gate/do/guard.ts");
+    expect(ownerGuardedPath(["apps/office/src/gate/auth/guard-book.ts"])).toBe("apps/office/src/gate/auth/guard-book.ts");
+    expect(ownerGuardedPath(["packages/core/src/keys.test.ts", "apps/office/src/gate/do/guard.tsx"])).toBeUndefined();
     expect(ownerGuardedPath(["apps/office/src/gate/x/../guard/a.ts"])).toBe("apps/office/src/gate/x/../guard/a.ts");
     expect(ownerGuardedPath(["packages/core/src/rules.md", "apps/office/src/gate/auth/vault.test.ts", "apps/office/src/gate/guardian/a.ts", "packages/core/src/rules/../id.ts"])).toBeUndefined();
     expect(ownerGuardedPath([])).toBeUndefined();

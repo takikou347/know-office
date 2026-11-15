@@ -120,7 +120,7 @@ describe("know-office 自身を管理する", () => {
 });
 
 describe("守りのファイルの決まり", () => {
-  for (const path of ["packages/core/src/rules/decide.ts", "packages/core/src/guard/signals.ts", "apps/office/src/gate/guard/thresholds.ts", "apps/office/src/gate/auth/vault.ts"]) {
+  for (const path of ["packages/core/src/rules/decide.ts", "packages/core/src/guard/signals.ts", "apps/office/src/gate/guard/thresholds.ts", "apps/office/src/gate/auth/vault.ts", "packages/core/src/keys.ts", "apps/office/src/gate/do/guard.ts", "apps/office/src/gate/auth/guard-book.ts"]) {
     it(`${path} を変える PR はオーナーの承認を待つ`, async () => {
       repoOnGitHub(world, OFFICE, [{ filename: path }]);
       await openedPull(world, OFFICE);
