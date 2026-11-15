@@ -15,6 +15,9 @@ import { vaultKey } from "./vault.ts";
 /** ログインセッションの開始とパスキーのパス。1 分 10 回に絞る (API の決まりの 3.6 の 2) */
 const AUTH_PATHS = /^\/api\/v1\/(sessions$|me\/step-up$|passkeys(\/options)?$)/;
 
+/** 1 年分の監査ログを頭から読み直すルート。1 分 1 回に絞る */
+const VERIFY_PATH = "/api/v1/audit-logs/verify";
+
 /**
  * 全体のセキュリティ DO を返す
  * @param c 要求の文脈
@@ -42,7 +45,7 @@ export async function recordLoginFailure(c: Context<GateEnv>, kind: "access" | "
 }
 
 /**
- * 送信元がロックアウト中なら 403、1 分の数を超えたら 429 で断る
+ * 送信元がロックアウト中なら 403、1 分の数 (ハッシュチェーンの確かめはそれだけで 1 回) を超えたら 429 で断る
  * @throws locked_out 送信元がロックアウト中の時
  * @throws rate_limited 1 分の数を超えた時。Retry-After に秒数を入れる
  */
@@ -54,6 +57,11 @@ export const admission = createMiddleware<GateEnv>(async (c, next) => {
   // ロックアウトは誰か分かる前に確かめるので、誰か分からなくても 403 を返す。API の決まりの 3.2
   if (locked) throw new AppError("locked_out", "失敗が続いたため、この送信元はしばらく使えない");
   if (retryAfter !== null) throw new AppError("rate_limited", "要求が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
+  // 重い処理のルートは、送信元ごとの数に加えて、そのルートだけの数でも絞る
+  if (c.req.method === "POST" && c.req.path === VERIFY_PATH) {
+    const heavy = await guardOf(c).admit(ip, "verify", c.var.clock.now());
+    if (heavy.retryAfter !== null) throw new AppError("rate_limited", "ハッシュチェーンの確かめは 1 分に 1 回まで", { headers: { "Retry-After": String(heavy.retryAfter) } });
+  }
   await next();
 });
 

@@ -27,5 +27,6 @@ paths:
 - WAF が無いので 1-api.md の 3.6 の守りを外さない。入力は Zod の `strict()`、JWT は決めた `alg` だけ、署名の比べは `timingSafeEqual`、外への `fetch` は `allowedFetch` だけ、WebSocket の切り替えは `Origin` を確かめる。Access を外すパスを `/hooks/v1/github` のほかに足さない
 - 書く時の条件 (段階、版、未読、決まっていない事) は、読んだ後の別の文で確かめない。1 文の条件付き `INSERT ... WHERE NOT EXISTS` か `UPDATE ... WHERE`、または 1 回のバッチに入れ、書けた件数で 409 を決める。一緒に書く物 (出来事、タスク、承認) も同じバッチに入れ、片方だけ残さない
 - できる操作を増やすルート (設定を弱める、2 本目のパスキー、止めた後の再開、拡張を入れる) には、`v1.yaml` で `x-step-up: true` か、弱める時だけなら `conditional` を付け、`conditional` はハンドラーの頭で `requireStepUp(c)` を呼んで確かめる。強める側 (切る、止める) には付けない
+- `x-step-up: true` のルートは、ハンドラーでなく `createRoute` の `middleware: [stepUpGate]` で確かめ、入力の検証より先に断る。`conditional` だけハンドラーの頭で `requireStepUp(c)` を呼ぶ
 - 外から来た ID、カーソル、R2 のキーは、使う前に Zod で形 (UUID、決めた文字だけ) を確かめる。R2 のキーは確かめた ID だけから組み立てる
 - 作業トークンを新しく出した時 (`renewTicket`、続きを呼ぶ `resumeRun`) は、同じタスクに出していた前の作業トークンを `StaffDO` の一覧で失効させ、監査ログに `ticket.revoke` を残す

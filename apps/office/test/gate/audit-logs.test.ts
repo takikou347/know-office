@@ -114,7 +114,20 @@ describe("記録の量", () => {
     expect(res.status).toBe(200);
     expect(Verification.parse(await res.json()).data).toEqual({ ok: true, brokenAt: null });
     expect(await d1.DB.prepare("SELECT COUNT(*) AS n FROM stops").first("n")).toBe(0);
+    clock.advance(60_000);
     expect((await verify(2030)).status).toBe(404);
+  });
+
+  it("確かめは重いので、送信元ごとに 1 分 1 回までにし、超えたら 429 と Retry-After", async () => {
+    expect((await verify(2027)).status).toBe(200);
+    const again = await verify(2026);
+    expect(again.status).toBe(429);
+    expect(Problem.parse(await again.json()).code).toBe("rate_limited");
+    expect(Number(again.headers.get("Retry-After"))).toBeGreaterThan(0);
+    // ほかのルートは同じ分でも使える
+    expect((await gate.request("/api/v1/storage", { headers })).status).toBe(200);
+    clock.advance(60_000);
+    expect((await verify(2026)).status).toBe(200);
   });
 
   it("パスキーの確認が無ければ 401 step_up_required、期間が逆さなら 422", async () => {

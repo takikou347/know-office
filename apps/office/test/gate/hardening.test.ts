@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { z } from "zod";
+import { Problem } from "@know-office/core";
+import { stepUpGate } from "../../src/gate/auth/passkey.ts";
 import { MAX_BODY_BYTES } from "../../src/gate/body.ts";
 import gate from "../../src/gate/index.ts";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
 import { createTestGate, ORIGIN, type TestGate } from "../helpers/gate.ts";
+import { STEP_UP_NOT_BUILT } from "../helpers/step-up.ts";
 
 const MINUTE = 60_000;
 const METHODS = ["get", "post", "put", "patch", "delete"];
@@ -76,25 +79,35 @@ beforeEach(async () => {
 });
 afterEach(() => d1.dispose());
 
+type Init = (route: (typeof codeRoutes)[number]) => { url?: string; headers: Record<string, string>; body?: string };
+
+/**
+ * 全ルートに同じ悪い要求を出し、ルートごとの返事を返す
+ * @param routes 要求を出すルート
+ * @param init ルートごとの要求の設定
+ * @param net 送信元の頭の 3 つ。同じテストで 2 度回す時は変え、1 分の数を分ける
+ * @returns 「メソッド パス」から返事への対応
+ */
+async function responses(routes: typeof codeRoutes, init: Init, net = "198.51.100"): Promise<Map<string, Response>> {
+  const out = new Map<string, Response>();
+  for (const [i, route] of routes.entries()) {
+    const { url, headers, ...rest } = init(route);
+    // ログインの失敗は送信元ごとに 5 回でロックアウトになるので、決めた送信元の無い要求はルートごとに送信元を変える
+    const from = { "CF-Connecting-IP": `${net}.${String(i + 1)}`, ...headers };
+    out.set(route.key, await test.request(url ?? fill(route.path), { method: route.method, headers: from, ...rest }));
+  }
+  return out;
+}
+
 /**
  * 全ルートに同じ悪い要求を出し、ルートごとの状態コードを返す
  * @param routes 要求を出すルート
  * @param init ルートごとの要求の設定
+ * @param net 送信元の頭の 3 つ
  * @returns 「メソッド パス」から状態コードへの対応
  */
-async function statuses(
-  routes: typeof codeRoutes,
-  init: (route: (typeof codeRoutes)[number]) => { url?: string; headers: Record<string, string>; body?: string },
-) {
-  const out: Record<string, number> = {};
-  for (const [i, route] of routes.entries()) {
-    const { url, headers, ...rest } = init(route);
-    // ログインの失敗は送信元ごとに 5 回でロックアウトになるので、決めた送信元の無い要求はルートごとに送信元を変える
-    const from = { "CF-Connecting-IP": `198.51.100.${String(i + 1)}`, ...headers };
-    const res = await test.request(url ?? fill(route.path), { method: route.method, headers: from, ...rest });
-    out[route.key] = res.status;
-  }
-  return out;
+async function statuses(routes: typeof codeRoutes, init: Init, net?: string): Promise<Record<string, number>> {
+  return Object.fromEntries([...(await responses(routes, init, net))].map(([key, res]) => [key, res.status]));
 }
 
 /**
@@ -148,10 +161,11 @@ describe("WAF が無い時の守り", () => {
   it("書き込みのルートはどれも、Origin が違うか無ければ 403 で断る", async () => {
     const other = await statuses(writeRoutes, () => ({ headers: { ...signedIn, Origin: "https://evil.example" } }));
     expect(other).toEqual(every(writeRoutes, 403));
+    // 1 度目と同じ送信元だと、1 分 1 回のルートが Origin を見る前に 429 になるので、送信元を変える
     const none = await statuses(writeRoutes, () => {
       const { Origin: _, ...headers } = signedIn;
       return { headers };
-    });
+    }, "203.0.113");
     expect(none).toEqual(every(writeRoutes, 403));
   });
 
@@ -167,12 +181,26 @@ describe("WAF が無い時の守り", () => {
     const routes = codeRoutes.filter((r) => specOps.get(r.key)?.["x-step-up"] === true);
     expect(routes.length).toBeGreaterThan(0);
     // 形の違う ID と本文でも、確認の無い人には 422 でなく 401 を返し、入力の形を探らせない
-    const result = await statuses(routes, (r) => ({
+    const result = await responses(routes, (r) => ({
       url: `${fill(r.path, "not-an-id")}?unknown=1`,
       headers: { ...signedIn, "Content-Type": "application/json" },
       ...(SAFE.has(r.method) ? {} : { body: "{\"unknown\":" }),
     }));
-    expect(result).toEqual(every(routes, 401));
+    const answers: Record<string, string> = {};
+    for (const [key, res] of result) answers[key] = `${String(res.status)} ${Problem.parse(await res.json()).code}`;
+    expect(answers).toEqual(Object.fromEntries(routes.map((r) => [r.key, "401 step_up_required"])));
+  });
+
+  it("x-step-up が true の操作は、コードにあれば stepUpGate を通り、まだ無い物は作る時まで許可リストに挙げる", () => {
+    const required = [...specOps].filter(([key, op]) => key.includes(" /api/") && op["x-step-up"] === true).map(([key]) => key);
+    const built = new Set(codeRoutes.map((r) => r.key));
+    // 許可リストのルートを作ったら、ここで落ちる。許可リストから外し、createRoute の middleware に stepUpGate を置く
+    expect(required.filter((key) => !built.has(key)).toSorted()).toEqual([...STEP_UP_NOT_BUILT].toSorted());
+    const gated = required.filter((key) => built.has(key));
+    expect(gated.length).toBeGreaterThan(0);
+    // ハンドラーの中の requireStepUp では入力の検証の後になるので、ルートのミドルウェアとして登録されている事を求める
+    const withGate = gated.filter((key) => gate.routes.some((r) => `${r.method} ${r.path.replaceAll(/:(\w+)/g, "{$1}")}` === key && r.handler === stepUpGate));
+    expect(withGate).toEqual(gated);
   });
 
   it("どの書き込みのルートも、1MB を超える本文を 413 で断る", async () => {

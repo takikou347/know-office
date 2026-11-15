@@ -97,6 +97,6 @@
 
 ## 10. 動かし始める
 
-- [x] 10.1 セキュリティと自動停止のチェックをすべて通す。シナリオとテストの突き合わせは `node scripts/scenarios.ts security auto-stop`。GitHub の通知の 2 つのシナリオ (偽の通知、同じ通知が 2 度届く) は 8.3 で作る
+- [x] 10.1 セキュリティと自動停止のチェックをすべて通す。シナリオとテストの突き合わせは `node scripts/scenarios.ts security auto-stop`。GitHub の通知の 2 つのシナリオ (偽の通知、同じ通知が 2 度届く) は 8.3 で作る。v1.yaml で x-step-up: true のうちまだ作っていない `GET /api/v1/traces/{traceId}` と `POST /api/v1/services/{serviceId}/rollback` は、作る時に createRoute の middleware に stepUpGate を置き、`apps/office/test/helpers/step-up.ts` の許可リストから外す
 - [ ] 10.2 弱点のチェックと自動の攻撃のチェックを CI に足す。開発環境の分 (依存の弱点の pnpm audit、手元の入口への自動の攻撃の e2e/attack.spec.ts) は済み。残りはコンテナのイメージの弱点のチェックと、4.9 の後のプレビュー環境への自動の攻撃
 - [ ] 10.3 社員を 1 日 8 時間で動かし始める

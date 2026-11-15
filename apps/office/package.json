@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --experimental-strip-types scripts/swagger-assets.ts && (test -f .dev.vars || cp .dev.vars.example .dev.vars) && vite",
-    "build": "node --experimental-strip-types scripts/swagger-assets.ts && vite build",
+    "build": "node --experimental-strip-types scripts/swagger-assets.ts && vite build && (test -f dist/client/_headers || (echo 'dist/client/_headers が無い。画面のファイルにセキュリティヘッダーが付かない' && exit 1))",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "test": "vitest run",
     "e2e": "playwright test",

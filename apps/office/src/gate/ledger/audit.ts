@@ -65,20 +65,34 @@ export type ChainCheck = {
 
 type StoredRow = HashedFields & { detail: string; prev_hash: string; hash: string };
 
+/** ハッシュチェーンを確かめる時に 1 度に読む行の数 */
+export const VERIFY_CHUNK_ROWS = 1000;
+
 /**
- * 頭から順にハッシュを計算し直して確かめる
+ * 頭から順にハッシュを計算し直して確かめる。確かめ始めた時の最後の行までを、rowid の順に塊ごとに読む
  * @param db REC_<年>
  * @param startHash その年の最初の行の prev_hash
+ * @param chunk 1 度に読む行の数
  * @returns 合うか、最初に合わなかった行、最後のハッシュ
  */
-export async function verifyChain(db: D1Database, startHash: string): Promise<ChainCheck> {
-  const { results } = await db.prepare("SELECT id, at, actor, action, target, scope, detail, prev_hash, hash FROM audit_log ORDER BY rowid").all<StoredRow>();
+export async function verifyChain(db: D1Database, startHash: string, chunk: number = VERIFY_CHUNK_ROWS): Promise<ChainCheck> {
+  // 確かめている間も記録 DO は行を足すので、始めた時の最後の行で止め、後から足された行を読まない
+  const last = (await db.prepare("SELECT MAX(rowid) AS last FROM audit_log").first<{ last: number | null }>())?.last ?? 0;
   let prev = startHash;
-  for (const row of results) {
-    // detail は書いた時の canonicalJson の文なので、読み直して同じ形で計算し直すと書き換えが分かる
-    const expected = await auditHash(prev, { id: row.id, at: row.at, actor: row.actor, action: row.action, target: row.target, scope: row.scope, detail: JSON.parse(row.detail) as unknown });
-    if (row.prev_hash !== prev || row.hash !== expected) return { ok: false, brokenAt: row.id, lastHash: prev };
-    prev = row.hash;
+  let after = 0;
+  while (after < last) {
+    const { results } = await db
+      .prepare("SELECT rowid AS seq, id, at, actor, action, target, scope, detail, prev_hash, hash FROM audit_log WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?")
+      .bind(after, last, chunk)
+      .all<StoredRow & { seq: number }>();
+    if (results.length === 0) break;
+    for (const row of results) {
+      // detail は書いた時の canonicalJson の文なので、読み直して同じ形で計算し直すと書き換えが分かる
+      const expected = await auditHash(prev, { id: row.id, at: row.at, actor: row.actor, action: row.action, target: row.target, scope: row.scope, detail: JSON.parse(row.detail) as unknown });
+      if (row.prev_hash !== prev || row.hash !== expected) return { ok: false, brokenAt: row.id, lastHash: prev };
+      prev = row.hash;
+      after = row.seq;
+    }
   }
   return { ok: true, brokenAt: null, lastHash: prev };
 }
