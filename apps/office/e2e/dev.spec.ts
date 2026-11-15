@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers/test.ts";
 import { addVirtualAuthenticator } from "./helpers/passkey.ts";
 
 // 開発環境の代わりの物が、画面から使える形で立っている事を確かめる。ログインと記録の 3.9

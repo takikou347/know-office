@@ -1,5 +1,6 @@
 import { AxeBuilder } from "@axe-core/playwright";
-import { type Locator, type Page, expect, test } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import { expect, test } from "./helpers/test.ts";
 import { screens } from "../src/screen/routes.ts";
 
 // 使いやすさ: キーボードだけで承認まで出せ、8 画面と深い所に axe の critical と serious が無い。画面の 3.5

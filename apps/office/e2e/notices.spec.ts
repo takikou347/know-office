@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers/test.ts";
 
 // 通知が画面の上部の帯とダッシュボードに出て、読んだら帯から消える (サービスと拡張の 3.5)
 // 通知の一覧は境目のモックで返し、画面が送る既読の要求を確かめる。ルートそのものは test/monitoring/notices.test.ts で確かめる

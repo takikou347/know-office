@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers/test.ts";
 import { screens } from "../src/screen/routes.ts";
 
 // どの画面も 3 つの幅で開き、横にはみ出さず、切り替えで今いる所が分かる
