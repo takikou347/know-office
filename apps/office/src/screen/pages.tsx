@@ -46,6 +46,7 @@ import {
 import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { StopButton } from "./pages/guard/StopButton.tsx";
 import { OfficePage } from "./pages/office/OfficePage.tsx";
+import { workFeed } from "./pages/office/feed.ts";
 import { RecordBreakdown } from "./pages/ledger/RecordBreakdown.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
 import { StaffStatus } from "./parts/staff-status.tsx";
@@ -173,8 +174,21 @@ function TaskReview({ task }: { task: Task }) {
       </Part>
       <Done text={done} />
       <Stack direction="row" gap={2} wrap>
-        <Button onClick={() => setDone("可を出しました")}>可</Button>
-        <Button variant="secondary" onClick={() => setDone("不可を出し、作る役に戻しました")}>
+        <Button
+          onClick={() => {
+            setDone("可を出しました");
+            workFeed.setTaskState(task.id, "済");
+          }}
+        >
+          可
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setDone("不可を出し、作る役に戻しました");
+            workFeed.setTaskState(task.id, "今");
+          }}
+        >
           不可
         </Button>
         {first ? (

@@ -1,58 +1,95 @@
 import { describe, expect, it } from "vitest";
 import { avatarSourceOf } from "../../src/screen/pages/office/avatars.ts";
-import { poseOf } from "../../src/screen/pages/office/motion.ts";
+import { activityOf, poseOf } from "../../src/screen/pages/office/motion.ts";
 import { canShow3d } from "../../src/screen/pages/office/support.ts";
 import { OFFICE_THEME, type OfficeThemeId, THEME_IDS, officeThemes, themeOf } from "../../src/screen/pages/office/themes.ts";
 
-// オフィスの 3D の部屋の、three.js を使わずに決まる所 (動き、出せるか、案、姿の元)。画面の 3.4
+// オフィスの 3D の部屋の、three.js を使わずに決まる所 (子犬の形、出せるか、案、姿の元)。画面の 3.4
 
-/** 1 秒の間を細かく刻んだ時刻 (ミリ秒) */
-const times = Array.from({ length: 20 }, (_, i) => i * 50);
+/**
+ * 時刻 (ミリ秒) を刻んだ並びを作る
+ * @param count 数
+ * @param step 刻み
+ * @returns 時刻の並び
+ */
+const ticks = (count: number, step: number) => Array.from({ length: count }, (_, i) => i * step);
+
+const span = (values: number[]) => Math.max(...values) - Math.min(...values);
 
 describe("社員の動き", () => {
-  it("働く時は席に座り、手を動かし続ける", () => {
-    const poses = times.map((t) => poseOf("working", t));
-    expect(poses.every((p) => p.seated && p.visible)).toBe(true);
-    const arms = poses.map((p) => p.arm);
-    expect(Math.max(...arms) - Math.min(...arms)).toBeGreaterThan(0.2);
+  it("状態から、することを決める", () => {
+    expect(activityOf("working")).toBe("work");
+    expect(activityOf("paused")).toBe("wait");
+    expect(activityOf("stopped")).toBe("stopped");
+    expect(activityOf("off")).toBe("off");
   });
 
-  it("待つ時は席で手を止め、ゆっくり息をする", () => {
-    const poses = times.map((t) => poseOf("paused", t));
-    expect(poses.every((p) => p.seated && p.visible && p.arm === 0)).toBe(true);
-    const lifts = Array.from({ length: 40 }, (_, i) => poseOf("paused", i * 100).lift);
-    const span = Math.max(...lifts) - Math.min(...lifts);
-    expect(span).toBeGreaterThan(0);
-    // 働く時の手より小さく動く
-    expect(span).toBeLessThan(0.1);
+  it("働く時は座って、前足で打ち続ける", () => {
+    const poses = ticks(20, 50).map((t) => poseOf("work", t));
+    expect(poses.every((p) => p.visible && p.posture === "sit")).toBe(true);
+    expect(span(poses.map((p) => p.paws))).toBeGreaterThan(0.2);
   });
 
-  it("止まる時は時刻が進んでも形が変わらず、止めた印を出す", () => {
+  it("待つ時はおすわりで息をし、時々しっぽを振る", () => {
+    const poses = ticks(100, 100).map((t) => poseOf("wait", t));
+    expect(poses.every((p) => p.posture === "sit" && p.paws === 0)).toBe(true);
+    expect(span(poses.map((p) => p.lift))).toBeGreaterThan(0);
+    expect(span(poses.map((p) => p.lift))).toBeLessThan(0.05);
+    expect(span(poses.map((p) => p.tail))).toBeGreaterThan(0.3);
+  });
+
+  it("まばたきは時々だけ目を閉じる", () => {
+    const poses = ticks(1000, 10).map((t) => poseOf("wait", t));
+    const closed = poses.filter((p) => p.blink).length / poses.length;
+    expect(closed).toBeGreaterThan(0.01);
+    expect(closed).toBeLessThan(0.15);
+  });
+
+  it("歩く時は立って、足と耳としっぽが揺れる", () => {
+    const poses = ticks(20, 50).map((t) => poseOf("walk", t));
+    expect(poses.every((p) => p.posture === "stand")).toBe(true);
+    expect(span(poses.map((p) => p.legs))).toBeGreaterThan(0.3);
+    expect(span(poses.map((p) => p.ears))).toBeGreaterThan(0.05);
+    expect(span(poses.map((p) => p.tail))).toBeGreaterThan(0.1);
+  });
+
+  it("止めた時は困り顔で赤い印を出し、時刻が進んでも形が変わらない", () => {
     const first = poseOf("stopped", 0);
-    for (const t of times) expect(poseOf("stopped", t)).toEqual(first);
+    for (const t of ticks(30, 333)) expect(poseOf("stopped", t)).toEqual(first);
+    expect(first.face).toBe("trouble");
     expect(first.mark).toBe("stop");
   });
 
-  it("退勤した時は席に居ない", () => {
-    const pose = poseOf("off", 0);
-    expect(pose.visible).toBe(false);
-    expect(pose.lamp).toBe(false);
-  });
-
-  it("働く時と待つ時は机の明かりを点ける", () => {
-    expect(poseOf("working", 0).lamp).toBe(true);
-    expect(poseOf("paused", 0).lamp).toBe(true);
+  it("退勤した時は部屋に居ない", () => {
+    expect(poseOf("off", 0).visible).toBe(false);
   });
 });
 
 /**
- * 確かめに使う作り物のブラウザの口を作る
- * @param o 動きを減らす設定と WebGL の有無
+ * 作り物の canvas を返す口を作る
+ * @param webgl WebGL 2 を出せるか
  * @returns 作り物の口
  */
-const env = (o: { reduce?: boolean; webgl?: boolean }) => ({
-  matchMedia: (q: string) => ({ matches: q.includes("prefers-reduced-motion") && Boolean(o.reduce) }),
-  createCanvas: () => ({ getContext: (kind: string) => (o.webgl && kind === "webgl2" ? {} : null) }),
+const env = (webgl: boolean) => ({ createCanvas: () => ({ getContext: (kind: string) => (webgl && kind === "webgl2" ? {} : null) }) });
+
+describe("3D を出せるか", () => {
+  it("WebGL 2 があれば出す", () => {
+    expect(canShow3d(env(true))).toBe(true);
+  });
+
+  it("WebGL 2 が無ければ出さない", () => {
+    expect(canShow3d(env(false))).toBe(false);
+  });
+
+  it("確かめる途中で投げたら出さない", () => {
+    expect(
+      canShow3d({
+        createCanvas: () => {
+          throw new Error("canvas を作れない");
+        },
+      }),
+    ).toBe(false);
+  });
 });
 
 /**
@@ -62,47 +99,21 @@ const env = (o: { reduce?: boolean; webgl?: boolean }) => ({
  */
 const keysOf = (id: OfficeThemeId) => Object.keys(themeOf(id)).toSorted();
 
-describe("3D を出せるか", () => {
-  it("WebGL があり、動きを減らす設定でなければ出す", () => {
-    expect(canShow3d(env({ webgl: true }))).toBe(true);
-  });
-
-  it("WebGL が無ければ出さない", () => {
-    expect(canShow3d(env({ webgl: false }))).toBe(false);
-  });
-
-  it("動きを減らす設定なら出さない", () => {
-    expect(canShow3d(env({ webgl: true, reduce: true }))).toBe(false);
-  });
-
-  it("確かめる途中で投げたら出さない", () => {
-    expect(
-      canShow3d({
-        matchMedia: () => ({ matches: false }),
-        createCanvas: () => {
-          throw new Error("canvas を作れない");
-        },
-      }),
-    ).toBe(false);
-  });
-});
-
 describe("部屋の案", () => {
   it("案は 2 から 3 個で、どれも同じ項目を持つ", () => {
-    const ids = THEME_IDS;
-    expect(ids.length).toBeGreaterThanOrEqual(2);
-    expect(ids.length).toBeLessThanOrEqual(3);
-    for (const id of ids) expect(keysOf(id)).toEqual(keysOf(OFFICE_THEME));
+    expect(THEME_IDS.length).toBeGreaterThanOrEqual(2);
+    expect(THEME_IDS.length).toBeLessThanOrEqual(3);
+    for (const id of THEME_IDS) expect(keysOf(id)).toEqual(keysOf(OFFICE_THEME));
   });
 
-  it("使う案は定数の 1 か所で決まり、案の中にある", () => {
-    expect(THEME_IDS).toContain(OFFICE_THEME);
+  it("使う案は定数の 1 か所で決まり、既定は木の部屋", () => {
+    expect(OFFICE_THEME).toBe("wood");
     expect(Object.keys(officeThemes).toSorted()).toEqual([...THEME_IDS].toSorted());
   });
 });
 
 describe("社員の姿", () => {
-  it("VRM のモデルが無い社員は、形を組み合わせた姿にする", () => {
+  it("VRM のモデルが無い社員は、形を組み合わせた子犬にする", () => {
     expect(avatarSourceOf("builder", {})).toEqual({ kind: "shapes" });
   });
 

@@ -1,37 +1,33 @@
-// three.js でオフィスの部屋を組む。小さな机と椅子を 2 列に並べ、社員の姿を席に置き、状態ごとの形を毎フレーム当てる
+// three.js でオフィスの部屋を組み、子犬の社員を置き、状態ごとの形と出来事の動きの列を毎フレーム当てる
 import {
-  AmbientLight,
   BufferGeometry,
-  BoxGeometry,
   Color,
-  CylinderGeometry,
   DirectionalLight,
+  HemisphereLight,
   Material,
   Mesh,
   MeshStandardMaterial,
   type Object3D,
   OrthographicCamera,
   PCFSoftShadowMap,
-  PlaneGeometry,
-  PointLight,
   Scene,
-  SphereGeometry,
   Vector3,
   WebGLRenderer,
 } from "three";
 import type { Staff } from "../../mock.ts";
 import { avatarSourceOf } from "./avatars.ts";
-import { type ShapeAvatar, applyShapePose, buildShapeAvatar } from "./figure.ts";
-import { SEAT_Y, buildChair, buildDesk } from "./furniture.ts";
-import { poseOf } from "./motion.ts";
+import { COATS, PROPS, PUPPY_SCALE, type Puppy, applyPuppyPose, buildPuppy } from "./figure.ts";
+import { type DeskParts, SEAT_HEIGHT, buildRoomShell, stackPaper } from "./furniture.ts";
+import { GRID, type Point, seatOf, stationOf } from "./layout.ts";
+import { buildMarks, type Marks, showMark } from "./marks.ts";
+import { activityOf, poseOf } from "./motion.ts";
+import type { Actors, Step } from "./plan.ts";
 import type { OfficeTheme } from "./themes.ts";
 import { type VrmAvatar, loadVrmAvatar } from "./vrm.ts";
 
-/** 席に着く社員 */
+/** 部屋に置く社員 */
 export interface Seat {
-  /** 社員の id */
   id: string;
-  /** 社員の状態 */
   state: Staff["state"];
 }
 
@@ -52,31 +48,59 @@ export interface Room {
   resize: (width: number, height: number) => void;
   /** 社員の姿を覆う箱を返す */
   boxes: () => SeatBox[];
+  /** 社員の今の居る所と、歩けるかを返す */
+  actors: () => Actors;
+  /** 社員の状態を変える */
+  setStates: (seats: readonly Seat[]) => void;
+  /** 動きの列を後ろに積む。動きを減らす設定では、その場で置き換える */
+  play: (steps: readonly Step[]) => void;
   /** 使った物を捨てる */
   dispose: () => void;
 }
 
-/** 色の書き方 (CSS の色か var(--color-...)) を three.js の色に直す関数 */
+/** 色の書き方 (CSS の色か var(--color-...)) を CSS の rgb() に直す関数 */
 export type ColorResolver = (value: string) => string;
 
-// 部屋の大きさ。x は左右、z は手前 (カメラの側) が正
-const ROOM = { minX: -3.4, maxX: 3.4, minZ: -2.6, maxZ: 3, wall: 2.6 };
-const COLUMNS = [-1.45, 1.45];
-const ROWS = [-0.9, 1.5];
+/** 歩く速さ (タイル毎秒) と、書類を置くのに掛ける時間と、印を出す時間 (ミリ秒) */
+const WALK_SPEED = 1.8;
+const GIVE_MS = 700;
+const MARK_MS = 2400;
+
+interface Actor {
+  id: string;
+  state: Staff["state"];
+  puppy: Puppy;
+  marks: Marks;
+  vrm?: VrmAvatar;
+  pos: Point;
+  face: number;
+  present: boolean;
+  carry: boolean;
+  walking: boolean;
+  mark: { kind: "ok" | "back"; until: number } | null;
+}
+
+const atSeat = (id: string, p: Point) => {
+  const s = seatOf(id)?.seat;
+  return s !== undefined && Math.hypot(s.x - p.x, s.z - p.z) < 0.05;
+};
 
 /**
  * 部屋を組み、canvas に描く
  * @param canvas 描く canvas
- * @param seats 席に着く社員。机は 2 列に並べ、空いた席も置く
+ * @param seats 部屋に置く社員
  * @param theme 部屋の色と明かり
- * @param resolve 色の書き方を three.js の色に直す関数
+ * @param resolve 色の書き方を CSS の rgb() に直す関数
+ * @param opts 動きの決まり
+ * @param opts.reduce 動きを減らす設定か
  * @returns 組んだ部屋
  */
-export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], theme: OfficeTheme, resolve: ColorResolver): Room {
+export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], theme: OfficeTheme, resolve: ColorResolver, opts: { reduce: boolean }): Room {
   const color = (value: string) => new Color(resolve(value));
   const materials = new Map<string, MeshStandardMaterial>();
-  const mat = (key: keyof OfficeTheme) => {
-    const value = theme[key];
+  const mat = (key: string) => {
+    const binder = /^binder(\d)$/.exec(key);
+    const value: unknown = binder ? theme.binders[Number(binder[1])] : Reflect.get(theme, key);
     if (typeof value !== "string") throw new Error(`${key} は色ではない`);
     let m = materials.get(key);
     if (!m) {
@@ -92,110 +116,52 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
   renderer.shadowMap.type = PCFSoftShadowMap;
   const scene = new Scene();
   scene.background = color(theme.background);
+  const desks: Record<string, DeskParts> = buildRoomShell(scene, mat, resolve, theme);
 
-  // 床、敷物、奥と左の壁、窓、鉢植え
-  const floor = new Mesh(new PlaneGeometry(ROOM.maxX - ROOM.minX, ROOM.maxZ - ROOM.minZ), mat("floor"));
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.set((ROOM.minX + ROOM.maxX) / 2, 0, (ROOM.minZ + ROOM.maxZ) / 2);
-  floor.receiveShadow = true;
-  const rug = new Mesh(new PlaneGeometry(5.6, 4), mat("rug"));
-  rug.rotation.x = -Math.PI / 2;
-  rug.position.set(0, 0.005, 0.25);
-  rug.receiveShadow = true;
-  const back = new Mesh(new BoxGeometry(ROOM.maxX - ROOM.minX, ROOM.wall, 0.1), mat("wall"));
-  back.position.set((ROOM.minX + ROOM.maxX) / 2, ROOM.wall / 2, ROOM.minZ - 0.05);
-  back.receiveShadow = true;
-  const left = new Mesh(new BoxGeometry(0.1, ROOM.wall, ROOM.maxZ - ROOM.minZ), mat("wall"));
-  left.position.set(ROOM.minX - 0.05, ROOM.wall / 2, (ROOM.minZ + ROOM.maxZ) / 2);
-  left.receiveShadow = true;
-  const windowMat = new MeshStandardMaterial({ color: color(theme.window), emissive: color(theme.window), emissiveIntensity: 0.35 });
-  const win = new Mesh(new PlaneGeometry(2.4, 1.1), windowMat);
-  win.position.set(0.6, 1.55, ROOM.minZ + 0.001);
-  const pot = new Mesh(new CylinderGeometry(0.22, 0.17, 0.4, 16), mat("pot"));
-  pot.position.set(ROOM.maxX - 0.45, 0.2, ROOM.minZ + 0.45);
-  const leaves = new Mesh(new SphereGeometry(0.4, 16, 12), mat("plant"));
-  leaves.position.set(ROOM.maxX - 0.45, 0.75, ROOM.minZ + 0.45);
-  for (const m of [pot, leaves]) m.castShadow = true;
-  scene.add(floor, rug, back, left, win, pot, leaves);
-
-  scene.add(new AmbientLight(0xffffff, theme.ambient * 2));
-  const sun = new DirectionalLight(0xffffff, theme.sun);
-  sun.position.set(-2.5, 6, 4);
+  // 柔らかい光: 空と床の色を混ぜた明かりに、窓の側からの影の柔らかい日の光を足す
+  scene.add(new HemisphereLight(0xfffaf0, 0xe8d8c0, theme.ambient * 2.2));
+  const sun = new DirectionalLight(0xfff4e0, theme.sun);
+  sun.position.set(GRID.cols * 0.75, 9, -2);
+  sun.target.position.set(GRID.cols / 2, 0, GRID.rows / 2);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5 });
-  scene.add(sun);
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.radius = 4;
+  Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, far: 30 });
+  scene.add(sun, sun.target);
 
-  // 机は 2 列。社員の数が半端なら空いた席を足して並びをそろえる
-  const deskCount = Math.max(4, seats.length + (seats.length % 2));
-  const staffColors = theme.staff.map(color);
-  const placed: {
-    seat: Seat | undefined;
-    at: Vector3;
-    avatar?: ShapeAvatar;
-    vrm?: VrmAvatar;
-    screen: MeshStandardMaterial;
-    bulb: MeshStandardMaterial;
-    glow?: PointLight;
-  }[] = [];
-  const screenOn = color(theme.screenOn);
-  const screenOff = color(theme.screenOff);
-  const lampOn = color(theme.lamp);
+  const paperMat = mat("paper");
   let disposed = false;
-  for (let i = 0; i < deskCount; i++) {
-    const x = COLUMNS[i % COLUMNS.length] ?? 0;
-    const z = ROWS[Math.floor(i / COLUMNS.length) % ROWS.length] ?? 0;
-    const { desk, screen, bulbMat, bulbAt } = buildDesk(mat);
-    desk.position.set(x, 0, z);
-    scene.add(desk);
-    // 椅子と人は机の奥に置き、顔をカメラに向ける
-    const at = new Vector3(x, 0, z - 0.6);
-    const chair = buildChair(mat);
-    chair.position.copy(at);
-    scene.add(chair);
-    const seat = seats[i];
-    const entry: (typeof placed)[number] = { seat, at, screen, bulb: bulbMat };
-    if (theme.lampGlow > 0) {
-      const glow = new PointLight(lampOn, theme.lampGlow, 2.2, 1.5);
-      glow.position.copy(bulbAt).add(desk.position);
-      scene.add(glow);
-      entry.glow = glow;
+  const actors = new Map<string, Actor>();
+  for (const s of seats) {
+    const puppy = buildPuppy(COATS[s.id] ?? "#c99a6e", PROPS[s.id] ?? null, paperMat.color);
+    const marks = buildMarks({ stop: color(theme.stop), ok: color(theme.ok), back: color(theme.back) });
+    puppy.root.add(marks.group);
+    scene.add(puppy.root);
+    const at = stationOf(s.id, s.state);
+    const actor: Actor = { id: s.id, state: s.state, puppy, marks, pos: at ?? { x: 0, z: 0 }, face: at?.face ?? 0, present: at !== null, carry: false, walking: false, mark: null };
+    actors.set(s.id, actor);
+    const source = avatarSourceOf(s.id);
+    if (source.kind === "vrm") {
+      // 読めたら子犬と差し替え、読めなければ子犬のままにする
+      loadVrmAvatar(source.url)
+        .then((vrm) => {
+          if (disposed) return vrm.dispose();
+          puppy.body.visible = false;
+          puppy.root.add(vrm.object);
+          actor.vrm = vrm;
+        })
+        .catch(() => undefined);
     }
-    if (seat) {
-      const avatar = buildShapeAvatar({
-        body: staffColors[i % staffColors.length] ?? new Color(0x888888),
-        face: color(theme.face),
-        eye: color(theme.eye),
-        stop: color(theme.stop),
-      });
-      avatar.root.position.copy(at);
-      scene.add(avatar.root);
-      entry.avatar = avatar;
-      const source = avatarSourceOf(seat.id);
-      if (source.kind === "vrm") {
-        // 読めたら形の姿と差し替え、読めなければ形の姿のままにする
-        loadVrmAvatar(source.url)
-          .then((vrm) => {
-            if (disposed) return vrm.dispose();
-            vrm.object.position.copy(at);
-            scene.add(vrm.object);
-            avatar.body.visible = false;
-            entry.vrm = vrm;
-          })
-          .catch(() => undefined);
-      }
-    }
-    placed.push(entry);
   }
 
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
-  const target = new Vector3(0, 0.6, 0.3);
-  camera.position.copy(target).add(new Vector3(5.5, 7, 10).normalize().multiplyScalar(30));
+  const target = new Vector3(GRID.cols / 2, 0.4, GRID.rows / 2);
+  camera.position.copy(target).add(new Vector3(0.55, 0.95, 1).normalize().multiplyScalar(30));
   camera.lookAt(target);
   camera.updateMatrixWorld();
   // 部屋の隅を目の向きに写し、どの縦横比でも部屋がちょうど収まる広さを決める
   const corners: Vector3[] = [];
-  for (const x of [ROOM.minX, ROOM.maxX]) for (const y of [0, ROOM.wall]) for (const z of [ROOM.minZ, ROOM.maxZ]) corners.push(new Vector3(x, y, z));
+  for (const x of [-0.2, GRID.cols + 0.2]) for (const y of [0, 2]) for (const z of [-0.2, GRID.rows + 0.2]) corners.push(new Vector3(x, y, z));
   const view = corners.map((c) => c.clone().applyMatrix4(camera.matrixWorldInverse));
   const span = {
     minX: Math.min(...view.map((v) => v.x)),
@@ -205,35 +171,105 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
   };
   let size = { width: 1, height: 1 };
 
-  let last = 0;
-  const room: Room = {
-    render: (t) => {
-      const seconds = last ? (t - last) / 1000 : 0;
-      last = t;
-      for (const p of placed) {
-        const pose = p.seat ? poseOf(p.seat.state, t) : poseOf("off", t);
-        if (p.avatar) applyShapePose(p.avatar, pose);
-        if (p.vrm) {
-          p.vrm.applyPose(pose);
-          p.vrm.update(seconds);
-          if (p.avatar) p.avatar.body.visible = false;
-        }
-        p.screen.color.copy(pose.lamp ? screenOn : screenOff);
-        p.screen.emissive.copy(pose.lamp ? screenOn : screenOff);
-        p.screen.emissiveIntensity = pose.lamp ? 0.8 : 0;
-        p.bulb.color.copy(lampOn);
-        p.bulb.emissive.copy(lampOn);
-        p.bulb.emissiveIntensity = pose.lamp ? 1 : 0;
-        if (p.glow) p.glow.visible = pose.lamp;
+  // 動きの列。先頭から 1 段ずつ進める
+  const queue: Step[] = [];
+  let current: { step: Step; start: number } | null = null;
+  const apply = (step: Step, now: number) => {
+    const a = actors.get(step.actor);
+    if (!a) return;
+    if (step.kind === "give") {
+      a.carry = false;
+      const desk = desks[step.desk];
+      if (desk) stackPaper(desk.papers, paperMat);
+    } else if (step.kind === "mark") {
+      a.mark = { kind: step.mark, until: now + MARK_MS };
+    } else if (step.kind === "place") {
+      a.present = step.at !== null;
+      if (step.at) {
+        a.pos = { x: step.at.x, z: step.at.z };
+        a.face = step.at.face;
       }
-      renderer.render(scene, camera);
+      a.walking = false;
+    }
+  };
+  const advance = (t: number) => {
+    for (;;) {
+      if (!current) {
+        const next = queue.shift();
+        if (!next) return;
+        current = { step: next, start: t };
+        if (next.kind === "walk") {
+          const a = actors.get(next.actor);
+          if (a) Object.assign(a, { walking: true, carry: next.carry === "paper", present: true });
+        }
+      }
+      const { step, start } = current;
+      const a = actors.get(step.actor);
+      if (step.kind === "walk" && a) {
+        const lengths = step.path.slice(1).map((p, i) => Math.hypot(p.x - (step.path[i]?.x ?? 0), p.z - (step.path[i]?.z ?? 0)));
+        let left = ((t - start) / 1000) * WALK_SPEED;
+        let i = 0;
+        while (i < lengths.length && left > (lengths[i] ?? 0)) left -= lengths[i++] ?? 0;
+        if (i >= lengths.length) {
+          const end = step.path.at(-1);
+          if (end) a.pos = { ...end };
+          a.walking = false;
+          current = null;
+          continue;
+        }
+        const p0 = step.path[i] ?? a.pos;
+        const p1 = step.path[i + 1] ?? a.pos;
+        const k = left / (lengths[i] || 1);
+        a.pos = { x: p0.x + (p1.x - p0.x) * k, z: p0.z + (p1.z - p0.z) * k };
+        a.face = Math.atan2(p1.x - p0.x, p1.z - p0.z);
+        return;
+      }
+      if (step.kind === "give" && a) {
+        a.face = Math.PI;
+        if (t - start < GIVE_MS) return;
+      }
+      apply(step, t);
+      current = null;
+    }
+  };
+
+  const draw = (t: number) => {
+    for (const a of actors.values()) {
+      const activity = a.walking ? "walk" : activityOf(a.state);
+      const standing = !a.walking && current?.step.actor === a.id && current.step.kind === "give";
+      // 書類を置く間は立ち止まる。動きを減らす設定では時刻 0 の形のままにする
+      const pose = standing ? poseOf("walk", 0) : poseOf(activity, opts.reduce ? 0 : t);
+      const seated = pose.posture === "sit" && atSeat(a.id, a.pos);
+      applyPuppyPose(a.puppy, { ...pose, visible: a.present && (a.walking || pose.visible) });
+      a.vrm?.applyPose(pose);
+      a.vrm?.update(1 / 60);
+      a.puppy.root.position.set(a.pos.x, seated ? SEAT_HEIGHT : 0, a.pos.z);
+      a.puppy.root.rotation.y = a.face;
+      a.puppy.paper.visible = a.carry;
+      if (a.mark && !opts.reduce && t > a.mark.until) a.mark = null;
+      const stopMark = pose.mark === "stop" && !a.walking ? "stop" : null;
+      showMark(a.marks, a.mark?.kind ?? stopMark, camera);
+      const desk = desks[a.id];
+      if (desk) {
+        const on = a.state === "working";
+        desk.screen.color.copy(color(on ? theme.screenOn : theme.screenOff));
+        desk.screen.emissive.copy(desk.screen.color);
+        desk.screen.emissiveIntensity = on ? 0.7 : 0;
+      }
+    }
+    renderer.render(scene, camera);
+  };
+
+  return {
+    render: (t) => {
+      advance(t);
+      draw(t);
     },
     resize: (width, height) => {
       size = { width: Math.max(1, width), height: Math.max(1, height) };
       renderer.setSize(size.width, size.height, false);
-      const margin = 0.06;
-      let w = (span.maxX - span.minX) * (1 + margin);
-      let h = (span.maxY - span.minY) * (1 + margin);
+      let w = (span.maxX - span.minX) * 1.02;
+      let h = (span.maxY - span.minY) * 1.02;
       const aspect = size.width / size.height;
       if (w / h < aspect) w = h * aspect;
       else h = w / aspect;
@@ -241,20 +277,44 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
       const cy = (span.minY + span.maxY) / 2;
       Object.assign(camera, { left: cx - w / 2, right: cx + w / 2, top: cy + h / 2, bottom: cy - h / 2 });
       camera.updateProjectionMatrix();
+      if (opts.reduce) draw(0);
     },
     boxes: () =>
-      placed.flatMap((p) => {
-        if (!p.seat) return [];
+      [...actors.values()].flatMap((a) => {
+        // 退勤した社員は、空いた席を覆う
+        const seat = seatOf(a.id)?.seat ?? null;
+        const at = a.present ? a.pos : seat;
+        if (!at) return [];
+        const lifted = atSeat(a.id, at) ? SEAT_HEIGHT : 0;
         const toScreen = (y: number) => {
-          const v = new Vector3(p.at.x, y, p.at.z).project(camera);
+          const v = new Vector3(at.x, y, at.z).project(camera);
           return { x: ((v.x + 1) / 2) * size.width, y: ((1 - v.y) / 2) * size.height };
         };
-        const top = toScreen(SEAT_Y + 1.3);
-        const bottom = toScreen(0.1);
+        // 頭の上の印まで覆う
+        const top = toScreen(lifted + 1.2 * PUPPY_SCALE);
+        const bottom = toScreen(0);
         const height = bottom.y - top.y;
-        const width = height * 0.7;
-        return [{ id: p.seat.id, left: top.x - width / 2, top: top.y, width, height }];
+        const width = Math.max(height * 0.8, 24);
+        return [{ id: a.id, left: top.x - width / 2, top: top.y, width, height }];
       }),
+    actors: () => Object.fromEntries([...actors.values()].map((a) => [a.id, { at: a.present ? (stationOf(a.id, a.state) ?? null) : null, canMove: a.present && a.state !== "stopped" }])),
+    setStates: (next) => {
+      for (const s of next) {
+        const a = actors.get(s.id);
+        if (a) a.state = s.state;
+      }
+      if (opts.reduce) draw(0);
+    },
+    play: (steps) => {
+      if (!opts.reduce) {
+        queue.push(...steps);
+        return;
+      }
+      // 歩かずに置き換え、印は次の出来事まで出したままにする
+      for (const a of actors.values()) a.mark = null;
+      for (const s of steps) apply(s, 0);
+      draw(0);
+    },
     dispose: () => {
       disposed = true;
       scene.traverse((o: Object3D) => {
@@ -262,11 +322,11 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
         const geometry: unknown = o.geometry;
         const material: unknown = o.material;
         if (geometry instanceof BufferGeometry) geometry.dispose();
+        if (material instanceof MeshStandardMaterial) material.map?.dispose();
         if (material instanceof Material) material.dispose();
       });
-      for (const p of placed) p.vrm?.dispose();
+      for (const a of actors.values()) a.vrm?.dispose();
       renderer.dispose();
     },
   };
-  return room;
 }

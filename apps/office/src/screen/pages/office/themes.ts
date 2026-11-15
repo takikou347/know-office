@@ -4,23 +4,28 @@
 export interface OfficeTheme {
   /** 案の名前 */
   label: string;
-  /** 部屋の背景 */
+  /** 部屋の外の背景 */
   background: string;
-  /** 床 */
-  floor: string;
-  /** 机の並ぶ所に敷く敷物 */
-  rug: string;
+  /** 床のタイルの 2 色 (市松に並べる) */
+  floorA: string;
+  floorB: string;
+  /** タイルの目地 */
+  grout: string;
   /** 奥と左の壁 */
   wall: string;
+  /** 手前と右の低い壁と、壁の縁 */
+  trim: string;
   /** 奥の壁の窓 */
   window: string;
-  /** 机の天板 */
+  /** 作る役と見る役の机の天板 */
   desk: string;
-  /** 机の脚と椅子の柱 */
+  /** 社長の机 */
+  deskPresident: string;
+  /** 机の脚、椅子の柱、棚の枠 */
   leg: string;
   /** 椅子の座面と背 */
   chair: string;
-  /** 画面の枠 */
+  /** パソコンの枠 */
   monitor: string;
   /** 点いている画面 */
   screenOn: string;
@@ -28,18 +33,26 @@ export interface OfficeTheme {
   screenOff: string;
   /** 机の明かり */
   lamp: string;
+  /** 書類の棚の本体 */
+  shelf: string;
+  /** 棚に並ぶ書類の背の 3 色 */
+  binders: readonly [string, string, string];
+  /** ソファ */
+  sofa: string;
+  /** 休憩所の敷物 */
+  rug: string;
   /** 鉢植えの葉 */
   plant: string;
   /** 鉢 */
   pot: string;
-  /** 社員の顔と手 */
-  face: string;
-  /** 社員の目 */
-  eye: string;
+  /** 書類 */
+  paper: string;
   /** 止めた印 */
   stop: string;
-  /** 社員の体の色。席の順に使い、足りなければ繰り返す */
-  staff: readonly string[];
+  /** 承認の丸 */
+  ok: string;
+  /** 差し戻しの印 */
+  back: string;
   /** 部屋全体の明るさ (0 から 1) */
   ambient: number;
   /** 窓からの光の強さ */
@@ -50,77 +63,98 @@ export interface OfficeTheme {
 
 /** 案の一覧 */
 export const officeThemes = {
-  // 案 A: knowidea-ui の今の色。画面のほかの所と同じ色で、暗い設定にも合わせて変わる
+  // 案 A (既定): 木の机と明るい床の、昼の小さな事務所。木、ベージュ、白、淡い緑の植物
+  wood: {
+    label: "木の部屋",
+    background: "#f4efe6",
+    floorA: "#e8d6bb",
+    floorB: "#dfc9a8",
+    grout: "#cdb592",
+    wall: "#fbf7f0",
+    trim: "#c9a77f",
+    window: "#d7ebf2",
+    desk: "#c08a57",
+    deskPresident: "#9a6a3f",
+    leg: "#7a5236",
+    chair: "#f2ece2",
+    monitor: "#4a4038",
+    screenOn: "#eaf6ff",
+    screenOff: "#6b625a",
+    lamp: "#ffe9b0",
+    shelf: "#b98552",
+    binders: ["#9cc5a1", "#f0e2c4", "#e6b48c"],
+    sofa: "#a9c8a2",
+    rug: "#f1e6d0",
+    plant: "#8fbf86",
+    pot: "#f5f0e8",
+    paper: "#ffffff",
+    stop: "#d9473b",
+    ok: "#3f9a5a",
+    back: "#e08a2e",
+    ambient: 0.75,
+    sun: 2.2,
+    lampGlow: 0,
+  },
+  // 案 B: knowidea-ui の今の色。画面のほかの所と同じ色で、暗い設定にも合わせて変わる
   standard: {
     label: "いつもの色",
     background: "var(--color-bg)",
-    floor: "var(--color-surface-2)",
-    rug: "var(--color-line)",
+    floorA: "var(--color-surface-2)",
+    floorB: "var(--color-surface)",
+    grout: "var(--color-line)",
     wall: "var(--color-surface)",
+    trim: "var(--color-line-strong)",
     window: "var(--color-info-soft)",
     desk: "var(--color-surface)",
+    deskPresident: "var(--color-primary)",
     leg: "var(--color-line-strong)",
     chair: "var(--color-text-muted)",
     monitor: "var(--color-text)",
     screenOn: "var(--color-info-soft)",
     screenOff: "var(--color-text-muted)",
     lamp: "var(--color-warn-soft)",
+    shelf: "var(--color-line-strong)",
+    binders: ["var(--color-primary)", "var(--color-info)", "var(--color-warn)"],
+    sofa: "var(--color-primary)",
+    rug: "var(--color-line)",
     plant: "var(--color-success)",
     pot: "var(--color-line-strong)",
-    face: "var(--color-surface)",
-    eye: "var(--color-text)",
+    paper: "var(--color-surface)",
     stop: "var(--color-error)",
-    staff: ["var(--color-primary)", "var(--color-success)", "var(--color-info)", "var(--color-warn)"],
+    ok: "var(--color-success)",
+    back: "var(--color-warn)",
     ambient: 0.75,
-    sun: 1.6,
-    lampGlow: 0,
-  },
-  // 案 B: 木の机と明るい床の、昼の小さな事務所
-  wood: {
-    label: "木の部屋",
-    background: "#f3ece2",
-    floor: "#d9c3a5",
-    rug: "#b9cbb5",
-    wall: "#f7f1e8",
-    window: "#cfe6f2",
-    desk: "#b07a4a",
-    leg: "#6e4a2c",
-    chair: "#3f6d5c",
-    monitor: "#2b2b2b",
-    screenOn: "#e8f4ff",
-    screenOff: "#56514b",
-    lamp: "#ffe6a8",
-    plant: "#4f8a3c",
-    pot: "#c46f4b",
-    face: "#f6dcc4",
-    eye: "#2a2a2a",
-    stop: "#c8382c",
-    staff: ["#e0874a", "#4f86c6", "#9b6bbf", "#d4b13a"],
-    ambient: 0.7,
-    sun: 2,
+    sun: 1.8,
     lampGlow: 0,
   },
   // 案 C: 夜の事務所。部屋は暗く、働く席の画面と明かりだけが光る
   night: {
     label: "夜の部屋",
     background: "#10162b",
-    floor: "#222a45",
-    rug: "#2e3a5e",
+    floorA: "#2a3150",
+    floorB: "#242b47",
+    grout: "#1b2138",
     wall: "#1a2240",
+    trim: "#3b4570",
     window: "#3b4f8a",
-    desk: "#46506e",
+    desk: "#5a5f7e",
+    deskPresident: "#6a4f7a",
     leg: "#2a3150",
     chair: "#5a4a7a",
     monitor: "#0b0e1a",
     screenOn: "#7fd8ff",
     screenOff: "#1c2236",
     lamp: "#ffd27a",
+    shelf: "#3f4770",
+    binders: ["#6bc4ff", "#c79bff", "#ffd66b"],
+    sofa: "#4a5a8a",
+    rug: "#2e3a5e",
     plant: "#3f8f6a",
     pot: "#7a5a4a",
-    face: "#f0d8c8",
-    eye: "#10162b",
+    paper: "#f4f4ff",
     stop: "#ff5a4f",
-    staff: ["#ff9f6b", "#6bc4ff", "#c79bff", "#ffd66b"],
+    ok: "#5fd38a",
+    back: "#ffb057",
     ambient: 0.35,
     sun: 0.5,
     lampGlow: 2.5,
@@ -131,10 +165,10 @@ export const officeThemes = {
 export type OfficeThemeId = keyof typeof officeThemes;
 
 /** 案の名前の並び */
-export const THEME_IDS = ["standard", "wood", "night"] as const satisfies readonly OfficeThemeId[];
+export const THEME_IDS = ["wood", "standard", "night"] as const satisfies readonly OfficeThemeId[];
 
 /** 今使う案。オーナーが選んだら、ここだけを変える */
-export const OFFICE_THEME: OfficeThemeId = "standard";
+export const OFFICE_THEME: OfficeThemeId = "wood";
 
 /**
  * 案の名前から色と明かりを返す

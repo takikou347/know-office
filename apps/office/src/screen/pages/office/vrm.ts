@@ -42,13 +42,13 @@ export async function loadVrmAvatar(url: string): Promise<VrmAvatar> {
     applyPose: (pose) => {
       model.scene.visible = pose.visible;
       model.scene.position.y = pose.lift;
-      const legs = pose.seated ? Math.PI / 2 : 0;
+      const legs = pose.posture === "sit" ? Math.PI / 2 : 0;
       bone("leftUpperLeg")?.rotation.set(-legs, 0, 0);
       bone("rightUpperLeg")?.rotation.set(-legs, 0, 0);
       bone("leftLowerLeg")?.rotation.set(legs, 0, 0);
       bone("rightLowerLeg")?.rotation.set(legs, 0, 0);
-      bone("leftUpperArm")?.rotation.set(-0.9 + pose.arm, 0, 1.1);
-      bone("rightUpperArm")?.rotation.set(-0.9 - pose.arm, 0, -1.1);
+      bone("leftUpperArm")?.rotation.set(-0.9 + pose.paws, 0, 1.1);
+      bone("rightUpperArm")?.rotation.set(-0.9 - pose.paws, 0, -1.1);
       bone("head")?.rotation.set(0, pose.head, 0);
     },
     update: (seconds) => model.update(seconds),

@@ -11,7 +11,7 @@
 
 @media (width < 600px) {
   .ko-office-frame {
-    aspect-ratio: 1 / 1;
+    aspect-ratio: 4 / 3;
   }
 }
 
@@ -73,5 +73,15 @@
 @media (width < 600px) {
   .ko-office-tag {
     padding: 0 var(--space-1);
+  }
+
+  /* 狭い幅では名札に役目だけを出す。状態は読み上げには残し、姿と印で見せる */
+  .ko-office-tag span {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }

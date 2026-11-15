@@ -1,10 +1,12 @@
 import type { Page, Request } from "@playwright/test";
 import { expect, test } from "./helpers/test.ts";
+import { withoutWebgl } from "./helpers/webgl.ts";
 
-// オフィスの 3D の部屋。社員を押すと会話に移り、ほかの画面では 3D を読まず、3D を出せない時は 2D の一覧に代える。画面の 3.4
+// オフィスの 3D の部屋。社員を押すと会話に移り、ほかの画面では 3D を読まず、3D を出せない時は 2D の一覧に代え、
+// 画面のデータの変わりを出来事として見せて読み上げる。画面の 3.4
 
 /** 3D のコード (three.js と部屋の作り) とエディタのコードの要求か。開発の入口は 1 つずつ、作った物は分けた塊で出す */
-const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|vrm|themes)|codemirror|knowidea-ui_editor|editor-/i;
+const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|marks|plan|vrm|themes)|codemirror|knowidea-ui_editor|editor-/i;
 
 /**
  * 開いたページで出た要求の URL を貯める
@@ -23,6 +25,32 @@ function recordRequests(page: Page): string[] {
  * @returns 部屋の区画
  */
 const roomOf = (page: Page) => page.getByRole("region", { name: "オフィスの部屋" });
+
+/**
+ * 読み込み直さずに、切り替えからオフィスへ移る。狭い幅ではその他から移る
+ * @param page 見るページ
+ */
+async function openOfficeInApp(page: Page): Promise<void> {
+  const side = page.locator("nav:visible").getByRole("link", { name: "オフィス" });
+  if (await side.isVisible()) {
+    await side.click();
+  } else {
+    await page.locator("nav:visible").getByRole("link", { name: "その他" }).click();
+    await page.getByRole("main").getByRole("link", { name: "オフィス" }).click();
+  }
+  await expect(page.getByRole("heading", { level: 1, name: "オフィス" })).toBeVisible();
+}
+
+/**
+ * 社員を覆うリンクの箱の位置を返す
+ * @param page 見るページ
+ * @param name リンクの名前
+ * @returns 左上の位置
+ */
+async function boxOf(page: Page, name: RegExp): Promise<{ x: number; y: number }> {
+  const b = await roomOf(page).getByRole("link", { name }).boundingBox();
+  return { x: Math.round(b?.x ?? -1), y: Math.round(b?.y ?? -1) };
+}
 
 test.describe("画面の一覧", () => {
   test("オフィスから会話に移る", async ({ page }) => {
@@ -52,31 +80,50 @@ test.describe("速さ", () => {
 });
 
 test.describe("オフィスの 3D", () => {
+  test("社員と状態と直近の出来事を読み上げる", async ({ page }) => {
+    await page.goto("/office");
+    const room = roomOf(page);
+    await expect(room.getByRole("link", { name: "社長 働いている" })).toBeVisible();
+    await expect(room.getByRole("link", { name: "作る役 働いている" })).toBeVisible();
+    await expect(room.getByRole("link", { name: "見る役 待っている" })).toBeVisible();
+    await expect(room.getByRole("status")).toHaveText("直近の出来事はまだありません");
+  });
+
+  test("可を出すと、オフィスで承認の出来事を読み上げる", async ({ page }) => {
+    await page.goto("/staff/builder/tasks/t2");
+    await page.getByRole("button", { name: "可", exact: true }).click();
+    await openOfficeInApp(page);
+    await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を承認した");
+  });
+
+  test("不可を出すと、オフィスで差し戻しの出来事を読み上げる", async ({ page }) => {
+    await page.goto("/staff/builder/tasks/t2");
+    await page.getByRole("button", { name: "不可" }).click();
+    await openOfficeInApp(page);
+    await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を作る役に差し戻した");
+  });
+
   test("WebGL が無い時は 2D の一覧に代える", async ({ page }) => {
-    // WebGL だけを出せないブラウザに見せる
-    await page.addInitScript({
-      content: `{
-        const original = HTMLCanvasElement.prototype.getContext;
-        HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
-          return String(kind).startsWith("webgl") ? null : original.call(this, kind, ...rest);
-        };
-      }`,
-    });
+    await withoutWebgl(page);
     const urls = recordRequests(page);
     await page.goto("/office");
     const list = page.getByRole("list", { name: "社員の様子" });
     await expect(list.getByRole("link", { name: /作る役/ })).toBeVisible();
+    await expect(page.getByRole("status")).toHaveText("直近の出来事はまだありません");
     await expect(page.locator("canvas")).toHaveCount(0);
     expect(urls.filter((u) => /three/.test(u))).toEqual([]);
     await list.getByRole("link", { name: /作る役/ }).click();
     await expect(page.getByRole("log", { name: "作る役との会話" })).toBeVisible();
   });
 
-  test("動きを減らす設定の時は 2D の一覧に代える", async ({ page }) => {
+  test("動きを減らす設定では部屋を出し、社員を動かさない", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/office");
-    await expect(page.getByRole("list", { name: "社員の様子" }).getByRole("link", { name: /見る役/ })).toBeVisible();
-    await expect(page.locator("canvas")).toHaveCount(0);
+    await expect(roomOf(page).locator("canvas")).toBeVisible();
+    await expect(page.getByRole("list", { name: "社員の様子" })).toHaveCount(0);
+    const first = await boxOf(page, /見る役/);
+    await page.waitForTimeout(600);
+    expect(await boxOf(page, /見る役/)).toEqual(first);
   });
 
   test("キーボードで社員を選ぶ", async ({ page, browserName }) => {

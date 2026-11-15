@@ -1,12 +1,32 @@
-// オフィスの画面。3D を出せる時は部屋を読み込み、出せない時と動きを減らす設定の時は 2D の一覧で社員を出す
+// オフィスの画面。画面のデータの変わりから出来事を起こし、3D を出せる時は部屋で動きを見せ、出せない時は 2D の一覧で社員を出す
 import { List } from "knowidea-ui";
 import { Component, type ReactNode, Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { type Staff, staff } from "../../mock.ts";
 import { StaffStatus } from "../../parts/staff-status.tsx";
+import { type OfficeEvent, type OfficeSnapshot, describeEvent, eventsBetween } from "./events.ts";
+import { workFeed } from "./feed.ts";
 import { REDUCED_MOTION_QUERY, browserEnv, canShow3d } from "./support.ts";
 
 // three.js と部屋の作りは、この画面を開いた時だけ読む
 const OfficeScene = lazy(() => import("./OfficeScene.tsx"));
+
+/** 部屋に渡す出来事のまとまり。id が変わるたびに部屋が動きを積む */
+export interface EventBatch {
+  id: number;
+  /** 出来事の前の写し */
+  before: OfficeSnapshot;
+  events: OfficeEvent[];
+}
+
+const roleOf = (id: string) => staff.find((s) => s.id === id)?.role ?? id;
+
+/**
+ * 写しの状態を、社員の役目と今の様子に重ねる
+ * @param snap 写し
+ * @returns 画面に出す社員
+ */
+const peopleOf = (snap: OfficeSnapshot): Staff[] =>
+  staff.map((s) => ({ ...s, state: snap.staff.find((x) => x.id === s.id)?.state ?? s.state }));
 
 /**
  * 社員を 2D の一覧で出す。押すと社員とタスクの画面でその社員の会話が開く
@@ -36,24 +56,59 @@ class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode
 }
 
 /**
+ * 画面のデータの変わりを聞き、前にオフィスが見た写しとの違いを出来事にする
+ * @returns 今の写しと、出来事のまとまり
+ */
+function useOfficeEvents() {
+  const [snap, setSnap] = useState(workFeed.snapshot);
+  const [batch, setBatch] = useState<EventBatch | null>(null);
+  useEffect(() => {
+    let id = 0;
+    const take = () => {
+      const now = workFeed.snapshot();
+      const before = workFeed.seen;
+      workFeed.seen = now;
+      setSnap(now);
+      const events = eventsBetween(before, now);
+      if (events.length > 0) setBatch({ id: ++id, before, events });
+    };
+    take();
+    return workFeed.subscribe(take);
+  }, []);
+  return { snap, batch };
+}
+
+/**
  * オフィスの画面の中身
- * @returns 3D の部屋か 2D の一覧
+ * @returns 3D の部屋か 2D の一覧と、直近の出来事
  */
 export function OfficePage() {
-  const [mode, setMode] = useState<"checking" | "3d" | "2d">("checking");
+  // サーバーで描く時はブラウザが無いので、確かめている事だけを出す
+  const browser = typeof window !== "undefined";
+  const [mode, setMode] = useState<"checking" | "3d" | "2d">(() => {
+    if (!browser) return "checking";
+    return canShow3d(browserEnv()) ? "3d" : "2d";
+  });
+  const [reduce, setReduce] = useState(() => browser && window.matchMedia(REDUCED_MOTION_QUERY).matches);
+  const { snap, batch } = useOfficeEvents();
   useEffect(() => {
-    const decide = () => setMode(canShow3d(browserEnv()) ? "3d" : "2d");
-    decide();
     // 開いている間に動きを減らす設定を変えても合わせる
     const query = window.matchMedia(REDUCED_MOTION_QUERY);
-    query.addEventListener("change", decide);
-    return () => query.removeEventListener("change", decide);
+    const follow = (e: MediaQueryListEvent) => setReduce(e.matches);
+    query.addEventListener("change", follow);
+    return () => query.removeEventListener("change", follow);
   }, []);
   const fail = useCallback(() => setMode("2d"), []);
+  const people = peopleOf(snap);
+  const latest = batch?.events.at(-1);
+  const news = (
+    <p role="status">{latest ? `直近の出来事: ${describeEvent(latest, roleOf)}` : "直近の出来事はまだありません"}</p>
+  );
   const list = (
     <>
-      <p>動きを減らす設定か、3D を出せないブラウザなので、社員を一覧で出しています。押すとその社員の会話が開きます</p>
-      <OfficeList people={staff} />
+      <p>3D を出せないブラウザなので、社員を一覧で出しています。押すとその社員の会話が開きます</p>
+      {news}
+      <OfficeList people={people} />
     </>
   );
   if (mode === "checking") return <p role="status">部屋を用意しています</p>;
@@ -61,7 +116,7 @@ export function OfficePage() {
   return (
     <SceneBoundary fallback={list}>
       <Suspense fallback={<p role="status">部屋を読んでいます</p>}>
-        <OfficeScene staff={staff} onFail={fail} />
+        <OfficeScene people={people} batch={batch} reduce={reduce} onFail={fail} news={news} />
       </Suspense>
     </SceneBoundary>
   );
