@@ -1,6 +1,6 @@
 // 拡張の一覧と入れ切り (ルートの一覧の 1.14) と、入れた拡張のルートを /api/v1/ext/<ID> の下に付ける (サービスと拡張の 3.8)
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
-import { AppError, Extension, ToggleExtensionInput } from "@know-office/core";
+import { AppError, EXTENSION_ID, Extension, ToggleExtensionInput } from "@know-office/core";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { createRouter } from "../app.ts";
@@ -117,7 +117,9 @@ export function extensionRoutes(extensions: readonly ExtensionDefinition[]) {
         try {
           requireStepUp(c);
         } catch (error) {
-          await audit(c, "extension.toggle_refused", extensionId, { enabled, reason: "step_up_required" });
+          // ID の形を確かめる前なので、拡張 ID の形の時だけ記録に写す
+          const target = extensionId.length <= 64 && EXTENSION_ID.test(extensionId) ? extensionId : null;
+          await audit(c, "extension.toggle_refused", target, { enabled, reason: "step_up_required" });
           throw error;
         }
       }

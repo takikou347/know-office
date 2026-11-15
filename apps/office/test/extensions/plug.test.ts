@@ -158,6 +158,12 @@ describe("差し込み口", () => {
     expect(await api(world, "PUT", "/api/v1/extensions/sample-notes", { enabled: false })).toMatchObject({ enabled: false });
   });
 
+  it("形の違う拡張 ID で断った試みは、ID を記録に写さない", async () => {
+    const odd = `Bad<${"x".repeat(200)}>`;
+    await api(world, "PUT", `/api/v1/extensions/${encodeURIComponent(odd)}`, { enabled: true }, 401);
+    expect(world.gate.audits.filter((a) => a.action === "extension.toggle_refused").map((a) => a.target)).toEqual([null]);
+  });
+
   it("拡張のツールもルールの判断を通り、鍵や自動停止や社員に触れる名前は入れても断る", () => {
     const enabled = { ...DEFAULT_RULES, extensionTools: ["sample-notes.note_read", "bad.vault_read", "bad.stop_all", "bad.staff_add"] };
     expect(toOperation(SDK_NOTE_READ, {})).toEqual({ kind: "ext.tool", tool: SDK_NOTE_READ, target: "sample-notes.note_read", paths: [] });
