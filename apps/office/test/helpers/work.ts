@@ -62,6 +62,9 @@ function fakeForge(): FakeForge {
       return { number: forge.pulls.length, baseSha: "a".repeat(40), headSha: "b".repeat(40) };
     },
     checksPassed: () => Promise.resolve(forge.checks),
+    changedPaths: () => Promise.resolve([]),
+    protectMain: () => Promise.resolve("applied"),
+    connected: true,
     merge: async (_repo, branch) => {
       await forge.during.merge?.();
       forge.merged.push(branch);
@@ -72,9 +75,11 @@ function fakeForge(): FakeForge {
 
 /**
  * 要件ごとの describe で、D1 を 1 つ作ってテストごとに空にし、8 時にログインしたゲートウェイを置く
+ * @param options github が true ならゲートウェイを代わりの GitHub につなぐ
+ * @param options.github 代わりの GitHub につなぐか
  * @returns テストの物
  */
-export function useWork(): WorkWorld {
+export function useWork(options: { github?: boolean } = {}): WorkWorld {
   // beforeEach で中身を入れる
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const world = {} as WorkWorld;
@@ -85,7 +90,7 @@ export function useWork(): WorkWorld {
   beforeEach(async () => {
     await resetMain(world.d1.DB);
     world.clock = fixedClock(at(8));
-    world.gate = await createTestGate({ clock: world.clock, d1: world.d1 });
+    world.gate = await createTestGate({ clock: world.clock, d1: world.d1, github: options.github === true });
     world.forge = fakeForge();
     world.headers = await world.gate.signIn();
   }, 30_000);

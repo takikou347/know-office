@@ -19,7 +19,7 @@ export type FakeGitHub = {
   app: Hono;
   /** 届いた要求 */
   requests: GitHubRequest[];
-  /** 「メソッド パス」に返す本文を置く */
+  /** 「メソッド パス」に返す本文を置く。undefined は置いた本文を消し、404 に戻す */
   set(route: string, body: unknown): void;
 };
 
@@ -52,7 +52,11 @@ export function createFakeGitHub(): FakeGitHub {
       return c.json(routes.get(route));
     });
 
-  return { app, requests, set: (route, body) => routes.set(route, body) };
+  const set = (route: string, body: unknown): void => {
+    if (body === undefined) routes.delete(route);
+    else routes.set(route, body);
+  };
+  return { app, requests, set };
 }
 
 /** 代わりの GitHub が送る通知 */

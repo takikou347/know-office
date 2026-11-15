@@ -2,6 +2,9 @@
 import { AppError, type AuditInput, type Clock, type Fetcher, type StaffId } from "@know-office/core";
 import { createFakeAccess, type FakeAccess } from "../../dev/access.ts";
 import { createFakeClaude, type FakeClaude } from "../../dev/claude.ts";
+import { createFakeGitHub, type FakeGitHub } from "../../dev/github.ts";
+import { endpoints } from "../../src/gate/endpoints.ts";
+import { type GitHubAccess, httpForge, type Permissions } from "../../src/gate/github/forge.ts";
 import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts";
 import type { Bindings } from "../../src/gate/env.ts";
 import type { ExtensionDefinition } from "../../src/gate/extensions/define.ts";
@@ -9,7 +12,7 @@ import type { GuardDeps, ReviewAnswer } from "../../src/gate/guard/deps.ts";
 import { OfficeGuard } from "../../src/gate/guard/office-guard.ts";
 import { StaffGuard } from "../../src/gate/guard/staff-guard.ts";
 import { createGate } from "../../src/gate/index.ts";
-import { pullNext } from "../../src/gate/work/loop.ts";
+import { type Forge, pullNext, UNCONNECTED_FORGE } from "../../src/gate/work/loop.ts";
 import { appendTranscript, loadTranscript, type TranscriptStore } from "../../src/gate/work/transcript.ts";
 import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/work/staff-book.ts";
 import type { TestD1 } from "./d1.ts";
@@ -34,8 +37,14 @@ export type TestGate = {
   access: FakeAccess;
   /** 代わりの Claude API。返事を積み、届いた要求と鍵を読む */
   claude: FakeClaude;
-  /** ゲートウェイが外へ出す fetch。代わりの Access と Claude API に回す */
+  /** ゲートウェイが外へ出す fetch。代わりの Access、Claude API、GitHub に回す */
   fetch: Fetcher;
+  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル */
+  github: FakeGitHub & { files: { filename: string; previous_filename?: string }[] };
+  /** GitHub の鍵を出した先と権限 */
+  githubTokens: { repo: string; permissions: Permissions }[];
+  /** ゲートウェイと同じ、GitHub を呼ぶ口。github を付けて起こした時だけ代わりの GitHub につなぐ */
+  forge: Forge;
   /** Access の公開鍵を取りに来た回数と、返し方。down は 503、malformed は形の違う JSON を返す */
   certs: { calls: number; answer: "ok" | "down" | "malformed" };
   /** 記録 DO に頼んだ監査ログ */
@@ -154,19 +163,43 @@ function namespace<T>(stub: T) {
 }
 
 /**
+ * 代わりの GitHub への道を返す。ブランチの名前はタスク ID から決まるので、compare とブランチの先は置いた返事をどのブランチにも返す
+ * @param github 代わりの GitHub
+ * @param path 道とクエリ
+ * @returns そのまま送る道
+ */
+function githubPath(github: TestGate["github"], path: string): string {
+  const compare = /^\/repos\/([^/]+\/[^/]+)\/compare\//.exec(path);
+  if (compare) github.set(`GET ${path}`, { files: github.files });
+  if (/^\/repos\/[^/]+\/[^/]+\/git\/ref\/heads\//.test(path)) github.set(`GET ${path}`, { ref: "refs/heads/x", object: { sha: "b".repeat(40) } });
+  return path;
+}
+
+/**
  * テストのゲートウェイを起こす
  * @param options 時刻と D1
  * @param options.clock 時刻
  * @param options.d1 手元の D1
  * @param options.extensions 差し込む拡張。無ければ extensions/ から読み込んだ物
+ * @param options.github true なら代わりの GitHub につなぐ
  * @returns ゲートウェイと、ログインの手伝い
  */
-export async function createTestGate(options: { clock: Clock; d1: TestD1; extensions?: readonly ExtensionDefinition[] }): Promise<TestGate> {
+export async function createTestGate(options: { clock: Clock; d1: TestD1; extensions?: readonly ExtensionDefinition[]; github?: boolean }): Promise<TestGate> {
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
+  const github: TestGate["github"] = Object.assign(createFakeGitHub(), { files: [] });
+  const githubTokens: TestGate["githubTokens"] = [];
+  const githubAccess: GitHubAccess = {
+    appId: 1234,
+    token: (repo, permissions) => {
+      githubTokens.push({ repo, permissions });
+      return Promise.resolve("ghs_test");
+    },
+  };
   const fetcher: Fetcher = (url, init) => {
     if (url.startsWith(`${FAKES}/anthropic/`)) return Promise.resolve(claude.app.request(url.slice(`${FAKES}/anthropic`.length), init));
+    if (url.startsWith(`${FAKES}/github/`)) return Promise.resolve(github.app.request(githubPath(github, url.slice(`${FAKES}/github`.length)), init));
     if (!url.startsWith(`${FAKES}/access/`)) return Promise.reject(new Error(`テストで外へ出た: ${url}`));
     certs.calls += 1;
     if (certs.answer === "down") return Promise.resolve(new Response("", { status: 503 }));
@@ -288,7 +321,14 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     MASTER_KEY,
     ANTHROPIC_API_KEY: ANTHROPIC_KEY,
   } as unknown as Bindings;
-  const app = createGate({ clock: options.clock, fetch: fetcher, guard: deps, ...(options.extensions ? { extensions: options.extensions } : {}) });
+  const app = createGate({
+    clock: options.clock,
+    fetch: fetcher,
+    guard: deps,
+    ...(options.extensions ? { extensions: options.extensions } : {}),
+    ...(options.github === true ? { github: githubAccess } : {}),
+  });
+  const forge = options.github === true ? httpForge(endpoints(env).github, fetcher, githubAccess) : UNCONNECTED_FORGE;
   const request = (path: string, init: RequestInit = {}) => Promise.resolve(app.request(path, init, env));
   return {
     app,
@@ -296,6 +336,9 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     access,
     claude,
     fetch: fetcher,
+    github,
+    githubTokens,
+    forge,
     certs,
     audits,
     storage,
