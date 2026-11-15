@@ -1,4 +1,5 @@
 // Claude Agent SDK に渡す呼び出しの形と、設定を読ませずにフックを関数で渡す options を作る (社員が考えるの 3.1、3.2)
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { CONTAINER_CA, type RunInput } from "@know-office/core";
 import type { PreToolUseOutput } from "./hooks.ts";
 
@@ -29,6 +30,8 @@ export type AgentOptions = {
   env: { ANTHROPIC_API_KEY: string; HOME: string; PATH: string; NODE_EXTRA_CA_CERTS: string };
   /** ツールを使う前のフック。関数で渡し、ファイルから読まない */
   hooks: { PreToolUse: [{ hooks: [(input: unknown) => Promise<PreToolUseOutput>] }] };
+  /** MCP の受け手。社員のツールの staff だけを渡す */
+  mcpServers: { staff: McpSdkServerConfigWithInstance };
   /** 呼び出しを終える口 */
   abortController: AbortController;
   /** 続きから呼ぶ session。無ければ頭から */
@@ -58,6 +61,7 @@ export type Agent = (call: AgentCall) => Promise<void>;
  * @param input.effort 考える深さ
  * @param input.systemPrompt 役目の説明文と組織の決まり
  * @param input.hook PreToolUse のフック
+ * @param input.staff 社員のツールの MCP の受け手
  * @param input.abortController 呼び出しを終える口
  * @param input.resume 続きから呼ぶ session
  * @returns SDK の options
@@ -68,6 +72,7 @@ export function agentOptions(input: {
   effort: RunInput["effort"];
   systemPrompt: string;
   hook: (input: unknown) => Promise<PreToolUseOutput>;
+  staff: McpSdkServerConfigWithInstance;
   abortController: AbortController;
   resume?: string | undefined;
 }): AgentOptions {
@@ -79,6 +84,7 @@ export function agentOptions(input: {
     cwd: WORK_ROOT,
     env: { ANTHROPIC_API_KEY: input.ticket, HOME: staffHome(), PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", NODE_EXTRA_CA_CERTS: CONTAINER_CA },
     hooks: { PreToolUse: [{ hooks: [input.hook] }] },
+    mcpServers: { staff: input.staff },
     abortController: input.abortController,
     ...(input.resume === undefined ? {} : { resume: input.resume }),
   };

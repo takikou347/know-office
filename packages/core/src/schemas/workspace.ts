@@ -1,5 +1,6 @@
 // ワークスペースとゲートウェイ、社員 DO の間でやり取りする形と、作業トークンの中身 (社員が考えるの 1.2、1.3、2 章)
 import { fromBase64 } from "../encoding.ts";
+import { STAFF_TOOL_NAMES } from "../rules/staff-tools.ts";
 import { StaffId } from "./workday.ts";
 import { z } from "./zod.ts";
 
@@ -19,6 +20,8 @@ export const RunInput = z
     systemPrompt: z.string(),
     prompt: z.string(),
     resume: z.string().min(1).optional(),
+    // 社員の役で使える社員のツール。ワークスペースはこの名前のツールだけを MCP の受け手 staff に出す
+    tools: z.array(z.enum(STAFF_TOOL_NAMES)).max(STAFF_TOOL_NAMES.length),
   })
   .strict()
   .meta({ id: "RunInput" });

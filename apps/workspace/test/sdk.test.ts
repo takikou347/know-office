@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentOptions, type AgentCall } from "../src/agent.ts";
 import { preToolUse } from "../src/hooks.ts";
 import { type QueryFn, sdkAgent, sdkOptions } from "../src/sdk.ts";
+import { staffServer } from "../src/staff-tools.ts";
 import { sessionFile, TranscriptShipper } from "../src/transcript.ts";
 
 /** 代わりの Claude API に積む返事。text か tool_use のブロック */
@@ -126,11 +127,17 @@ async function localQuery(baseUrl: string, work: string, home = work): Promise<Q
  * ゲートウェイのルールの判断の代わりを作る
  * @param allow 通すか
  * @param asked 聞かれたツールの名前を足す並び
+ * @param called 社員のツールの口が受けた名前と本文を足す並び
  * @returns fetch の代わり
  */
-function gate(allow: boolean, asked: string[]): Fetcher {
-  return (_url, init) => {
+function gate(allow: boolean, asked: string[], called: string[] = []): Fetcher {
+  return (url, init) => {
     const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
+    // 社員のツールの口は、呼ばれたツールの名前と入力を控え、決まった答えを返す
+    if (url.includes("/ws/v1/tools/")) {
+      called.push(`${url.split("/").at(-1) ?? ""} ${JSON.stringify(body)}`);
+      return Promise.resolve(Response.json({ data: { content: "社長に plan を足した", isError: false }, meta: { traceId: "t" } }));
+    }
     asked.push(isRecord(body) ? String(body["toolName"]) : "");
     return Promise.resolve(Response.json({ data: { allow, reason: allow ? "通す" : "ルールで断る" }, meta: { traceId: "t" } }));
   };
@@ -146,7 +153,15 @@ function task(fetcher: Fetcher, sessions: string[]): AgentCall {
   const hook = preToolUse({ fetcher, token: () => "ticket-1", clock: { now: () => 0 }, record: () => {} });
   return {
     prompt: "ログインを直す",
-    options: agentOptions({ ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目の説明文 v1", hook, abortController: new AbortController() }),
+    options: agentOptions({
+      ticket: "ticket-1",
+      model: "claude-sonnet-5-5",
+      effort: "medium",
+      systemPrompt: "役目の説明文 v1",
+      hook,
+      staff: staffServer({ fetcher, token: () => "ticket-1" }, ["ask_boss"]),
+      abortController: new AbortController(),
+    }),
     onSession: (id) => sessions.push(id),
     onEvent: () => {},
   };
@@ -177,6 +192,9 @@ describe("ワークスペースの Claude Agent SDK", () => {
     expect(options).toMatchObject({ model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目の説明文 v1", settingSources: [], cwd: "/work", permissionMode: "dontAsk" });
     expect(Object.keys(options?.env ?? {}).toSorted()).toEqual(["ANTHROPIC_API_KEY", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
     expect(options?.hooks?.PreToolUse?.[0]?.hooks).toHaveLength(1);
+    // MCP の受け手は社員のツールの staff だけで、ほかの置き場の MCP の設定を読まない
+    expect(Object.keys(options?.mcpServers ?? {})).toEqual(["staff"]);
+    expect(options?.strictMcpConfig).toBe(true);
     expect(options?.resume).toBeUndefined();
     expect(sessions).toEqual(["session-1"]);
   });
@@ -240,6 +258,24 @@ describe("ワークスペースの Claude Agent SDK", () => {
     expect(JSON.stringify(main?.body["messages"])).toContain("ログインを直す");
     expect(JSON.stringify(main?.body["messages"])).toContain("半分まで直した");
     expect(JSON.stringify(main?.body["messages"])).toContain("続きから進める");
+  });
+
+  it("本物の SDK は、フックが通した社員のツールを受け手 staff でゲートウェイに渡し、答えを返す", async () => {
+    const claude = await fakeClaude([[{ type: "tool_use", id: "toolu_1", name: "mcp__staff__ask_boss", input: { reason: "次のタスクが無い" } }]]);
+    const asked: string[] = [];
+    const called: string[] = [];
+    await sdkAgent(await localQuery(claude.url, tempDir()))(task(gate(true, asked, called), []));
+    expect(asked).toEqual(["mcp__staff__ask_boss"]);
+    expect(called).toEqual([`ask_boss ${JSON.stringify({ toolInput: { reason: "次のタスクが無い" } })}`]);
+    expect(JSON.stringify(toolResults(claude.received))).toContain("社長に plan を足した");
+  });
+
+  it("本物の SDK は、フックが断った社員のツールをゲートウェイに渡さない", async () => {
+    const claude = await fakeClaude([[{ type: "tool_use", id: "toolu_1", name: "mcp__staff__ask_boss", input: { reason: "次のタスクが無い" } }]]);
+    const called: string[] = [];
+    await sdkAgent(await localQuery(claude.url, tempDir()))(task(gate(false, [], called), []));
+    expect(called).toEqual([]);
+    expect(JSON.stringify(toolResults(claude.received))).toContain("ルールで断る");
   });
 
   it("本物の SDK はフックが断ったツールを動かさず、理由を返す", async () => {

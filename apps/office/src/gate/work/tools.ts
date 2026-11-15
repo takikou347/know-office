@@ -11,6 +11,7 @@ import {
   ReviewSubmitTool,
   ServiceCloseRequestTool,
   recordedText,
+  ROLE_TOOLS,
   type StaffId,
   StaffRequestTool,
   StudySubmitTool,
@@ -18,7 +19,7 @@ import {
 } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { ZodType } from "zod";
-import { approvals, reviews } from "../db/main.ts";
+import { reviews } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import type { ExtensionDefinition, ExtensionTool } from "../extensions/define.ts";
 import { INSTALLED } from "../extensions/installed.ts";
@@ -45,6 +46,8 @@ export type ToolCall = {
   now: number;
   /** 要求のトレース ID */
   traceId?: string;
+  /** 作業トークンのタスク。ルートは必ず渡し、今のタスクと違えば断る */
+  nodeId?: string;
   /** 自動停止が外へ頼む口。ルールの外の操作を数える時に使う。無ければつないでいない口 */
   guard?: GuardDeps;
 };
@@ -54,13 +57,8 @@ type Run = (env: Bindings, forge: Forge, call: ToolCall, input: never) => Promis
 /** ツールの入力の形と中身 */
 type Tool = { schema: ZodType; run: Run };
 
-/** 役ごとに使えるツール。ここに無いツールは not_found で断る */
-// TODO(#72): idea_add、study_submit、service_close_request をルールの判断の操作 (core の rules/operation.ts) に足す
-const ROLE_TOOLS: Record<StaffId, readonly string[]> = {
-  president: ["node_create", "node_assign", "staff_request", "study_submit", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
-  builder: ["pr_open", "idea_add", "service_close_request", "ask_boss", "ask_owner"],
-  reviewer: ["review_submit", "idea_add", "ask_boss", "ask_owner"],
-};
+/** 役ごとに使えるツール。正本は core の ROLE_TOOLS で、ルールの判断と同じ一覧を使う。ここに無いツールは not_found で断る */
+const ROLE_TOOL_NAMES: Record<StaffId, readonly string[]> = ROLE_TOOLS;
 
 /** レビューのタスクを割り振る社員 */
 const REVIEWER: StaffId = "reviewer";
@@ -84,6 +82,8 @@ function actorOf(call: ToolCall): Actor {
 async function currentTask(env: Bindings, call: ToolCall): Promise<NodeRow> {
   const { nodeId } = await staffDo(env, call.staffId).status(call.now);
   if (nodeId === null) throw new AppError("conflict", "今のタスクが無い");
+  // 前のタスクの作業トークンで、今のタスクを動かさない
+  if (call.nodeId !== undefined && call.nodeId !== nodeId) throw new AppError("conflict", "作業トークンのタスクは今のタスクでない");
   return findNode(env.DB, nodeId);
 }
 
@@ -100,11 +100,18 @@ async function currentTask(env: Bindings, call: ToolCall): Promise<NodeRow> {
  */
 async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff_add" | "role_change" | "external_integration" | "cost_increase" | "service_close"; target: string; payload: Record<string, unknown> }): Promise<{ approvalId: string }> {
   const task = await currentTask(env, call);
-  if (!(await moveNode(env.DB, task, "waiting_owner", call.now))) throw new AppError("conflict", "タスクが変わった");
   const id = newId(clockAt(call.now));
-  await drizzle(env.DB)
-    .insert(approvals)
-    .values({ id, kind: approval.kind, target: approval.target, payload: { ...approval.payload, nodeId: task.id }, status: "pending", requestedBy: call.staffId, requestedAt: call.now });
+  // 承認を足す事とタスクを waiting_owner にする事を 1 回のバッチで書き、片方だけを残さない。読んだ版のまま、この社員の作業中の時だけ書く
+  // 承認を先に足し、タスクの移しは足した承認がある時だけにする。同じ版を読んだ 2 つ目は承認もタスクも書けない
+  const [added] = await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO approvals (id, kind, target, payload, status, requested_by, requested_at) SELECT ?, ?, ?, ?, 'pending', ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'doing' AND assignee = ?)",
+    ).bind(id, approval.kind, approval.target, JSON.stringify({ ...approval.payload, nodeId: task.id }), call.staffId, call.now, task.id, task.version, call.staffId),
+    env.DB.prepare(
+      "UPDATE nodes SET status = 'waiting_owner', version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND EXISTS (SELECT 1 FROM approvals WHERE id = ?)",
+    ).bind(call.now, task.id, task.version, id),
+  ]);
+  if ((added?.meta.changes ?? 0) === 0) throw new AppError("conflict", "タスクが変わった");
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "waiting_owner", detail: { approvalId: id, kind: approval.kind } }, actorOf(call));
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "approval.request", target: id, scope: task.scope, detail: { kind: approval.kind, target: approval.target }, traceId: call.traceId });
   // 答えを待つ間は次のタスクを進める
@@ -355,11 +362,11 @@ async function extensionTools(env: Bindings, extensions: readonly ExtensionDefin
  * @returns ゲートウェイでのツールの名前
  */
 export async function staffTools(env: Bindings, staffId: StaffId, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<string[]> {
-  return [...ROLE_TOOLS[staffId], ...(await extensionTools(env, extensions)).keys()];
+  return [...ROLE_TOOL_NAMES[staffId], ...(await extensionTools(env, extensions)).keys()];
 }
 
 /**
- * 社員のツールを 1 回動かす。`POST /ws/v1/tools/{toolName}` が作業トークンと判断を確かめた後に呼ぶ
+ * 社員のツールを 1 回動かす。テストと、確かめを済ませた呼び出しが使う
  * @param env バインディング
  * @param forge GitHub を呼ぶ口
  * @param call 呼び出し
@@ -370,33 +377,51 @@ export async function staffTools(env: Bindings, staffId: StaffId, extensions: re
  * @throws conflict 今のタスクが無いなど、今の状態では動かせない時
  */
 export async function runTool(env: Bindings, forge: Forge, call: ToolCall, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<ToolResult> {
-  if (EXT_TOOL_NAME.test(call.tool)) return runExtensionTool(env, call, extensions);
-  const tool = ROLE_TOOLS[call.staffId].includes(call.tool) ? TOOLS[call.tool] : undefined;
-  if (!tool) throw new AppError("not_found", "この社員の役では使えないツール");
-  const input = tool.schema.safeParse(call.input);
-  if (!input.success) throw new AppError("validation_failed", "ツールの入力の形が違う");
-  // 入力は上でツールごとのスキーマに通した物なので、そのツールの中身に渡せる
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  const result = await tool.run(env, forge, call, input.data as never);
-  return { content: JSON.stringify(result), isError: false };
+  return (await prepareTool(env, forge, call, extensions))();
 }
 
 /**
- * 入れている拡張のツールを動かす。拡張には時刻とその拡張の置き場だけを渡す
+ * 社員のツールを探し、入力を確かめて、動かす関数を返す。`POST /ws/v1/tools/{toolName}` は、これを通した後にルールの判断をしてから動かす
+ * @param env バインディング
+ * @param forge GitHub を呼ぶ口
+ * @param call 呼び出し
+ * @param extensions 読み込んだ拡張
+ * @returns 動かして社員に返す答えを作る関数
+ * @throws not_found その社員の役では使えないツールの時、入れていない拡張のツールの時
+ * @throws validation_failed 入力がツールの形に合わない時
+ */
+export async function prepareTool(env: Bindings, forge: Forge, call: ToolCall, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<() => Promise<ToolResult>> {
+  if (EXT_TOOL_NAME.test(call.tool)) return prepareExtensionTool(env, call, extensions);
+  const tool = ROLE_TOOL_NAMES[call.staffId].includes(call.tool) ? TOOLS[call.tool] : undefined;
+  if (!tool) throw new AppError("not_found", "この社員の役では使えないツール");
+  const input = tool.schema.safeParse(call.input);
+  if (!input.success) throw new AppError("validation_failed", "ツールの入力の形が違う");
+  return async () => {
+    // 入力は上でツールごとのスキーマに通した物なので、そのツールの中身に渡せる
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const result = await tool.run(env, forge, call, input.data as never);
+    return { content: JSON.stringify(result), isError: false };
+  };
+}
+
+/**
+ * 入れている拡張のツールを探し、入力を確かめて、動かす関数を返す。拡張には時刻とその拡張の置き場だけを渡す
  * @param env バインディング
  * @param call 呼び出し
  * @param extensions 読み込んだ拡張
- * @returns 社員に返す答え
+ * @returns 動かして社員に返す答えを作る関数
  * @throws not_found 入れていない拡張のツールの時
  * @throws validation_failed 入力がツールの形に合わない時
  */
-async function runExtensionTool(env: Bindings, call: ToolCall, extensions: readonly ExtensionDefinition[]): Promise<ToolResult> {
+async function prepareExtensionTool(env: Bindings, call: ToolCall, extensions: readonly ExtensionDefinition[]): Promise<() => Promise<ToolResult>> {
   const found = (await extensionTools(env, extensions)).get(call.tool);
   if (!found) throw new AppError("not_found", "入れていない拡張のツール");
   const input = found.tool.schema.safeParse(call.input);
   if (!input.success) throw new AppError("validation_failed", "ツールの入力の形が違う");
-  // 入力は上でツールのスキーマに通した物なので、そのツールの中身に渡せる
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  const result = await found.tool.run({ now: call.now, store: extensionStore(env.FILES, found.ext.id) }, input.data as never);
-  return { content: JSON.stringify(result), isError: false };
+  return async () => {
+    // 入力は上でツールのスキーマに通した物なので、そのツールの中身に渡せる
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const result = await found.tool.run({ now: call.now, store: extensionStore(env.FILES, found.ext.id) }, input.data as never);
+    return { content: JSON.stringify(result), isError: false };
+  };
 }

@@ -4,11 +4,10 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, recordedText, toOperation, type OperationKind } from "../src/index.ts";
+import { DEFAULT_RULES, decide, maskSecrets, OPERATION_KINDS, recordedText, ROLE_TOOLS, toOperation, type OperationKind } from "../src/index.ts";
 import { type Case, CASES } from "./rules.cases.ts";
 
 const ALWAYS_DENIED: readonly OperationKind[] = ["secret.read", "guard.access", "staff.manage", "unknown"];
-const ALWAYS_ALLOWED: readonly OperationKind[] = ["office.tool"];
 
 /**
  * 1 組を判断する
@@ -25,7 +24,7 @@ describe("ルールの判断", () => {
     expect(Object.keys(CASES).toSorted()).toEqual([...OPERATION_KINDS].toSorted());
   });
 
-  it.each(OPERATION_KINDS.filter((k) => !ALWAYS_DENIED.includes(k) && !ALWAYS_ALLOWED.includes(k)))("%s は通す場合と断る場合を並べる", (kind) => {
+  it.each(OPERATION_KINDS.filter((k) => !ALWAYS_DENIED.includes(k)))("%s は通す場合と断る場合を並べる", (kind) => {
     expect(CASES[kind].allow.length).toBeGreaterThan(0);
     expect(CASES[kind].deny.length).toBeGreaterThan(0);
   });
@@ -95,6 +94,36 @@ describe("ルールの判断", () => {
       expect(code).not.toBe(0);
       expect(output).toContain("decide.ts");
     });
+  });
+});
+
+/**
+ * 社員の役のツールを前提にして、社員のツールを判断する
+ * @param role 役
+ * @param name ツールの名前 (mcp__staff__ を外した物)
+ * @returns 操作と判断
+ */
+function asRole(role: keyof typeof ROLE_TOOLS, name: string) {
+  return judge({ name, tool: `mcp__staff__${name}`, input: {}, ctx: { officeTools: ROLE_TOOLS[role] } });
+}
+
+describe("社員のツールは役ごとに通す", () => {
+  it.each([
+    { role: "president", allow: ["node_create", "node_assign", "staff_request", "study_submit", "service_close_request"], deny: ["pr_open", "review_submit"] },
+    { role: "builder", allow: ["pr_open", "service_close_request"], deny: ["node_create", "node_assign", "staff_request", "study_submit", "review_submit"] },
+    { role: "reviewer", allow: ["review_submit"], deny: ["pr_open", "staff_request", "node_create", "service_close_request"] },
+  ] as const)("$role は役のツールだけを通す", ({ role, allow, deny }) => {
+    expect(allow.map((name) => [name, asRole(role, name).decision.allow])).toEqual(allow.map((name) => [name, true]));
+    expect(deny.map((name) => [name, asRole(role, name).op.kind, asRole(role, name).decision.allow])).toEqual(deny.map((name) => [name, "office.tool", false]));
+  });
+
+  it.each(["president", "builder", "reviewer"] as const)("%s も ask_boss、ask_owner、idea_add を使える", (role) => {
+    expect(["ask_boss", "ask_owner", "idea_add"].map((name) => asRole(role, name).decision.allow)).toEqual([true, true, true]);
+  });
+
+  it("staff_request は社員を触る操作でなく社員のツールにし、staff で始まるほかの名前は今のまま断る", () => {
+    expect(toOperation("mcp__staff__staff_request", { kind: "staff_add" })).toMatchObject({ kind: "office.tool", target: "staff_request" });
+    expect(toOperation("mcp__staff__staff_create", {}).kind).toBe("staff.manage");
   });
 });
 

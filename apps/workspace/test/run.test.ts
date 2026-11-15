@@ -1,10 +1,11 @@
 // タスク 1 件の SDK の呼び出しと、作業トークンを差し替えた時の続きからの呼び直しを確かめる (社員が考えるの 3.2)
+import type { RunInput } from "@know-office/core";
 import { describe, expect, it, vi } from "vitest";
 import type { Agent, AgentCall } from "../src/agent.ts";
 import { Runner } from "../src/run.ts";
 
 const NODE = "0190f4a8-0000-7000-8000-000000000101";
-const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す" } as const;
+const RUN: RunInput = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す", tools: ["ask_boss"] };
 
 /**
  * 呼ばれた SDK の呼び出しを並べ、止めるまで終わらない SDK の代わりを作る
@@ -41,6 +42,8 @@ describe("1 時間を超えるタスク", () => {
     expect(calls[0]?.options.env.ANTHROPIC_API_KEY).toBe("ticket-1");
     expect(calls[0]?.options.resume).toBeUndefined();
     expect(runner.token()).toBe("ticket-1");
+    // 社員のツールの受け手は、呼び直すたびに作り直す
+    expect(calls[0]?.options.mcpServers.staff).toMatchObject({ type: "sdk", name: "staff" });
 
     runner.replaceTicket("ticket-2");
     // フックは次の判断から新しい作業トークンを使う
@@ -50,6 +53,7 @@ describe("1 時間を超えるタスク", () => {
     expect(calls[0]?.options.abortController.signal.aborted).toBe(true);
     expect(calls[1]?.options.env.ANTHROPIC_API_KEY).toBe("ticket-2");
     expect(calls[1]?.options.resume).toBe("session-1");
+    expect(calls[1]?.options.mcpServers.staff).not.toBe(calls[0]?.options.mcpServers.staff);
     expect(runner.running).toBe(true);
 
     finish();

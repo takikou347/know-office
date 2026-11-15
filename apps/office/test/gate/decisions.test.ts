@@ -117,6 +117,16 @@ describe("鍵はゲートウェイだけが持つ", () => {
     expect((await ask(work, "Read", { file_path: "/work/a.ts" })).status).toBe(401);
   });
 
+  it("社員のツールは社員の役で使える物だけを通し、役で使えないツールは断って記録する", async () => {
+    const work = await startTask();
+    expect(await decision(work, "mcp__staff__pr_open", { name: "fix", title: "直す", body: "本文" })).toEqual({ allow: true, reason: "役で使える社員のツール" });
+    expect(await decision(work, "mcp__staff__node_create", {})).toEqual({ allow: false, reason: "役で使えない社員のツールは断る" });
+    expect(await toolCalls(work.nodeId)).toMatchObject([
+      { tool: "mcp__staff__pr_open", op_kind: "office.tool", target: "pr_open", allowed: 1 },
+      { tool: "mcp__staff__node_create", op_kind: "office.tool", target: "node_create", allowed: 0 },
+    ]);
+  });
+
   it("社員かタスクが止まっている間は 409 stopped で断る", async () => {
     const work = await startTask();
     await w.d1.DB.prepare(

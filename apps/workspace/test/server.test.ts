@@ -11,7 +11,7 @@ import { sessionFile, TranscriptShipper } from "../src/transcript.ts";
 
 const NODE = "0190f4a8-0000-7000-8000-000000000101";
 const KEY = "a".repeat(64);
-const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す" };
+const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す", tools: ["ask_boss"] };
 
 describe("ワークスペース", () => {
   const calls: AgentCall[] = [];

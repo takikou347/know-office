@@ -1,4 +1,5 @@
 // タスクの木、組織図、オーナーの承認の返す形と入力 (タスクとレビューの 1 章と 2 章、データの 2.2 と 2.5)
+import { Meta } from "./common.ts";
 import { StaffId } from "./workday.ts";
 import { z } from "./zod.ts";
 
@@ -184,3 +185,21 @@ export const ToolResult = z.object({ content: z.string(), isError: z.boolean() }
 
 /** 社員のツールの答えの型 */
 export type ToolResult = z.infer<typeof ToolResult>;
+
+/** 社員のツールの名前の形。社員のツール (`node_create`) か、入れている拡張のツール (`ext__<拡張 ID>__<ツール>`) だけを受ける */
+export const TOOL_NAME = /^(?:[a-z][a-z\d_]*|ext__[a-z][a-z\d-]*__[a-z][a-z\d_]*)$/;
+
+/** 社員のツールの名前の長さの上限 */
+export const TOOL_NAME_MAX = 100;
+
+/** POST /ws/v1/tools/{toolName} の入力。toolInput の形はツールごとの Zod スキーマでゲートウェイが確かめる */
+export const ToolCallInput = z
+  .object({ toolInput: z.record(z.string(), z.unknown()) })
+  .strict()
+  .meta({ id: "ToolCallInput" });
+
+/** 社員のツールを呼ぶ入力の型 */
+export type ToolCallInput = z.infer<typeof ToolCallInput>;
+
+/** POST /ws/v1/tools/{toolName} の返事。ワークスペースが読む */
+export const ToolCallAnswer = z.object({ data: ToolResult, meta: Meta }).strict();

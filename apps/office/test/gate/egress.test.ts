@@ -219,7 +219,7 @@ describe("ワークスペースを分ける", () => {
     expect((await send("https://api.anthropic.com:443/v1/messages", { method: "POST", body: "{}" })).status).toBe(401);
   });
 
-  const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す" };
+  const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す", tools: ["pr_open"] };
 
   it("起こすたびに新しい鍵を作ってコンテナに渡し、タスクの開始と作業トークンの差し替えに付ける", async () => {
     const { container, seen } = fakeContainer();

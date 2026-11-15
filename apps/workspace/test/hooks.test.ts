@@ -3,6 +3,7 @@ import type { Fetcher } from "@know-office/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentOptions, WORK_ROOT } from "../src/agent.ts";
 import { DECISION_TIMEOUT_MS, GATE_DECISIONS_URL, preToolUse, type DeniedCall, type HookDeps } from "../src/hooks.ts";
+import { staffServer } from "../src/staff-tools.ts";
 
 /** 判断を聞いた中身 */
 type Seen = { url: string; init: RequestInit | undefined };
@@ -136,7 +137,8 @@ describe("フックからルールの判断を聞く", () => {
 describe("ワークスペースを分ける", () => {
   it("フックを書き換えられない", () => {
     const { hook } = setup(() => answer(true, "通す"));
-    const options = agentOptions({ ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", hook, abortController: new AbortController() });
+    const staff = staffServer({ fetcher: () => Promise.reject(new Error("呼ばない")), token: () => "ticket-1" }, []);
+    const options = agentOptions({ ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", hook, staff, abortController: new AbortController() });
     // リポジトリの中の .claude/ の設定と、利用者の設定を読まない。フックは関数で渡し、ファイルから読まない
     expect(options.settingSources).toEqual([]);
     expect(options.hooks).toEqual({ PreToolUse: [{ hooks: [hook] }] });

@@ -15,6 +15,7 @@ import { problems } from "./openapi.ts";
 import { noContent } from "./respond.ts";
 import { rethrowRpc } from "./rpc.ts";
 import { decisionRoutes } from "./work/decisions.ts";
+import { toolRoutes } from "./work/tool-route.ts";
 import { relayClaude } from "./work/relay.ts";
 import { authenticateTicket, bearer, type Caller, renewTicket, ticketTask } from "./work/ticket.ts";
 
@@ -142,6 +143,7 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     return noContent(c);
   });
   decisionRoutes(app, caller, options.extensions ?? INSTALLED);
+  toolRoutes(app, caller, options.extensions ?? INSTALLED);
   app.all("*", (c) => {
     const host = new URL(c.req.url).hostname;
     if (host !== "gate.internal") throw new AppError("unavailable", `${host} へのプロキシは無い`);

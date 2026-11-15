@@ -2,6 +2,7 @@
 import { AppError, log, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
 import { type Agent, agentOptions } from "./agent.ts";
 import { type HookDeps, preToolUse } from "./hooks.ts";
+import { staffServer } from "./staff-tools.ts";
 
 /** 作業トークンを差し替えて呼び直す時に、今の呼び出しを止める理由 */
 class TicketRenewed extends Error {
@@ -133,10 +134,12 @@ export class Runner {
         current.renewPending = false;
         const controller = current.controller;
         const hook = preToolUse({ ...this.#hookBase, token: () => this.token() });
+        // MCP の受け手は SDK の呼び出しごとに作る。作業トークンはツールを呼ぶたびに今の物を読む
+        const staff = staffServer({ fetcher: this.#hookBase.fetcher, token: () => this.token() }, current.input.tools);
         try {
           await this.#agent({
             prompt,
-            options: agentOptions({ ...current.input, ticket: current.ticket, hook, abortController: controller, resume: current.sessionId }),
+            options: agentOptions({ ...current.input, ticket: current.ticket, hook, staff, abortController: controller, resume: current.sessionId }),
             onSession: (sessionId) => {
               current.sessionId = sessionId;
               if (current.renewPending && !controller.signal.aborted) controller.abort(new TicketRenewed("作業トークンを差し替えた"));

@@ -31,6 +31,9 @@ export function sdkOptions(options: AgentOptions): Options {
     // env は SDK の子のプロセスの環境変数を置き換える。process.env は受け継がない
     env: options.env,
     hooks: options.hooks,
+    // MCP の受け手は渡した物だけを使い、置き場や利用者の MCP の設定を読まない
+    mcpServers: options.mcpServers,
+    strictMcpConfig: true,
     permissionMode: "dontAsk",
     abortController: options.abortController,
     ...(options.resume === undefined ? {} : { resume: options.resume }),

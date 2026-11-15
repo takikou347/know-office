@@ -34,12 +34,12 @@ export type Operation = {
 
 import { secretPath } from "./path.ts";
 import { pathsOf, shellSegments } from "./shell.ts";
+import { isStaffTool } from "./staff-tools.ts";
 
 // 社員のツールは MCP の受け手 staff が出す。SDK には mcp__staff__<名前> で届く
 const STAFF_TOOL = /^mcp__staff__(\w+)$/;
 // 拡張のツールは同じ受け手が mcp__staff__ext__<拡張 ID>__<ツール> で出す。形は core の EXTENSION_ID と EXTENSION_TOOL と同じ
 const EXT_TOOL = /^mcp__staff__ext__([a-z][a-z\d]*(?:-[a-z\d]+)*)__([a-z][a-z\d]*(?:_[a-z\d]+)*)$/;
-const OFFICE_TOOLS = ["checkpoint", "report", "ask_boss"];
 
 // 鍵の形 (GitHub と Anthropic の鍵の頭、Bearer)、鍵の環境変数、環境変数を全部出す命令。鍵の頭は語の途中に埋めても当たるよう \b を付けない
 const SECRET_TEXT = [
@@ -158,10 +158,12 @@ export function toOperation(toolName: string, toolInput: unknown): Operation {
   if (toolName.startsWith("mcp__staff__ext__")) return op("unknown", toolName);
   const staff = STAFF_TOOL.exec(toolName)?.[1];
   if (staff !== undefined) {
+    // 決めた名前の社員のツールは、名前の頭 (staff_request の staff) で鍵や社員を触る試みと取り違えない。役で使えるかは decide が見る
+    if (isStaffTool(staff)) return op("office.tool", staff);
     const hit = sensitive(staff, "");
     if (hit) return op(hit, staff);
     if (staff === "owner_info_read") return op("owner_info.read", text(input, "item"));
-    return OFFICE_TOOLS.includes(staff) ? op("office.tool", staff) : op("unknown", staff);
+    return op("unknown", staff);
   }
   switch (toolName) {
     case "Read":

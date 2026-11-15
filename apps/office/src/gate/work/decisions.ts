@@ -13,6 +13,7 @@ import {
   type RuleContext,
   type RuleDecision,
   recordedText,
+  ROLE_TOOLS,
   type StaffId,
   toOperation,
 } from "@know-office/core";
@@ -49,6 +50,29 @@ const decideRoute = createRoute({
 async function protectedPathsOf(env: Bindings, scope: string): Promise<string[]> {
   if (scope !== "office") return (await serviceRules(env.DB, scope)).protectedPaths;
   return INHERITED_SETTINGS.protectedPaths.parse((await loadOfficeDefaults(env.DB)).protectedPaths.value);
+}
+
+/**
+ * ルールの判断の前提を作る。触れない所、外部の文章の印、入れている拡張のツール、社員の役で使える社員のツールを判断のたびに読む
+ * @param env バインディング
+ * @param who 社員とタスク
+ * @param who.staffId 社員 ID
+ * @param who.nodeId タスク ID
+ * @param who.scope タスクの範囲
+ * @param op 判断する操作
+ * @param extensions 読み込んだ拡張
+ * @returns 判断の前提
+ */
+export async function ruleContext(env: Bindings, who: { staffId: StaffId; nodeId: string; scope: string }, op: Operation, extensions: readonly ExtensionDefinition[]): Promise<RuleContext> {
+  return {
+    ...DEFAULT_RULES,
+    officeTools: ROLE_TOOLS[who.staffId],
+    protectedPaths: await protectedPathsOf(env, who.scope),
+    // 外部の文章の印はオーナーの情報の判断だけが見るので、その時だけ社員 DO に聞く
+    external: op.kind === "owner_info.read" && (await staffOf(env, who.staffId).externalSources(who.nodeId)).length > 0,
+    // 拡張のツールは、判断のたびに設定で入れている拡張から読む
+    extensionTools: op.kind === "ext.tool" ? (await enabledExtensions(env.DB, extensions)).flatMap((e) => Object.keys(e.tools).map((t) => `${e.id}.${t}`)) : [],
+  };
 }
 
 /** 観察が止めた時に返す答え。ルールが通す判断でも断る */
@@ -99,16 +123,7 @@ export function decisionRoutes(app: OpenAPIHono<GateEnv>, caller: Caller, extens
     await ensureRunning(c.env, staffId, nodeId);
     const node = await findNode(c.env.DB, nodeId);
     const op = toOperation(input.toolName, input.toolInput);
-    const staff = staffOf(c.env, staffId);
-    // 外部の文章の印はオーナーの情報の判断だけが見るので、その時だけ社員 DO に聞く
-    const ctx: RuleContext = {
-      ...DEFAULT_RULES,
-      protectedPaths: await protectedPathsOf(c.env, node.scope),
-      external: op.kind === "owner_info.read" && (await staff.externalSources(nodeId)).length > 0,
-      // 拡張のツールは、判断のたびに設定で入れている拡張から読む
-      extensionTools: op.kind === "ext.tool" ? (await enabledExtensions(c.env.DB, extensions)).flatMap((e) => Object.keys(e.tools).map((t) => `${e.id}.${t}`)) : [],
-    };
-    const decision = decide(op, ctx);
+    const decision = decide(op, await ruleContext(c.env, { staffId, nodeId, scope: node.scope }, op, extensions));
     const target = recordedText(op.target);
     // 数えは記録より先に渡す。tool_calls に書けずに 500 を返しても、自動停止の数えには入る
     const answer: Decision = (await count(c.env, { staffId, nodeId, op, decision, target }, now, c.var.guard, c.var.traceId)) ? STOPPED : { allow: decision.allow, reason: decision.reason };

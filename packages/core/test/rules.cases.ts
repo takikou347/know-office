@@ -121,11 +121,13 @@ export const CASES: Record<OperationKind, { allow: Case[]; deny: Case[] }> = {
   },
   "office.tool": {
     allow: [
-      { name: "チェックポイントを伝える", tool: "mcp__staff__checkpoint", input: { kind: "commit" } },
-      { name: "オーナーに話す", tool: "mcp__staff__report", input: { body: "終わった" } },
-      { name: "上司に聞く", tool: "mcp__staff__ask_boss", input: { body: "次は" } },
+      { name: "上司に聞く", tool: "mcp__staff__ask_boss", input: { reason: "次は" }, ctx: { officeTools: ["ask_boss"] } },
+      { name: "社長が社員の追加を求める", tool: "mcp__staff__staff_request", input: { kind: "staff_add" }, ctx: { officeTools: ["staff_request"] } },
     ],
-    deny: [],
+    deny: [
+      { name: "役で使えない社員のツール", tool: "mcp__staff__pr_open", input: {}, ctx: { officeTools: ["ask_boss"] } },
+      { name: "役の一覧が空なら社員のツールを断る", tool: "mcp__staff__ask_boss", input: { reason: "次は" } },
+    ],
   },
   "ext.tool": {
     allow: [{ name: "入れた拡張のツール", tool: "mcp__staff__ext__sample-notes__note_read", input: {}, ctx: { extensionTools: ["sample-notes.note_read"] } }],
@@ -171,6 +173,8 @@ export const CASES: Record<OperationKind, { allow: Case[]; deny: Case[] }> = {
     deny: [
       { name: "知らないツール", tool: "KillShell", input: {} },
       { name: "知らない MCP のツール", tool: "mcp__other__owner_info_read", input: { item: "timezone" } },
+      { name: "中身の無いチェックポイントのツール", tool: "mcp__staff__checkpoint", input: { kind: "commit" }, ctx: { officeTools: ["ask_boss"] } },
+      { name: "中身の無いオーナーに話すツール", tool: "mcp__staff__report", input: { body: "終わった" }, ctx: { officeTools: ["ask_boss"] } },
     ],
   },
 };
