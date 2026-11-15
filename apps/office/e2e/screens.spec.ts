@@ -208,9 +208,13 @@ test("画面を移った直後に Tab を押しても、中身の先頭から進
 });
 
 test("ハッシュだけが違う同じ道へ移っても中身に移り、その後のタブの切り替えでは移らない", async ({ page }) => {
-  await page.goto("/staff/builder#x");
+  // 幅が狭いと社員の画面に一覧が出ないので、どの幅でも出る下のナビゲーションから同じ道へ移る
+  await page.goto("/staff#x");
   const main = page.getByRole("main");
-  await main.getByRole("link", { name: /作る役/ }).click();
+  await page.locator("nav:visible").getByRole("link", { name: "社員と仕事" }).click();
+  await expect(page).toHaveURL(/\/staff$/);
+  await expect(main).toBeFocused();
+  await main.getByRole("link", { name: /作る役/ }).first().click();
   await expect(main).toBeFocused();
   const tab = page.getByRole("tab", { name: "仕事の山" });
   await tab.click();
