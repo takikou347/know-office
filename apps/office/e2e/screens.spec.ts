@@ -198,11 +198,24 @@ test("画面を移った直後に Tab を押しても、中身の先頭から進
   // 描き直しを待たずに確かめる。次の描画まで中身に移らないと、その間に押した Tab の行き先が、後から中身に戻される
   const active = await page.evaluate(async () => {
     const link = [...document.querySelectorAll<HTMLAnchorElement>('nav a[href="/staff"]')].find((a) => a.getClientRects().length > 0);
+    const before = document.title;
     link?.click();
-    for (let n = 0; n < 5; n++) await Promise.resolve();
+    // 題は中身に移るのと同じ時に変わる。描画もタイマーも挟まず、microtask だけで待つ
+    for (let n = 0; document.title === before && n < 1000; n++) await Promise.resolve();
     return { tag: document.activeElement?.tagName, title: document.title };
   });
   expect(active).toEqual({ tag: "MAIN", title: "社員と仕事 - know-office" });
+});
+
+test("ハッシュだけが違う同じ道へ移っても中身に移り、その後のタブの切り替えでは移らない", async ({ page }) => {
+  await page.goto("/staff/builder#x");
+  const main = page.getByRole("main");
+  await main.getByRole("link", { name: /作る役/ }).click();
+  await expect(main).toBeFocused();
+  const tab = page.getByRole("tab", { name: "仕事の山" });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(main).not.toBeFocused();
 });
 
 test("画面を移ると、中身の先頭に戻り、中身に Tab で入れるままである", async ({ page }) => {

@@ -2,7 +2,7 @@ import "knowidea-tokens/tokens.css";
 import "knowidea-css/index.css";
 import "./app.css";
 import type { Extension, Health } from "@know-office/core";
-import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { StrictMode, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { ApiContext, createApi, sessionFetch } from "./api.ts";
@@ -45,36 +45,32 @@ function announce() {
  * @returns 今の URL と、移る関数
  */
 function useRoute() {
-  const [url, setUrl] = useState(urlNow);
-  // 画面が変わった時に、描いた直後に題と読み上げに伝える印
-  const moved = useRef(false);
+  // moves は画面を移った回数。同じ URL へ移った時 (ハッシュだけが違う時) も増えるので、描き直して伝えられる
+  const [route, setRoute] = useState(() => ({ url: urlNow(), moves: 0 }));
   const navigate = useCallback((to: string, opts?: { replace?: boolean }) => {
     // 今と同じ所へは履歴を積まない
     const here = window.location.pathname + window.location.search + window.location.hash;
     if (opts?.replace || to === here) {
       window.history.replaceState(null, "", to);
       shownPath = window.location.pathname;
-      setUrl(urlNow());
+      setRoute((r) => ({ url: urlNow(), moves: r.moves }));
       return;
     }
     window.history.pushState(null, "", to);
     shownPath = window.location.pathname;
-    moved.current = true;
-    setUrl(urlNow());
+    setRoute((r) => ({ url: urlNow(), moves: r.moves + 1 }));
   }, []);
   // 新しい画面を描いたのと同じ時に中身へ移る。次の描画まで待つと、その間に押した Tab の行き先を後から中身に戻してしまう
   useLayoutEffect(() => {
-    if (!moved.current) return;
-    moved.current = false;
-    announce();
-  }, [url]);
+    if (route.moves > 0) announce();
+  }, [route.moves]);
   useEffect(() => {
     document.title = titleNow();
     const onPop = () => {
       // 画面が変わった時だけ、先頭へ戻して中身に移る
-      if (window.location.pathname !== shownPath) moved.current = true;
+      const changed = window.location.pathname !== shownPath;
       shownPath = window.location.pathname;
-      setUrl(urlNow());
+      setRoute((r) => ({ url: urlNow(), moves: r.moves + (changed ? 1 : 0) }));
     };
     const onClick = (e: MouseEvent) => {
       const a = e.target instanceof Element ? e.target.closest("a") : null;
@@ -103,7 +99,7 @@ function useRoute() {
       document.removeEventListener("click", onClick);
     };
   }, [navigate]);
-  return { url, navigate };
+  return { url: route.url, navigate };
 }
 
 function Root() {
