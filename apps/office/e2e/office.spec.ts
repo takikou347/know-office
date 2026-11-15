@@ -6,7 +6,7 @@ import { withoutWebgl } from "./helpers/webgl.ts";
 // 画面のデータの変わりを出来事として見せて読み上げる。画面の 3.4
 
 /** 3D のコード (three.js と部屋の作り) とエディタのコードの要求か。開発の入口は 1 つずつ、作った物は分けた塊で出す */
-const heavy = /three|OfficeScene|pages\/office\/(room|figure|fur|face|props|walls|layout|furniture|marks|plan|vrm|themes)|codemirror|knowidea-ui_editor|editor-/i;
+const heavy = /three|OfficeScene|pages\/office\/(room|figure|fur|face|props|walls|layout|furniture|marks|plan|vrm|themes|model)|models\/puppy|codemirror|knowidea-ui_editor|editor-/i;
 
 /**
  * 部屋の canvas が出るまで待つ上限 (ミリ秒)。GPU の無い headless では、幅 360 で開いてから canvas が見えるまで
@@ -90,6 +90,7 @@ test.describe("速さ", () => {
     await page.goto("/office");
     await expect(roomOf(page).locator("canvas")).toBeVisible({ timeout: CANVAS_TIMEOUT });
     expect(urls.some((u) => /three/.test(u))).toBe(true);
+    expect(urls).toContain("/models/puppy/puppy.glb");
   });
 });
 
@@ -120,6 +121,20 @@ test.describe("オフィスの部屋", () => {
     await page.getByRole("button", { name: "不可" }).click();
     await openInApp(page, "オフィス");
     await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を作る役に差し戻した");
+  });
+
+  test("子犬のモデルを読んで部屋に置く", async ({ page }) => {
+    await page.goto("/office");
+    await expect(roomOf(page).locator("canvas")).toBeVisible();
+    await expect(roomOf(page)).toHaveAttribute("data-puppy", "model");
+  });
+
+  test("子犬のモデルを読めない時は形を組んだ子犬にする", async ({ page }) => {
+    await page.route("**/models/puppy/**", (route) => route.fulfill({ status: 404 }));
+    await page.goto("/office");
+    await expect(roomOf(page).locator("canvas")).toBeVisible();
+    await expect(roomOf(page)).toHaveAttribute("data-puppy", "shapes");
+    await expect(roomOf(page).getByRole("link", { name: /作る役/ })).toBeVisible();
   });
 
   test("WebGL が無い時は 2D の一覧", async ({ page }) => {

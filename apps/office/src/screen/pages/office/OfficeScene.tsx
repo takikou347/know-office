@@ -1,9 +1,10 @@
 // オフィスの 3D の部屋。オフィスの画面を開いた時だけ読み込み、社員の姿の上に、押すと会話が開くリンクを重ね、出来事の動きを見せる
 import "./office.css";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Staff } from "../../mock.ts";
 import { STAFF_STATES } from "../../parts/staff-status.tsx";
 import { type Loop, browserClock, createLoop } from "./loop.ts";
+import { type PuppyModel, loadPuppyModelOrNull } from "./model.ts";
 import type { EventBatch } from "./OfficePage.tsx";
 import { planMotions } from "./plan.ts";
 import { type ColorResolver, type Room, createRoom } from "./room.ts";
@@ -84,6 +85,26 @@ function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>): () =
 }
 
 /**
+ * 最後に受けた出来事のまとまりをまだ見せていなければ動きを積み、社員の状態を今にする
+ * @param c 組んだ部屋
+ * @param latest 最後に受けた出来事のまとまりと社員
+ * @param latest.batch 出来事のまとまり
+ * @param latest.people 社員と今の状態
+ * @param played 見せたまとまりの番号
+ * @param played.current 番号
+ * @param walks 歩かせるか
+ */
+function catchUp(c: Control, latest: { batch: EventBatch | null; people: readonly Staff[] }, played: { current: number }, walks: boolean): void {
+  const { batch, people } = latest;
+  if (batch && batch.id !== played.current) {
+    played.current = batch.id;
+    for (const e of batch.events) c.room.play(planMotions(e, c.room.actors(), { walks }));
+  }
+  c.room.setStates(people.map((s) => ({ id: s.id, state: s.state })));
+  c.place();
+}
+
+/**
  * オフィスの 3D の部屋
  * @param props 部屋に置く社員、出来事、動かすか、組めなかった時の呼び先、部屋の上に置く物
  * @returns 部屋と、社員のリンク
@@ -97,57 +118,85 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
   const first = useRef(batch?.before.staff ?? people);
   // 組む時の動かすかの初めの値。後の変わりは下の effect で部屋に伝え、組み直さない
   const moving = useRef(moves);
+  // 部屋を組む前に来た出来事を、組んだ後に見せるため、最後に受けた物を持つ
+  const latest = useRef({ batch, people });
+  // 子犬の姿の元。モデルを読む間は loading、読めたら model、読めなければ形を組んだ子犬の shapes
+  const [puppy, setPuppy] = useState<"loading" | "model" | "shapes">("loading");
 
   useEffect(() => {
-    const box = frame.current;
-    if (!box) return undefined;
-    // canvas は組むたびに作る。捨てる時に描く所を手放すと、同じ canvas では描けなくなる
-    const el = document.createElement("canvas");
-    el.setAttribute("aria-hidden", "true");
-    box.prepend(el);
-    let room: Room;
-    try {
-      const seats = first.current.map((s) => ({ id: s.id, state: s.state }));
-      room = createRoom(el, seats, themeOf(OFFICE_THEME), colorResolver(box), { moves: moving.current, onLost: onFail });
-    } catch {
-      el.remove();
-      onFail();
-      return undefined;
-    }
-    const place = placer(room, links.current);
-    const loop = createLoop((t) => {
-      room.render(t);
-      place();
-    }, browserClock());
-    let inView = true;
-    const sync = () => {
-      const shown = document.visibilityState === "visible";
-      if (moving.current && shown && inView) loop.start();
-      else loop.pause();
-    };
-    control.current = { room, loop, sync, place };
-    const fit = () => {
-      room.resize(el.clientWidth, el.clientHeight);
-      place();
-    };
-    const resized = new ResizeObserver(fit);
-    resized.observe(el);
-    const seen = new IntersectionObserver((entries) => {
-      inView = entries.some((e) => e.isIntersecting);
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    // 部屋を組み、描く回し方と、大きさや見えるかの見張りを付ける。返す関数で後始末をする
+    const build = (model: PuppyModel | null): (() => void) | undefined => {
+      const box = frame.current;
+      if (!box) {
+        model?.dispose();
+        return undefined;
+      }
+      // canvas は組むたびに作る。捨てる時に描く所を手放すと、同じ canvas では描けなくなる
+      const el = document.createElement("canvas");
+      el.setAttribute("aria-hidden", "true");
+      box.prepend(el);
+      let room: Room;
+      try {
+        const seats = first.current.map((s) => ({ id: s.id, state: s.state }));
+        room = createRoom(el, seats, themeOf(OFFICE_THEME), colorResolver(box), { moves: moving.current, onLost: onFail, model });
+      } catch {
+        model?.dispose();
+        el.remove();
+        onFail();
+        return undefined;
+      }
+      const place = placer(room, links.current);
+      const loop = createLoop((t) => {
+        room.render(t);
+        place();
+      }, browserClock());
+      let inView = true;
+      const sync = () => {
+        const shown = document.visibilityState === "visible";
+        if (moving.current && shown && inView) loop.start();
+        else loop.pause();
+      };
+      control.current = { room, loop, sync, place };
+      // モデルを読む間に来た出来事と状態を、組んだ部屋に当てる
+      catchUp(control.current, latest.current, played, moving.current);
+      const fit = () => {
+        room.resize(el.clientWidth, el.clientHeight);
+        place();
+      };
+      const resized = new ResizeObserver(fit);
+      resized.observe(el);
+      const seen = new IntersectionObserver((entries) => {
+        inView = entries.some((e) => e.isIntersecting);
+        sync();
+      });
+      seen.observe(el);
+      document.addEventListener("visibilitychange", sync);
+      fit();
       sync();
+      return () => {
+        document.removeEventListener("visibilitychange", sync);
+        seen.disconnect();
+        resized.disconnect();
+        loop.stop();
+        room.dispose();
+        el.remove();
+        control.current = null;
+      };
+    };
+    // 子犬のモデルを読んでから部屋を組む。読めない時と遅い時は、待たずに形を組んだ子犬で組む
+    void loadPuppyModelOrNull().then((model) => {
+      if (cancelled) {
+        model?.dispose();
+        return;
+      }
+      setPuppy(model ? "model" : "shapes");
+      cleanup = build(model);
     });
-    seen.observe(el);
-    document.addEventListener("visibilitychange", sync);
-    fit();
-    sync();
     return () => {
-      document.removeEventListener("visibilitychange", sync);
-      seen.disconnect();
-      resized.disconnect();
-      loop.stop();
-      room.dispose();
-      el.remove();
-      control.current = null;
+      cancelled = true;
+      cleanup?.();
     };
   }, [onFail]);
 
@@ -162,23 +211,13 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
 
   // 出来事のまとまりが来たら、前の状態のまま動きを決めて積み、それから今の状態にする
   useEffect(() => {
+    latest.current = { batch, people };
     const c = control.current;
-    if (!c || !batch || batch.id === played.current) return;
-    played.current = batch.id;
-    for (const e of batch.events) c.room.play(planMotions(e, c.room.actors(), { walks: moving.current }));
-    c.room.setStates(people.map((s) => ({ id: s.id, state: s.state })));
-    c.place();
+    if (c) catchUp(c, latest.current, played, moving.current);
   }, [batch, people]);
 
-  useEffect(() => {
-    const c = control.current;
-    if (!c) return;
-    c.room.setStates(people.map((s) => ({ id: s.id, state: s.state })));
-    c.place();
-  }, [people]);
-
   return (
-    <section className="ko-office-room" aria-label="オフィスの部屋" data-motion={moves ? "moving" : "still"}>
+    <section className="ko-office-room" aria-label="オフィスの部屋" data-motion={moves ? "moving" : "still"} data-puppy={puppy}>
       <div className="ko-office-frame" ref={frame}>
         {people.map((s) => (
           <a

@@ -1,4 +1,4 @@
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Scene, Texture } from "three";
+import { Bone, BoxGeometry, Group, Mesh, MeshStandardMaterial, Scene, Skeleton, SkinnedMesh, Texture } from "three";
 import { describe, expect, it } from "vitest";
 import { disposeScene } from "../../src/screen/pages/office/cleanup.ts";
 
@@ -27,6 +27,27 @@ describe("後始末", () => {
     const checks = [watch(geometry), watch(material), watch(map)];
     disposeScene(scene, []);
     expect(checks.map((gone) => gone())).toEqual([true, true, true]);
+  });
+
+  it("材質の法線の模様と、骨の付いた形の骨の模様も捨てる", () => {
+    const scene = new Scene();
+    const normalMap = new Texture();
+    const bone = new Bone();
+    const skeleton = new Skeleton([bone]);
+    const mesh = new SkinnedMesh(new BoxGeometry(), new MeshStandardMaterial({ normalMap }));
+    mesh.add(bone);
+    mesh.bind(skeleton);
+    scene.add(mesh);
+    // 骨の並びは知らせを出さないので、捨てる呼び出しを数える
+    let skeletonGone = false;
+    const dispose = skeleton.dispose.bind(skeleton);
+    skeleton.dispose = () => {
+      skeletonGone = true;
+      dispose();
+    };
+    const normalGone = watch(normalMap);
+    disposeScene(scene, []);
+    expect([normalGone(), skeletonGone]).toEqual([true, true]);
   });
 
   it("部屋に置いていない材質 (使い回しの置き場) も捨てる", () => {

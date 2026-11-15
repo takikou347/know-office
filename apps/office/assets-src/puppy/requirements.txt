@@ -1,0 +1,13 @@
+# 子犬のモデルを作る build.py の依存。Python 3.13 で uv pip install -r で入れる
+attrs==26.1.0
+bpy==5.3.0
+cattrs==26.2.1
+certifi==2026.10.23
+charset-normalizer==3.5.2
+cython==3.3.1
+idna==3.20
+numpy==2.5.4
+requests==2.34.2
+typing-extensions==4.16.0
+urllib3==2.8.0
+zstandard==0.25.0

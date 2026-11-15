@@ -108,6 +108,18 @@ const bodyPaint =
   };
 
 /**
+ * 足元の丸い影を作る。子犬は日の光の影を落とさず、この影で置く。動く物が影を落とさなければ、影の地図を描き直さずに済む
+ * @param color 影の色
+ * @returns 床に寝かせた影
+ */
+export function footShadow(color: Color): Mesh {
+  const shadow = new Mesh(new CircleGeometry(0.27, 24), new MeshBasicMaterial({ color, transparent: true, opacity: 0.2, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.006;
+  return shadow;
+}
+
+/**
  * 子犬の姿を作る
  * @param colors 子犬の色
  * @param prop 役目の小物
@@ -130,11 +142,7 @@ export function buildPuppy(colors: PuppyColors, prop: Prop, paperColor: Color): 
   root.scale.setScalar(PUPPY_SCALE);
   const body = new Group();
   root.add(body);
-  // 子犬は日の光の影を落とさず、足元の丸い影で置く。動く物が影を落とさなければ、影の地図を描き直さずに済む
-  const shadow = new Mesh(new CircleGeometry(0.27, 24), new MeshBasicMaterial({ color: colors.shadow, transparent: true, opacity: 0.2, depthWrite: false }));
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.006;
-  root.add(shadow);
+  root.add(footShadow(colors.shadow));
 
   // 胴: 頭より小さな丸い胴に、ふくらんだ胸とお尻
   const torso = new Group();

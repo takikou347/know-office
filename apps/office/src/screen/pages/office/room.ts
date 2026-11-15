@@ -1,15 +1,16 @@
 // オフィスの部屋。舞台と子犬の社員を組み (組み立て)、出来事の動きを進め (動き)、状態ごとの形を当てて描き (描画)、閉じる時に捨てる (片付け)
-import { Color, MeshStandardMaterial, Vector3 } from "three";
+import { Color, type Group, type Mesh, MeshStandardMaterial, type Object3D, Vector3 } from "three";
 import type { Staff } from "../../mock.ts";
 import { avatarSourceOf } from "./avatars.ts";
 import { disposeScene } from "./cleanup.ts";
 import { type ActorState, createDirector } from "./director.ts";
-import { PROPS, PUPPY_SCALE, type Puppy, applyPuppyPose, buildPuppy, coatOf, puppyScaleFor } from "./figure.ts";
+import { PROPS, PUPPY_SCALE, applyPuppyPose, buildPuppy, coatOf, puppyScaleFor } from "./figure.ts";
 import { furLayersFor } from "./fur.ts";
 import { type DeskParts, SEAT_HEIGHT, buildRoomShell, stackPaper } from "./furniture.ts";
 import { FLOOR, type Point, seatOf, stationOf } from "./layout.ts";
 import { buildMarks, type Marks, showMark } from "./marks.ts";
-import { activityOf, poseOf } from "./motion.ts";
+import { type PuppyClip, type PuppyModel, buildModelPuppy, clipOf, coatIdOf } from "./model.ts";
+import { type Pose, activityOf, poseOf } from "./motion.ts";
 import type { Actors, Step } from "./plan.ts";
 import { buildStage } from "./stage.ts";
 import type { OfficeTheme } from "./themes.ts";
@@ -59,12 +60,31 @@ export interface RoomOptions {
   moves: boolean;
   /** 描く所を失った時に呼ぶ */
   onLost: () => void;
+  /** 子犬のモデル。無ければ形を組んだ子犬にする */
+  model: PuppyModel | null;
 }
+
+/** 社員の姿。モデルの子犬と形を組んだ子犬で同じ口を持つ */
+interface Avatar {
+  /** 部屋に置く物 */
+  root: Group;
+  /** 子犬の姿 (VRM と差し替える時に隠す) */
+  body: Object3D;
+  /** くわえて運ぶ書類 */
+  paper: Mesh;
+  /** ある時刻の形を当てる */
+  pose: (pose: Pose, clip: PuppyClip, t: number) => void;
+  /** 描く毛の層の数を変える。モデルの子犬は毛を模様に焼いてあるので何もしない */
+  setFur: (layers: number) => void;
+}
+
+/** 3 体の動きの時刻のずらし (ミリ秒)。同じ時にまばたきしないようにする。時刻 0 でどれも目を開けている値にする */
+const PHASES = [0, 1100, 2300] as const;
 
 /** 社員の姿と状態 */
 interface Figure {
   state: Staff["state"];
-  puppy: Puppy;
+  avatar: Avatar;
   marks: Marks;
   vrm?: VrmAvatar;
 }
@@ -118,12 +138,21 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
   let disposed = false;
   const figures = new Map<string, Figure>();
   const states = new Map<string, ActorState>();
-  for (const s of seats) {
-    const puppy = buildPuppy({ ...puppyColors, coat: color(coatOf(theme, s.id)) }, PROPS[s.id] ?? null, paperMat.color);
+  const avatarOf = (id: string, index: number): Avatar => {
+    const prop = PROPS[id] ?? null;
+    if (opts.model) {
+      const p = buildModelPuppy(opts.model, coatIdOf(id), prop, puppyColors, paperMat.color, PHASES[index % PHASES.length]);
+      return { root: p.root, body: p.body, paper: p.paper, pose: p.apply, setFur: () => undefined };
+    }
+    const p = buildPuppy({ ...puppyColors, coat: color(coatOf(theme, id)) }, prop, paperMat.color);
+    return { root: p.root, body: p.body, paper: p.paper, pose: (pose) => applyPuppyPose(p, pose), setFur: p.setFur };
+  };
+  for (const [index, s] of seats.entries()) {
+    const avatar = avatarOf(s.id, index);
     const marks = buildMarks(markColors);
-    puppy.root.add(marks.group);
-    scene.add(puppy.root);
-    const figure: Figure = { state: s.state, puppy, marks };
+    avatar.root.add(marks.group);
+    scene.add(avatar.root);
+    const figure: Figure = { state: s.state, avatar, marks };
     figures.set(s.id, figure);
     const at = stationOf(s.id, s.state);
     states.set(s.id, { id: s.id, pos: at ?? { x: 0, z: 0 }, face: at?.face ?? 0, present: at !== null, carry: false, walking: false, giving: false, mark: null });
@@ -133,8 +162,8 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
       loadVrmAvatar(source.url)
         .then((vrm) => {
           if (disposed) return vrm.dispose();
-          puppy.body.visible = false;
-          puppy.root.add(vrm.object);
+          avatar.body.visible = false;
+          avatar.root.add(vrm.object);
           figure.vrm = vrm;
         })
         .catch(() => undefined);
@@ -167,14 +196,15 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     for (const [id, f] of figures) {
       const a = states.get(id);
       if (!a) continue;
-      const pose = a.giving ? poseOf("walk", 0) : poseOf(a.walking ? "walk" : activityOf(f.state), at);
+      const activity = a.walking ? "walk" : activityOf(f.state);
+      const pose = a.giving ? poseOf("walk", 0) : poseOf(activity, at);
       const seated = pose.posture === "sit" && atSeat(id, a.pos);
-      applyPuppyPose(f.puppy, { ...pose, visible: a.present && (a.walking || pose.visible) });
+      f.avatar.pose({ ...pose, visible: a.present && (a.walking || pose.visible) }, clipOf(a.giving ? "give" : activity), at);
       f.vrm?.applyPose(pose);
       f.vrm?.update(1 / 30);
-      f.puppy.root.position.set(a.pos.x, seated ? SEAT_HEIGHT : 0, a.pos.z);
-      f.puppy.root.rotation.y = a.face;
-      f.puppy.paper.visible = a.carry;
+      f.avatar.root.position.set(a.pos.x, seated ? SEAT_HEIGHT : 0, a.pos.z);
+      f.avatar.root.rotation.y = a.face;
+      f.avatar.paper.visible = a.carry;
       // 歩いている間は止めた印を出さない
       const stopMark = a.walking ? null : pose.mark;
       showMark(f.marks, a.mark?.kind ?? stopMark, camera);
@@ -197,8 +227,8 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
       scale = puppyScaleFor(size.width);
       const layers = furLayersFor(size.width);
       for (const f of figures.values()) {
-        f.puppy.root.scale.setScalar(scale);
-        f.puppy.setFur(layers);
+        f.avatar.root.scale.setScalar(scale);
+        f.avatar.setFur(layers);
       }
       draw(0);
     },
@@ -255,6 +285,8 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
       canvas.removeEventListener("webglcontextlost", lost);
       for (const f of figures.values()) f.vrm?.dispose();
       disposeScene(scene, materials.values());
+      // 写しは元の形を分け合うので、元のモデルも最後に捨てる
+      opts.model?.dispose();
       sun.shadow.map?.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
