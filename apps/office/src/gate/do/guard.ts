@@ -5,6 +5,7 @@ import { type Admission, type Challenge, GuardBook, type RateBucket } from "../a
 import type { Bindings, Guard } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
 import { type KeyState, OfficeGuard } from "../guard/office-guard.ts";
+import { noticeDenied } from "../ledger/notices.ts";
 
 /** 全体のセキュリティ DO。ゲートウェイだけが RPC で呼ぶ。時刻は呼ぶ側の Clock で渡す */
 export class GuardDO extends DurableObject<Bindings> implements Guard {
@@ -12,7 +13,7 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
     await this.env.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) VALUES (?, ?, 'warn', 'lockout', ?, ?, 'office')")
       .bind(newId(systemClock), at, "ログインの失敗が続いたため送信元を 15 分止めた", `送信元 ${ip} が 10 分に 5 回失敗した`)
       .run();
-  });
+  }, (at, count) => noticeDenied(this.env.DB, at, count));
 
   #office = new OfficeGuard(this.ctx.storage);
 
@@ -126,10 +127,20 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
    * @param ip 送信元
    * @param bucket レート制限の種類
    * @param now 今の時刻
+   * @param count 断った時に、401、403、429 の数に入れるか
    * @returns ロックアウト中か、待つ秒数
    */
-  admit(ip: string, bucket: RateBucket, now: number): Promise<Admission> {
-    return this.#book.admit(ip, bucket, now);
+  admit(ip: string, bucket: RateBucket, now: number, count?: boolean): Promise<Admission> {
+    return this.#book.admit(ip, bucket, now, count);
+  }
+
+  /**
+   * 入口のほかで断った 401 と 403 を 1 回数え、5 分に 50 回を超えたら知らせる
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  countDenied(now: number): Promise<null> {
+    return this.#book.countDenied(now);
   }
 
   /**

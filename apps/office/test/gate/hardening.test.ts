@@ -227,3 +227,118 @@ describe("WAF が無い時の守り", () => {
     expect(bad).toEqual([]);
   });
 });
+
+/**
+ * 断られた続きの通知を数える
+ * @returns denied_burst の通知の数
+ */
+async function bursts(): Promise<number> {
+  const row = await d1.DB.prepare("SELECT COUNT(*) AS n FROM notices WHERE kind = 'denied_burst'").first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/**
+ * 断った数を GuardDO の数え方に直に足す。1 回ずつ要求を出すと 5 秒を超えるので、超える手前までをここで数える
+ * @param n 回数
+ */
+async function prefill(n: number): Promise<void> {
+  for (let i = 0; i < n; i += 1) await test.guard.countDenied(clock.now());
+}
+
+/**
+ * Access の証明を付けずに呼び、401 を返させる
+ * @param ip 送信元
+ * @param path 呼ぶ道
+ */
+async function unauthenticated(ip = "192.0.2.1", path = "/api/v1/notices"): Promise<void> {
+  expect((await test.request(path, { headers: { "CF-Connecting-IP": ip } })).status).toBe(401);
+}
+
+describe("401、403、429 が 5 分に 50 回を超えたら知らせる", () => {
+  it("5 分に 50 回では出さず、51 回目で通知を 1 件出す", async () => {
+    await prefill(49);
+    await unauthenticated();
+    expect(await bursts()).toBe(0);
+    await unauthenticated("192.0.2.2");
+    expect(await bursts()).toBe(1);
+    const row = await d1.DB.prepare("SELECT level, scope, read_at FROM notices WHERE kind = 'denied_burst'").first();
+    expect(row).toEqual({ level: "warn", scope: "office", read_at: null });
+  });
+
+  it("401、403、429 を合わせて数える", async () => {
+    await prefill(48);
+    await unauthenticated();
+    const forbidden = await test.request("/api/v1/notices/0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/read", { method: "POST", headers: { ...signedIn, Origin: "https://evil.example" } });
+    expect(forbidden.status).toBe(403);
+    // ハッシュチェーンの確かめは 1 分に 1 回まで。2 回目は 429
+    const verify = { method: "POST", headers: { ...signedIn, Origin: ORIGIN, "CF-Connecting-IP": "203.0.113.9" } };
+    expect((await test.request("/api/v1/audit-logs/verify", verify)).status).not.toBe(429);
+    expect(await bursts()).toBe(0);
+    expect((await test.request("/api/v1/audit-logs/verify", verify)).status).toBe(429);
+    expect(await bursts()).toBe(1);
+  });
+
+  it("5 分より前の数は入れない", async () => {
+    await prefill(50);
+    clock.advance(5 * MINUTE);
+    await unauthenticated();
+    expect(await bursts()).toBe(0);
+  });
+
+  it("続く間は、読むまで同じ通知を重ねない", async () => {
+    await prefill(60);
+    clock.advance(6 * MINUTE);
+    await prefill(50);
+    await unauthenticated();
+    expect(await bursts()).toBe(1);
+    await d1.DB.prepare("UPDATE notices SET read_at = ? WHERE kind = 'denied_burst'").bind(clock.now()).run();
+    clock.advance(6 * MINUTE);
+    await prefill(50);
+    await unauthenticated("192.0.2.2");
+    expect(await bursts()).toBe(2);
+  });
+
+  it("同時に 51 回目と 52 回目が来ても、通知は 1 件", async () => {
+    await prefill(50);
+    await Promise.all([unauthenticated("192.0.2.3"), unauthenticated("192.0.2.4")]);
+    expect(await bursts()).toBe(1);
+  });
+
+  it("/api/v1/ と /ws/v1/ のほかの道は数えない", async () => {
+    await prefill(50);
+    const res = await test.request("/hooks/v1/github", { method: "POST", headers: { "CF-Connecting-IP": "192.0.2.5", "X-GitHub-Event": "ping", "Content-Type": "application/json" }, body: "{}" });
+    expect(res.status).toBe(401);
+    expect(await bursts()).toBe(0);
+  });
+
+  it("ロックアウトの 403 は 1 回ずつ数え、2 度数えない", async () => {
+    await prefill(40);
+    // 同じ送信元で 5 回失敗するとロックアウトになり、その後は 403
+    const from = { "CF-Connecting-IP": "198.51.100.77" };
+    const seen: number[] = [];
+    for (let i = 0; i < 10; i += 1) seen.push((await test.request("/api/v1/notices", { headers: from })).status);
+    expect(seen).toEqual([401, 401, 401, 401, 401, 403, 403, 403, 403, 403]);
+    expect(await bursts()).toBe(0);
+    expect((await test.request("/api/v1/notices", { headers: from })).status).toBe(403);
+    expect(await bursts()).toBe(1);
+  });
+
+  it("通知を書けなくても返事は変わらない", async () => {
+    await prefill(50);
+    const real = test.env.DB;
+    // 通知の文だけを落とす。D1 のうち、ゲートウェイの使うメソッドだけを持つ包み
+    const wrapped = {
+      prepare: (sql: string) => {
+        if (sql.includes("denied_burst")) throw new Error("書けない");
+        return real.prepare(sql);
+      },
+      batch: (statements: Parameters<typeof real.batch>[0]) => real.batch(statements),
+      exec: (query: string) => real.exec(query),
+    };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    test.env.DB = wrapped as unknown as typeof real;
+    await unauthenticated();
+    test.env.DB = real;
+    expect(await bursts()).toBe(0);
+  });
+});

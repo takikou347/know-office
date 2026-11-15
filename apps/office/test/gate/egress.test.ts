@@ -219,6 +219,17 @@ describe("ワークスペースを分ける", () => {
     expect((await send("https://api.anthropic.com:443/v1/messages", { method: "POST", body: "{}" })).status).toBe(401);
   });
 
+  it("ハートビートとチェックポイントの 429 も、401、403、429 の数に入れる", async () => {
+    w.clock.advance(jst(9, 1) - w.clock.now());
+    const workspaceId = workspaceIdOf(w.gate.env, "builder");
+    // 1 分の 60 回と、5 分の 50 回の手前までを直に数える
+    for (let i = 0; i < 60; i += 1) await w.gate.guard.admit(`workspace:${workspaceId}`, "workspace", w.clock.now());
+    for (let i = 0; i < 50; i += 1) await w.gate.guard.countDenied(w.clock.now());
+    const beat = await send("http://gate.internal/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(jst(9, 1)).toISOString() }) });
+    expect(beat.status).toBe(429);
+    expect(await rows(w, "SELECT COUNT(*) AS n FROM notices WHERE kind = 'denied_burst'")).toEqual([{ n: 1 }]);
+  });
+
   const RUN = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す", tools: ["pr_open"] };
 
   it("起こすたびに新しい鍵を作ってコンテナに渡し、タスクの開始と作業トークンの差し替えに付ける", async () => {

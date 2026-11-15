@@ -1,9 +1,10 @@
 // ゲートウェイの Hono を作る。入力の検証に落ちた時の返し方と失敗の返し方をそろえる
 import { OpenAPIHono, type Hook } from "@hono/zod-openapi";
-import { AppError, type Clock, type Fetcher, type FieldError, systemClock } from "@know-office/core";
+import { AppError, type Clock, type Fetcher, type FieldError, log, systemClock } from "@know-office/core";
+import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import type { ZodError } from "zod";
-import { accessProof, admission, hookAdmission, loginSession, sameOrigin } from "./auth/middleware.ts";
+import { accessProof, admission, guardOf, hookAdmission, loginSession, sameOrigin } from "./auth/middleware.ts";
 import { bodyShape } from "./body.ts";
 import { securityHeaders } from "./headers.ts";
 import type { GateEnv } from "./env.ts";
@@ -13,6 +14,20 @@ import { type GitHubAccess, httpForge } from "./github/forge.ts";
 import { type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
 import { trace } from "./trace.ts";
+
+/** 401、403、429 を数える道。GitHub の通知と画面のファイルは入れない */
+const DENIED_PATHS = /^\/(?:api|ws)\/v1\//;
+
+/** /api/v1/ と /ws/v1/ で断った 401 と 403 を GuardDO で数える。入口の admit がもう数えた物は数えない */
+const countDenied = createMiddleware<GateEnv>(async (c, next) => {
+  await next();
+  const status = c.res.status;
+  if ((status !== 401 && status !== 403) || !DENIED_PATHS.test(c.req.path) || c.get("deniedCounted")) return;
+  // 数えられなくても返事は変えない
+  await guardOf(c)
+    .countDenied(c.var.clock.now())
+    .catch((error: unknown) => log("warn", "denied_not_counted", { traceId: c.var.traceId, error: error instanceof Error ? error.message : "unknown" }));
+});
 
 const TARGET_PREFIX: Record<string, string> = { json: "#", query: "#/query", param: "#/path", header: "#/header", cookie: "#/cookie" };
 
@@ -81,6 +96,8 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
     await next();
   });
   app.use("*", trace);
+  // 401、403、429 を 5 分ごとに数えて知らせる (API の決まりの 3.6 の 8)。429 とロックアウトの 403 は入口の admit が数える
+  app.use("*", countDenied);
   // 順は API の決まりの 1.2。ここで落ちた要求はルートの処理に届かない
   app.use("/api/*", securityHeaders);
   app.use("/api/*", admission);

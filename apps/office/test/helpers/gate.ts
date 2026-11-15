@@ -7,6 +7,7 @@ import { endpoints } from "../../src/gate/endpoints.ts";
 import { TokenCache } from "../../src/gate/github/app.ts";
 import { type GitHubAccess, httpForge, type Permissions } from "../../src/gate/github/forge.ts";
 import { GuardBook, type GuardStorage } from "../../src/gate/auth/guard-book.ts";
+import { noticeDenied } from "../../src/gate/ledger/notices.ts";
 import type { Bindings } from "../../src/gate/env.ts";
 import type { ExtensionDefinition } from "../../src/gate/extensions/define.ts";
 import type { GuardDeps, ReviewAnswer } from "../../src/gate/guard/deps.ts";
@@ -234,7 +235,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   };
   const audits: AuditInput[] = [];
   const storage: Record<string, number> = { DB: 1024, REC_2026: 2048, REC_2027: 1024 };
-  const guard = new GuardBook(memoryStorage(), () => Promise.resolve());
+  const guard = new GuardBook(memoryStorage(), () => Promise.resolve(), (at, count) => noticeDenied(env.DB, at, count));
   const office = new OfficeGuard(memoryStorage());
   const staff: Record<StaffId, TestStaff> = { president: testStaff("president", options.d1), builder: testStaff("builder", options.d1), reviewer: testStaff("reviewer", options.d1) };
   const deps: TestGate["deps"] = {
@@ -247,7 +248,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   };
   // GuardDO はロックアウトと数え方の 2 つの本を持つ
   const guardDo = {
-    admit: guard.admit.bind(guard),
+    admit: guard.admit.bind(guard), countDenied: guard.countDenied.bind(guard),
     fail: guard.fail.bind(guard),
     putChallenge: guard.putChallenge.bind(guard),
     takeChallenge: guard.takeChallenge.bind(guard),

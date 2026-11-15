@@ -1,4 +1,5 @@
 // ロックアウト、レート制限、パスキーの challenge の数え方。GuardDO が持ち、テストは同じ物を手元の入れ物で使う (ログインと記録の 1.2、3.1 の 4)
+import { log } from "@know-office/core";
 import { z } from "zod";
 
 /** 数えた物を置く入れ物。DO の ctx.storage と同じ形。読んだ物は Zod で確かめてから使う */
@@ -35,21 +36,59 @@ const CHALLENGE_MS = 5 * MINUTE;
 /** 通知を出す先。GuardDO は D1 の notices に書く */
 export type Notify = (ip: string, at: number) => Promise<void>;
 
+/** 401、403、429 を数える窓と、超えたら知らせる回数。API の決まりの 3.6 の 8 */
+export const DENIED_WINDOW_MS = 5 * MINUTE;
+export const DENIED_LIMIT = 50;
+
+/** 断った数が 5 分に 50 回を超えた時に知らせる先。数は超えた時の窓の数 */
+export type NotifyDenied = (at: number, count: number) => Promise<void>;
+
 /** 送信元ごとの失敗とロックアウト、レート制限、challenge を数える */
 export class GuardBook {
   // レート制限の数は 1 分で消えるので、DO が起き直したら数え直してよい。記憶にだけ持つ
   #counts = new Map<string, number>();
   /** #counts を数えている分の始まり */
   #minute = 0;
+  // 断った数は 1 分ごとに区切り、5 分の分だけ持つ。DO が起き直したら数え直してよい
+  #denied = new Map<number, number>();
 
   /**
    * @param storage ロックアウトと challenge を置く入れ物
    * @param notify ロックアウトした時に通知を出す
+   * @param notifyDenied 断った数が 5 分に 50 回を超えた時に通知を出す
    */
   constructor(
     private readonly storage: GuardStorage,
     private readonly notify: Notify,
+    private readonly notifyDenied: NotifyDenied = () => Promise.resolve(),
   ) {}
+
+  /**
+   * 断った数を持っている分の数。記憶が増え続けない事をテストで確かめる
+   * @returns 分の数
+   */
+  get deniedMinutes(): number {
+    return this.#denied.size;
+  }
+
+  /**
+   * 401、403、429 を 1 回数える。5 分の窓の数が 50 を超えた 1 回目だけ知らせる。知らせが書けなくても投げない
+   * 窓は 1 分ごとの 5 つの数で持つので、境目では最大 1 分ぶん長く数える
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  async countDenied(now: number): Promise<null> {
+    const minute = now - (now % MINUTE);
+    for (const key of this.#denied.keys()) if (key <= minute - DENIED_WINDOW_MS) this.#denied.delete(key);
+    this.#denied.set(minute, (this.#denied.get(minute) ?? 0) + 1);
+    let count = 0;
+    for (const n of this.#denied.values()) count += n;
+    // 数えるのも比べるのも待たずに続けるので、同じ時に来ても超えた 1 回目は 1 つだけ
+    if (count === DENIED_LIMIT + 1) {
+      await this.notifyDenied(now, count).catch((error: unknown) => log("warn", "denied_notice_failed", { error: error instanceof Error ? error.message : "unknown" }));
+    }
+    return null;
+  }
 
   /**
    * 今の分で数えている送信元と種類の組の数。記憶が増え続けない事をテストで確かめる
@@ -64,11 +103,16 @@ export class GuardBook {
    * @param ip 送信元
    * @param bucket レート制限の種類
    * @param now 今の時刻
+   * @param count 断った時に、401、403、429 の数に入れるか。/api/v1/ と /ws/v1/ のほか (GitHub の通知) は入れない
    * @returns ロックアウト中か、待つ秒数
    */
-  async admit(ip: string, bucket: RateBucket, now: number): Promise<Admission> {
+  async admit(ip: string, bucket: RateBucket, now: number, count = true): Promise<Admission> {
     const until = z.number().optional().parse(await this.storage.get(`lock:${ip}`));
-    if (until !== undefined && until > now) return { locked: true, retryAfter: null };
+    if (until !== undefined && until > now) {
+      // 断る 403 はここで数え、入口のミドルウェアでは数えない
+      if (count) await this.countDenied(now);
+      return { locked: true, retryAfter: null };
+    }
     // 1 分ごとに区切って数える。区切りの境目で最大 2 倍通るが、守りたいのは総当たりの速さなので足りる
     const start = now - (now % MINUTE);
     // 分が変わったら前の分の数は要らないので、送信元ごと捨てる。記憶が送信元の数だけ増え続けない
@@ -77,10 +121,12 @@ export class GuardBook {
       this.#minute = start;
     }
     const key = `${bucket}:${ip}`;
-    const count = (this.#counts.get(key) ?? 0) + 1;
-    this.#counts.set(key, count);
-    if (count > RATE_LIMITS[bucket]) return { locked: false, retryAfter: Math.ceil((start + MINUTE - now) / 1000) };
-    return { locked: false, retryAfter: null };
+    const used = (this.#counts.get(key) ?? 0) + 1;
+    this.#counts.set(key, used);
+    if (used <= RATE_LIMITS[bucket]) return { locked: false, retryAfter: null };
+    // 429 はここで数える。断る要求ごとに DO を呼び足さない
+    if (count) await this.countDenied(now);
+    return { locked: false, retryAfter: Math.ceil((start + MINUTE - now) / 1000) };
   }
 
   /**

@@ -54,7 +54,8 @@ export const admission = createMiddleware<GateEnv>(async (c, next) => {
   c.set("ip", ip);
   const bucket: RateBucket = c.req.method === "POST" && AUTH_PATHS.test(c.req.path) ? "auth" : "api";
   const { locked, retryAfter } = await guardOf(c).admit(ip, bucket, c.var.clock.now());
-  // ロックアウトは誰か分かる前に確かめるので、誰か分からなくても 403 を返す。API の決まりの 3.2
+  // ロックアウトは誰か分かる前に確かめるので、誰か分からなくても 403 を返す。API の決まりの 3.2。数は admit の中で数えた
+  c.set("deniedCounted", locked || retryAfter !== null);
   if (locked) throw new AppError("locked_out", "失敗が続いたため、この送信元はしばらく使えない");
   if (retryAfter !== null) throw new AppError("rate_limited", "要求が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
   // 重い処理のルートは、送信元ごとの数に加えて、そのルートだけの数でも絞る
@@ -73,7 +74,8 @@ export const hookAdmission = createMiddleware<GateEnv>(async (c, next) => {
   const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
   c.set("ip", ip);
   // 署名の無い要求で全体の数を使い切らせないよう、ここでは送信元の数だけを見る
-  const { retryAfter } = await guardOf(c).admit(`hooks-ip:${ip}`, "api", c.var.clock.now());
+  // GitHub の通知は 401、403、429 の数に入れない
+  const { retryAfter } = await guardOf(c).admit(`hooks-ip:${ip}`, "api", c.var.clock.now(), false);
   if (retryAfter !== null) throw new AppError("rate_limited", "要求が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
   await next();
 });

@@ -14,3 +14,16 @@ describe("総当たりと怪しい動き", () => {
     expect(book.tracked).toBe(1);
   });
 });
+
+describe("401、403、429 が 5 分に 50 回を超えたら知らせる", () => {
+  it("数える窓は 5 分の分だけを持ち、記憶が増え続けない", async () => {
+    const storage = { get: () => Promise.resolve(undefined), put: () => Promise.resolve(), delete: () => Promise.resolve(false) };
+    const crossed: number[] = [];
+    const book = new GuardBook(storage, () => Promise.resolve(), (at) => Promise.resolve(void crossed.push(at)));
+    for (let m = 0; m < 60; m += 1) await book.countDenied(start + m * 60_000);
+    expect(book.deniedMinutes).toBeLessThanOrEqual(5);
+    expect(crossed).toEqual([]);
+    for (let n = 0; n < 51; n += 1) await book.countDenied(start + 61 * 60_000);
+    expect(crossed).toEqual([start + 61 * 60_000]);
+  });
+});

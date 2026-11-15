@@ -25,7 +25,9 @@ export interface Recorder extends Rpc.DurableObjectBranded {
 /** 全体のセキュリティ DO の RPC。時刻は呼ぶ側の Clock で渡す */
 export interface Guard extends Rpc.DurableObjectBranded {
   /** 入口で通すかを決める */
-  admit(ip: string, bucket: RateBucket, now: number): Promise<Admission>;
+  admit(ip: string, bucket: RateBucket, now: number, count?: boolean): Promise<Admission>;
+  /** 入口のほかで断った 401 と 403 を 1 回数える */
+  countDenied(now: number): Promise<null>;
   /** ログインの証明かパスキーの失敗を 1 回数える */
   fail(ip: string, now: number): Promise<{ locked: boolean }>;
   /** challenge をログインセッションに結ぶ */
@@ -198,5 +200,7 @@ export type GateEnv = {
     forge: Forge;
     /** GitHub の 1 時間の鍵を作るのに使う、fetch、時刻、ためる所 */
     github: TokenDeps;
+    /** 断った返事を、入口で 401、403、429 の数に入れたか。入れていればもう数えない */
+    deniedCounted: boolean;
   };
 };

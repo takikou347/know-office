@@ -119,7 +119,7 @@ export async function receiveHook(c: Context<GateEnv>): Promise<void> {
   // 2 度目と分かった通知は何も直さないので、全体の数に入れずに受ける。書く時の重なりは FRESH で決める
   if (await c.env.DB.prepare("SELECT 1 FROM github_deliveries WHERE body_sha256 = ?").bind(digest).first()) return;
   // 通知の全体の数は署名の合った新しい通知だけで数え、署名の無い要求や送り直しで本物の通知を締め出させない
-  const { retryAfter } = await guardOf(c).admit("hooks:github", "hook", now);
+  const { retryAfter } = await guardOf(c).admit("hooks:github", "hook", now, false);
   if (retryAfter !== null) throw new AppError("rate_limited", "通知が多すぎる", { headers: { "Retry-After": String(retryAfter) } });
   let payload: unknown;
   try {
