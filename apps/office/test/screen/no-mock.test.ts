@@ -10,7 +10,6 @@ const SCREEN = join(import.meta.dirname, "../../src/screen");
  */
 const STILL_MOCK: Record<string, string> = {
   "pages/dashboard/DashboardPage.tsx": "#107",
-  "pages/guard/GuardPage.tsx": "#108",
   "pages/ledger/RecordsPage.tsx": "#107",
   "pages/office/OfficePage.tsx": "#87",
   "pages/office/OfficeScene.tsx": "#87",
@@ -20,7 +19,6 @@ const STILL_MOCK: Record<string, string> = {
   "pages/office/motion.ts": "#87",
   "pages/office/room.ts": "#87",
   "pages/services/ServicesPage.tsx": "#109",
-  "pages/settings/SettingsPage.tsx": "#108",
   "pages/staff/StaffPage.tsx": "#107",
   "pages/staff/TaskReview.tsx": "#107",
   "parts/staff-status.tsx": "#107",
