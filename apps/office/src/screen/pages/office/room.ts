@@ -4,9 +4,10 @@ import type { Staff } from "../../mock.ts";
 import { avatarSourceOf } from "./avatars.ts";
 import { disposeScene } from "./cleanup.ts";
 import { type ActorState, createDirector } from "./director.ts";
-import { COATS, PROPS, PUPPY_SCALE, type Puppy, applyPuppyPose, buildPuppy, puppyScaleFor } from "./figure.ts";
+import { PROPS, PUPPY_SCALE, type Puppy, applyPuppyPose, buildPuppy, coatOf, puppyScaleFor } from "./figure.ts";
+import { furLayersFor } from "./fur.ts";
 import { type DeskParts, SEAT_HEIGHT, buildRoomShell, stackPaper } from "./furniture.ts";
-import { type Point, seatOf, stationOf } from "./layout.ts";
+import { FLOOR, type Point, seatOf, stationOf } from "./layout.ts";
 import { buildMarks, type Marks, showMark } from "./marks.ts";
 import { activityOf, poseOf } from "./motion.ts";
 import type { Actors, Step } from "./plan.ts";
@@ -100,14 +101,25 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     }
     return m;
   };
-  const { renderer, scene, camera, sun, fit } = buildStage(canvas, color(theme.background), theme);
-  const desks: Record<string, DeskParts> = buildRoomShell(scene, mat, resolve, theme);
+  const { renderer, scene, camera, sun, fit } = buildStage(canvas, color(theme.background), theme, FLOOR);
+  const desks: Record<string, DeskParts> = buildRoomShell(scene, FLOOR, mat, resolve, theme);
+  const puppyColors = {
+    cream: color(theme.furCream),
+    eye: color(theme.eye),
+    iris: color(theme.iris),
+    nose: color(theme.nose),
+    mouth: color(theme.mouth),
+    shadow: color(theme.eye),
+    gold: color(theme.gold),
+    pen: color(theme.pen),
+    frame: color(theme.frame),
+  };
   const paperMat = mat("paper");
   let disposed = false;
   const figures = new Map<string, Figure>();
   const states = new Map<string, ActorState>();
   for (const s of seats) {
-    const puppy = buildPuppy(COATS[s.id] ?? "#c99a6e", PROPS[s.id] ?? null, paperMat.color);
+    const puppy = buildPuppy({ ...puppyColors, coat: color(coatOf(theme, s.id)) }, PROPS[s.id] ?? null, paperMat.color);
     const marks = buildMarks(markColors);
     puppy.root.add(marks.group);
     scene.add(puppy.root);
@@ -183,7 +195,11 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
       size = { width: Math.max(1, width), height: Math.max(1, height) };
       fit(size.width, size.height);
       scale = puppyScaleFor(size.width);
-      for (const f of figures.values()) f.puppy.root.scale.setScalar(scale);
+      const layers = furLayersFor(size.width);
+      for (const f of figures.values()) {
+        f.puppy.root.scale.setScalar(scale);
+        f.puppy.setFur(layers);
+      }
       draw(0);
     },
     boxes: () =>

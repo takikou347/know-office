@@ -1,29 +1,24 @@
-// 部屋の床、壁、家具を three.js の形で組む。タイルの床、奥と左の高い壁、手前と右の低い壁、配置の表の家具
+// 部屋の家具を three.js の形で組む。フロアの床と壁を置き、部屋の定義の家具、社員の机と椅子を並べる
 import {
   BoxGeometry,
   type BufferGeometry,
-  CanvasTexture,
-  Color,
   CylinderGeometry,
   Group,
   type Material,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
-  RepeatWrapping,
-  SRGBColorSpace,
   type Scene,
   SphereGeometry,
 } from "three";
-import { FURNITURE, type Furniture, GRID, SEATS } from "./layout.ts";
+import type { Floor, Furniture } from "./layout.ts";
 import type { OfficeTheme } from "./themes.ts";
+import { WALL, buildFloorShell } from "./walls.ts";
 
 /** 席の椅子の座面の高さ */
 export const SEAT_HEIGHT = 0.22;
 /** 机の天板の高さ */
 const DESK_Y = 0.45;
-/** 奥と左の壁の高さと、手前と右の低い壁の高さ */
-const WALL = { high: 2, low: 0.28, thick: 0.15 };
 
 /** 社員の机の、画面と書類の山 */
 export interface DeskParts {
@@ -64,34 +59,6 @@ function put(parent: Group, geometry: BufferGeometry, m: Material, at: readonly 
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   parent.add(mesh);
-}
-
-/**
- * 市松のタイルと目地を描いた床の模様を作る
- * @param colors 2 色のタイルと目地の CSS の色
- * @returns 床の模様
- */
-function floorTexture(colors: { a: string; b: string; grout: string }): CanvasTexture {
-  const px = 64;
-  const canvas = document.createElement("canvas");
-  canvas.width = GRID.cols * px;
-  canvas.height = GRID.rows * px;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    ctx.fillStyle = colors.grout;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    for (let x = 0; x < GRID.cols; x++) {
-      for (let z = 0; z < GRID.rows; z++) {
-        ctx.fillStyle = (x + z) % 2 === 0 ? colors.a : colors.b;
-        ctx.fillRect(x * px + 2, z * px + 2, px - 4, px - 4);
-      }
-    }
-  }
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.wrapS = RepeatWrapping;
-  tex.wrapT = RepeatWrapping;
-  return tex;
 }
 
 /**
@@ -157,15 +124,30 @@ function buildPiece(f: Furniture, mat: MaterialOf): Group {
   g.position.set(f.x + f.w / 2, 0, f.z + f.d / 2);
   g.rotation.y = f.rot ?? 0;
   switch (f.kind) {
-    case "shelf": {
-      box(g, [f.w - 0.2, 1.3, 0.38], mat("shelf"), [0, 0.65, -0.25]);
-      const binders = ["binder0", "binder1", "binder2"];
-      for (let row = 0; row < 3; row++) {
-        for (let i = 0; i < 12; i++) {
-          const m = mat(binders[(i + row) % 3] ?? "binder0");
-          box(g, [0.16, 0.3, 0.05], m, [-(f.w - 0.5) / 2 + i * 0.21, 0.27 + row * 0.4, -0.04]);
+    case "shelf":
+    case "bookcase": {
+      // 書類の棚は低く、社長室の本棚は高くする。どちらも背を壁に付け、長い辺を壁に沿わせる
+      const length = Math.max(f.w, f.d) - 0.2;
+      const rows = f.kind === "bookcase" ? 3 : 2;
+      const back = -Math.min(f.w, f.d) / 2 + 0.2;
+      box(g, [length, rows * 0.4 + 0.1, 0.36], mat("shelf"), [0, (rows * 0.4 + 0.1) / 2, back]);
+      const per = Math.floor((length - 0.1) / 0.2);
+      for (let row = 0; row < rows; row++) {
+        for (let i = 0; i < per; i++) {
+          const m = mat(`binder${(i + row) % 3}`);
+          box(g, [0.15, 0.28, 0.05], m, [-length / 2 + 0.15 + i * 0.2, 0.25 + row * 0.4, back + 0.2]);
         }
       }
+      break;
+    }
+    case "window": {
+      // 奥の壁の窓。光る空の色の板に枠を付ける
+      const glass = mat("window");
+      const pane = new Mesh(new PlaneGeometry(f.w - 0.5, 0.75), new MeshStandardMaterial({ color: glass.color, emissive: glass.color, emissiveIntensity: 0.4 }));
+      pane.position.set(0, 0.85, -f.d / 2 + WALL.thick / 2 + 0.01);
+      g.add(pane);
+      box(g, [f.w - 0.4, 0.06, 0.08], mat("trim"), [0, 0.45, -f.d / 2 + WALL.thick / 2 + 0.04]);
+      box(g, [0.04, 0.75, 0.03], mat("trim"), [0, 0.85, -f.d / 2 + WALL.thick / 2 + 0.02]);
       break;
     }
     case "meeting-table":
@@ -213,49 +195,27 @@ function buildPiece(f: Furniture, mat: MaterialOf): Group {
 }
 
 /**
- * 床、壁、家具を部屋に置く
+ * 床、壁、家具をフロアに置く
  * @param scene 置く先
+ * @param floor フロア
  * @param mat 材質
  * @param css 色の書き方を CSS の rgb() に直す関数
  * @param theme 部屋の色
  * @returns 社員の id ごとの机の部品
  */
-export function buildRoomShell(scene: Scene, mat: MaterialOf, css: (value: string) => string, theme: OfficeTheme): Record<string, DeskParts> {
-  const floor = new Mesh(
-    new PlaneGeometry(GRID.cols, GRID.rows),
-    new MeshStandardMaterial({ map: floorTexture({ a: css(theme.floorA), b: css(theme.floorB), grout: css(theme.grout) }), roughness: 0.9 }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.set(GRID.cols / 2, 0, GRID.rows / 2);
-  floor.receiveShadow = true;
-  scene.add(floor);
-  // 奥と左は高い壁、手前と右は低く切ってジオラマのように中を見せる
-  const shell = new Group();
-  box(shell, [GRID.cols + WALL.thick, WALL.high, WALL.thick], mat("wall"), [GRID.cols / 2 - WALL.thick / 2, WALL.high / 2, -WALL.thick / 2]);
-  box(shell, [WALL.thick, WALL.high, GRID.rows], mat("wall"), [-WALL.thick / 2, WALL.high / 2, GRID.rows / 2]);
-  box(shell, [GRID.cols + WALL.thick * 2, WALL.low, WALL.thick], mat("trim"), [GRID.cols / 2, WALL.low / 2, GRID.rows + WALL.thick / 2]);
-  box(shell, [WALL.thick, WALL.low, GRID.rows + WALL.thick], mat("trim"), [GRID.cols + WALL.thick / 2, WALL.low / 2, GRID.rows / 2 - WALL.thick / 2]);
-  box(shell, [GRID.cols, 0.1, 0.03], mat("trim"), [GRID.cols / 2, 0.05, 0.015]);
-  box(shell, [0.03, 0.1, GRID.rows], mat("trim"), [0.015, 0.05, GRID.rows / 2]);
-  scene.add(shell);
-  const glass = new Color(css(theme.window));
-  const win = new Mesh(new PlaneGeometry(2.6, 0.9), new MeshStandardMaterial({ color: glass, emissive: glass, emissiveIntensity: 0.35 }));
-  win.position.set(7.9, 1.25, 0.005);
-  scene.add(win);
-  box(scene, [2.7, 0.06, 0.08], mat("trim"), [7.9, 0.77, 0.04]);
-
+export function buildRoomShell(scene: Scene, floor: Floor, mat: MaterialOf, css: (value: string) => string, theme: OfficeTheme): Record<string, DeskParts> {
+  buildFloorShell(scene, floor, mat, css, theme);
   const desks: Record<string, DeskParts> = {};
-  for (const f of FURNITURE) {
+  for (const f of floor.furniture) {
     if (f.kind === "desk" || f.kind === "desk-president") {
-      const owner = Object.entries(SEATS).find(([, s]) => s.handoff.x >= f.x && s.handoff.x <= f.x + f.w)?.[0];
       const { group, parts } = buildDesk(f, mat, f.kind === "desk-president");
       scene.add(group);
-      if (owner) desks[owner] = parts;
+      if (f.owner) desks[f.owner] = parts;
       continue;
     }
     scene.add(buildPiece(f, mat));
   }
-  for (const { seat } of Object.values(SEATS)) scene.add(buildChair(seat.x, seat.z, mat));
+  for (const { seat } of Object.values(floor.seats)) scene.add(buildChair(seat.x, seat.z, mat));
   return desks;
 }
 

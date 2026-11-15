@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { avatarSourceOf } from "../../src/screen/pages/office/avatars.ts";
-import { puppyScaleFor } from "../../src/screen/pages/office/figure.ts";
+import { coatOf, puppyScaleFor } from "../../src/screen/pages/office/figure.ts";
+import { furLayersFor } from "../../src/screen/pages/office/fur.ts";
 import { activityOf, poseOf } from "../../src/screen/pages/office/motion.ts";
 import { canShow3d } from "../../src/screen/pages/office/support.ts";
 import { OFFICE_THEME, type OfficeThemeId, THEME_IDS, officeThemes, themeOf } from "../../src/screen/pages/office/themes.ts";
@@ -44,6 +45,10 @@ describe("社員の動き", () => {
     const closed = poses.filter((p) => p.blink).length / poses.length;
     expect(closed).toBeGreaterThan(0.01);
     expect(closed).toBeLessThan(0.15);
+  });
+
+  it("動きを止めて描く時刻 0 では、どのすることでも目を開けている", () => {
+    for (const a of ["work", "wait", "walk"] as const) expect(poseOf(a, 0).blink).toBe(false);
   });
 
   it("歩く時は立って、足と耳としっぽが揺れる", () => {
@@ -118,6 +123,21 @@ describe("社員の姿", () => {
     expect(puppyScaleFor(360)).toBeGreaterThan(puppyScaleFor(1280));
     expect(puppyScaleFor(599)).toBe(puppyScaleFor(360));
     expect(puppyScaleFor(600)).toBe(puppyScaleFor(1280));
+  });
+
+  it("電話の幅では毛の層を減らし、広い幅では毛羽が見えるだけ重ねる", () => {
+    expect(furLayersFor(360)).toBeLessThan(furLayersFor(1280));
+    expect(furLayersFor(599)).toBe(furLayersFor(360));
+    expect(furLayersFor(360)).toBeGreaterThanOrEqual(3);
+    expect(furLayersFor(1280)).toBeLessThanOrEqual(12);
+  });
+
+  it("3 体は同じ子の毛色違いで、毛色は部屋の案の色から取る", () => {
+    const theme = themeOf(OFFICE_THEME);
+    expect(coatOf(theme, "president")).toBe(theme.coatPresident);
+    expect(coatOf(theme, "builder")).toBe(theme.coatBuilder);
+    expect(coatOf(theme, "reviewer")).toBe(theme.coatReviewer);
+    expect(new Set(["president", "builder", "reviewer"].map((id) => coatOf(theme, id))).size).toBe(3);
   });
 
   it("VRM のモデルが無い社員は、形を組み合わせた子犬にする", () => {

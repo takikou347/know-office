@@ -33,8 +33,8 @@ export interface Pose {
 const TAU = Math.PI * 2;
 const wave = (t: number, period: number, phase = 0) => Math.sin((TAU * t) / period + phase);
 
-// 3.7 秒に 1 回、0.15 秒だけ目を閉じる
-const blinkAt = (t: number) => t % 3700 < 150;
+// 3.7 秒に 1 回、0.15 秒だけ目を閉じる。止めて描く時刻 0 で眠そうに見えないよう、周期の終わりに閉じる
+const blinkAt = (t: number) => t % 3700 >= 3550;
 
 /**
  * 社員の状態から、することを決める

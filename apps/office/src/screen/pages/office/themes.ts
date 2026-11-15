@@ -11,6 +11,14 @@ export interface OfficeTheme {
   floorB: string;
   /** タイルの目地 */
   grout: string;
+  /** 廊下の床の 2 色 */
+  hallA: string;
+  hallB: string;
+  /** 敷き詰めの床 (社長室) */
+  carpet: string;
+  /** 部屋の名前の札と、札の文字 */
+  sign: string;
+  signText: string;
   /** 奥と左の壁 */
   wall: string;
   /** 手前と右の低い壁と、壁の縁 */
@@ -53,6 +61,21 @@ export interface OfficeTheme {
   ok: string;
   /** 差し戻しの印 */
   back: string;
+  /** 子犬のクリーム色の毛 (顔、胸、足) */
+  furCream: string;
+  /** 子犬の毛色。3 体は同じ子の毛色違い: 社長は手本の薄茶、作る役は少し灰がかった色、見る役は少し濃い茶 */
+  coatPresident: string;
+  coatBuilder: string;
+  coatReviewer: string;
+  /** 子犬の目、黒目の下の茶色、鼻、口 */
+  eye: string;
+  iris: string;
+  nose: string;
+  mouth: string;
+  /** 社長の冠、作る役のペン、見る役の眼鏡の縁 */
+  gold: string;
+  pen: string;
+  frame: string;
   /** 部屋全体の明るさ (0 から 1) */
   ambient: number;
   /** 窓からの光の強さ */
@@ -70,6 +93,11 @@ export const officeThemes = {
     floorA: "#e8d6bb",
     floorB: "#dfc9a8",
     grout: "#cdb592",
+    hallA: "#efe4d2",
+    hallB: "#e9dcc6",
+    carpet: "#dcc9ab",
+    sign: "#fffaf2",
+    signText: "#6b4a35",
     wall: "#fbf7f0",
     trim: "#c9a77f",
     window: "#d7ebf2",
@@ -91,8 +119,19 @@ export const officeThemes = {
     stop: "#d9473b",
     ok: "#3f9a5a",
     back: "#e08a2e",
+    furCream: "#fff7ec",
+    coatPresident: "#d9b08f",
+    coatBuilder: "#bfb7ae",
+    coatReviewer: "#a87a5a",
+    eye: "#231917",
+    iris: "#5e3d2e",
+    nose: "#33241f",
+    mouth: "#6b4636",
+    gold: "#e8b94a",
+    pen: "#f2c94c",
+    frame: "#3a2a20",
     ambient: 0.75,
-    sun: 2.2,
+    sun: 1.6,
     lampGlow: 0,
   },
   // 案 B: knowidea-ui の今の色。画面のほかの所と同じ色で、暗い設定にも合わせて変わる
@@ -102,6 +141,11 @@ export const officeThemes = {
     floorA: "var(--color-surface-2)",
     floorB: "var(--color-surface)",
     grout: "var(--color-line)",
+    hallA: "var(--color-bg)",
+    hallB: "var(--color-surface)",
+    carpet: "var(--color-surface-2)",
+    sign: "var(--color-surface)",
+    signText: "var(--color-text)",
     wall: "var(--color-surface)",
     trim: "var(--color-line-strong)",
     window: "var(--color-info-soft)",
@@ -123,8 +167,19 @@ export const officeThemes = {
     stop: "var(--color-error)",
     ok: "var(--color-success)",
     back: "var(--color-warn)",
+    furCream: "#fff7ec",
+    coatPresident: "#d9b08f",
+    coatBuilder: "#bfb7ae",
+    coatReviewer: "#a87a5a",
+    eye: "#231917",
+    iris: "#5e3d2e",
+    nose: "#33241f",
+    mouth: "#6b4636",
+    gold: "#e8b94a",
+    pen: "#f2c94c",
+    frame: "#3a2a20",
     ambient: 0.75,
-    sun: 1.8,
+    sun: 1.4,
     lampGlow: 0,
   },
   // 案 C: 夜の事務所。部屋は暗く、働く席の画面と明かりだけが光る
@@ -134,6 +189,11 @@ export const officeThemes = {
     floorA: "#2a3150",
     floorB: "#242b47",
     grout: "#1b2138",
+    hallA: "#202741",
+    hallB: "#1c2239",
+    carpet: "#2e2a4a",
+    sign: "#2a3150",
+    signText: "#e6e8f5",
     wall: "#1a2240",
     trim: "#3b4570",
     window: "#3b4f8a",
@@ -155,6 +215,17 @@ export const officeThemes = {
     stop: "#ff5a4f",
     ok: "#5fd38a",
     back: "#ffb057",
+    furCream: "#fff7ec",
+    coatPresident: "#d9b08f",
+    coatBuilder: "#bfb7ae",
+    coatReviewer: "#a87a5a",
+    eye: "#231917",
+    iris: "#5e3d2e",
+    nose: "#33241f",
+    mouth: "#6b4636",
+    gold: "#e8b94a",
+    pen: "#f2c94c",
+    frame: "#3a2a20",
     ambient: 0.35,
     sun: 0.5,
     lampGlow: 2.5,
