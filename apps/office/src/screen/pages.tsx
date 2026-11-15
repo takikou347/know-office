@@ -45,8 +45,10 @@ import {
 } from "./mock.ts";
 import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
 import { StopButton } from "./pages/guard/StopButton.tsx";
+import { OfficePage } from "./pages/office/OfficePage.tsx";
 import { RecordBreakdown } from "./pages/ledger/RecordBreakdown.tsx";
 import { AttendanceTable } from "./pages/staff/AttendanceTable.tsx";
+import { StaffStatus } from "./parts/staff-status.tsx";
 import { type ExtensionScreenId, type ScreenId, isExtensionScreen, moreScreensWith } from "./routes.ts";
 
 export type Navigate = (to: string, opts?: { replace?: boolean }) => void;
@@ -57,20 +59,9 @@ export type ToggleExtension = (id: string, enabled: boolean) => Promise<void>;
 // エディタは「直す」を押した時だけ読み込む
 const CodeEditor = lazy(() => import("knowidea-ui/editor").then((m) => ({ default: m.CodeEditor })));
 
-const stateOf: Record<Staff["state"], { kind: StatusKind; label: string }> = {
-  working: { kind: "working", label: "働いている" },
-  paused: { kind: "paused", label: "待っている" },
-  stopped: { kind: "stopped", label: "止めた" },
-};
-
 const taskKind: Record<Task["state"], StatusKind> = { 今: "working", 可待ち: "pending", 次: "neutral", 済: "success" };
 
 const roleOf = (id: string) => staff.find((s) => s.id === id)?.role ?? id;
-
-function StaffStatus({ s }: { s: Staff }) {
-  const st = stateOf[s.state];
-  return <Status kind={st.kind} label={st.label} />;
-}
 
 function Section({ children }: { children: ReactNode }) {
   return (
@@ -326,14 +317,7 @@ function Goals() {
 function Office() {
   return (
     <Section>
-      <EmptyState title="3D のオフィスは後で作る">今は社員の様子だけを出します。押すとその社員の会話が開きます</EmptyState>
-      <Grid minItemWidth={220}>
-        {staff.map((s) => (
-          <Card key={s.id} title={s.role} headingLevel={2} badge={<StaffStatus s={s} />} href={`/staff/${s.id}`}>
-            {s.now}
-          </Card>
-        ))}
-      </Grid>
+      <OfficePage />
     </Section>
   );
 }

@@ -3,7 +3,7 @@ export interface Staff {
   id: string;
   role: string;
   model: string;
-  state: "working" | "paused" | "stopped";
+  state: "working" | "paused" | "stopped" | "off";
   now: string;
 }
 

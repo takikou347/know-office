@@ -1,0 +1,77 @@
+/* オフィスの 3D の部屋。canvas の上に、社員の姿を覆うリンクと名札を重ねる */
+.ko-office-frame {
+  position: relative;
+  inline-size: 100%;
+  aspect-ratio: 16 / 10;
+  max-block-size: 70vh;
+  border-radius: var(--radius-3);
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+}
+
+@media (width < 600px) {
+  .ko-office-frame {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+.ko-office-frame canvas {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+/* 姿を覆う透けた箱。押す所と、キーボードで選んだ時の輪になる */
+.ko-office-who {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-inline-size: var(--size-hit);
+  min-block-size: var(--size-hit);
+  border-radius: var(--radius-2);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.ko-office-who:hover {
+  outline: 2px dashed var(--color-line-strong);
+  outline-offset: 2px;
+}
+
+.ko-office-who:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.ko-office-tag {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translateY(-100%);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--font-size-1);
+  line-height: var(--font-line-height-1);
+  white-space: nowrap;
+}
+
+.ko-office-who[data-state="stopped"] .ko-office-tag {
+  border-color: var(--color-error);
+}
+
+.ko-office-who[data-state="off"] .ko-office-tag {
+  color: var(--color-text-muted);
+}
+
+@media (width < 600px) {
+  .ko-office-tag {
+    padding: 0 var(--space-1);
+  }
+}

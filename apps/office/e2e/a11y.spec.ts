@@ -20,8 +20,11 @@ async function withSampleNotes(page: Page): Promise<void> {
 }
 
 /** axe に掛ける所。8 画面に、その他と、社員とサービスを選んだ所と、入れた拡張の画面を足す */
-const pages: readonly { name: string; path: string; heading: string; ready?: string; mock?: (page: Page) => Promise<void> }[] = [
-  ...screens.map((s) => ({ name: s.label, path: s.path, heading: s.label })),
+const pages: readonly { name: string; path: string; heading: string; ready?: string; mock?: (page: Page) => Promise<void>; reduceMotion?: boolean }[] = [
+  // オフィスは 3D の部屋と名札を読み終えてから掛ける
+  ...screens.map((s) => ({ name: s.label, path: s.path, heading: s.label, ...(s.id === "office" ? { ready: "社員を押すと、その社員の会話が開きます" } : {}) })),
+  // 動きを減らす設定では、オフィスは 2D の一覧に代わる
+  { name: "オフィスの 2D の一覧", path: "/office", heading: "オフィス", ready: "社員を一覧で出しています", reduceMotion: true },
   { name: "その他", path: "/more", heading: "その他" },
   { name: "社員の会話", path: "/staff/builder", heading: "社員と仕事" },
   { name: "社員の仕事の山", path: "/staff/builder?tab=tasks", heading: "社員と仕事" },
@@ -149,6 +152,7 @@ test.describe("使いやすさ", () => {
     for (const p of pages) {
       test(p.name, async ({ page }) => {
         await p.mock?.(page);
+        if (p.reduceMotion) await page.emulateMedia({ reducedMotion: "reduce" });
         await page.goto(p.path);
         await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
         if (p.ready) await expect(page.getByText(p.ready)).toBeVisible();
