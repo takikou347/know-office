@@ -61,7 +61,6 @@ const STUBBED: Record<string, number> = {
   "screens.spec.ts": 1,
 };
 
-/**
 /** ページに先に入れるスクリプトを持つファイルと、その数。fetch を差し替える道になるので増やさない。今は WebGL を無くす 1 つだけ */
 const INIT_SCRIPTS: Record<string, number> = { "helpers/webgl.ts": 1 };
 
