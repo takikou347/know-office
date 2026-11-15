@@ -267,7 +267,7 @@ describe("勤務の時間", () => {
   const SCHEDULE = "/api/v1/settings/workday.schedule";
   const ALL = [0, 1, 2, 3, 4, 5, 6];
 
-  it("勤務の時刻を変えると版が進み、次の予定が新しい時刻になる", async () => {
+  it("時刻を変える", async () => {
     // 始まりを遅らせるだけなら勤務は延びないので、パスキー無しで通る
     const changed = await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "10:00", end: "17:00", days: ALL }, reason: "朝を遅くする" });
     expect(changed).toEqual({ key: "workday.schedule", value: { start: "10:00", end: "17:00", days: ALL }, inherited: false, version: 1 });
@@ -280,7 +280,18 @@ describe("勤務の時間", () => {
     await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "11:00", end: "17:00", days: ALL }, reason: "古い版から" }, 409);
   });
 
-  it("同じ版を読んだ 2 つが勤務の時刻を変えると、片方は 409", async () => {
+  it("予定を組み直せなかった社員がいても変更は残り、その社員をエラーログに残す", async () => {
+    world.gate.staff.builder.book.wake = () => Promise.reject(new Error("StaffDO に届かない"));
+    const changed = await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "10:00", end: "17:00", days: ALL }, reason: "朝を遅くする" });
+    expect(changed).toMatchObject({ version: 1 });
+    expect((await officeSettings(world))["workday.schedule"]).toEqual(changed);
+    const { results } = await world.d1.REC_2026.prepare("SELECT source, level, code, message, route FROM error_events").all();
+    expect(results).toEqual([
+      { source: "gate", level: "warn", code: "schedule_rearm_failed", message: "Error: builder の予定を組み直せなかった: StaffDO に届かない", route: "/api/v1/settings/:key" },
+    ]);
+  });
+
+  it("同じ版から同時に変える", async () => {
     const put = (start: string) =>
       world.gate.request(SCHEDULE, {
         method: "PUT",
@@ -294,7 +305,7 @@ describe("勤務の時間", () => {
     expect(world.gate.audits.filter((a) => a.action === "setting.update")).toHaveLength(1);
   });
 
-  it("勤務を延ばす変更はパスキー無しでは 401、縮める変更は通る", async () => {
+  it("延ばす変更はパスキーで確かめる", async () => {
     const code = z.object({ code: z.string() }).loose();
     // 終わりを遅らせる、曜日を足す、日をまたいで延ばす、はどれも働く時間が増える
     expect(code.parse(await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "18:00", days: ALL }, reason: "延ばす" }, 401)).code).toBe("step_up_required");
@@ -307,7 +318,7 @@ describe("勤務の時間", () => {
     expect(await api(world, "PUT", SCHEDULE, { version: 1, value: { start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5, 6] }, reason: "延ばす" })).toMatchObject({ version: 2 });
   });
 
-  it("始まりと終わりが同じ、形の違う時刻、曜日が空は 422", async () => {
+  it("形の違う値を断る", async () => {
     await stepUp(world);
     await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "09:00", end: "09:00", days: ALL }, reason: "同じ時刻" }, 422);
     await api(world, "PUT", SCHEDULE, { version: 0, value: { start: "9:00", end: "17:00", days: ALL }, reason: "形が違う" }, 422);

@@ -2,27 +2,11 @@
 import type { GuardScope, StopPreview } from "@know-office/core";
 import { Alert, Button, Dialog, DialogClose } from "knowidea-ui";
 import { useContext, useState } from "react";
-import { z } from "zod";
 import { ApiContext } from "../../api.ts";
+import { type Failed, FailedAlert, failureOf } from "../../parts/load.tsx";
 import { SCOPE_LABEL, STAFF_LABEL } from "./labels.ts";
 
 const REASON = "オーナーが画面のボタンで止めた";
-
-/** 止められなかった時に出す物。不具合を伝えられるよう traceId を添える */
-type Failure = { code: string; traceId: string };
-
-const ProblemFields = z.object({ code: z.string(), traceId: z.string() }).loose();
-
-/**
- * 失敗の返事から code と traceId を読む
- * @param res 返事
- * @returns code と traceId
- */
-async function failureOf(res: Response): Promise<Failure> {
-  const body: unknown = await res.json().catch(() => null);
-  const parsed = ProblemFields.safeParse(body);
-  return parsed.success ? { code: parsed.data.code, traceId: parsed.data.traceId } : { code: String(res.status), traceId: "" };
-}
 
 export interface StopButtonProps {
   /** 止める範囲 */
@@ -41,7 +25,7 @@ export function StopButton({ scope, target, label, onStopped }: StopButtonProps)
   const [preview, setPreview] = useState<StopPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string>();
-  const [failure, setFailure] = useState<Failure>();
+  const [failure, setFailure] = useState<Failed>();
 
   const open = async () => {
     if (!api) return;
@@ -103,11 +87,7 @@ export function StopButton({ scope, target, label, onStopped }: StopButtonProps)
           {done}
         </Alert>
       ) : null}
-      {failure ? (
-        <Alert tone="error" live>
-          止められませんでした ({failure.code})。不具合を伝える時は {failure.traceId || "なし"} を添えてください
-        </Alert>
-      ) : null}
+      {failure ? <FailedAlert title="止められませんでした" failure={failure} /> : null}
     </>
   );
 }

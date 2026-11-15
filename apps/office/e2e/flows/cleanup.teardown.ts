@@ -5,7 +5,7 @@ teardown("通しが出した通知を既読にする", async ({ page }) => {
   await page.goto("/settings");
   // 入口の返事が画面に出るまで待つ。それより前はログインセッションがまだ無い
   await expect(page.getByRole("main").getByText("登録済み")).toBeVisible();
-  const headers = { Origin: new URL(page.url()).origin, "Content-Type": "application/json" };
+  const headers = { Origin: new URL(page.url()).origin };
   const res = await page.request.get("/api/v1/notices?limit=100");
   expect(res.status()).toBe(200);
   const body: unknown = await res.json();

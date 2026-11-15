@@ -4815,7 +4815,7 @@ paths:
 
         4. `settings` に範囲 `office` で、読んだ版より新しい行が無い時だけ追加し、監査ログに `setting.update` を記録する
 
-        5. `key` が `service.mergeWhen` の時は、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を新しい条件で設定し直す。`workday.schedule` の時は、3 人の `StaffDO` の alarm を新しい時刻で掛け直す
+        5. `key` が `service.mergeWhen` の時は、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を新しい条件で設定し直す。`workday.schedule` の時は、3 人の `StaffDO` の alarm を新しい時刻で掛け直す。掛け直せなかった社員は変更を残したまま `error_events` に `schedule_rearm_failed` で残す
 
 
         このルート固有のエラー:
@@ -4835,7 +4835,7 @@ paths:
       - '`version` が現在と一致することを確認する'
       - '今の初期値と変えた後の値を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める。勤務の時刻は、今の勤務の時間に無い時間を足す変更 (終わりを遅らせる、始まりを早める、曜日を足す) ならパスキーの確認を求める'
       - '`settings` に範囲 `office` で、読んだ版より新しい行が無い時だけ追加し、監査ログに `setting.update` を記録する'
-      - '`key` が `service.mergeWhen` の時は、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を新しい条件で設定し直す。`workday.schedule` の時は、3 人の `StaffDO` の alarm を新しい時刻で掛け直す'
+      - '`key` が `service.mergeWhen` の時は、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を新しい条件で設定し直す。`workday.schedule` の時は、3 人の `StaffDO` の alarm を新しい時刻で掛け直す。掛け直せなかった社員は変更を残したまま `error_events` に `schedule_rearm_failed` で残す'
       x-errors:
       - '404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない'
       - '401 `step_up_required`: 守りを弱める変更か勤務を延ばす変更で、パスキーの確認がない'

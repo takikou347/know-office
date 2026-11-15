@@ -19,6 +19,6 @@ export function part(page: Page, title: string): Locator {
  */
 export async function post(page: Page, path: string): Promise<number> {
   const origin = new URL(page.url()).origin;
-  const res = await page.request.post(path, { headers: { Origin: origin, "Content-Type": "application/json" } });
+  const res = await page.request.post(path, { headers: { Origin: origin } });
   return res.status();
 }

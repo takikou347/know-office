@@ -70,8 +70,7 @@ export function StoppedList({ tick, onChanged }: GuardStopsProps) {
     setBusy(stopId);
     setDone(undefined);
     setFailure(undefined);
-    // 本文の無い POST でも、開発の入口は空の本文を付けて届けるので、ゲートウェイが受ける Content-Type を付ける
-    const sent = await send(api, () => api.api.v1.guard.stops[":stopId"].resume.$post({ param: { stopId } }, { headers: { "Content-Type": "application/json" } }));
+    const sent = await send(api, () => api.api.v1.guard.stops[":stopId"].resume.$post({ param: { stopId } }));
     setBusy(null);
     if (sent.ok) {
       const { resumedAt } = z.object({ data: Resumption }).loose().parse(await sent.res.json()).data;

@@ -61,7 +61,7 @@ function stored(schema: ZodType, value: unknown, where: string): unknown {
  * @returns 確かめた値
  * @throws validation_failed 値が項目の形に合わない時
  */
-export function checkValue(schema: ZodType, value: unknown): unknown {
+export function checkValue<S extends ZodType>(schema: S, value: unknown): z.output<S> {
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw new AppError("validation_failed", "値が項目の形に合わない", { errors: toFieldErrors(parsed.error, "json").map((e) => ({ ...e, pointer: e.pointer.replace(/^#/, "#/value") })) });
@@ -316,7 +316,7 @@ export async function loadScheduleSetting(db: D1Database): Promise<Setting> {
  */
 export async function updateSchedule(db: D1Database, input: { value: unknown; version: number; reason: string; now: number }, stepUp: () => void): Promise<Setting> {
   const { version, reason, now } = input;
-  const value = ScheduleInput.parse(checkValue(ScheduleInput, input.value));
+  const value = checkValue(ScheduleInput, input.value);
   const current = await loadScheduleSetting(db);
   // 延ばすかは読んだ版の値と比べる。古い版のまま送った変更は、今の値と比べず先に断る
   if (current.version !== version) throw new AppError("conflict", "バージョンが違う");

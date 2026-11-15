@@ -1,4 +1,4 @@
-// 本文の形の確かめ。application/json だけを 1MB まで受ける
+// 本文の形の確かめ。application/json だけを 1MB まで受ける。空の本文は Content-Type を見ずに通す
 import { AppError } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import type { GateEnv } from "./env.ts";
@@ -30,9 +30,27 @@ async function exceeds(body: ReadableStream<Uint8Array>, limit: number): Promise
 }
 
 /**
+ * 本文に 1 バイトでも中身があるかを見る。中身を見つけた所で読むのを止める
+ * @param body 本文のストリーム
+ * @returns 中身があれば true。読み終えて 0 バイトなら false
+ */
+async function hasBytes(body: ReadableStream<Uint8Array>): Promise<boolean> {
+  const reader = body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return false;
+    if (value.byteLength > 0) {
+      // tee の片方の cancel は両方が止まるまで終わらないので待たない
+      void reader.cancel();
+      return true;
+    }
+  }
+}
+
+/**
  * 本文のある要求は Content-Type と大きさを確かめる
  * @throws payload_too_large Content-Length か読んだ本文が 1MB を超える時
- * @throws unsupported_media_type 本文があり Content-Type が application/json でない時
+ * @throws unsupported_media_type 本文に 1 バイトでも中身があり Content-Type が application/json でない時
  */
 export const bodyShape = createMiddleware<GateEnv>(async (c, next) => {
   if (METHODS_WITH_BODY.has(c.req.method)) {
@@ -43,10 +61,9 @@ export const bodyShape = createMiddleware<GateEnv>(async (c, next) => {
     if (body) {
       const type = c.req.header("Content-Type") ?? "";
       if (type.split(";")[0]?.trim() !== "application/json") {
-        void body.cancel();
-        throw new AppError("unsupported_media_type", "Content-Type は application/json だけを受ける");
-      }
-      if (await exceeds(body, MAX_BODY_BYTES)) throw new AppError("payload_too_large", "リクエスト本文が 1MB を超える");
+        // 空の本文 (再開のように本文の無い POST) は Content-Type を見ずに通す。1 バイトでもあれば断る
+        if (await hasBytes(body)) throw new AppError("unsupported_media_type", "Content-Type は application/json だけを受ける");
+      } else if (await exceeds(body, MAX_BODY_BYTES)) throw new AppError("payload_too_large", "リクエスト本文が 1MB を超える");
     }
   }
   await next();

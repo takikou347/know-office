@@ -115,7 +115,7 @@ test.describe("サービスごとの設定", () => {
 });
 
 test.describe("勤務の時間", () => {
-  test("勤務の時刻を 10 時から 18 時に変えると、読み直しても出る", async ({ page }) => {
+  test("時刻を変える", async ({ page }) => {
     await useOwnerPasskey(page);
     await page.goto("/settings");
     const schedule = card(page, "勤務の時刻");

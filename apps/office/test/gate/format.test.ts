@@ -24,6 +24,7 @@ beforeEach(async () => {
   gate = await createTestGate({ clock: fixedClock(Date.UTC(2026, 10, 14, 3, 0, 0)), d1 });
   // ルートは最初の要求の前に足す
   gate.app.openapi(echo, (c) => ok(c, c.req.valid("json")));
+  gate.app.post("/api/v1/touch", (c) => c.body(null, 204));
   gate.app.get("/api/v1/boom", () => {
     throw new Error("D1 の接続文字列 secret");
   });
@@ -127,6 +128,35 @@ describe("入力の失敗", () => {
     const res = await post("title=a", { "Content-Type": "application/x-www-form-urlencoded" });
     expect(res.status).toBe(415);
     expect((await problem(res)).code).toBe("unsupported_media_type");
+  });
+
+  it("本文の無い POST は Content-Type 無しで通る", async () => {
+    const none = await gate.request("/api/v1/touch", { method: "POST", headers: { ...signedIn, "Content-Length": "0" } });
+    expect(none.status).toBe(204);
+    // 手元の入口 (pnpm dev) は、本文の無い要求にも空のストリームを付けて渡す
+    const empty = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    const streamed = await gate.request("/api/v1/touch", { method: "POST", body: empty, headers: signedIn, duplex: "half" } as RequestInit);
+    expect(streamed.status).toBe(204);
+  });
+
+  it("空でない本文で Content-Type 無しは 415 のまま", async () => {
+    const res = await gate.request("/api/v1/touch", { method: "POST", body: new TextEncoder().encode("{}"), headers: signedIn });
+    expect(res.status).toBe(415);
+    expect((await problem(res)).code).toBe("unsupported_media_type");
+    // 空のかたまりの後に中身が来る本文も、本文がある物として断る
+    const late = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(0));
+        controller.enqueue(new TextEncoder().encode("{}"));
+        controller.close();
+      },
+    });
+    const streamed = await gate.request("/api/v1/touch", { method: "POST", body: late, headers: signedIn, duplex: "half" } as RequestInit);
+    expect(streamed.status).toBe(415);
   });
 
   it("本文が 1MB を超えれば 413", async () => {

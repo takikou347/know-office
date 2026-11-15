@@ -5,6 +5,7 @@ import { createRouter } from "../app.ts";
 import { requireStepUp } from "../auth/passkey.ts";
 import { MERGE_WHEN_KEY, protectRepos } from "../github/rules.ts";
 import { loadThresholds } from "../guard/thresholds.ts";
+import { recordError } from "../ledger/errors.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, ok } from "../respond.ts";
@@ -105,8 +106,15 @@ export const settingRoutes = router
     if (key === SCHEDULE_KEY) {
       const schedule = await updateSchedule(c.env.DB, { value, version, reason, now }, () => requireStepUp(c));
       await audit(c, "setting.update", key, { value: schedule.value, version: schedule.version, reason });
-      // 3 人の alarm を新しい時刻で掛け直す。掛け直せなくても、次の alarm が新しい時刻から予定を作るので、変えた設定は残して成功を返す
-      await Promise.allSettled(StaffId.options.map((id) => staffDo(c.env, id).wake(now)));
+      // 3 人の alarm を新しい時刻で掛け直す。失敗した社員は、次の alarm まで新しい時刻が効かない。変えた設定は残し、失敗した社員をエラーログに残す
+      const woken = await Promise.allSettled(StaffId.options.map((id) => staffDo(c.env, id).wake(now)));
+      for (const [i, result] of woken.entries()) {
+        if (result.status === "rejected") {
+          const cause: unknown = result.reason;
+          const error = new Error(`${StaffId.options[i] ?? ""} の予定を組み直せなかった: ${cause instanceof Error ? cause.message : "非 Error の値"}`, { cause });
+          await recordError(c.env, { source: "gate", level: "warn", code: "schedule_rearm_failed", error, route: c.req.routePath, traceId: c.var.traceId }, c.var.clock);
+        }
+      }
       return ok(c, schedule);
     }
     const setting = await updateOfficeDefault(c.env.DB, { key, value, version, reason, now }, () => requireStepUp(c));
