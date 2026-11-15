@@ -75,6 +75,7 @@ function fakeForge(): FakeForge {
     postReview: (repo, pr, review) => Promise.resolve(forge.posted.push({ repo, pr, kind: "review", body: review })),
     postComment: (repo, pr, comment) => Promise.resolve(forge.posted.push({ repo, pr, kind: "comment", body: comment })),
     commitFile: () => Promise.resolve("c".repeat(40)),
+    findMirror: () => Promise.resolve(null),
   };
   return forge;
 }

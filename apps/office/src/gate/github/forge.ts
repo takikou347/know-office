@@ -7,7 +7,9 @@ import {
   GitHubCompare,
   GitHubGitCommit,
   GitHubGitObject,
+  GitHubGitTree,
   GitHubPosted,
+  GitHubPostedList,
   GitHubPull,
   GitHubRef,
   GitHubRepo,
@@ -33,6 +35,21 @@ export type GitHubAccess = {
 
 /** compare API が 1 回で返すファイルの上限。届いたら残りがあるとみる */
 const COMPARE_FILES = 300;
+
+/** その場の直しのコミットの作者と入れた者。公開のリポジトリにオーナーの名前を残さない */
+const COMMITTER = { name: "KNOW IDEA", email: "noreply@knowidea.invalid" };
+
+/** 書き換えてよいファイルの mode。普通のファイルと実行できるファイル。120000 (シンボリックリンク) と 160000 (サブモジュール) は書き換えない */
+const FILE_MODES: ReadonlySet<string> = new Set(["100644", "100755"]);
+
+/** 新しいファイルの mode */
+const NEW_FILE_MODE = "100644";
+
+/** レビューと行のコメントの一覧の 1 ページの数。GitHub の上限 */
+const PAGE_SIZE = 100;
+
+/** 目印を探す一覧のページの上限。1,000 件を超えるプルリクエストは読み切れないとして断る */
+const LIST_PAGES = 10;
 
 /** チェックが通ったとみる結果 */
 const PASSED = new Set(["success", "neutral", "skipped"]);
@@ -120,6 +137,36 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
 
   const read: Permissions = { metadata: "read" };
   const writePulls: Permissions = { pull_requests: "write" };
+  const readContents: Permissions = { contents: "read" };
+
+  /**
+   * 書き換えるファイルの今の mode を、親のコミットの木から 1 階ずつ読む
+   * @param repo リポジトリ
+   * @param top 親のコミットの木の sha
+   * @param path 書き換えるファイルの道
+   * @returns 引き継ぐ mode。無い新しいファイルは 100644
+   * @throws rule_denied シンボリックリンクかサブモジュールか、道の途中がフォルダでない時
+   * @throws upstream_failed 木を読めないか、読み切れない時
+   */
+  async function modeOf(repo: string, top: string, path: string): Promise<string> {
+    const parts = path.split("/");
+    let tree = top;
+    for (const [i, name] of parts.entries()) {
+      const listing = await call(repo, readContents, { method: "GET", path: `/git/trees/${tree}` }, GitHubGitTree);
+      const entry = listing.tree.find((e) => e.path === name);
+      if (entry === undefined) {
+        if (listing.truncated) throw new AppError("upstream_failed", "木を読み切れない");
+        return NEW_FILE_MODE;
+      }
+      if (i === parts.length - 1) {
+        if (FILE_MODES.has(entry.mode)) return entry.mode;
+        throw new AppError("rule_denied", "シンボリックリンクとサブモジュールは書き換えない");
+      }
+      if (entry.type !== "tree") throw new AppError("rule_denied", "道の途中がフォルダでない");
+      tree = entry.sha;
+    }
+    return NEW_FILE_MODE;
+  }
   const writeContents: Permissions = { contents: "write" };
   return {
     connected: () => Promise.resolve(true),
@@ -138,15 +185,34 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       return posted.id;
     },
     commitFile: async (repo, branch, change) => {
-      const parent = await call(repo, { contents: "read" }, { method: "GET", path: `/git/commits/${change.parent}` }, GitHubGitCommit);
+      const parent = await call(repo, readContents, { method: "GET", path: `/git/commits/${change.parent}` }, GitHubGitCommit);
+      // ファイルを書き換える前に今の mode を読み、シンボリックリンクとサブモジュールを断る。何も作らずに断るので、blob より先に読む
+      const mode = await modeOf(repo, parent.tree.sha, change.path);
       const blob = await call(repo, writeContents, { method: "POST", path: "/git/blobs" }, GitHubGitObject, { content: change.content, encoding: "utf-8" });
-      const tree = await call(repo, writeContents, { method: "POST", path: "/git/trees" }, GitHubGitObject, { base_tree: parent.tree.sha, tree: [{ path: change.path, mode: "100644", type: "blob", sha: blob.sha }] });
-      const commit = await call(repo, writeContents, { method: "POST", path: "/git/commits" }, GitHubGitObject, { message: change.message, tree: tree.sha, parents: [change.parent] });
+      const tree = await call(repo, writeContents, { method: "POST", path: "/git/trees" }, GitHubGitObject, { base_tree: parent.tree.sha, tree: [{ path: change.path, mode, type: "blob", sha: blob.sha }] });
+      const commit = await call(repo, writeContents, { method: "POST", path: "/git/commits" }, GitHubGitObject, {
+        message: change.message,
+        tree: tree.sha,
+        parents: [change.parent],
+        author: COMMITTER,
+        committer: COMMITTER,
+      });
       // force を付けず、ブランチの先が親のままの時だけ進める。進んでいれば GitHub が 422 を返す
       const res = await send(repo, writeContents, { method: "PATCH", path: `/git/refs/heads/${branchPath(branch)}` }, { sha: commit.sha, force: false });
       if (res.status === 422) throw new AppError("conflict", "ブランチの先が進んだ");
       await parse(res, GitHubRef);
       return commit.sha;
+    },
+    findMirror: async (repo, pr, kind, marker) => {
+      const what = kind === "review" ? "reviews" : "comments";
+      for (let page = 1; page <= LIST_PAGES; page += 1) {
+        const list = await call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls/${String(pr)}/${what}?per_page=${String(PAGE_SIZE)}&page=${String(page)}` }, GitHubPostedList);
+        const found = list.find((p) => p.body?.includes(marker) === true);
+        if (found) return found.id;
+        if (list.length < PAGE_SIZE) return null;
+      }
+      // 読み切れない時は、無いと言えないので送らずに断る
+      throw new AppError("upstream_failed", "レビューの一覧を読み切れない");
     },
     openPull: async (input) => {
       const pull = await call(input.repo, { pull_requests: "write" }, { method: "POST", path: "/pulls" }, GitHubPull, { title: input.title, head: input.branch, base: "main", body: input.body });

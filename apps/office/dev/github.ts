@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { renewAppKey } from "./github-keys.ts";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
-import { createFakePulls, type FakeActor } from "./github-pulls.ts";
+import { createFakePulls, type FakeActor, type FakePosted, type FakeTreeEntry } from "./github-pulls.ts";
 import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, type GitHubRequest, Manifest, Permission } from "./github-types.ts";
 
 export type { FakeApp, FakeGitHub, FakeGitHubOptions, FakeToken, GitHubRequest } from "./github-types.ts";
@@ -39,6 +39,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const sent: FakeGitHub["sent"] = [];
   const failures = new Map<string, number>();
   const heads = new Map<string, string>();
+  const trees = new Map<string, FakeTreeEntry[]>();
+  const posted: FakePosted = { reviews: [], comments: [] };
   const pick: FakeGitHub["pick"] = [
     { fullName: "example/knowidea-ui", private: false },
     { fullName: "example/know-office", private: false },
@@ -133,7 +135,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     return t !== null && reaches(t, repo, { name, level });
   };
 
-  const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, sent, heads });
+  const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, sent, heads, trees, posted });
 
   const app = new Hono()
     .post("/__fake/routes", async (c) => {
@@ -345,5 +347,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     sent,
     failNext: (route: string, status: number): void => void failures.set(route, status),
     heads,
+    trees,
+    posted,
   };
 }

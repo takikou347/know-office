@@ -1,15 +1,25 @@
 // レビューのテストの手伝い。代わりの GitHub に連携し、開発担当にプルリクエストを出させ、GitHub の形の通知を作る (タスクとレビューの 3.5、3.6)
+import { expect } from "vitest";
 import { z } from "zod";
 import { vaultForge } from "../../src/gate/github/app.ts";
 import type { Forge } from "../../src/gate/work/loop.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
-import { type Connected, connect, hook } from "./github.ts";
+import { type Connected, connect, hook, wrapDb } from "./github.ts";
 import { api, clockIn, idOf, purposeAndGoal, REPO, staffOf, type WorkWorld } from "./work.ts";
 
 /** プルリクエストの先の sha。代わりの GitHub に置く */
 export const HEAD = "b".repeat(40);
 /** プルリクエストの元の sha */
 export const BASE = "a".repeat(40);
+
+/**
+ * 写した本文が、末尾に順番待ちの目印を付けた形かを確かめる物を作る
+ * @param body 目印の前の本文
+ * @returns expect の中で比べる物
+ */
+export function marked(body: string): unknown {
+  return expect.stringMatching(new RegExp(`^${body.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\n\n<!-- know-office:mirror:[0-9a-f-]{36} -->$`));
+}
 
 /** 開いたレビュー */
 export type Opened = {
@@ -105,6 +115,33 @@ export function commentHook(c: Connected, body: string, association = "OWNER") {
     installation: { id: c.installationId },
     sender: user,
   };
+}
+
+/**
+ * ゲートウェイが DB に出したバッチの SQL を並べる。一緒に書く物が同じバッチに入るかを確かめる
+ * @param w テストの物
+ * @returns バッチごとの SQL の並びと、元に戻す関数
+ */
+export function spyBatches(w: WorkWorld): { batches: string[][]; restore: () => void } {
+  const batches: string[][] = [];
+  const restore = wrapDb(w, {
+    batch: (real, statements) => {
+      // 手元の D1 の文は、組み立てた SQL を statement に持つ
+      batches.push(statements.map((s) => z.object({ statement: z.string() }).loose().catch({ statement: "" }).parse(s).statement));
+      return real(statements);
+    },
+  });
+  return { batches, restore };
+}
+
+/**
+ * 並べたバッチのうち、どれか 1 つが SQL の頭をすべて含むか
+ * @param batches バッチごとの SQL
+ * @param heads SQL の頭
+ * @returns 含むバッチがあれば true
+ */
+export function sameBatch(batches: string[][], ...heads: string[]): boolean {
+  return batches.some((b) => heads.every((h) => b.some((sql) => sql.trimStart().startsWith(h))));
 }
 
 /** タスクの出来事のうち比べる所 */

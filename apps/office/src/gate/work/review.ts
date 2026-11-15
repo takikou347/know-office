@@ -2,12 +2,12 @@
 import { AppError, decideRepo, missingConditions, type RepoAction } from "@know-office/core";
 import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { nodes, reviews } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
-import { type Actor, appendNodeEvent, moveNode, type NodeRow, revertNode } from "./nodes.ts";
+import { type Actor, appendNodeEvent, findNode, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
 /** レビューの行 */
 export type ReviewRow = typeof reviews.$inferSelect;
@@ -156,14 +156,26 @@ export async function madeTaskOf(db: D1Database, repo: string, prNumber: number)
 }
 
 /**
- * 作った社員のタスクがレビューを待っていれば todo に戻し、担当の社員を呼ぶ。オーナーの差し戻しと指摘に使う
+ * 作った社員のタスクがレビューを待っている時だけ todo に戻す文を作る。オーナーの差し戻しと指摘を書く文と同じバッチに入れる
+ * @param db 今の状態の D1
+ * @param nodeId 作った社員のタスク ID
+ * @param now 今の時刻
+ * @param when 戻す条件。一緒に書く物と同じ条件を渡し、そちらが書けなかった時は戻さない
+ * @param when.sql 条件の SQL
+ * @param when.args 条件の値
+ * @returns 戻す文
+ */
+export function backToTodo(db: D1Database, nodeId: string, now: number, when: { sql: string; args: unknown[] } = { sql: "1", args: [] }): D1PreparedStatement {
+  return db.prepare(`UPDATE nodes SET status = 'todo', version = version + 1, updated_at = ? WHERE id = ? AND status = 'review' AND ${when.sql}`).bind(now, nodeId, ...when.args);
+}
+
+/**
+ * todo に戻したタスクの担当の社員を呼ぶ。オーナーの指摘は、勤務時間外の社員を呼び出してでも直させる
  * @param env バインディング
- * @param made 作った社員のタスク
+ * @param nodeId 戻したタスク ID
  * @param now 今の時刻
  */
-export async function returnToMaker(env: Bindings, made: NodeRow, now: number): Promise<void> {
-  if (made.status !== "review") return;
-  const moved = await moveNode(env.DB, made, "todo", now);
-  // オーナーの指摘は、勤務時間外の社員を呼び出してでも直させる
-  if (moved && moved.assignee !== null) await notifyStaff(env, moved.assignee, now, true);
+export async function callMaker(env: Bindings, nodeId: string, now: number): Promise<void> {
+  const made = await findNode(env.DB, nodeId);
+  if (made.status === "todo" && made.assignee !== null) await notifyStaff(env, made.assignee, now, true);
 }

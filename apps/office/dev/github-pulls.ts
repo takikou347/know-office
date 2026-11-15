@@ -28,7 +28,20 @@ export type PullsDeps = {
   sent: { event: string; payload: unknown }[];
   /** ブランチの先のコミット。「owner/name:ブランチ」から */
   heads: Map<string, string>;
+  /** Git の木の中身。木の sha から。無い木は空の木として返す */
+  trees: Map<string, FakeTreeEntry[]>;
+  /** 受けたレビューと行のコメント */
+  posted: FakePosted;
 };
+
+/** Git の木の 1 項目 */
+export type FakeTreeEntry = { path: string; mode: string; type: string; sha: string };
+
+/** 受けたレビューと行のコメント。一覧の API が返す */
+export type FakePosted = { reviews: FakePost[]; comments: FakePost[] };
+
+/** 受けたレビューか行のコメント 1 つ */
+export type FakePost = { repo: string; pr: number; id: number; body: string; payload: unknown };
 
 /** レビューと Git の API の代わり */
 export type FakePulls = {
@@ -84,12 +97,14 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
       const reviewState = { APPROVE: "approved", REQUEST_CHANGES: "changes_requested", COMMENT: "commented" }[input.data.event];
       const review = { id, state: reviewState, body: input.data.body ?? "", commit_id: input.data.commit_id ?? null, user, author_association: "NONE" };
       deps.sent.push({ event: "pull_request_review", payload: { action: "submitted", review, ...head } });
+      deps.posted.reviews.push({ repo, pr: num, id, body: review.body, payload: review });
       return Response.json(review);
     }
     const input = CommentRequest.safeParse(body);
     if (!input.success) return invalid();
     const comment = { id, body: input.data.body, path: input.data.path, line: input.data.line, side: input.data.side, commit_id: input.data.commit_id, user, author_association: "NONE" };
     deps.sent.push({ event: "pull_request_review_comment", payload: { action: "created", comment, ...head } });
+    deps.posted.comments.push({ repo, pr: num, id, body: comment.body, payload: comment });
     return Response.json(comment, { status: 201 });
   };
 
@@ -103,6 +118,7 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
    * @returns 返事。当たらなければ null
    */
   const git = (method: string, repo: string, what: string, rest: string, body: unknown): Response | null => {
+    if (method === "GET" && what === "trees") return Response.json({ sha: rest, tree: deps.trees.get(rest) ?? [], truncated: false });
     if (method === "GET" && what === "commits") {
       const found = commits.get(rest);
       // 知らないコミットは、ブランチの頭として木を持つ物にする。木の sha は 16 進数の並びを逆にした物
@@ -136,7 +152,14 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
       const body: unknown = text ? JSON.parse(text) : null;
       const review = /^POST \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/(reviews|comments)$/.exec(route);
       if (review) return pull(review[1] ?? "", Number(review[2]), review[3] ?? "", body, token);
-      const found = /^(GET|POST|PATCH) \/repos\/([^/]+\/[^/]+)\/git\/(blobs|trees|commits|refs\/heads)(?:\/(.+))?$/.exec(route);
+      const list = /^GET \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/(reviews|comments)$/.exec(route);
+      if (list) {
+        const [, repo = "", num = "", what = ""] = list;
+        if (!deps.allows(token, repo, "pull_requests", "read")) return forbidden();
+        const posts = what === "reviews" ? deps.posted.reviews : deps.posted.comments;
+        return Response.json(posts.filter((p) => p.repo === repo && p.pr === Number(num)).map((p) => p.payload));
+      }
+      const found = /^(GET|POST|PATCH) \/repos\/([^/]+\/[^/]+)\/git\/(blobs|trees|commits|refs\/heads)(?:\/([^?]+))?(?:\?.*)?$/.exec(route);
       if (!found) return null;
       const [, method = "", repo = "", what = "", rest = ""] = found;
       if (!deps.allows(token, repo, "contents", method === "GET" ? "read" : "write")) return forbidden();

@@ -6,7 +6,7 @@ import { runTool } from "../../src/gate/work/tools.ts";
 import { hook, wrapDb } from "../helpers/github.ts";
 import { fakeTracker } from "../helpers/weekly.ts";
 import { api, MINUTE, REPO, rows, useWork } from "../helpers/work.ts";
-import { commentHook, deliverSent, eventsOf, HEAD, openReview, postedTo, reviewHook } from "../helpers/review.ts";
+import { commentHook, deliverSent, eventsOf, HEAD, marked, openReview, postedTo, reviewHook, sameBatch, spyBatches } from "../helpers/review.ts";
 
 const world = useWork();
 
@@ -26,7 +26,7 @@ describe("GitHub に写す", () => {
     const { forge } = await openReview(world);
     const res = await runTool(world.gate.env, forge, { staffId: "reviewer", tool: "review_submit", input: { verdict: "reject", summary: "空の日の表のテストが無い" }, now: world.clock.now(), guard: world.gate.deps });
     expect(res.isError).toBe(false);
-    expect(postedTo(world, "reviews")[0]).toEqual({ event: "REQUEST_CHANGES", body: "空の日の表のテストが無い", commit_id: HEAD });
+    expect(postedTo(world, "reviews")[0]).toEqual({ event: "REQUEST_CHANGES", body: marked("空の日の表のテストが無い"), commit_id: HEAD });
   });
 
   it("レビューと行のコメントは、そのリポジトリの pull_requests の書きだけに絞った鍵で写す", async () => {
@@ -175,12 +175,73 @@ describe("GitHub に写す", () => {
 
   it("写し直しを 12 回続けて失敗したら、あきらめて記録に残す", async () => {
     const { task, forge } = await openReview(world);
-    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "直す", baseSha: HEAD });
-    await world.d1.DB.prepare("UPDATE github_mirrors SET sent_at = NULL, attempts = 11, github_id = NULL").run();
     world.gate.github.failNext(`POST /repos/${REPO}/pulls/1/reviews`, 500);
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "直す", baseSha: HEAD });
+    await world.d1.DB.prepare("UPDATE github_mirrors SET attempts = 11").run();
+    world.gate.github.failNext(`GET /repos/${REPO}/pulls/1/reviews`, 500);
     world.clock.advance(5 * MINUTE);
     expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 0, failed: 1 });
     expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 0, failed: 0 });
     expect((await rows(world.d1.REC_2026, "SELECT code FROM error_events")).map((r) => r["code"])).toContain("github_mirror_gave_up");
+  });
+
+  it("POST は通ったが記録が落ちた後の写し直しでは、GitHub に 2 度写さない", async () => {
+    const { task, forge } = await openReview(world);
+    // GitHub に送れた後、送った印を書く文が落ちる
+    let broken = true;
+    const restore = wrapDb(world, {
+      prepare: (real, sql) => {
+        if (broken && sql.startsWith("UPDATE github_mirrors SET github_id")) {
+          broken = false;
+          return real("UPDATE github_mirrors_missing SET x = 1");
+        }
+        return real(sql);
+      },
+    });
+    try {
+      await api(world, "POST", `/api/v1/reviews/${task}/notes`, { path: "src/a.ts", line: 1, side: "new", body: "ここ" }, 201);
+    } finally {
+      restore();
+    }
+    expect(postedTo(world, "comments")).toHaveLength(1);
+    expect(await rows(world.d1.DB, "SELECT sent_at FROM github_mirrors")).toEqual([{ sent_at: null }]);
+    world.clock.advance(5 * MINUTE);
+    expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 1, failed: 0 });
+    expect(postedTo(world, "comments")).toHaveLength(1);
+    const [row] = await rows(world.d1.DB, "SELECT github_id, sent_at IS NOT NULL AS sent FROM github_mirrors");
+    expect(row).toEqual({ github_id: world.gate.github.posted.comments[0]?.id, sent: 1 });
+    // 目印を探す一覧は、pull_requests の読みだけに絞った鍵で読む
+    const lists = world.gate.github.requests.filter((r) => r.route === `GET /repos/${REPO}/pulls/1/comments`);
+    expect(lists.length).toBeGreaterThan(0);
+    for (const r of lists) expect(world.gate.github.tokens.get(r.token ?? "")?.permissions).toEqual({ pull_requests: "read" });
+  });
+
+  it("写す本文の末尾に、写した順番待ちの見えない目印を付ける", async () => {
+    const { task } = await openReview(world);
+    await api(world, "POST", `/api/v1/reviews/${task}/notes`, { path: "src/a.ts", line: 1, side: "new", body: "ここ" }, 201);
+    const [row] = await rows(world.d1.DB, "SELECT id FROM github_mirrors");
+    expect(postedTo(world, "comments")).toMatchObject([{ body: `オーナー: ここ\n\n<!-- know-office:mirror:${String(row?.["id"])} -->` }]);
+  });
+
+  it("GitHub で写した不可と、作った社員のタスクを todo に戻すのは 1 回のバッチで書く", async () => {
+    const { c } = await openReview(world);
+    const spy = spyBatches(world);
+    try {
+      await hook(world, { event: "pull_request_review", payload: reviewHook(c, "changes_requested", "直す"), secret: c.webhookSecret });
+      await hook(world, { event: "pull_request_review_comment", payload: commentHook(c, "ここ"), secret: c.webhookSecret });
+    } finally {
+      spy.restore();
+    }
+    expect(sameBatch(spy.batches, "UPDATE reviews SET owner_verdict", "UPDATE nodes SET status = 'todo'")).toBe(true);
+    expect(sameBatch(spy.batches, "INSERT INTO review_notes", "UPDATE nodes SET status = 'todo'")).toBe(true);
+  });
+
+  it("形の違う道の行のコメントは写さない", async () => {
+    const { c } = await openReview(world);
+    for (const path of ["../etc/passwd", "/abs.ts", "src//a.ts"]) {
+      const comment = commentHook(c, "ここ");
+      await hook(world, { event: "pull_request_review_comment", payload: { ...comment, comment: { ...comment.comment, id: 9200 + path.length, path } }, secret: c.webhookSecret });
+    }
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM review_notes")).toEqual([{ n: 0 }]);
   });
 });

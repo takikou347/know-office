@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { wrapDb } from "../helpers/github.ts";
 import { api, REPO, rows, useWork } from "../helpers/work.ts";
-import { eventsOf, HEAD, openReview, postedTo } from "../helpers/review.ts";
+import { eventsOf, HEAD, marked, openReview, postedTo, sameBatch, spyBatches } from "../helpers/review.ts";
 
 const world = useWork();
 
@@ -14,8 +14,8 @@ describe("know-office の中で確認する", () => {
     expect(data).toEqual({ nodeId: task, ownerVerdict: "approve" });
     // App が出したプルリクエストに App は可を付けられないので、GitHub が断った後は判断を頭に書いたレビューにする
     expect(postedTo(world, "reviews")).toEqual([
-      { event: "APPROVE", body: "オーナー: 表の作りはよい", commit_id: HEAD },
-      { event: "COMMENT", body: "[承認] オーナー: 表の作りはよい", commit_id: HEAD },
+      { event: "APPROVE", body: marked("オーナー: 表の作りはよい"), commit_id: HEAD },
+      { event: "COMMENT", body: marked("[承認] オーナー: 表の作りはよい"), commit_id: HEAD },
     ]);
     expect(await rows(world.d1.DB, "SELECT owner_verdict FROM reviews WHERE node_id = ?", task)).toEqual([{ owner_verdict: "approve" }]);
     expect(await rows(world.d1.DB, "SELECT kind, sent_at IS NOT NULL AS sent, github_id IS NOT NULL AS has_id FROM github_mirrors")).toEqual([{ kind: "review", sent: 1, has_id: 1 }]);
@@ -36,7 +36,7 @@ describe("know-office の中で確認する", () => {
   it("差し戻しは GitHub に不可として写り、作った社員のタスクに戻る", async () => {
     const { task } = await openReview(world);
     await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "空の日の表が崩れる", baseSha: HEAD });
-    expect(postedTo(world, "reviews")[0]).toEqual({ event: "REQUEST_CHANGES", body: "オーナー: 空の日の表が崩れる", commit_id: HEAD });
+    expect(postedTo(world, "reviews")[0]).toEqual({ event: "REQUEST_CHANGES", body: marked("オーナー: 空の日の表が崩れる"), commit_id: HEAD });
     const events = await eventsOf(world, task);
     expect(events.find((e) => e.kind === "review_rejected")).toEqual({ kind: "review_rejected", staffId: null, detail: { by: "owner", summary: "空の日の表が崩れる" } });
     // 戻ったタスクは、手の空いた開発担当がすぐに取る
@@ -73,5 +73,32 @@ describe("know-office の中で確認する", () => {
   it("無いレビューは 404", async () => {
     await openReview(world);
     expect(await api(world, "POST", `/api/v1/reviews/${crypto.randomUUID()}/verdict`, { verdict: "approve", body: "", baseSha: HEAD }, 404)).toMatchObject({ code: "not_found" });
+  });
+
+  it("差し戻しの判断と、作った社員のタスクを todo に戻すのは 1 回のバッチで書く", async () => {
+    const { task } = await openReview(world);
+    const spy = spyBatches(world);
+    try {
+      await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "直す", baseSha: HEAD });
+    } finally {
+      spy.restore();
+    }
+    expect(sameBatch(spy.batches, "UPDATE reviews SET owner_verdict", "INSERT INTO github_mirrors", "UPDATE nodes SET status = 'todo'")).toBe(true);
+  });
+
+  it("差し戻しの間に push が届いたら、タスクも戻さない", async () => {
+    const { task } = await openReview(world);
+    const restore = wrapDb(world, {
+      batch: async (real, statements) => {
+        await world.d1.DB.prepare("UPDATE reviews SET head_sha = ? WHERE node_id = ?").bind("d".repeat(40), task).run();
+        return real(statements);
+      },
+    });
+    try {
+      await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "直す", baseSha: HEAD }, 409);
+    } finally {
+      restore();
+    }
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
   });
 });

@@ -24,7 +24,9 @@ export type Forge = {
   postReview(repo: string, pr: number, review: { event: "APPROVE" | "REQUEST_CHANGES"; body: string; commitId: string }): Promise<number>;
   /** プルリクエストの 1 行にコメントを付け、GitHub のコメントの ID を返す。side は LEFT (前) か RIGHT (後) */
   postComment(repo: string, pr: number, comment: { body: string; path: string; line: number; side: "LEFT" | "RIGHT"; commitId: string }): Promise<number>;
-  /** ブランチに 1 ファイルを書き換えたコミットを足し、その sha を返す。parent はブランチの今の先で、先が進んでいれば conflict で断る */
+  /** 本文に目印を含む、know-office が写したレビューか行のコメントを GitHub の一覧から探し、その ID を返す。無ければ null */
+  findMirror(repo: string, pr: number, kind: "review" | "comment", marker: string): Promise<number | null>;
+  /** ブランチに 1 ファイルを書き換えたコミットを足し、その sha を返す。parent はブランチの今の先で、先が進んでいれば conflict で断る。mode は今のファイルから引き継ぎ、シンボリックリンクとサブモジュールは rule_denied で断る */
   commitFile(repo: string, branch: string, change: { parent: string; path: string; content: string; message: string }): Promise<string>;
 };
 
@@ -39,6 +41,7 @@ export const UNCONNECTED_FORGE: Forge = {
   postReview: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   postComment: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   commitFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  findMirror: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
 };
 
 /** 社員 DO の中で次のタスクを取るのに使う、勤務の本の口 */

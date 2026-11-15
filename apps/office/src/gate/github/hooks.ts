@@ -23,8 +23,8 @@ import { guardOf } from "../auth/middleware.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { clockAt } from "../work/attendance.ts";
 import { intakeTask } from "../work/loop.ts";
-import { type Actor, appendNodeEvent, findNode } from "../work/nodes.ts";
-import { returnToMaker } from "../work/review.ts";
+import { type Actor, appendNodeEvent } from "../work/nodes.ts";
+import { backToTodo, callMaker } from "../work/review.ts";
 import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
 
@@ -326,6 +326,7 @@ async function intakeReview(env: Bindings, hook: Hook, record: D1PreparedStateme
 
 /**
  * 写す物をレビューに置き、作った社員のタスクの出来事に足す。不可と行のコメントはタスクを todo に戻す
+ * 判断か指摘と、todo に戻す事は 1 回のバッチで書く。出来事はその後に足し、最後に担当の社員を呼ぶ
  * @param env バインディング
  * @param found 写す物
  * @param review レビューの ID と、作った社員のタスク ID
@@ -334,24 +335,28 @@ async function intakeReview(env: Bindings, hook: Hook, record: D1PreparedStateme
  * @param now 今の時刻
  */
 async function applyFromGitHub(env: Bindings, found: FromGitHub, review: { id: string; node_id: string }, now: number): Promise<void> {
+  const db = env.DB;
   const actor: Actor = { by: "github", now };
-  const made = await findNode(env.DB, review.node_id);
   if (found.kind === "review") {
-    await env.DB.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ?").bind(found.verdict, review.id).run();
+    const statements = [db.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ?").bind(found.verdict, review.id)];
+    if (found.verdict === "request_changes") statements.push(backToTodo(db, review.node_id, now));
+    await db.batch(statements);
+    // 出来事の node_events は年ごとの記録の D1 にあり、D1 のバッチは 1 つの D1 の中だけなので、同じバッチに入れられない
     const kind = found.verdict === "approve" ? "owner_approved" : "review_rejected";
-    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind, detail: { by: "owner", summary: found.body, githubReviewId: found.githubId } }, actor);
+    await appendNodeEvent(env, { nodeId: review.node_id, staffId: null, kind, detail: { by: "owner", summary: found.body, githubReviewId: found.githubId } }, actor);
     // TODO(#55): GitHub で出た可の後に、main に入れる条件がそろっていれば main に入れる
-    if (found.verdict === "request_changes") await returnToMaker(env, made, now);
+    if (found.verdict === "request_changes") await callMaker(env, review.node_id, now);
     return;
   }
   const id = newId(clockAt(now));
-  // 同じコメントを配信 ID を替えて 2 度受けても、指摘は 1 つ
-  const inserted = await env.DB.prepare(
-    "INSERT INTO review_notes (id, review_id, at, by, path, line, side, body, github_comment_id) SELECT ?, ?, ?, 'owner', ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM review_notes WHERE github_comment_id = ?)",
-  )
-    .bind(id, review.id, now, found.path, found.line, found.side, found.body, found.githubId, found.githubId)
-    .run();
-  if (inserted.meta.changes === 0) return;
-  await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "review_note", detail: { by: "owner", noteId: id, path: found.path, line: found.line, side: found.side, body: found.body, githubCommentId: found.githubId } }, actor);
-  await returnToMaker(env, made, now);
+  // 同じコメントを配信 ID を替えて 2 度受けても、指摘は 1 つ。タスクは、この指摘を足せた時だけ戻す
+  const [inserted] = await db.batch([
+    db
+      .prepare("INSERT INTO review_notes (id, review_id, at, by, path, line, side, body, github_comment_id) SELECT ?, ?, ?, 'owner', ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM review_notes WHERE github_comment_id = ?)")
+      .bind(id, review.id, now, found.path, found.line, found.side, found.body, found.githubId, found.githubId),
+    backToTodo(db, review.node_id, now, { sql: "EXISTS (SELECT 1 FROM review_notes WHERE id = ?)", args: [id] }),
+  ]);
+  if ((inserted?.meta.changes ?? 0) === 0) return;
+  await appendNodeEvent(env, { nodeId: review.node_id, staffId: null, kind: "review_note", detail: { by: "owner", noteId: id, path: found.path, line: found.line, side: found.side, body: found.body, githubCommentId: found.githubId } }, actor);
+  await callMaker(env, review.node_id, now);
 }

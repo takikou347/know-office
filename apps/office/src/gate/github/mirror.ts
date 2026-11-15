@@ -40,7 +40,7 @@ export function enqueueMirror(env: Bindings, reviewId: string, mirror: Mirror, c
 }
 
 /** 取った順番待ちの行と、写す先のプルリクエスト */
-type Claimed = { kind: string; payload: string; attempts: number; repo: string | null; pr_number: number | null };
+type Claimed = { id: string; kind: string; payload: string; attempts: number; repo: string | null; pr_number: number | null };
 
 /**
  * 順番待ちの 1 つを GitHub に送る。送る者の印を 1 文で取れた時だけ送るので、同時に 2 つ走っても 1 度だけ送る
@@ -60,7 +60,7 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
     .first<{ review_id: string; kind: string; payload: string; attempts: number }>();
   if (!row) return "skipped";
   const target = await env.DB.prepare("SELECT repo, pr_number FROM reviews WHERE id = ?").bind(row.review_id).first<{ repo: string; pr_number: number }>();
-  const claimed: Claimed = { ...row, repo: target?.repo ?? null, pr_number: target?.pr_number ?? null };
+  const claimed: Claimed = { ...row, id, repo: target?.repo ?? null, pr_number: target?.pr_number ?? null };
   let githubId: number;
   try {
     githubId = await post(forge, claimed);
@@ -70,23 +70,49 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
     await recordError(env, { source: "job", level: gaveUp ? "error" : "warn", code: gaveUp ? "github_mirror_gave_up" : "github_mirror_failed", error }, clock);
     return "failed";
   }
-  await env.DB.prepare("UPDATE github_mirrors SET github_id = ?, sent_at = ?, claimed_until = NULL WHERE id = ? AND sent_at IS NULL").bind(githubId, clock.now(), id).run();
+  try {
+    await env.DB.prepare("UPDATE github_mirrors SET github_id = ?, sent_at = ?, claimed_until = NULL WHERE id = ? AND sent_at IS NULL").bind(githubId, clock.now(), id).run();
+  } catch (error) {
+    // GitHub には写せたので、次の写し直しは本文の目印で見つけて送らずに印だけを置く
+    await recordError(env, { source: "job", level: "warn", code: "github_mirror_unrecorded", error }, clock);
+    return "failed";
+  }
   return "sent";
 }
 
 /**
- * 取った行の中身を形で確かめ、GitHub に送る
+ * 順番待ちの ID から、写す本文の末尾に付ける見えない目印を作る。GitHub の画面では HTML のコメントとして隠れる
+ * @param id 順番待ちの ID
+ * @returns 目印
+ */
+export function mirrorMarker(id: string): string {
+  return `<!-- know-office:mirror:${id} -->`;
+}
+
+/**
+ * 取った行の中身を形で確かめ、本文の末尾に目印を付けて GitHub に送る
+ * 2 回目からは、前の回が GitHub に送れた後に印を書けずに落ちたかもしれないので、先に GitHub の一覧で目印を探し、あればその ID を返して送らない
  * @param forge GitHub
  * @param claimed 取った行
  * @returns GitHub のレビューかコメントの ID
  * @throws Error 中身の形が違う時、レビューが無い時
- * @throws upstream_failed GitHub が失敗を返した時
+ * @throws upstream_failed GitHub が失敗を返した時、一覧を読み切れない時
  */
 async function post(forge: Forge, claimed: Claimed): Promise<number> {
   if (claimed.repo === null || claimed.pr_number === null) throw new Error("写す先のレビューが無い");
+  const marker = mirrorMarker(claimed.id);
+  const kind = claimed.kind === "review" ? "review" : "comment";
+  if (claimed.attempts > 1) {
+    const found = await forge.findMirror(claimed.repo, claimed.pr_number, kind, marker);
+    if (found !== null) return found;
+  }
   const raw: unknown = JSON.parse(claimed.payload);
-  if (claimed.kind === "review") return forge.postReview(claimed.repo, claimed.pr_number, MirrorReviewPayload.parse(raw));
-  return forge.postComment(claimed.repo, claimed.pr_number, MirrorCommentPayload.parse(raw));
+  if (kind === "review") {
+    const review = MirrorReviewPayload.parse(raw);
+    return forge.postReview(claimed.repo, claimed.pr_number, { ...review, body: `${review.body}\n\n${marker}` });
+  }
+  const comment = MirrorCommentPayload.parse(raw);
+  return forge.postComment(claimed.repo, claimed.pr_number, { ...comment, body: `${comment.body}\n\n${marker}` });
 }
 
 /**

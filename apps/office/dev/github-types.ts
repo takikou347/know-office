@@ -2,6 +2,7 @@
 import type { KeyObject } from "node:crypto";
 import type { Hono } from "hono";
 import { z } from "zod";
+import type { FakePosted, FakeTreeEntry } from "./github-pulls.ts";
 
 /** 代わりの GitHub の App が持てる権限。know-office の manifest と同じ */
 export const Permission = z.enum(["read", "write"]);
@@ -91,6 +92,10 @@ export type FakeGitHub = {
   failNext(route: string, status: number): void;
   /** ブランチの先のコミット。「owner/name:ブランチ」から */
   heads: Map<string, string>;
+  /** Git の木の中身。木の sha から。無い木は空の木として返す */
+  trees: Map<string, FakeTreeEntry[]>;
+  /** 受けたレビューと行のコメント。一覧の API が返す */
+  posted: FakePosted;
 };
 
 /** 代わりの GitHub の設定 */

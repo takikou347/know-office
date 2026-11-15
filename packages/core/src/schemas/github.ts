@@ -1,4 +1,5 @@
 // GitHub のルールの返す形と入力、ゲートウェイが読む GitHub の REST API の返事の形 (タスクとレビューの 3.2 から 3.4)
+import { RepoPath } from "./review.ts";
 import { z } from "./zod.ts";
 
 /**
@@ -214,6 +215,17 @@ export const GitHubPosted = z.object({ id: GitHubId }).loose();
 /** Git の API (blobs、trees、commits) の返事のうち使う所 */
 export const GitHubGitObject = z.object({ sha: Sha }).loose();
 
+/** GET /repos/{o}/{r}/git/trees/{sha} の返事のうち使う所。1 階だけを読む */
+export const GitHubGitTree = z
+  .object({
+    tree: z.array(z.object({ path: z.string().min(1).max(4096), mode: z.string().regex(/^[0-7]{5,6}$/), type: z.string().max(16), sha: Sha }).loose()).max(100_000),
+    truncated: z.boolean(),
+  })
+  .loose();
+
+/** GET /repos/{o}/{r}/pulls/{n}/reviews と /comments の 1 ページのうち使う所。本文の目印で写した物を探す */
+export const GitHubPostedList = z.array(z.object({ id: GitHubId, body: z.string().max(70_000).nullable() }).loose()).max(100);
+
 /** GET /repos/{o}/{r}/git/commits/{sha} の返事のうち使う所 */
 export const GitHubGitCommit = z.object({ sha: Sha, tree: z.object({ sha: Sha }).loose() }).loose();
 
@@ -234,7 +246,7 @@ export const PullRequestReviewCommentEvent = z
       .object({
         id: GitHubId,
         body: z.string().min(1).max(65_536),
-        path: z.string().min(1).max(4096),
+        path: RepoPath,
         line: z.number().int().positive().nullable().optional(),
         side: z.enum(["LEFT", "RIGHT"]).optional(),
         user: GitHubUser.nullable(),

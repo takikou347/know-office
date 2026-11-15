@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { api, rows, useWork } from "../helpers/work.ts";
-import { eventsOf, HEAD, openReview, postedTo } from "../helpers/review.ts";
+import { eventsOf, HEAD, marked, openReview, postedTo, sameBatch, spyBatches } from "../helpers/review.ts";
 
 const world = useWork();
 
@@ -20,7 +20,7 @@ describe("指摘", () => {
     expect(events.find((e) => e.kind === "review_note")).toEqual({ kind: "review_note", staffId: null, detail: { by: "owner", noteId: note.id, path: NOTE.path, line: NOTE.line, side: "new", body: NOTE.body } });
     // 戻ったタスクは、手の空いた開発担当がすぐに取る
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
-    expect(postedTo(world, "comments")).toEqual([{ body: "オーナー: 空の日は 0 を出す", commit_id: HEAD, path: NOTE.path, line: 12, side: "RIGHT" }]);
+    expect(postedTo(world, "comments")).toEqual([{ body: marked("オーナー: 空の日は 0 を出す"), commit_id: HEAD, path: NOTE.path, line: 12, side: "RIGHT" }]);
     expect(await rows(world.d1.DB, "SELECT kind, sent_at IS NOT NULL AS sent FROM github_mirrors")).toEqual([{ kind: "comment", sent: 1 }]);
   });
 
@@ -50,5 +50,16 @@ describe("指摘", () => {
     }
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM review_notes")).toEqual([{ n: 0 }]);
     expect(postedTo(world, "comments")).toEqual([]);
+  });
+
+  it("指摘と、作った社員のタスクを todo に戻すのは 1 回のバッチで書く", async () => {
+    const { task } = await openReview(world);
+    const spy = spyBatches(world);
+    try {
+      await api(world, "POST", `/api/v1/reviews/${task}/notes`, NOTE, 201);
+    } finally {
+      spy.restore();
+    }
+    expect(sameBatch(spy.batches, "INSERT INTO review_notes", "INSERT INTO github_mirrors", "UPDATE nodes SET status = 'todo'")).toBe(true);
   });
 });
