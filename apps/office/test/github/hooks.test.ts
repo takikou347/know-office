@@ -172,6 +172,30 @@ describe("なりすましと偽の通知を断る", () => {
     expect((await planTasks()).map((t) => t["issue_number"])).toEqual([1]);
   });
 
+  it("署名の前は送信元ごとに 1 分 300 回まで受け、301 回目は Retry-After を付けて 429。別の送信元は通る", async () => {
+    const c = await connect(world);
+    const unsigned = (ip: string) =>
+      world.gate.app.request("/hooks/v1/github", { method: "POST", body: "{}", headers: { "x-github-event": "ping", "x-github-delivery": crypto.randomUUID(), "CF-Connecting-IP": ip } }, world.gate.env);
+    // 300 回の要求の代わりに、同じ数え方の本に 300 回数えておく
+    for (let i = 0; i < 300; i += 1) await world.gate.guard.admit("hooks-ip:203.0.113.20", "api", world.clock.now());
+    const over = await unsigned("203.0.113.20");
+    expect({ status: over.status, code: Problem.parse(await over.json()).code }).toEqual({ status: 429, code: "rate_limited" });
+    expect(Number(over.headers.get("Retry-After"))).toBeGreaterThan(0);
+    // 別の送信元は署名を確かめる所まで届く
+    expect((await unsigned("203.0.113.21")).status).toBe(401);
+    expect((await hook(world, { event: "issues", payload: issueOpened(c), secret: c.webhookSecret })).status).toBe(204);
+  });
+
+  it.each(["GET", "PUT"])("%s の /hooks/v1/github は受け手に届かず、problem+json の 404 か 405", async (method) => {
+    const c = await connect(world);
+    const body = JSON.stringify(issueOpened(c));
+    const res = await world.gate.app.request("/hooks/v1/github", { method, ...(method === "GET" ? {} : { body }), headers: { "x-github-event": "issues", "x-github-delivery": crypto.randomUUID() } }, world.gate.env);
+    expect([404, 405]).toContain(res.status);
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+    expect(await rows(world.d1.DB, "SELECT * FROM github_deliveries")).toEqual([]);
+    expect(await planTasks()).toEqual([]);
+  });
+
   it("署名の無い 61 回の後でも、署名の合う通知は通る", async () => {
     const c = await connect(world);
     for (let i = 0; i < 61; i += 1) {
