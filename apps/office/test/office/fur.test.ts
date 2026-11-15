@@ -29,9 +29,9 @@ describe("毛の層", () => {
     const g = sample();
     const base = Number(g.userData["baseIndices"]);
     const per = Number(g.userData["layerIndices"]);
+    setFurLayers(g, 2);
+    expect(g.drawRange.count).toBe(base + per * 2);
     setFurLayers(g, 3);
     expect(g.drawRange.count).toBe(base + per * 3);
-    setFurLayers(g, 5);
-    expect(g.drawRange.count).toBe(base + per * 5);
   });
 });

@@ -128,7 +128,7 @@ describe("社員の姿", () => {
   it("電話の幅では毛の層を減らし、広い幅では毛羽が見えるだけ重ねる", () => {
     expect(furLayersFor(360)).toBeLessThan(furLayersFor(1280));
     expect(furLayersFor(599)).toBe(furLayersFor(360));
-    expect(furLayersFor(360)).toBeGreaterThanOrEqual(3);
+    expect(furLayersFor(360)).toBeGreaterThanOrEqual(2);
     expect(furLayersFor(1280)).toBeLessThanOrEqual(12);
   });
 

@@ -2,10 +2,10 @@
 import { BufferAttribute, type BufferGeometry, Color, MeshStandardMaterial, SphereGeometry, Vector3 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-/** 広い幅で重ねる毛の層の数。GPU の無い描き方でも 1 枚の重さが元の部屋に近くなるよう 5 にする */
-const WIDE_LAYERS = 5;
+/** 広い幅で重ねる毛の層の数。1 層ごとに描く重さが増えるので、GPU の無い描き方でも元の部屋の倍にならない 3 にする */
+const WIDE_LAYERS = 3;
 /** 電話の幅で重ねる毛の層の数。子犬が小さく見えるので減らしても違いが見えない */
-const PHONE_LAYERS = 3;
+const PHONE_LAYERS = 2;
 /** これより狭い部屋を電話の幅と見る (CSS のピクセル)。子犬の大きさと毛の層の数の両方がこの幅で切り替わる */
 export const PHONE_WIDTH = 600;
 /** 作る時に用意する層の数。描く層の数はこの中で変える */
