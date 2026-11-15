@@ -252,15 +252,12 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     putChallenge: guard.putChallenge.bind(guard),
     takeChallenge: guard.takeChallenge.bind(guard),
     observe: office.observe.bind(office),
-    holdKeys: office.holdKeys.bind(office),
-    keysHeld: office.keysHeld.bind(office),
+    holdKeys: office.holdKeys.bind(office), keysHeld: office.keysHeld.bind(office),
     keyState: office.keyState.bind(office),
     releaseKeys: office.releaseKeys.bind(office),
-    setThresholdHash: office.setThresholdHash.bind(office),
-    thresholdHash: office.thresholdHash.bind(office),
+    setThresholdHash: office.setThresholdHash.bind(office), thresholdHash: office.thresholdHash.bind(office),
     claimStop: office.claimStop.bind(office),
-    releaseStop: office.releaseStop.bind(office),
-    dropClaim: office.dropClaim.bind(office),
+    releaseStop: office.releaseStop.bind(office), dropClaim: office.dropClaim.bind(office),
     restoreStop: office.restoreStop.bind(office),
   };
   const workspaces: Record<StaffId, TestWorkspace> = { president: { tickets: [], down: false }, builder: { tickets: [], down: false }, reviewer: { tickets: [], down: false } };

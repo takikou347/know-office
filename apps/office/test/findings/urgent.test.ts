@@ -119,7 +119,7 @@ describe("急ぐ故障の調べの費用の守り", () => {
     const prints = await bursts([4, 4, 5, 6, 6], dec(3, 10));
     await poll(dec(3, 10, 5));
     expect(world.gate.claude.batches).toHaveLength(3);
-    expect(await sent()).toEqual([prints[2], prints[3], prints[4]].toSorted((a, b) => a.localeCompare(b)));
+    expect(await sent()).toEqual(prints.slice(2).toSorted((a, b) => a.localeCompare(b)));
   });
 
   it("1 日に送るのは 10 本までで、次の日はまた送る", async () => {
