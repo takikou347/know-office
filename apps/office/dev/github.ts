@@ -188,7 +188,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     })
     .get("/app", async (c) => {
       remember("GET /app", "", null);
-      // GitHub は消した App の JWT に 404 を返す
+      // 消した App の JWT への返事は GitHub の文書に無い。ゲートウェイの前提 (404 Integration not found) に合わせて返す
       const iss = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1];
       let known = false;
       try {

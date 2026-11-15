@@ -1,6 +1,6 @@
 // 全体を止めた後の鍵。止まっている間はプロキシが外へ出さず、オーナーが GitHub App と Claude の鍵を入れ直すと全体を再開できる (自動停止の 3.4、3.5)
 import { generateKeyPairSync } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ANTHROPIC_KEY } from "../helpers/gate.ts";
 import { connect, createGitHubApp, fromWorkspace, hook, onGitHub, push, returnFromGitHub, startTask, stepUp, type Work, wrapDb } from "../helpers/github.ts";
@@ -281,6 +281,32 @@ describe("再開", () => {
     expect(res.status).toBe(500);
     expect((await world.gate.office.keyState()).held).toBe(true);
     expect(world.gate.github.revoked).toEqual(issued);
+  });
+
+  it("鍵の取り替えと外の鍵の印の両方が落ちても、取り替えの失敗を残し、印の失敗も記録して、1 時間の鍵を取り消す", async () => {
+    await connect(world);
+    const work = await startTask(world, UI);
+    expect((await push(world, work, UI, [{ ref: "refs/heads/ko/x" }])).status).toBe(200);
+    const issued = [...world.gate.github.tokens.keys()];
+    const restore = wrapDb(world, {
+      prepare: (real, sql) => {
+        if (/^insert into "vault"/i.test(sql)) throw new Error("取り替えを落とす");
+        return real(sql);
+      },
+    });
+    // エラーログはテストの間で消えないので、ここから後の行だけを見る
+    const seen = Number((await rows(world.d1.REC_2026, "SELECT COALESCE(MAX(rowid), 0) AS n FROM error_events"))[0]?.["n"]);
+    const hold = vi.spyOn(world.gate.env.GUARD.get(world.gate.env.GUARD.idFromName("guard")), "holdKeys").mockRejectedValue(new Error("印を落とす"));
+    const res = await call("POST", "/api/v1/guard/stops", { scope: "office", target: "office", reason: "確かめ" });
+    restore();
+    hold.mockRestore();
+    expect(res.status).toBe(500);
+    expect(world.gate.github.revoked).toEqual(issued);
+    const errors = (await rows(world.d1.REC_2026, "SELECT rowid AS n, code, message FROM error_events")).filter((e) => Number(e["n"]) > seen);
+    // 印の失敗は別の行に残り、止める動きの失敗には元の取り替えの失敗が残る
+    expect(errors.map((e) => String(e["code"])).toSorted()).toEqual(["guard_keys_hold_failed", "guard_stop_failed", "internal"]);
+    expect(errors.find((e) => e["code"] === "guard_stop_failed")?.["message"]).toContain("取り替えを落とす");
+    expect(errors.find((e) => e["code"] === "guard_keys_hold_failed")?.["message"]).toContain("印を落とす");
   });
 
   it("全体を止めると、外の鍵は取り消すだけで新しい版を作らない", async () => {

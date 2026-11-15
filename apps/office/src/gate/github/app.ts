@@ -300,7 +300,7 @@ export async function checkInstallation(env: Bindings, fetcher: Fetcher, app: Gi
 
 /**
  * 自分の App がまだ GitHub にあるかを、App の JWT で GET /app を呼んで確かめる
- * GitHub は消した App の JWT に 404 (Integration not found) を返す。docs.github.com/en/rest/apps/apps#get-the-authenticated-app
+ * 消した App の JWT への返事は GitHub の文書に無い。404 (Integration not found) を返すという前提で書いている。401 を返すなら取り消さず 502 のままで、作り直せない
  * @param env バインディング
  * @param fetcher 外への fetch
  * @param app 自分の App

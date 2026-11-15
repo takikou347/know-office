@@ -239,21 +239,27 @@ async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null,
     case "office":
       for (const id of ALL_STAFF) await staffOf(env, id).halt(now);
       await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
-      // 取り替えが落ちても、外の鍵の印と 1 時間の鍵の取り消しは必ず行う。落ちた事は投げ直して止めた記録に残す
+      // 取り替えが落ちても、外の鍵の印と 1 時間の鍵の取り消しは必ず行う。落ちた事は最初の失敗を投げ直して止めた記録に残す
+      const failures: unknown[] = [];
       try {
         await rotateVaultKeys(env.DB, env.MASTER_KEY, now);
-      } finally {
-        try {
-          await guardDo(env).holdKeys();
-        } finally {
-          // 新しい鍵を作れなくしてから、出した 1 時間の鍵を GitHub の側で取り消す。届かなくても止めるのは続ける
-          try {
-            await deps.revokeGitHubTokens(env);
-          } catch (error) {
-            await recordError(env, { source: "gate", level: "error", code: "github_token_revoke_failed", error }, clockAt(now));
-          }
-        }
+      } catch (error) {
+        failures.push(error);
       }
+      try {
+        await guardDo(env).holdKeys();
+      } catch (error) {
+        // 取り替えの失敗を覆わないよう、印の失敗は別に残す
+        await recordError(env, { source: "gate", level: "error", code: "guard_keys_hold_failed", error }, clockAt(now));
+        failures.push(error);
+      }
+      // 新しい鍵を作れなくしてから、出した 1 時間の鍵を GitHub の側で取り消す。届かなくても止めるのは続ける
+      try {
+        await deps.revokeGitHubTokens(env);
+      } catch (error) {
+        await recordError(env, { source: "gate", level: "error", code: "github_token_revoke_failed", error }, clockAt(now));
+      }
+      if (failures.length > 0) throw failures[0];
       return;
     default:
       input.scope satisfies never;

@@ -36,8 +36,9 @@ const CHALLENGE_MS = 5 * MINUTE;
 /** 通知を出す先。GuardDO は D1 の notices に書く */
 export type Notify = (ip: string, at: number) => Promise<void>;
 
-/** 401、403、429 を数える窓と、超えたら知らせる回数。API の決まりの 3.6 の 8 */
+/** 401、403、429 を数える窓の長さ (5 分)。API の決まりの 3.6 の 8 */
 export const DENIED_WINDOW_MS = 5 * MINUTE;
+/** 窓の中の 401、403、429 がこの回数を超えたら知らせる。API の決まりの 3.6 の 8 */
 export const DENIED_LIMIT = 50;
 
 /** 断った数が 5 分に 50 回を超えた時に知らせる先。数は超えた時の窓の数 */
