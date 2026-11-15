@@ -92,8 +92,11 @@ void describe("自動のデプロイとプレビュー環境", () => {
     const production = all.get("production") ?? "";
     assert.match(production, /^ {4}needs: \[ready, check\]$/m);
     assert.match(production, /&& github\.event_name == 'push'$/m);
-    inOrder(production, ["pnpm build", "wrangler d1 migrations apply", "wrangler deploy", "node scripts/smoke.ts", "wrangler rollback"]);
+    inOrder(production, ["pnpm build", "wrangler d1 migrations apply", "wrangler deploy", "node scripts/smoke.ts", "wrangler rollback", "node scripts/smoke.ts"]);
     assert.match(production, /^ {8}if: failure\(\) && steps\.deploy\.outcome == 'success'$/m);
+    // 戻した後にもう一度聞き、戻した先が返るかを出す
+    assert.match(production, /^ {6}- id: rollback\n/m);
+    assert.match(production, /^ {8}if: failure\(\) && steps\.rollback\.outcome == 'success'\n(.*\n){4} {8}run: node scripts\/smoke\.ts$/m);
     assert.match(production, /^ {6}cancel-in-progress: false$/m);
     assert.match(deploy, /^ {2}push:\n {4}branches: \[main\]$/m);
   });
@@ -105,7 +108,12 @@ void describe("自動のデプロイとプレビュー環境", () => {
     assert.match(preview, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository$/m);
     inOrder(preview, ["pnpm build", ".previews.d1_databases", "wrangler d1 migrations apply", 'wrangler preview --name "pr-$NUMBER"', "node scripts/smoke.ts"]);
     assert.doesNotMatch(preview, /-c wrangler\.jsonc/);
-    assert.match(all.get("preview-delete") ?? "", /wrangler preview delete --name "pr-\$NUMBER"/);
+    const remove = all.get("preview-delete") ?? "";
+    assert.match(remove, /wrangler preview delete --name "pr-\$NUMBER"/);
+    // 出す job と消す job は同じ group に並べ、消す job は止めない
+    const group = /^ {4}concurrency:\n {6}group: (.+)\n {6}cancel-in-progress: (\w+)$/m;
+    assert.equal(group.exec(remove)?.[1], group.exec(preview)?.[1]);
+    assert.equal(group.exec(remove)?.[2], "false");
   });
 
   void it("プレビューは本番と別の D1 と R2 を結ぶ", () => {

@@ -93,12 +93,21 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: node scripts/smoke.ts
       # 確かめが落ちたら前のバージョンに戻す。マイグレーションは足すだけなので戻さない (運用手順の 2 章)
-      - name: 前のバージョンに戻す
+      - id: rollback
+        name: 前のバージョンに戻す
         if: failure() && steps.deploy.outcome == 'success'
         working-directory: apps/office
         env:
           SHA: ${{ github.sha }}
         run: pnpm exec wrangler rollback --name know-office --yes --message "main $SHA の確かめが落ちた"
+      # 戻した先が返るかを出す。戻せても job は落ちたまま
+      - name: 戻した先の URL に聞く
+        if: failure() && steps.rollback.outcome == 'success'
+        env:
+          SMOKE_URL: ${{ vars.OFFICE_URL }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: node scripts/smoke.ts
 
   preview:
     needs: [ready, check]
@@ -109,6 +118,7 @@ jobs:
     environment:
       name: preview
       url: ${{ steps.preview.outputs.url }}
+    # 消す job と同じ group にし、出している途中のプレビューを消す job が追い越さない
     concurrency:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -156,6 +166,10 @@ jobs:
     if: needs.ready.outputs.ok == 'true' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # 消すのは途中で止めない。出す job が後から回っても、消した後に並ぶ
+    concurrency:
+      group: preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

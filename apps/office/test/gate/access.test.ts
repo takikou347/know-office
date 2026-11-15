@@ -254,6 +254,17 @@ describe("Access の作業用の鍵", () => {
     expect(await d1.DB.prepare("SELECT count(*) AS n FROM sessions").first("n")).toBe(0);
   });
 
+  // 断ったのが Access の証明の確かめだと分かるよう、Access の失敗の記録が 1 行残る事も見る。セッションの確かめで断られたのでは、鍵の証明を通した事になる
+  it.each([
+    ["セッションの要るほかのルート", "/api/v1/me", "GET"],
+    ["稼働確認への GET 以外", "/api/v1/health", "POST"],
+    ["末尾に / の付いた稼働確認", "/api/v1/health/", "GET"],
+  ])("決めた鍵の証明でも%sは Access で断る", async (_, path, method) => {
+    const res = await gate.request(path, { method, headers: { Origin: ORIGIN, "Cf-Access-Jwt-Assertion": await serviceProof(SMOKE_CLIENT_ID) } });
+    expect([401, 405]).toContain(res.status);
+    expect(await d1.DB.prepare("SELECT kind, ok FROM login_attempts").all().then((r) => r.results)).toEqual([{ kind: "access", ok: 0 }]);
+  });
+
   it("ほかの鍵の証明は稼働確認でも 401", async () => {
     const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof("other-client.access") } });
     expect(res.status).toBe(401);
