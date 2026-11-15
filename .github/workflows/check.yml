@@ -130,6 +130,15 @@ jobs:
       - run: pnpm --filter @know-office/office exec playwright install --with-deps chromium webkit
       # 画面の通しと一緒に、動く入口への自動の攻撃のチェック (e2e/attack.spec.ts) も流す
       - run: pnpm e2e
+      # 落ちた時に出ていた画面の中身を記録にも出す。ファイルを取りに行けない所からでも原因を読める
+      - if: failure()
+        run: |
+          for f in apps/office/test-results/*/error-context.md; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            head -c 20000 "$f"
+            echo "::endgroup::"
+          done
       # 落ちた時に、どの画面で何が出ていたかを後から読めるよう残す
       - if: failure()
         uses: actions/upload-artifact@v4

@@ -47,7 +47,16 @@ async function openInApp(page: Page, name: string): Promise<void> {
  * @param page 見るページ
  * @returns 絵の PNG
  */
-const pictureOf = (page: Page) => roomOf(page).locator("canvas").screenshot({ animations: "allow" });
+async function pictureOf(page: Page): Promise<Buffer> {
+  const canvas = roomOf(page).locator("canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("canvas が無い");
+  // canvas の内側だけを撮る。位置が小数の時、要素の絵は外の 1 行 (枠の丸い角) まで入り、動きが止まって重ね方が変わると、その縁のぼかしが 1 段ずれる
+  const inset = 2;
+  const clip = { x: Math.ceil(box.x) + inset, y: Math.ceil(box.y) + inset, width: Math.floor(box.width) - inset * 2 - 1, height: Math.floor(box.height) - inset * 2 - 1 };
+  return page.screenshot({ clip, animations: "allow" });
+}
 
 /**
  * 社員を覆うリンクの箱の位置を返す
