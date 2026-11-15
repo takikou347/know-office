@@ -1,10 +1,13 @@
 // タスクの繰り返し。社員が自分の山から 1 つ取り、空なら上司に求め、終えたら次を取る (タスクとレビューの 3.1)
-import { AppError, type ReleaseCondition, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
+import { AppError, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, staff } from "../db/main.ts";
 import type { Bindings, Staff } from "../env.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow, revertNode } from "./nodes.ts";
+
+/** 2 つのコミットの間で変わった 1 ファイル。patch は統一形式の差分の本文で、GitHub が大きすぎて返さない時は null */
+export type ChangedFile = { path: string; previousPath?: string; status: ReviewFileStatus; patch: string | null };
 
 /** GitHub を呼ぶ口。鍵は github/app.ts が vault の App の鍵から作る (タスクとレビューの 3.3、3.4) */
 export type Forge = {
@@ -28,6 +31,10 @@ export type Forge = {
   findMirror(repo: string, pr: number, kind: "review" | "comment", marker: string): Promise<number | null>;
   /** ブランチに 1 ファイルを書き換えたコミットを足し、その sha を返す。parent はブランチの今の先で、先が進んでいれば conflict で断る。mode は今のファイルから引き継ぎ、シンボリックリンクとサブモジュールは rule_denied で断る */
   commitFile(repo: string, branch: string, change: { parent: string; path: string; content: string; message: string }): Promise<string>;
+  /** base から head までに変わったファイルを、差分の本文と一緒に返す。contents の読みだけに絞った鍵で読む */
+  compare(repo: string, base: string, head: string): Promise<ChangedFile[]>;
+  /** コミット ref のファイルの中身を返す。無いか、ファイルでなければ null */
+  readFile(repo: string, ref: string, path: string): Promise<string | null>;
 };
 
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
@@ -42,6 +49,8 @@ export const UNCONNECTED_FORGE: Forge = {
   postComment: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   commitFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   findMirror: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  compare: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  readFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
 };
 
 /** 社員 DO の中で次のタスクを取るのに使う、勤務の本の口 */

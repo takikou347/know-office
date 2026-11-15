@@ -5,6 +5,7 @@ import {
   type Fetcher,
   GitHubCheckRuns,
   GitHubCompare,
+  GitHubContent,
   GitHubGitCommit,
   GitHubGitObject,
   GitHubGitTree,
@@ -20,7 +21,7 @@ import {
   RULESET_NAME,
 } from "@know-office/core";
 import type { ZodType } from "zod";
-import type { Forge } from "../work/loop.ts";
+import type { ChangedFile, Forge } from "../work/loop.ts";
 
 /** 鍵に付ける権限。GitHub App の権限の名前と、読むか書くか */
 export type Permissions = Partial<Record<"contents" | "pull_requests" | "issues" | "checks" | "statuses" | "administration" | "metadata", "read" | "write">>;
@@ -50,6 +51,28 @@ const PAGE_SIZE = 100;
 
 /** 目印を探す一覧のページの上限。1,000 件を超えるプルリクエストは読み切れないとして断る */
 const LIST_PAGES = 10;
+
+/** GitHub のファイルの種類を、画面で分ける種類に寄せる。copied は足した物、changed と unchanged は変えた物とみる */
+const FILE_STATUS: Readonly<Record<string, ChangedFile["status"]>> = { added: "added", copied: "added", removed: "removed", renamed: "renamed" };
+
+/**
+ * ファイルの道を URL の道に入れる形にする。/ はそのまま残し、区切りごとに符号にする
+ * @param path 確かめたファイルの道
+ * @returns URL に入れる形
+ */
+function filePath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * base64 の中身を UTF-8 の文字にする。GitHub は 60 字ごとに改行を入れる
+ * @param content base64
+ * @returns 文字
+ */
+function fromBase64(content: string): string {
+  const bytes = Uint8Array.from(atob(content.replace(/\s/g, "")), (ch) => ch.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
 
 /** チェックが通ったとみる結果 */
 const PASSED = new Set(["success", "neutral", "skipped"]);
@@ -169,6 +192,25 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
   }
   const writeContents: Permissions = { contents: "write" };
   return {
+    compare: async (repo, from, to) => {
+      const compare = await call(repo, readContents, { method: "GET", path: `/compare/${from}...${to}` }, GitHubCompare);
+      return compare.files.map((f) => ({
+        path: f.filename,
+        ...(f.previous_filename === undefined ? {} : { previousPath: f.previous_filename }),
+        status: FILE_STATUS[f.status ?? ""] ?? "modified",
+        patch: f.patch ?? null,
+      }));
+    },
+    readFile: async (repo, ref, path) => {
+      const res = await send(repo, readContents, { method: "GET", path: `/contents/${filePath(path)}?ref=${ref}` });
+      if (res.status === 404) return null;
+      const file = await parse(res, GitHubContent);
+      // フォルダ、シンボリックリンク、サブモジュールはファイルの中身として返さない
+      if (file.type !== "file") return null;
+      // 1MB を超えるファイルは中身が来ない
+      if (file.encoding !== "base64") throw new AppError("upstream_failed", "ファイルが大きすぎて読めない");
+      return fromBase64(file.content);
+    },
     connected: () => Promise.resolve(true),
     postReview: async (repo, pr, review) => {
       const path = `/pulls/${String(pr)}/reviews`;

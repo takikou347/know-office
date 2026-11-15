@@ -69,9 +69,14 @@ export const GitHubCheckRuns = z
 /** GET /repos/{o}/{r}/compare/{base}...{head} の返事のうち使う所 */
 export const GitHubCompare = z
   .object({
-    files: z.array(z.object({ filename: z.string().min(1), previous_filename: z.string().min(1).optional() }).loose()).default([]),
+    files: z
+      .array(z.object({ filename: z.string().min(1), previous_filename: z.string().min(1).optional(), status: z.string().optional(), patch: z.string().optional() }).loose())
+      .default([]),
   })
   .loose();
+
+/** GET /repos/{o}/{r}/contents/{path} の返事のうち使う所。1MB を超えるファイルは encoding が none で中身が空 */
+export const GitHubContent = z.object({ type: z.string(), encoding: z.string(), content: z.string() }).loose();
 
 /** プルリクエストの返事のうち使う所 */
 export const GitHubPull = z.object({ number: z.number().int().positive(), base: z.object({ sha: Sha }).loose(), head: z.object({ sha: Sha }).loose() }).loose();

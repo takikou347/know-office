@@ -99,3 +99,74 @@ export const MirrorCommentPayload = z
 
 /** GitHub に写す行のコメントの中身の型 */
 export type MirrorCommentPayload = z.infer<typeof MirrorCommentPayload>;
+
+/** 画面で分ける、変えたファイルの種類。GitHub の copied は added、changed と unchanged は modified に寄せる */
+export const ReviewFileStatus = z.enum(["added", "modified", "removed", "renamed"]);
+
+/** 変えたファイルの種類の型 */
+export type ReviewFileStatus = z.infer<typeof ReviewFileStatus>;
+
+/** レビューの概要。要点とチェックを変更の前に出し、変えたファイルは木に並べる道と種類だけを持つ。差分はファイルごとに getReviewDiff で取る */
+export const ReviewHead = z
+  .object({
+    nodeId: Uuid,
+    repo: z.string(),
+    prNumber: z.number().int(),
+    branch: z.string(),
+    baseSha: z.string(),
+    headSha: z.string(),
+    lastSeenSha: z.string().nullable(),
+    checks: z.array(z.object({ name: z.string(), ok: z.boolean() }).strict()),
+    reviewerSummary: z.string(),
+    reviewerVerdict: z.string().nullable(),
+    files: z.array(z.object({ path: z.string(), status: ReviewFileStatus, seen: z.boolean() }).strict()),
+  })
+  .strict()
+  .meta({ id: "ReviewHead" });
+
+/** レビューの概要の型 */
+export type ReviewHead = z.infer<typeof ReviewHead>;
+
+/** 1 ファイルの差分の問い。since は前に見た先で、あればそこからの差を返す */
+export const ReviewDiffQuery = z.object({ path: RepoPath, since: Sha.optional() }).strict();
+
+/** 1 ファイルの差分。lines は行の頭に ` ` (変わらない)、`+` (足した)、`-` (消した) を付けた統一形式の行 */
+export const FileDiff = z
+  .object({
+    path: z.string(),
+    language: z.string(),
+    hunks: z.array(z.object({ oldStart: z.number().int(), newStart: z.number().int(), lines: z.array(z.string()) }).strict()),
+  })
+  .strict()
+  .meta({ id: "FileDiff" });
+
+/** 1 ファイルの差分の型 */
+export type FileDiff = z.infer<typeof FileDiff>;
+
+/** 前か後のファイルの中身の問い。base はレビューの元、head は今の先 */
+export const ReviewFileQuery = z.object({ path: RepoPath, ref: z.enum(["base", "head"]) }).strict();
+
+/** 前か後のファイルの中身。ref は読んだ sha */
+export const FileContent = z.object({ path: z.string(), ref: z.string(), content: z.string() }).strict().meta({ id: "FileContent" });
+
+/** ファイルの中身の型 */
+export type FileContent = z.infer<typeof FileContent>;
+
+/** 読んだ所の印を置く入力。sha は読んだ時の head_sha で、違えば 409 */
+export const SeenInput = z.object({ sha: Sha }).strict().meta({ id: "SeenInput" });
+
+/** 読んだ所の印を置く入力の型 */
+export type SeenInput = z.infer<typeof SeenInput>;
+
+/** 拡張子ごとの色分けの言語。画面のエディタの言語の名前と同じ */
+const LANGUAGES: Readonly<Record<string, string>> = { ts: "typescript", mts: "typescript", cts: "typescript", tsx: "tsx", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx", css: "css", md: "markdown", json: "json", jsonc: "json" };
+
+/**
+ * ファイルの道の拡張子から、色分けの言語を決める
+ * @param path ファイルの道
+ * @returns 言語の名前。知らない物は text
+ */
+export function languageOfPath(path: string): string {
+  const ext = /\.([^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? "";
+  return LANGUAGES[ext] ?? "text";
+}

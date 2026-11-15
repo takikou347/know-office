@@ -482,5 +482,7 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
     postComment: async (repo, pr, comment) => (await load()).postComment(repo, pr, comment),
     commitFile: async (repo, branch, change) => (await load()).commitFile(repo, branch, change),
     findMirror: async (repo, pr, kind, marker) => (await load()).findMirror(repo, pr, kind, marker),
+    compare: async (repo, base, head) => (await load()).compare(repo, base, head),
+    readFile: async (repo, ref, path) => (await load()).readFile(repo, ref, path),
   };
 }

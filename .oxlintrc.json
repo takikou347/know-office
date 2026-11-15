@@ -67,11 +67,6 @@
       "rules": { "no-console": "off" }
     },
     {
-      // 仮のデータのモック。tasks.md の 8.8 で画面ごとのファイル (screen/pages/<画面>/) に分ける時にこの例外を消す
-      "files": ["apps/office/src/screen/pages.tsx"],
-      "rules": { "max-lines": "off" }
-    },
-    {
       // Swagger UI の初期化 (GitHub Pages とゲートウェイの /api/v1/docs)。ブラウザが先に読んだ swagger-ui-bundle.js の大域の関数を呼ぶ
       "files": ["apps/office/openapi/pages/*.js", "apps/office/public/swagger/*.js"],
       "rules": { "typescript/no-unsafe-assignment": "off", "typescript/no-unsafe-call": "off" }

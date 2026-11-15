@@ -29,6 +29,9 @@ const MASTER_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 /** テストのオーナー */
 export const OWNER = "owner@example.com";
 
+/** 代わりの GitHub の compare が返す 1 ファイル。GitHub の形 */
+export type CompareFile = { filename: string; previous_filename?: string; status?: string; patch?: string };
+
 /** 起こしたテストのゲートウェイ */
 export type TestGate = {
   /** ゲートウェイ。ルートを足すテストは signIn の前に足す */
@@ -41,8 +44,8 @@ export type TestGate = {
   claude: FakeClaude;
   /** ゲートウェイが外へ出す fetch。代わりの Access、Claude API、GitHub に回す */
   fetch: Fetcher;
-  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル */
-  github: FakeGitHub & { files: { filename: string; previous_filename?: string }[] };
+  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル。compares は「元...先」ごとに返すファイルで、あればそちらを返す。contents は「sha:道」ごとのファイルの中身 */
+  github: FakeGitHub & { files: CompareFile[]; compares: Map<string, CompareFile[]>; contents: Map<string, string> };
   /** vault の App の鍵から作った 1 時間の鍵をためる所。テストごとに別にする */
   githubCache: TokenCache;
   /** GitHub の鍵を出した先と権限 */
@@ -173,8 +176,15 @@ function namespace<T>(stub: T) {
  * @returns そのまま送る道
  */
 function githubPath(github: TestGate["github"], path: string): string {
-  const compare = /^\/repos\/([^/]+\/[^/]+)\/compare\//.exec(path);
-  if (compare) github.set(`GET ${path}`, { files: github.files });
+  const compare = /^\/repos\/[^/]+\/[^/]+\/compare\/([^?]+)/.exec(path);
+  if (compare) github.set(`GET ${path.split("?")[0] ?? path}`, { files: github.compares.get(decodeURIComponent(compare[1] ?? "")) ?? github.files });
+  // contents は道が同じで ref だけが違うので、問いの ref ごとに置いた中身を返す
+  const file = /^(\/repos\/[^/]+\/[^/]+\/contents\/([^?]+))\?ref=([0-9a-f]{40})$/.exec(path);
+  if (file) {
+    const [, route = "", name = "", ref = ""] = file;
+    const content = github.contents.get(`${ref}:${decodeURIComponent(name)}`);
+    github.set(`GET ${route}`, content === undefined ? undefined : { type: "file", encoding: "base64", content: Buffer.from(content).toString("base64") });
+  }
   if (/^\/repos\/[^/]+\/[^/]+\/git\/ref\/heads\//.test(path)) github.set(`GET ${path}`, { ref: "refs/heads/x", object: { sha: "b".repeat(40) } });
   return path;
 }
@@ -192,7 +202,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
-  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now() }), { files: [] });
+  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now() }), { files: [], compares: new Map(), contents: new Map() });
   const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];
   const githubAccess: GitHubAccess = {

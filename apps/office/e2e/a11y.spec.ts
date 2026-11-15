@@ -2,6 +2,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./helpers/test.ts";
 import { screens } from "../src/screen/routes.ts";
+import { REVIEW_PATH, stubReview } from "./helpers/review.ts";
 import { withoutWebgl } from "./helpers/webgl.ts";
 
 // 使いやすさ: キーボードだけで承認まで出せ、8 画面と深い所に axe の critical と serious が無い。画面の 3.5
@@ -34,6 +35,8 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   // 勤怠は records.setup.ts が手元の D1 に置いた日を開き、表を読み終えてから掛ける
   { name: "社員の勤怠", path: "/staff/builder?tab=attendance&day=2026-11-13", heading: "社員と仕事", ready: "出勤 9:00" },
   { name: "変更のレビュー", path: "/staff/builder/tasks/t2", heading: "社員と仕事" },
+  // 入口にあるレビューは、境目のモックの返事で最初のファイルの変更を読み終えてから掛ける
+  { name: "入口のレビュー", path: REVIEW_PATH, heading: "社員と仕事", ready: "const empty = 0;", mock: async (page) => void (await stubReview(page)) },
   { name: "サービスの様子", path: "/services/knowidea-ui", heading: "アイデアとサービス" },
   // 木と組織図は records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
   // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
