@@ -61,7 +61,9 @@ const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
  * @returns 見えない時はその訳、見える時は null
  */
 async function focusProblem(page: Page): Promise<string | null> {
-  return page.evaluate((body) => {
+  return page.evaluate(async (body) => {
+    // Safari は focus した物を画面に入れる送りを、次の描画の時に行う。送り終えてから位置を見る
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     const el = document.activeElement;
     if (!(el instanceof HTMLElement) || el === document.body) return body;
     const name = `${el.tagName.toLowerCase()} 「${(el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 30)}」`;
