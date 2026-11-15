@@ -2,6 +2,7 @@
 import {
   AppError,
   allowedFetch,
+  CommitSha,
   type Fetcher,
   GitHubCheckRuns,
   GitHubCompare,
@@ -94,6 +95,18 @@ function fromBase64(content: string): string {
 
 /** チェックが通ったとみる結果 */
 const PASSED = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * コミットの SHA を URL の道と本文に入れる前に形を確かめる
+ * @param sha コミットの SHA
+ * @returns 確かめた SHA
+ * @throws internal 40 字の 16 進数でない時
+ */
+function commitSha(sha: string): string {
+  const parsed = CommitSha.safeParse(sha);
+  if (!parsed.success) throw new AppError("internal", "コミットの形が違う");
+  return parsed.data;
+}
 
 /**
  * ブランチの名前を URL の道に入れる形にする。/ はそのまま残し、ほかを符号にする
@@ -283,16 +296,16 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       const pull = await call(input.repo, { pull_requests: "write" }, { method: "POST", path: "/pulls" }, GitHubPull, { title: input.title, head: input.branch, base: "main", body: input.body });
       return { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };
     },
-    checksPassed: async (repo, pr) => {
-      const pull = await call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls/${String(pr)}` }, GitHubPull);
-      const runs = await call(repo, { checks: "read" }, { method: "GET", path: `/commits/${pull.head.sha}/check-runs` }, GitHubCheckRuns);
+    checksPassed: async (repo, sha) => {
+      // 確かめたコミットのチェックを読む。プルリクエストの今の先は、確かめた後に進んでいるかもしれない
+      const runs = await call(repo, { checks: "read" }, { method: "GET", path: `/commits/${commitSha(sha)}/check-runs` }, GitHubCheckRuns);
       // チェックが 1 つも無い時と、一覧に入り切らない時は通ったと言えない
       if (runs.check_runs.length === 0 || runs.total_count > runs.check_runs.length) return false;
       return runs.check_runs.every((r) => r.status === "completed" && r.conclusion !== null && PASSED.has(r.conclusion));
     },
-    merge: async (repo, branch) => {
-      const ref = await call(repo, { contents: "read" }, { method: "GET", path: `/git/ref/heads/${branchPath(branch)}` }, GitHubRef);
-      await call(repo, { contents: "write" }, { method: "PATCH", path: "/git/refs/heads/main" }, GitHubRef, { sha: ref.object.sha, force: false });
+    merge: async (repo, head) => {
+      // ブランチの先を読み直さず、変えたファイルとチェックを確かめたコミットまで進める
+      await call(repo, { contents: "write" }, { method: "PATCH", path: "/git/refs/heads/main" }, GitHubRef, { sha: commitSha(head.sha), force: false });
     },
     changedPaths: async (repo, branch) => {
       const compare = await call(repo, { contents: "read" }, { method: "GET", path: `/compare/main...${branchPath(branch)}` }, GitHubCompare);

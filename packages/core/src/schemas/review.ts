@@ -2,7 +2,8 @@
 import { z } from "./zod.ts";
 
 const Uuid = z.uuid().openapi({ description: "UUID v7" });
-const Sha = z.string().regex(/^[0-9a-f]{40}$/);
+/** git のコミットの SHA-1。40 字の小文字の 16 進数 */
+export const CommitSha = z.string().regex(/^[0-9a-f]{40}$/);
 
 /**
  * 道が制御文字を持たないか
@@ -37,7 +38,7 @@ export type OwnerVerdict = z.infer<typeof OwnerVerdict>;
 
 /** オーナーが承認か差し戻しを出す入力。baseSha は読んだ時の head_sha で、違えば 409 */
 export const ReviewVerdictInput = z
-  .object({ verdict: OwnerVerdict, body: z.string().max(20_000), baseSha: Sha })
+  .object({ verdict: OwnerVerdict, body: z.string().max(20_000), baseSha: CommitSha })
   .strict()
   .meta({ id: "ReviewVerdictInput" });
 
@@ -73,7 +74,7 @@ export type ReviewNote = z.infer<typeof ReviewNote>;
 
 /** レビューの画面から 1 ファイルを書き換えてコミットする入力。baseSha は読んだ時の head_sha で、違えば 409 */
 export const CreateCommitInput = z
-  .object({ path: RepoPath, content: z.string().max(500_000), baseSha: Sha, message: z.string().min(1).max(1000) })
+  .object({ path: RepoPath, content: z.string().max(500_000), baseSha: CommitSha, message: z.string().min(1).max(1000) })
   .strict()
   .meta({ id: "CreateCommitInput" });
 
@@ -87,14 +88,14 @@ export const Commit = z.object({ sha: z.string() }).strict().meta({ id: "Commit"
 export type Commit = z.infer<typeof Commit>;
 
 /** GitHub に写すレビューの中身。event は GitHub のレビューの種類 */
-export const MirrorReviewPayload = z.object({ event: z.enum(["APPROVE", "REQUEST_CHANGES"]), body: z.string().max(65_536), commitId: Sha }).strict();
+export const MirrorReviewPayload = z.object({ event: z.enum(["APPROVE", "REQUEST_CHANGES"]), body: z.string().max(65_536), commitId: CommitSha }).strict();
 
 /** GitHub に写すレビューの中身の型 */
 export type MirrorReviewPayload = z.infer<typeof MirrorReviewPayload>;
 
 /** GitHub に写す行のコメントの中身。side は GitHub の LEFT (前) と RIGHT (後) */
 export const MirrorCommentPayload = z
-  .object({ noteId: Uuid, path: RepoPath, line: z.number().int().positive(), side: z.enum(["LEFT", "RIGHT"]), body: z.string().min(1).max(65_536), commitId: Sha })
+  .object({ noteId: Uuid, path: RepoPath, line: z.number().int().positive(), side: z.enum(["LEFT", "RIGHT"]), body: z.string().min(1).max(65_536), commitId: CommitSha })
   .strict();
 
 /** GitHub に写す行のコメントの中身の型 */
@@ -128,7 +129,7 @@ export const ReviewHead = z
 export type ReviewHead = z.infer<typeof ReviewHead>;
 
 /** 1 ファイルの差分の問い。since は前に見た先で、あればそこからの差を返す */
-export const ReviewDiffQuery = z.object({ path: RepoPath, since: Sha.optional() }).strict();
+export const ReviewDiffQuery = z.object({ path: RepoPath, since: CommitSha.optional() }).strict();
 
 /** 1 ファイルの差分。lines は行の頭に ` ` (変わらない)、`+` (足した)、`-` (消した) を付けた統一形式の行 */
 export const FileDiff = z
@@ -153,7 +154,7 @@ export const FileContent = z.object({ path: z.string(), ref: z.string(), content
 export type FileContent = z.infer<typeof FileContent>;
 
 /** 読んだ所の印を置く入力。sha は読んだ時の head_sha で、違えば 409 */
-export const SeenInput = z.object({ sha: Sha }).strict().meta({ id: "SeenInput" });
+export const SeenInput = z.object({ sha: CommitSha }).strict().meta({ id: "SeenInput" });
 
 /** 読んだ所の印を置く入力の型 */
 export type SeenInput = z.infer<typeof SeenInput>;

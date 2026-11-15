@@ -473,9 +473,9 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
   };
   return {
     openPull: async (input) => (await load()).openPull(input),
-    checksPassed: async (repo, pr) => (await load()).checksPassed(repo, pr),
-    merge: async (repo, branch) => (await load()).merge(repo, branch),
-    changedPaths: async (repo, branch) => (await load()).changedPaths(repo, branch),
+    checksPassed: async (repo, sha) => (await load()).checksPassed(repo, sha),
+    merge: async (repo, head) => (await load()).merge(repo, head),
+    changedPaths: async (repo, head) => (await load()).changedPaths(repo, head),
     protectMain: async (repo, when) => (await load()).protectMain(repo, when),
     connected: async () => (await load()).connected(),
     postReview: async (repo, pr, review) => (await load()).postReview(repo, pr, review),

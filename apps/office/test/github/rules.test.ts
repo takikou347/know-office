@@ -306,4 +306,23 @@ describe("GitHub のルールの決まり", () => {
     expect(writes(world).filter((r) => r.includes("/git/refs/heads/main"))).toEqual([]);
     expect((await events(world, task)).find((e) => e.kind === "merge_refused")).toEqual({ kind: "merge_refused", detail: { reason: "ルールで触れない所: .github/workflows/ci.yml" } });
   });
+
+  it("main は変えたファイルとチェックを確かめた先まで進め、ブランチの今の先を読み直さない", async () => {
+    await service(world, UI);
+    repoOnGitHub(world, UI, { private: false });
+    await buildTask(world, UI);
+    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await staffOf(world, "reviewer").pull(world.clock.now());
+    // 通知で先が c に進んだレビュー。ブランチの今の先 (代わりの GitHub は b を返す) はまだ確かめていない
+    const reviewed = "c".repeat(40);
+    await world.d1.DB.prepare("UPDATE reviews SET head_sha = ?").bind(reviewed).run();
+    world.gate.github.set(`GET /repos/${UI}/commits/${reviewed}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] });
+    world.gate.github.set(`GET /repos/${UI}/commits/${SHA.head}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "failure" }] });
+
+    expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ" })).content)).toEqual({ merged: true });
+    const routes = world.gate.github.requests.map((r) => r.route);
+    expect(routes).toContain(`GET /repos/${UI}/compare/main...${reviewed}`);
+    expect(routes.filter((r) => r.includes("/git/ref/heads/"))).toEqual([]);
+    expect(world.gate.github.requests.filter((r) => r.route === `PATCH /repos/${UI}/git/refs/heads/main`).map((r) => r.body)).toEqual([{ sha: reviewed, force: false }]);
+  });
 });

@@ -1,6 +1,6 @@
 // GitHub の操作の判断、main に入れる条件、ルールセットの中身、リポジトリの名前の形 (タスクとレビューの 3.4)
 import { describe, expect, it } from "vitest";
-import { decideRepo, DEFAULT_SERVICE_RULES, mainRuleset, missingConditions, RepoName, type ServiceRules } from "../src/index.ts";
+import { decideRepo, DEFAULT_SERVICE_RULES, mainRuleset, missingConditions, ownerGuardedPath, RepoName, type ServiceRules } from "../src/index.ts";
 
 const RULES: ServiceRules = DEFAULT_SERVICE_RULES;
 const REPO = "example/knowidea-ui";
@@ -45,6 +45,18 @@ describe("main に入れる条件", () => {
     expect(missingConditions(["checks", "reviewer", "owner"], { checks: true, reviewer: true, owner: false })).toEqual(["owner"]);
     expect(missingConditions(["owner", "checks"], { checks: false, reviewer: false, owner: false })).toEqual(["owner", "checks"]);
     expect(missingConditions(["reviewer"], { checks: false, reviewer: true, owner: false })).toEqual([]);
+  });
+});
+
+describe("オーナーの承認も要る守りのファイル", () => {
+  it("ルールの判断、シグナル、自動停止、vault のファイルに当て、名前が似ているだけのファイルと .. で外れた道は当てない", () => {
+    expect(ownerGuardedPath(["src/a.ts", "packages/core/src/rules/shell.ts"])).toBe("packages/core/src/rules/shell.ts");
+    expect(ownerGuardedPath(["packages/core/src/guard/signals.ts"])).toBe("packages/core/src/guard/signals.ts");
+    expect(ownerGuardedPath(["apps/office/src/gate/guard/observe.ts"])).toBe("apps/office/src/gate/guard/observe.ts");
+    expect(ownerGuardedPath(["apps/office/src/gate/auth/vault.ts"])).toBe("apps/office/src/gate/auth/vault.ts");
+    expect(ownerGuardedPath(["apps/office/src/gate/x/../guard/a.ts"])).toBe("apps/office/src/gate/x/../guard/a.ts");
+    expect(ownerGuardedPath(["packages/core/src/rules.md", "apps/office/src/gate/auth/vault.test.ts", "apps/office/src/gate/guardian/a.ts", "packages/core/src/rules/../id.ts"])).toBeUndefined();
+    expect(ownerGuardedPath([])).toBeUndefined();
   });
 });
 

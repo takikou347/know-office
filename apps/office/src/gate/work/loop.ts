@@ -13,12 +13,12 @@ export type ChangedFile = { path: string; previousPath?: string; status: ReviewF
 export type Forge = {
   /** ブランチから main へのプルリクエストを出す */
   openPull(input: { repo: string; branch: string; title: string; body: string }): Promise<{ number: number; baseSha: string; headSha: string }>;
-  /** プルリクエストのチェックがすべて通ったか */
-  checksPassed(repo: string, pr: number): Promise<boolean>;
-  /** main をブランチの先へ fast-forward で進める */
-  merge(repo: string, branch: string): Promise<void>;
-  /** main からブランチまでに変わったファイル。動かしたファイルは前の道も入れる。多すぎて全部を読めない時は null */
-  changedPaths(repo: string, branch: string): Promise<string[] | null>;
+  /** コミットのチェックがすべて通ったか。sha は確かめたコミット */
+  checksPassed(repo: string, sha: string): Promise<boolean>;
+  /** main を確かめたコミットへ fast-forward で進める。branch は記録と代わりの GitHub のために渡す */
+  merge(repo: string, head: { branch: string; sha: string }): Promise<void>;
+  /** main からブランチかコミット (head) までに変わったファイル。動かしたファイルは前の道も入れる。多すぎて全部を読めない時は null */
+  changedPaths(repo: string, head: string): Promise<string[] | null>;
   /** 公開のリポジトリの既定のブランチに、main に入れる条件と同じルールセットを掛ける。非公開なら何もせず private を返す */
   protectMain(repo: string, when: readonly ReleaseCondition[]): Promise<"applied" | "private">;
   /** GitHub とつないでいるか。つないでいない間はルールセットを掛ける先が無い。vault を読むまで分からないので待つ */

@@ -62,6 +62,21 @@ export function decideRepo(req: RepoRequest, scope: RepoScope): RepoDecision {
 }
 
 /**
+ * know-office 自身のリポジトリで、変える PR にオーナーの承認も要るファイル (タスクとレビューの 3.7)。ルールの判断、シグナルの数え方、自動停止、vault
+ * この一覧も rules/ にあるので、一覧を弱める変更にもオーナーの承認が要る
+ */
+export const OWNER_GUARDED_PATHS = ["packages/core/src/rules/", "packages/core/src/guard/", "apps/office/src/gate/guard/", "apps/office/src/gate/auth/vault.ts"] as const;
+
+/**
+ * 変わるファイルのうち、オーナーの承認も要るファイルを 1 つ返す。道の区切りで見て、.. を畳んでから当てる
+ * @param paths 変わるファイル (リポジトリの頭からの道)
+ * @returns 当たったファイル。無ければ undefined
+ */
+export function ownerGuardedPath(paths: readonly string[]): string | undefined {
+  return paths.find((p) => protectedPath(p, "/", OWNER_GUARDED_PATHS));
+}
+
+/**
  * main に入れる条件のうち、まだ満たしていない物を返す
  * @param when main に入れる条件
  * @param met 条件ごとに満たしたか

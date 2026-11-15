@@ -20,7 +20,7 @@ export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/comm
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
 export { HeartbeatInput, RESTORE_BODY_BYTES, RESTORE_TRANSCRIPT_BYTES, RestoreInput, RunInput, TicketInput, TRANSCRIPT_PART_BYTES, TranscriptPartInput, WorkTicketClaims } from "./schemas/workspace.ts";
 export { DEFAULT_RULES, decide, type RuleContext, type RuleDecision } from "./rules/decide.ts";
-export { decideRepo, mainRuleset, missingConditions, type RepoDecision, type RepoRequest, type RepoScope, RULESET_NAME, type RulesetBody } from "./rules/repo.ts";
+export { decideRepo, mainRuleset, missingConditions, OWNER_GUARDED_PATHS, ownerGuardedPath, type RepoDecision, type RepoRequest, type RepoScope, RULESET_NAME, type RulesetBody } from "./rules/repo.ts";
 export {
   AppSlug,
   CheckRunEvent,
@@ -65,6 +65,7 @@ export {
 } from "./schemas/github.ts";
 export {
   Commit,
+  CommitSha,
   CreateCommitInput,
   CreateNoteInput,
   FileContent,

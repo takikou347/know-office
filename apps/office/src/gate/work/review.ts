@@ -1,13 +1,16 @@
 // レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
-import { AppError, decideRepo, missingConditions, type RepoAction } from "@know-office/core";
+import { AppError, CommitSha, decideRepo, missingConditions, ownerGuardedPath, type RepoAction, type ServiceRules } from "@know-office/core";
 import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
-import { nodes, reviews } from "../db/main.ts";
+import { nodes, reviews, services } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
 import { type Actor, appendNodeEvent, findNode, moveNode, type NodeRow, revertNode } from "./nodes.ts";
+
+/** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.7) */
+const SELF_SERVICE_ID = "00000000-0000-7000-8000-000000000102";
 
 /** レビューの行 */
 export type ReviewRow = typeof reviews.$inferSelect;
@@ -19,26 +22,58 @@ export type ReviewRow = typeof reviews.$inferSelect;
  * @param req 操作、リポジトリ、ブランチか変わるファイル
  * @param req.action 操作の種類
  * @param req.repo リポジトリ
- * @param req.branch 変えたブランチ。paths が無い時は GitHub から変えたファイルを読む
+ * @param req.branch 変えたブランチかコミット。paths が無い時は GitHub から変えたファイルを読む
  * @param req.paths 変わるファイル。分かっている時に渡す
  * @returns 断る理由と当たった道。通すなら null
  * @throws upstream_failed 変えたファイルを GitHub から読めない時
  */
 export async function repoRefusal(env: Bindings, forge: Forge, req: { action: RepoAction; repo: string; branch: string; paths?: readonly string[] }): Promise<{ reason: string; path?: string } | null> {
-  const scope = await repoScope(env.DB, req.repo);
-  const first = decideRepo({ action: req.action, repo: req.repo, paths: [] }, scope);
-  if (!first.allow) return { reason: first.reason };
-  const decision = decideRepo({ action: req.action, repo: req.repo, paths: req.paths ?? (await forge.changedPaths(req.repo, req.branch)) }, scope);
-  if (decision.allow) return null;
-  return decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path };
+  return (await checkRepo(env, forge, req)).refusal;
 }
 
-/** main に入れられるかの答え。入れられない時は、ルールで断ったか条件を待つか */
-export type MergeGate = { kind: "ready" } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string };
+/**
+ * repoRefusal の中身。通した時は、確かめた変わるファイルも返す
+ * @param env バインディング
+ * @param forge GitHub
+ * @param req 操作、リポジトリ、ブランチかコミット、変わるファイル
+ * @param req.action 操作の種類
+ * @param req.repo リポジトリ
+ * @param req.branch 変えたブランチかコミット
+ * @param req.paths 変わるファイル。分かっている時に渡す
+ * @returns 断る理由と、通した時の変わるファイルとそのリポジトリの設定
+ * @throws upstream_failed 変えたファイルを GitHub から読めない時
+ */
+async function checkRepo(
+  env: Bindings,
+  forge: Forge,
+  req: { action: RepoAction; repo: string; branch: string; paths?: readonly string[] },
+): Promise<{ refusal: { reason: string; path?: string } | null; paths: readonly string[]; rules: ServiceRules }> {
+  const scope = await repoScope(env.DB, req.repo);
+  const first = decideRepo({ action: req.action, repo: req.repo, paths: [] }, scope);
+  if (!first.allow) return { refusal: { reason: first.reason }, paths: [], rules: scope.rules };
+  const paths = req.paths ?? (await forge.changedPaths(req.repo, req.branch));
+  const decision = decideRepo({ action: req.action, repo: req.repo, paths }, scope);
+  if (decision.allow) return { refusal: null, paths: paths ?? [], rules: scope.rules };
+  return { refusal: decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path }, paths: [], rules: scope.rules };
+}
+
+/** main に入れられるかの答え。入れられる時は、確かめたコミットまで入れる */
+export type MergeGate = { kind: "ready"; sha: string } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string };
 
 /**
- * 承認の後に main に入れられるかを決める。できる操作と触れない所をルールと照らし、main に入れる条件 (タスクとレビューの 3.4) がそろったかを見る
- * レビュー担当とオーナーの承認が足りない間は、GitHub にチェックを聞かずに待つ
+ * リポジトリが know-office 自身のサービスのリポジトリかを読む
+ * @param db 今の状態の D1
+ * @param repo リポジトリ
+ * @returns know-office 自身なら true
+ */
+async function selfRepo(db: D1Database, repo: string): Promise<boolean> {
+  const [row] = await drizzle(db).select({ id: services.id }).from(services).where(and(eq(services.id, SELF_SERVICE_ID), eq(services.repo, repo))).limit(1);
+  return row !== undefined;
+}
+
+/**
+ * 承認の後に main に入れられるかを決める。レビューで確かめたコミット (head_sha) について、できる操作と触れない所をルールと照らし、main に入れる条件 (タスクとレビューの 3.4) がそろったかを見る
+ * know-office 自身のリポジトリで守りのファイル (3.7) を変える時は、条件にオーナーの承認を足す。レビュー担当とオーナーの承認が足りない間は、GitHub にチェックを聞かずに待つ
  * @param env バインディング
  * @param forge GitHub
  * @param made 確かめたタスク
@@ -51,36 +86,41 @@ export type MergeGate = { kind: "ready" } | { kind: "refused"; reason: string } 
  * @throws upstream_failed GitHub から読めない時
  */
 export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; prNumber: number; reviewer: boolean | null }): Promise<MergeGate> {
-  const refusal = await repoRefusal(env, forge, { action: "merge", repo: review.repo, branch: review.branch });
-  if (refusal !== null) return { kind: "refused", reason: refusal.reason };
-  const { rules } = await repoScope(env.DB, review.repo);
-  const [row] = await drizzle(env.DB).select({ ownerVerdict: reviews.ownerVerdict, reviewerVerdict: reviews.reviewerVerdict }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
-  const approvals = { reviewer: review.reviewer ?? row?.reviewerVerdict === "approve", owner: row?.ownerVerdict === "approve" };
-  const others = missingConditions(rules.mergeWhen, { checks: true, ...approvals });
+  const [row] = await drizzle(env.DB).select({ headSha: reviews.headSha, ownerVerdict: reviews.ownerVerdict, reviewerVerdict: reviews.reviewerVerdict }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
+  // 確かめたコミットが分からなければ、何を入れるか決められないので断る
+  const sha = CommitSha.safeParse(row?.headSha);
+  if (!row || !sha.success) return { kind: "refused", reason: "確かめたコミットが分からない" };
+  const checked = await checkRepo(env, forge, { action: "merge", repo: review.repo, branch: sha.data });
+  if (checked.refusal !== null) return { kind: "refused", reason: checked.refusal.reason };
+  const guarded = ownerGuardedPath(checked.paths) !== undefined && (await selfRepo(env.DB, review.repo));
+  const when = guarded && !checked.rules.mergeWhen.includes("owner") ? [...checked.rules.mergeWhen, "owner" as const] : checked.rules.mergeWhen;
+  const approvals = { reviewer: review.reviewer ?? row.reviewerVerdict === "approve", owner: row.ownerVerdict === "approve" };
+  const others = missingConditions(when, { checks: true, ...approvals });
   if (others.length > 0) return { kind: "waiting", reason: others.join(",") };
   // チェックが分からない時は入れない
-  const checks = rules.mergeWhen.includes("checks") ? await forge.checksPassed(review.repo, review.prNumber) : true;
-  const missing = missingConditions(rules.mergeWhen, { checks, ...approvals });
-  return missing.length === 0 ? { kind: "ready" } : { kind: "waiting", reason: missing.join(",") };
+  const checks = when.includes("checks") ? await forge.checksPassed(review.repo, sha.data) : true;
+  const missing = missingConditions(when, { checks, ...approvals });
+  return missing.length === 0 ? { kind: "ready", sha: sha.data } : { kind: "waiting", reason: missing.join(",") };
 }
 
 /**
- * 承認されたタスクを done にしてから main に入れる。入れられなければ review に戻す
+ * 承認されたタスクを done にしてから、main を確かめたコミットまで進める。入れられなければ review に戻す
  * @param env バインディング
  * @param forge GitHub
  * @param made 確かめたタスク
  * @param review レビューのタスク
  * @param review.repo リポジトリ
  * @param review.branch ブランチ
+ * @param review.sha mergeGate が確かめたコミット
  * @param now 今の時刻
  * @throws conflict 確かめたタスクが読んだ後に変わった時
  */
-export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string }, now: number): Promise<void> {
+export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; sha: string }, now: number): Promise<void> {
   // 先に done にして、同じタスクを 2 度入れない
   const done = await moveNode(env.DB, made, "done", now);
   if (!done) throw new AppError("conflict", "確かめるタスクが変わった");
   try {
-    await forge.merge(review.repo, review.branch);
+    await forge.merge(review.repo, { branch: review.branch, sha: review.sha });
   } catch (error) {
     await revertNode(env.DB, made.id, "done", "review", now);
     throw error;
@@ -116,10 +156,10 @@ export async function mergeIfReady(
   actor: Actor,
 ): Promise<boolean> {
   const gate = await mergeGate(env, forge, made, review);
-  if (gate.kind === "ready") await mergeMade(env, forge, made, review, actor.now);
+  if (gate.kind === "ready") await mergeMade(env, forge, made, { ...review, sha: gate.sha }, actor.now);
   await appendNodeEvent(env, { nodeId: made.id, ...approved }, actor);
   if (gate.kind === "ready") {
-    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch } }, actor);
+    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch, sha: gate.sha } }, actor);
     return true;
   }
   await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: gate.kind === "refused" ? "merge_refused" : "merge_waiting", detail: { reason: gate.reason } }, actor);

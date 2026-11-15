@@ -68,9 +68,9 @@ function fakeForge(): FakeForge {
     changedPaths: () => Promise.resolve([]),
     protectMain: () => Promise.resolve("applied"),
     connected: () => Promise.resolve(true),
-    merge: async (_repo, branch) => {
+    merge: async (_repo, head) => {
       await forge.during.merge?.();
-      forge.merged.push(branch);
+      forge.merged.push(head.branch);
     },
     postReview: (repo, pr, review) => Promise.resolve(forge.posted.push({ repo, pr, kind: "review", body: review })),
     postComment: (repo, pr, comment) => Promise.resolve(forge.posted.push({ repo, pr, kind: "comment", body: comment })),
