@@ -66,14 +66,14 @@ export const GitHubCheckRuns = z
   })
   .loose();
 
-/** GET /repos/{o}/{r}/compare/{base}...{head} の返事のうち使う所 */
-export const GitHubCompare = z
-  .object({
-    files: z
-      .array(z.object({ filename: z.string().min(1), previous_filename: z.string().min(1).optional(), status: z.string().optional(), patch: z.string().optional() }).loose())
-      .default([]),
-  })
-  .loose();
+/** compare とプルリクエストのファイルの一覧が返す、変わった 1 ファイルのうち使う所 */
+const GitHubChangedFile = z.object({ filename: z.string().min(1), previous_filename: z.string().min(1).optional(), status: z.string().optional(), patch: z.string().optional() }).loose();
+
+/** GET /repos/{o}/{r}/compare/{base}...{head} の返事のうち使う所。ファイルは比べる全体で 300 件までで、それより多ければ切れる */
+export const GitHubCompare = z.object({ files: z.array(GitHubChangedFile).default([]) }).loose();
+
+/** GET /repos/{o}/{r}/pulls/{n}/files の 1 ページ。1 ページ 100 件まで、全体で 3,000 件まで */
+export const GitHubPullFiles = z.array(GitHubChangedFile).max(100);
 
 /** GET /repos/{o}/{r}/contents/{path} の返事のうち使う所。1MB を超えるファイルは encoding が none で中身が空 */
 export const GitHubContent = z.object({ type: z.string(), encoding: z.string(), content: z.string() }).loose();

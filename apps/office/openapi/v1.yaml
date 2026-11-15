@@ -3129,9 +3129,9 @@ paths:
 
         1. `reviews` を取得する
 
-        2. GitHub の compare API で変更ファイルの一覧を取得する。ワークスペースは起こさない
+        2. プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない
 
-        3. `last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする
+        3. `last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする
 
 
         このルート固有のエラー:
@@ -3142,8 +3142,8 @@ paths:
         - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
       - '`reviews` を取得する'
-      - GitHub の compare API で変更ファイルの一覧を取得する。ワークスペースは起こさない
-      - '`last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする'
+      - プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない
+      - '`last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする'
       x-errors:
       - '404 `not_found`: レビューが存在しない'
       - '502 `upstream_failed`: GitHub がエラーを返した'
@@ -3198,7 +3198,7 @@ paths:
         処理の流れ:
 
 
-        1. `since` (無ければ `base_sha`) から `head_sha` までの compare API の結果から、1 ファイル分の差分を取り出す。ワークスペースは起こさない
+        1. `since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す。compare が 300 件ちょうどなら 502。ワークスペースは起こさない
 
 
         このルート固有のエラー:
@@ -3208,7 +3208,7 @@ paths:
 
         - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
-      - '`since` (無ければ `base_sha`) から `head_sha` までの compare API の結果から、1 ファイル分の差分を取り出す。ワークスペースは起こさない'
+      - '`since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す。compare が 300 件ちょうどなら 502。ワークスペースは起こさない'
       x-errors:
       - '404 `not_found`: ファイルが存在しない'
       - '502 `upstream_failed`: GitHub がエラーを返した'

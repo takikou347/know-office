@@ -4,8 +4,8 @@ import { AppError, FileContent, FileDiff, languageOfPath, ReviewDiffQuery, Revie
 import { createRouter } from "../app.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { noContent, ok } from "../respond.ts";
-import type { ChangedFile } from "../work/loop.ts";
-import { findReview } from "../work/review.ts";
+import type { ChangedFile, Forge } from "../work/loop.ts";
+import { findReview, type ReviewRow } from "../work/review.ts";
 
 const router = createRouter();
 
@@ -37,6 +37,38 @@ export function hunksOf(patch: string): FileDiff["hunks"] {
  */
 function fileAt(files: readonly ChangedFile[], path: string): ChangedFile | undefined {
   return files.find((f) => f.path === path || f.previousPath === path);
+}
+
+/**
+ * 前に見た先から変わったファイルの道を返す。今の先まで読んでいれば空、まだ読んでいないか、compare が 300 件で切れて分からなければ all
+ * @param forge GitHub
+ * @param review レビューの行
+ * @returns 未読の道か all
+ * @throws upstream_failed GitHub から読めない時
+ */
+async function unreadPaths(forge: Forge, review: ReviewRow): Promise<Set<string> | "all"> {
+  const since = review.lastSeenSha;
+  if (since === null) return "all";
+  if (since === review.headSha) return new Set();
+  const compared = await forge.compare(review.repo, since, review.headSha);
+  // 切れているかもしれない時は、読んだと言えないので全部を未読にする
+  if (compared.truncated) return "all";
+  return new Set(compared.files.flatMap((f) => [f.path, ...(f.previousPath === undefined ? [] : [f.previousPath])]));
+}
+
+/**
+ * 差分を取る元のファイルの並びを返す。since が無ければプルリクエストのファイルの一覧、あればそこからの compare
+ * @param forge GitHub
+ * @param review レビューの行
+ * @param since 前に見た先
+ * @returns 変わったファイル
+ * @throws upstream_failed GitHub から読めない時、compare が 300 件で切れて差を読み切れない時
+ */
+async function diffFiles(forge: Forge, review: ReviewRow, since: string | undefined): Promise<ChangedFile[]> {
+  if (since === undefined) return forge.pullFiles(review.repo, review.prNumber);
+  const compared = await forge.compare(review.repo, since, review.headSha);
+  if (compared.truncated) throw new AppError("upstream_failed", "前に見た所からの差が多すぎて読み切れない");
+  return compared.files;
 }
 
 const getReviewRoute = createRoute({
@@ -80,11 +112,9 @@ export const reviewReadRoutes = router
   .openapi(getReviewRoute, async (c) => {
     const { nodeId } = c.req.valid("param");
     const review = await findReview(c.env.DB, nodeId);
-    const files = await c.var.forge.compare(review.repo, review.baseSha, review.headSha);
-    // 前に見た先から変わったファイルだけを、まだ読んでいない事にする。今の先まで読んでいれば GitHub に聞かない
-    const since = review.lastSeenSha;
-    const changed = since === null || since === review.headSha ? null : new Set((await c.var.forge.compare(review.repo, since, review.headSha)).flatMap((f) => [f.path, ...(f.previousPath === undefined ? [] : [f.previousPath])]));
-    const seen = (f: ChangedFile) => since !== null && (changed === null || !changed.has(f.path));
+    const files = await c.var.forge.pullFiles(review.repo, review.prNumber);
+    const unread = await unreadPaths(c.var.forge, review);
+    const seen = (f: ChangedFile) => unread !== "all" && !unread.has(f.path);
     return ok(c, {
       nodeId,
       repo: review.repo,
@@ -92,7 +122,7 @@ export const reviewReadRoutes = router
       branch: review.branch,
       baseSha: review.baseSha,
       headSha: review.headSha,
-      lastSeenSha: since,
+      lastSeenSha: review.lastSeenSha,
       checks: Checks.parse(review.checks),
       reviewerSummary: review.reviewerSummary ?? "",
       reviewerVerdict: review.reviewerVerdict,
@@ -103,7 +133,7 @@ export const reviewReadRoutes = router
     const { nodeId } = c.req.valid("param");
     const query = c.req.valid("query");
     const review = await findReview(c.env.DB, nodeId);
-    const file = fileAt(await c.var.forge.compare(review.repo, query.since ?? review.baseSha, review.headSha), query.path);
+    const file = fileAt(await diffFiles(c.var.forge, review, query.since), query.path);
     if (!file) throw new AppError("not_found", "このファイルは変わっていない");
     return ok(c, { path: file.path, language: languageOfPath(file.path), hunks: hunksOf(file.patch ?? "") });
   })

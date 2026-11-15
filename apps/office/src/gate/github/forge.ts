@@ -6,6 +6,7 @@ import {
   GitHubCheckRuns,
   GitHubCompare,
   GitHubContent,
+  GitHubPullFiles,
   GitHubGitCommit,
   GitHubGitObject,
   GitHubGitTree,
@@ -37,8 +38,8 @@ export type GitHubAccess = {
 /** compare API が 1 回で返すファイルの上限。届いたら残りがあるとみる */
 const COMPARE_FILES = 300;
 
-/** レビューで読む compare のページの上限。3,000 ファイルまで読む */
-const COMPARE_PAGES = 10;
+/** プルリクエストのファイルの一覧のページの上限。GitHub は 3,000 件までしか返さない */
+const PULL_FILE_PAGES = 30;
 
 /** その場の直しのコミットの作者と入れた者。公開のリポジトリにオーナーの名前を残さない */
 const COMMITTER = { name: "KNOW IDEA", email: "noreply@knowidea.invalid" };
@@ -57,6 +58,20 @@ const LIST_PAGES = 10;
 
 /** GitHub のファイルの種類を、画面で分ける種類に寄せる。copied は足した物、changed と unchanged は変えた物とみる */
 const FILE_STATUS: Readonly<Record<string, ChangedFile["status"]>> = { added: "added", copied: "added", removed: "removed", renamed: "renamed" };
+
+/**
+ * GitHub の変わったファイルを、ゲートウェイの形にする
+ * @param f compare かプルリクエストのファイルの一覧の 1 件
+ * @returns 道、前の道、種類、差分の本文
+ */
+function changedFile(f: output<typeof GitHubPullFiles>[number]): ChangedFile {
+  return {
+    path: f.filename,
+    ...(f.previous_filename === undefined ? {} : { previousPath: f.previous_filename }),
+    status: FILE_STATUS[f.status ?? ""] ?? "modified",
+    patch: f.patch ?? null,
+  };
+}
 
 /**
  * ファイルの道を URL の道に入れる形にする。/ はそのまま残し、区切りごとに符号にする
@@ -195,21 +210,19 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
   }
   const writeContents: Permissions = { contents: "write" };
   return {
-    compare: async (repo, from, to) => {
-      const files: output<typeof GitHubCompare>["files"] = [];
-      // 1 ページは 300 ファイルまで。満ちていれば続きを読み、上限のページまで満ちていれば読み切れないとして断る
+    pullFiles: async (repo, pr) => {
+      const files: output<typeof GitHubPullFiles> = [];
+      // 1 ページは 100 件まで。満ちていれば続きを読み、GitHub の上限の 30 ページまで満ちていれば読み切れないとして断る
       for (let page = 1; ; page += 1) {
-        const compare = await call(repo, readContents, { method: "GET", path: `/compare/${from}...${to}?page=${String(page)}` }, GitHubCompare);
-        files.push(...compare.files);
-        if (compare.files.length < COMPARE_FILES) break;
-        if (page === COMPARE_PAGES) throw new AppError("upstream_failed", "変えたファイルが多すぎて読み切れない");
+        const list = await call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls/${String(pr)}/files?per_page=${String(PAGE_SIZE)}&page=${String(page)}` }, GitHubPullFiles);
+        files.push(...list);
+        if (list.length < PAGE_SIZE) return files.map(changedFile);
+        if (page === PULL_FILE_PAGES) throw new AppError("upstream_failed", "変えたファイルが多すぎて読み切れない");
       }
-      return files.map((f) => ({
-        path: f.filename,
-        ...(f.previous_filename === undefined ? {} : { previousPath: f.previous_filename }),
-        status: FILE_STATUS[f.status ?? ""] ?? "modified",
-        patch: f.patch ?? null,
-      }));
+    },
+    compare: async (repo, from, to) => {
+      const compare = await call(repo, readContents, { method: "GET", path: `/compare/${from}...${to}` }, GitHubCompare);
+      return { files: compare.files.map(changedFile), truncated: compare.files.length >= COMPARE_FILES };
     },
     readFile: async (repo, ref, path) => {
       const res = await send(repo, readContents, { method: "GET", path: `/contents/${filePath(path)}?ref=${ref}` });

@@ -24,6 +24,24 @@ function compareOf(w: WorkWorld, range: string, files: { filename: string; statu
 }
 
 /**
+ * プルリクエスト #1 の変えたファイルの一覧を置く
+ * @param w テストの物
+ * @param files GitHub の形のファイル
+ */
+function pullOf(w: WorkWorld, files: { filename: string; status: string; patch?: string; previous_filename?: string }[]): void {
+  w.gate.github.pullFiles.set(1, files);
+}
+
+/**
+ * GitHub へのプルリクエストのファイルの一覧の要求の数
+ * @param w テストの物
+ * @returns 要求の数
+ */
+function pullFileReads(w: WorkWorld): number {
+  return w.gate.github.requests.filter((r) => r.route === `GET /repos/${REPO}/pulls/1/files`).length;
+}
+
+/**
  * GitHub への compare の要求の「元...先」を並べる
  * @param w テストの物
  * @returns 元...先
@@ -79,12 +97,11 @@ const Head = z.object({
 describe("指摘", () => {
   it("直った後の差", async () => {
     const { task, c } = await openReview(world);
-    compareOf(world, `${BASE}...${HEAD}`, [{ filename: "src/a.ts", status: "modified", patch: PATCH }, { filename: "src/b.ts", status: "added", patch: "@@ -0,0 +1,1 @@\n+export {};" }]);
+    pullOf(world, [{ filename: "src/a.ts", status: "modified", patch: PATCH }, { filename: "src/b.ts", status: "added", patch: "@@ -0,0 +1,1 @@\n+export {};" }]);
     // オーナーが今の先まで読んだ印を置く
     expect(await markSeen(world, task, HEAD)).toBe(204);
     // 社員が指摘を直して push すると、synchronize の通知が先を進める
     await hook(world, { event: "pull_request", payload: { action: "synchronize", pull_request: { number: 1, head: { sha: NEXT } }, repository: { full_name: REPO }, installation: { id: c.installationId } }, secret: c.webhookSecret });
-    compareOf(world, `${BASE}...${NEXT}`, [{ filename: "src/a.ts", status: "modified", patch: PATCH }, { filename: "src/b.ts", status: "added", patch: "@@ -0,0 +1,1 @@\n+export {};" }]);
     compareOf(world, `${HEAD}...${NEXT}`, [{ filename: "src/a.ts", status: "modified", patch: FIXED }]);
     const head = Head.parse(await api(world, "GET", `/api/v1/reviews/${task}`));
     expect(head).toMatchObject({ headSha: NEXT, lastSeenSha: HEAD });
@@ -103,7 +120,7 @@ describe("レビューを読む", () => {
   it("概要は、要点とチェックと変えたファイルの木を返す", async () => {
     const { task } = await openReview(world);
     await world.d1.DB.prepare("UPDATE reviews SET reviewer_summary = ?, checks = ? WHERE node_id = ?").bind("空の日の扱いを直した", JSON.stringify([{ name: "verify", ok: true }]), task).run();
-    compareOf(world, `${BASE}...${HEAD}`, [
+    pullOf(world, [
       { filename: "src/a.ts", status: "modified" },
       { filename: "src/new.ts", status: "renamed", previous_filename: "src/old.ts" },
       { filename: "src/gone.ts", status: "removed" },
@@ -133,17 +150,17 @@ describe("レビューを読む", () => {
 
   it("今の先まで読んでいれば、どのファイルも読んだ事にし、差を GitHub に聞かない", async () => {
     const { task } = await openReview(world);
-    compareOf(world, `${BASE}...${HEAD}`, [{ filename: "src/a.ts", status: "modified" }]);
+    pullOf(world, [{ filename: "src/a.ts", status: "modified" }]);
     expect(await markSeen(world, task, HEAD)).toBe(204);
     const before = compared(world).length;
     const head = Head.parse(await api(world, "GET", `/api/v1/reviews/${task}`));
     expect(head.files).toEqual([{ path: "src/a.ts", status: "modified", seen: true }]);
-    expect(compared(world).slice(before)).toEqual([`${BASE}...${HEAD}`]);
+    expect(compared(world).slice(before)).toEqual([]);
   });
 
   it("1 ファイルの差分を、行の頭の印ごと返す。印の無い知らせの行は落とす", async () => {
     const { task } = await openReview(world);
-    compareOf(world, `${BASE}...${HEAD}`, [{ filename: "README.md", status: "modified", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "src/a.ts", status: "modified", patch: PATCH }]);
+    pullOf(world, [{ filename: "README.md", status: "modified", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "src/a.ts", status: "modified", patch: PATCH }]);
     expect(await api(world, "GET", `/api/v1/reviews/${task}/diff?path=src%2Fa.ts`)).toEqual({
       path: "src/a.ts",
       language: "typescript",
@@ -154,7 +171,7 @@ describe("レビューを読む", () => {
 
   it("変えていないファイルの差分は 404", async () => {
     const { task } = await openReview(world);
-    compareOf(world, `${BASE}...${HEAD}`, [{ filename: "src/a.ts", status: "modified", patch: PATCH }]);
+    pullOf(world, [{ filename: "src/a.ts", status: "modified", patch: PATCH }]);
     expect(await api(world, "GET", `/api/v1/reviews/${task}/diff?path=src%2Fother.ts`, undefined, 404)).toMatchObject({ code: "not_found" });
   });
 
@@ -186,25 +203,39 @@ describe("レビューを読む", () => {
     expect(await api(world, "GET", `/api/v1/reviews/${task}/file?path=src%2Fnone.ts&ref=head`, undefined, 404)).toMatchObject({ code: "not_found" });
   });
 
-  it("300 ファイルを超える変更は、compare の続きのページまで読む", async () => {
+  it("100 ファイルを超える変更は、プルリクエストのファイルの一覧の続きのページまで読む", async () => {
     const { task } = await openReview(world);
-    compareOf(world, `${BASE}...${HEAD}`, Array.from({ length: 301 }, (_, i) => ({ filename: `src/f${String(i)}.ts`, status: "added" })));
+    pullOf(world, Array.from({ length: 301 }, (_, i) => ({ filename: `src/f${String(i)}.ts`, status: "added" })));
     const head = Head.parse(await api(world, "GET", `/api/v1/reviews/${task}`));
     expect(head.files).toHaveLength(301);
     expect(head.files.at(-1)).toEqual({ path: "src/f300.ts", status: "added", seen: false });
-    expect(compared(world).filter((r) => r.startsWith(`${BASE}...${HEAD}`))).toEqual([`${BASE}...${HEAD}`, `${BASE}...${HEAD}`]);
+    expect(pullFileReads(world)).toBe(4);
+    // 一覧はプルリクエストの読みだけに絞った鍵で読む
+    const tokens = world.gate.github.requests.filter((r) => r.route === `GET /repos/${REPO}/pulls/1/files`).map((r) => world.gate.github.tokens.get(r.token ?? "")?.permissions);
+    expect(new Set(tokens.map((t) => JSON.stringify(t)))).toEqual(new Set([JSON.stringify({ pull_requests: "read" })]));
   });
 
   it("3,000 ファイルを超える変更は、読み切れないので 502", async () => {
     const { task } = await openReview(world);
-    compareOf(world, `${BASE}...${HEAD}`, Array.from({ length: 3001 }, (_, i) => ({ filename: `src/f${String(i)}.ts`, status: "added" })));
+    pullOf(world, Array.from({ length: 3001 }, (_, i) => ({ filename: `src/f${String(i)}.ts`, status: "added" })));
     expect(await api(world, "GET", `/api/v1/reviews/${task}`, undefined, 502)).toMatchObject({ code: "upstream_failed" });
-    expect(compared(world).filter((r) => r.startsWith(`${BASE}...${HEAD}`))).toHaveLength(10);
+    expect(pullFileReads(world)).toBe(30);
+  });
+
+  it("前に見た所からの compare が 300 ファイルで切れていれば、全部を未読にし、その差は 502 で断る", async () => {
+    const { task, c } = await openReview(world);
+    pullOf(world, [{ filename: "src/a.ts", status: "modified", patch: PATCH }]);
+    expect(await markSeen(world, task, HEAD)).toBe(204);
+    await hook(world, { event: "pull_request", payload: { action: "synchronize", pull_request: { number: 1, head: { sha: NEXT } }, repository: { full_name: REPO }, installation: { id: c.installationId } }, secret: c.webhookSecret });
+    compareOf(world, `${HEAD}...${NEXT}`, Array.from({ length: 300 }, (_, i) => ({ filename: `src/f${String(i)}.ts`, status: "added" })));
+    const head = Head.parse(await api(world, "GET", `/api/v1/reviews/${task}`));
+    expect(head.files).toEqual([{ path: "src/a.ts", status: "modified", seen: false }]);
+    expect(await api(world, "GET", `/api/v1/reviews/${task}/diff?path=src%2Fa.ts&since=${HEAD}`, undefined, 502)).toMatchObject({ code: "upstream_failed" });
   });
 
   it("GitHub が失敗したら 502", async () => {
     const { task } = await openReview(world);
-    world.gate.github.failNext(`GET /repos/${REPO}/compare/${BASE}...${HEAD}`, 500);
+    world.gate.github.failNext(`GET /repos/${REPO}/pulls/1/files`, 500);
     expect(await api(world, "GET", `/api/v1/reviews/${task}`, undefined, 502)).toMatchObject({ code: "upstream_failed" });
   });
 
@@ -218,7 +249,7 @@ describe("レビューを読む", () => {
 
   it("読む道はワークスペースを起こさない", async () => {
     const { task } = await openReview(world);
-    compareOf(world, `${BASE}...${HEAD}`, [{ filename: "src/a.ts", status: "modified", patch: PATCH }]);
+    pullOf(world, [{ filename: "src/a.ts", status: "modified", patch: PATCH }]);
     world.gate.github.contents.set(`${HEAD}:src/a.ts`, "x");
     const calls = countWorkspace(world);
     await api(world, "GET", `/api/v1/reviews/${task}`);

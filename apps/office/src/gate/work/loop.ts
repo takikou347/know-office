@@ -31,8 +31,10 @@ export type Forge = {
   findMirror(repo: string, pr: number, kind: "review" | "comment", marker: string): Promise<number | null>;
   /** ブランチに 1 ファイルを書き換えたコミットを足し、その sha を返す。parent はブランチの今の先で、先が進んでいれば conflict で断る。mode は今のファイルから引き継ぎ、シンボリックリンクとサブモジュールは rule_denied で断る */
   commitFile(repo: string, branch: string, change: { parent: string; path: string; content: string; message: string }): Promise<string>;
-  /** base から head までに変わったファイルを、差分の本文と一緒に返す。contents の読みだけに絞った鍵で読む */
-  compare(repo: string, base: string, head: string): Promise<ChangedFile[]>;
+  /** プルリクエストで変わったファイルを、差分の本文と一緒に全部返す。pull_requests の読みだけに絞った鍵でページを回して読み、上限の 3,000 件に届けば upstream_failed で断る */
+  pullFiles(repo: string, pr: number): Promise<ChangedFile[]>;
+  /** base から head までに変わったファイルを、差分の本文と一緒に返す。contents の読みだけに絞った鍵で 1 回だけ読む。GitHub は 300 件で切るので、300 件ちょうどなら truncated */
+  compare(repo: string, base: string, head: string): Promise<{ files: ChangedFile[]; truncated: boolean }>;
   /** コミット ref のファイルの中身を返す。無いか、ファイルでなければ null */
   readFile(repo: string, ref: string, path: string): Promise<string | null>;
 };
@@ -49,6 +51,7 @@ export const UNCONNECTED_FORGE: Forge = {
   postComment: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   commitFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   findMirror: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  pullFiles: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   compare: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   readFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
 };

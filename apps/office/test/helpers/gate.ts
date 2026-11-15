@@ -29,8 +29,8 @@ const MASTER_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 /** テストのオーナー */
 export const OWNER = "owner@example.com";
 
-/** 代わりの GitHub の compare が 1 ページに返すファイルの数。GitHub と同じ */
-const COMPARE_PAGE = 300;
+/** 代わりの GitHub の compare が返すファイルの上限。GitHub と同じ */
+const COMPARE_LIMIT = 300;
 
 /** 代わりの GitHub の compare が返す 1 ファイル。GitHub の形 */
 export type CompareFile = { filename: string; previous_filename?: string; status?: string; patch?: string };
@@ -47,8 +47,8 @@ export type TestGate = {
   claude: FakeClaude;
   /** ゲートウェイが外へ出す fetch。代わりの Access、Claude API、GitHub に回す */
   fetch: Fetcher;
-  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル。compares は「元...先」ごとに返すファイルで、あればそちらを返す。contents は「sha:道」ごとのファイルの中身 */
-  github: FakeGitHub & { files: CompareFile[]; compares: Map<string, CompareFile[]>; contents: Map<string, string> };
+  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル。compares は「元...先」ごとに返すファイルで、あればそちらを返す。contents は「sha:道」ごとのファイルの中身。pullFiles はプルリクエストの番号ごとの変えたファイルで、無ければ files を返す */
+  github: FakeGitHub & { files: CompareFile[]; compares: Map<string, CompareFile[]>; contents: Map<string, string>; pullFiles: Map<number, CompareFile[]> };
   /** vault の App の鍵から作った 1 時間の鍵をためる所。テストごとに別にする */
   githubCache: TokenCache;
   /** GitHub の鍵を出した先と権限 */
@@ -179,12 +179,15 @@ function namespace<T>(stub: T) {
  * @returns そのまま送る道
  */
 function githubPath(github: TestGate["github"], path: string): string {
-  const compare = /^\/repos\/[^/]+\/[^/]+\/compare\/([^?]+)(?:\?(.*))?$/.exec(path);
-  if (compare) {
-    // GitHub と同じく、1 ページに 300 ファイルまでを返し、page で続きを返す
-    const page = Number(new URLSearchParams(compare[2] ?? "").get("page") ?? "1");
-    const all = github.compares.get(decodeURIComponent(compare[1] ?? "")) ?? github.files;
-    github.set(`GET ${path.split("?")[0] ?? path}`, { files: all.slice((page - 1) * COMPARE_PAGE, page * COMPARE_PAGE) });
+  const compare = /^\/repos\/[^/]+\/[^/]+\/compare\/([^?]+)/.exec(path);
+  // GitHub と同じく、compare は比べる全体で 300 ファイルまでを返し、page を付けても続きを返さない
+  if (compare) github.set(`GET ${path.split("?")[0] ?? path}`, { files: (github.compares.get(decodeURIComponent(compare[1] ?? "")) ?? github.files).slice(0, COMPARE_LIMIT) });
+  // プルリクエストのファイルの一覧は、per_page ごとのページで返す
+  const pull = /^(\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files)\?(.*)$/.exec(path);
+  if (pull) {
+    const q = new URLSearchParams(pull[3]);
+    const [perPage, page] = [Number(q.get("per_page") ?? "30"), Number(q.get("page") ?? "1")];
+    github.set(`GET ${pull[1] ?? ""}`, (github.pullFiles.get(Number(pull[2])) ?? github.files).slice((page - 1) * perPage, page * perPage));
   }
   // contents は道が同じで ref だけが違うので、問いの ref ごとに置いた中身を返す
   const file = /^(\/repos\/[^/]+\/[^/]+\/contents\/([^?]+))\?ref=([0-9a-f]{40})$/.exec(path);
@@ -210,7 +213,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
-  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now() }), { files: [], compares: new Map(), contents: new Map() });
+  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now() }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map() });
   const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];
   const githubAccess: GitHubAccess = {

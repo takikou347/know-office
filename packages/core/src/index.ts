@@ -52,6 +52,7 @@ export {
   GitHubCheckRuns,
   GitHubCompare,
   GitHubContent,
+  GitHubPullFiles,
   GitHubPull,
   GitHubRef,
   GitHubRepo,
