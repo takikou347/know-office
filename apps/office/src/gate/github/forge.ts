@@ -26,7 +26,7 @@ import type { output, ZodType } from "zod";
 import type { ChangedFile, Forge } from "../work/loop.ts";
 
 /** 鍵に付ける権限。GitHub App の権限の名前と、読むか書くか */
-export type Permissions = Partial<Record<"contents" | "pull_requests" | "issues" | "checks" | "statuses" | "administration" | "metadata", "read" | "write">>;
+export type Permissions = Partial<Record<"contents" | "pull_requests" | "issues" | "checks" | "statuses" | "administration" | "metadata" | "actions", "read" | "write">>;
 
 /** GitHub App の鍵の出し手。本番は github/app.ts の vault の元の鍵から 1 時間の鍵を作る物 */
 export type GitHubAccess = {
@@ -94,6 +94,9 @@ function fromBase64(content: string): string {
 }
 
 /** チェックが通ったとみる結果 */
+/** 動かせる workflow のファイルの名前 */
+const WORKFLOW_FILE = /^[A-Za-z0-9_-]{1,100}\.ya?ml$/;
+
 const PASSED = new Set(["success", "neutral", "skipped"]);
 
 /**
@@ -238,7 +241,8 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       return { files: compare.files.map(changedFile), truncated: compare.files.length >= COMPARE_FILES };
     },
     readFile: async (repo, ref, path) => {
-      const res = await send(repo, readContents, { method: "GET", path: `/contents/${filePath(path)}?ref=${ref}` });
+      // ref は道に入るので、コミットの形だけを通す
+      const res = await send(repo, readContents, { method: "GET", path: `/contents/${filePath(path)}?ref=${commitSha(ref)}` });
       if (res.status === 404) return null;
       const file = await parse(res, GitHubContent);
       // フォルダ、シンボリックリンク、サブモジュールはファイルの中身として返さない
@@ -311,6 +315,15 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       const compare = await call(repo, { contents: "read" }, { method: "GET", path: `/compare/main...${branchPath(branch)}` }, GitHubCompare);
       if (compare.files.length >= COMPARE_FILES) return null;
       return compare.files.flatMap((f) => (f.previous_filename === undefined ? [f.filename] : [f.filename, f.previous_filename]));
+    },
+    dispatchWorkflow: async (repo, workflow, inputs) => {
+      if (!WORKFLOW_FILE.test(workflow)) throw new AppError("internal", "workflow の名前の形が違う");
+      // 動かすのは既定のブランチ。GitHub の決まりで、workflow_dispatch はブランチかタグを ref に取る
+      const info = await call(repo, read, { method: "GET", path: "" }, GitHubRepo);
+      // POST /repos/{o}/{r}/actions/workflows/{file}/dispatches は 204 を返す (GitHub の REST API の Workflows)
+      const res = await send(repo, { actions: "write" }, { method: "POST", path: `/actions/workflows/${workflow}/dispatches` }, { ref: info.default_branch, inputs });
+      if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
+      return info.default_branch;
     },
     protectMain: async (repo, when) => {
       const info = await call(repo, read, { method: "GET", path: "" }, GitHubRepo);

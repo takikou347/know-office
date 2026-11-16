@@ -1,5 +1,6 @@
 // office の設定とサービスの設定の返す形、入力、項目ごとの値の形と初期値 (サービスと拡張の 3.3、タスクとレビューの 3.4)
 import { DEFAULT_RULES } from "../rules/decide.ts";
+import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";
 import { z } from "./zod.ts";
 
@@ -54,7 +55,7 @@ export const DEFAULT_SERVICE_RULES: ServiceRules = {
 
 /** 初期値を持たず、登録の時に決めるサービスの設定の項目と、値の形 */
 export const OWN_SETTINGS = {
-  repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
+  repo: RepoName,
   staffId: StaffId,
 } as const;
 

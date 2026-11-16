@@ -10,6 +10,7 @@ import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, ok } from "../respond.ts";
 import { DEFAULT_PREFIX, loadOfficeDefaults, loadScheduleSetting, loadServiceSettings, SCHEDULE_KEY, updateOfficeDefault, updateSchedule, updateServiceSetting } from "../services/settings.ts";
+import { chooseRepo } from "../services/repo.ts";
 import { staffDo } from "../work/loop.ts";
 
 const router = createRouter();
@@ -82,7 +83,12 @@ export const settingRoutes = router
   .openapi(updateServiceSettingRoute, async (c) => {
     const { serviceId, key } = c.req.valid("param");
     const { version, value, reason } = c.req.valid("json");
-    const setting = await updateServiceSetting(c.env.DB, { serviceId, key, value, version, now: c.var.clock.now() }, () => requireStepUp(c));
+    const setting = await updateServiceSetting(
+      c.env.DB,
+      { serviceId, key, value, version, now: c.var.clock.now() },
+      () => requireStepUp(c),
+      (repo) => chooseRepo(c.env, c.var.github, repo, "#/value"),
+    );
     await audit(c, "service.setting", serviceId, { key, value, version: setting.version, reason });
     // 変えた設定と記録を残してから、公開のリポジトリのルールセットを掛け直す
     if (key === "mergeWhen") await protectRepos(c.env, c.var.forge, serviceId);

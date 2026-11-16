@@ -33,6 +33,8 @@ export type FakeForge = Forge & {
   merged: string[];
   /** 出したレビューと行のコメント */
   posted: { repo: string; pr: number; kind: "review" | "comment"; body: unknown }[];
+  /** 動かした workflow */
+  dispatched: { repo: string; workflow: string; inputs: Record<string, string> }[];
   /** チェックが通っているか */
   checks: boolean;
   /** プルリクエストを出す間と main に入れる間に、ほかの要求を挟む */
@@ -57,6 +59,7 @@ function fakeForge(): FakeForge {
     pulls: [],
     merged: [],
     posted: [],
+    dispatched: [],
     checks: true,
     during: {},
     openPull: async (input) => {
@@ -79,6 +82,10 @@ function fakeForge(): FakeForge {
     pullFiles: () => Promise.resolve([]),
     compare: () => Promise.resolve({ files: [], truncated: false }),
     readFile: () => Promise.resolve(null),
+    dispatchWorkflow: (repo, workflow, inputs) => {
+      forge.dispatched.push({ repo, workflow, inputs });
+      return Promise.resolve("main");
+    },
   };
   return forge;
 }

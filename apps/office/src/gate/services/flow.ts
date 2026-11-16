@@ -11,17 +11,19 @@ import {
   type ServiceDetail,
   type ServiceStage,
 } from "@know-office/core";
-import { and, asc, desc, eq, gt, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { nodes, services, serviceEvents } from "../db/main.ts";
-import { serviceMetrics } from "../db/records.ts";
 import { insertWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
 import { notifyStaff } from "../work/loop.ts";
-import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated, recordsOf } from "../work/nodes.ts";
+import type { TokenDeps } from "../github/app.ts";
+import { chooseRepo } from "./repo.ts";
+import { serviceStatus } from "./status.ts";
+import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated } from "../work/nodes.ts";
 
 /** services の行 */
 export type ServiceRow = typeof services.$inferSelect;
@@ -134,24 +136,36 @@ async function studyTask(env: Bindings, row: ServiceRow, actor: Actor): Promise<
  * @param serviceId サービス ID
  * @param input 移る先、理由、試作の担当
  * @param actor 移した人。今はオーナーだけ
+ * @param github リポジトリを確かめる GitHub の鍵の出し手
  * @returns 移した後の行
  * @throws not_found サービスが無い時
- * @throws conflict 今の段階から移れない時、読んだ後に段階が変わった時
- * @throws validation_failed prototype に進めるのに担当の社員が無い時
+ * @throws conflict 今の段階から移れない時、読んだ後に段階か GitHub との連携が変わった時、GitHub とつないでいないのにリポジトリを選んだ時
+ * @throws validation_failed prototype に進めるのに担当の社員かリポジトリが無い時、ほかの段階にリポジトリを送った時、触れるリポジトリに無い時
+ * @throws upstream_failed 触れるリポジトリを GitHub から読めない時
  */
-export async function advanceService(env: Bindings, serviceId: string, input: AdvanceInput, actor: Actor): Promise<ServiceRow> {
+export async function advanceService(env: Bindings, serviceId: string, input: AdvanceInput, actor: Actor, github: TokenDeps): Promise<ServiceRow> {
   const row = await findService(env.DB, serviceId);
   if (!NEXT_STAGES[row.stage].includes(input.to)) throw new AppError("conflict", "今の段階から移れない");
-  if (input.to === "prototype" && input.staffId === undefined) {
-    throw new AppError("validation_failed", "作ると決める時は担当の社員が要る", { errors: [{ pointer: "#/staffId", detail: "prototype に進める時に要る" }] });
-  }
+  const prototype = input.to === "prototype";
+  const missing = [
+    ...(prototype && input.staffId === undefined ? [{ pointer: "#/staffId", detail: "prototype に進める時に要る" }] : []),
+    ...(prototype && input.repo === undefined ? [{ pointer: "#/repo", detail: "prototype に進める時に要る" }] : []),
+    // 登録の時に決める項目なので、ほかの段階では受けない。後から変えるのは設定で行う
+    ...(!prototype && input.repo !== undefined ? [{ pointer: "#/repo", detail: "prototype に進める時だけ送る" }] : []),
+  ];
+  if (missing.length > 0) throw new AppError("validation_failed", "作ると決める時は担当の社員とリポジトリが要る", { errors: missing });
   // TODO(#71): service に進める時は、サービスの deployWhen のチェックとレビュー担当の承認を GitHub から確かめる
   const change: Partial<ServiceRow> = { stage: input.to };
-  if (input.to === "prototype") change.staffId = input.staffId ?? null;
+  if (prototype) {
+    change.staffId = input.staffId ?? null;
+    change.repo = input.repo ?? null;
+  }
   if (input.to === "dropped") change.droppedReason = input.reason;
   const orm = drizzle(env.DB);
+  // リポジトリは確かめた時の連携のままの時だけ書く。連携が変われば、段階も変えない
+  const linked = prototype && input.repo !== undefined ? await chooseRepo(env, github, input.repo, "#/repo") : undefined;
   const task = input.to === "study" ? await studyTask(env, row, actor) : null;
-  const still = stillAt(serviceId, row.stage);
+  const still = linked ? (and(stillAt(serviceId, row.stage), linked) ?? linked) : stillAt(serviceId, row.stage);
   // 出来事と調べるタスクを先に足す。後の更新で段階が変わるので、どれも読んだ段階のままの時だけ書く。1 つでも失敗すれば全部を書かない
   const statements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
     insertWhen(env.DB, serviceEvents, stageEvent({ serviceId, to: input.to, by: actor.by, detail: { reason: input.reason } }, actor.now), still),
@@ -159,11 +173,11 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
     orm
       .update(services)
       .set(change)
-      .where(and(eq(services.id, serviceId), eq(services.stage, row.stage)))
+      .where(and(eq(services.id, serviceId), eq(services.stage, row.stage), linked))
       .returning({ id: services.id }),
   ];
   const results: unknown[] = await orm.batch(statements);
-  if (Moved.parse(results.at(-1)).length === 0) throw new AppError("conflict", "段階が変わった");
+  if (Moved.parse(results.at(-1)).length === 0) throw new AppError("conflict", "段階か GitHub との連携が変わった");
   if (task) {
     await recordCreated(env, task, actor);
     await notifyStaff(env, "president", actor.now, false);
@@ -234,19 +248,6 @@ export async function listServices(db: D1Database, query: { stage?: ServiceStage
 }
 
 /**
- * 最新のサービスの様子を、今の年の記録から読む
- * @param env バインディング
- * @param serviceId サービス ID
- * @param now 今の時刻
- * @returns 様子。まだ無ければ空
- */
-async function latestMetrics(env: Bindings, serviceId: string, now: number): Promise<Record<string, unknown>> {
-  const [row] = await drizzle(recordsOf(env, now)).select().from(serviceMetrics).where(eq(serviceMetrics.serviceId, serviceId)).orderBy(desc(serviceMetrics.at)).limit(1);
-  if (!row) return {};
-  return { at: iso(row.at), requests: row.requests, errors: row.errors, users: row.users, reads: row.reads };
-}
-
-/**
  * 検討の材料を R2 から読む
  * @param env バインディング
  * @param key study_key
@@ -268,10 +269,10 @@ async function readStudy(env: Bindings, key: string | null): Promise<string | nu
  */
 export async function loadService(env: Bindings, serviceId: string, now: number): Promise<ServiceDetail> {
   const row = await findService(env.DB, serviceId);
-  const [events, metrics, study] = await Promise.all([
+  const [events, status, study] = await Promise.all([
     // 同じミリ秒の出来事も書いた順に並べる
     drizzle(env.DB).select().from(serviceEvents).where(eq(serviceEvents.serviceId, serviceId)).orderBy(asc(serviceEvents.at), sql`rowid`),
-    latestMetrics(env, serviceId, now),
+    serviceStatus(env, row, now),
     readStudy(env, row.studyKey),
   ]);
   return {
@@ -282,7 +283,7 @@ export async function loadService(env: Bindings, serviceId: string, now: number)
     revenueEstimateMicroUsd: row.revenueEstimate ?? 0,
     study,
     droppedReason: row.droppedReason,
-    metrics,
+    status,
     events: events.map((e) => {
       const detail = EventDetail.safeParse(e.detail);
       return { at: iso(e.at), kind: e.kind, by: e.by, detail: detail.success ? detail.data : {} };

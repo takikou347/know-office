@@ -2,6 +2,8 @@
 import type { Judgment } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { revokeTokens, SHARED_TOKENS } from "../github/app.ts";
+import { rollbackService } from "../services/rollback.ts";
+import type { Forge } from "../work/loop.ts";
 
 /** 直前の出来事 1 件。出来事の項目はどれも文字、数、真偽、null */
 export type RecentOp = Record<string, string | number | boolean | null>;
@@ -37,18 +39,31 @@ export type ReviewAnswer = { resume: boolean; reason: string };
 
 /** 自動停止が外へ頼む口。GitHub とレビュー担当のモデルは後でつなぐ */
 export type GuardDeps = {
-  /** Web アプリを前のバージョンに戻す。そのリポジトリの rollback.yml を動かす */
-  rollback(serviceId: string): Promise<void>;
+  /** Web アプリを前のバージョンに戻す。そのリポジトリの rollback.yml を、止めた記録ごとに 1 度だけ動かす */
+  rollback(serviceId: string, stopId: string): Promise<void>;
   /** 止めた記録をレビュー担当に渡し、理由を確かめさせる。答えが無ければ null */
   review(record: StopRecord): Promise<ReviewAnswer | null>;
   /** ためた GitHub の 1 時間の鍵を GitHub の側で取り消し、ためる所を空にする */
   revokeGitHubTokens(env: Bindings): Promise<void>;
 };
 
-/** まだつないでいない口。戻しは失敗として返し、止めた側が通知とエラーログに残す。レビュー担当は答えず、再開はオーナーが行う */
-// TODO(#48): rollback を 8 章の GitHub 連携の rollback.yml に、review を 7 章のモデルの呼び出しにつなぐ
+/** まだつないでいない口。戻しは失敗として返し、止めた側が通知とエラーログに残す。レビュー担当は答えず、再開はオーナーが行う。入口と定期ジョブは戻しを connectRollback でつなぐ */
+// TODO(#48): review を 7 章のモデルの呼び出しにつなぐ
 export const UNCONNECTED_DEPS: GuardDeps = {
   rollback: () => Promise.reject(new Error("rollback.yml をまだつないでいない")),
   review: () => Promise.resolve(null),
   revokeGitHubTokens: (env) => revokeTokens(env, { fetcher: (input, init) => fetch(input, init), cache: SHARED_TOKENS }),
 };
+
+/**
+ * 自動停止の戻しを GitHub の rollback.yml につないだ口を作る。直前に戻していれば送らない
+ * @param env バインディング
+ * @param forge GitHub を呼ぶ口
+ * @param now 今の時刻を返す関数
+ * @returns GuardDeps の rollback
+ */
+export function connectRollback(env: Bindings, forge: Forge, now: () => number): GuardDeps["rollback"] {
+  return async (serviceId, stopId) => {
+    await rollbackService(env, forge, { serviceId, by: "system", reason: "自動停止がサービスを止めた", stopId, now: now() });
+  };
+}

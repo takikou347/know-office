@@ -143,7 +143,7 @@ export const serviceEvents = sqliteTable("service_events", {
   id: id(),
   at: time("at").notNull(),
   serviceId: text("service_id").notNull(),
-  kind: text("kind", { enum: ["stage", "deploy", "rollback", "release"] }).notNull(),
+  kind: text("kind", { enum: ["stage", "deploy", "rollback", "release", "uses"] }).notNull(),
   by: text("by").notNull(),
   detail: json("detail"),
 });

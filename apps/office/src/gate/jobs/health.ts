@@ -1,4 +1,4 @@
-// 5 分ごとの定期ジョブ。社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
+// 5 分ごとの定期ジョブ。社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
 import { type Clock, newId, StaffId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -6,7 +6,8 @@ import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { SHARED_TOKENS, vaultForge } from "../github/app.ts";
 import { retryMirrors } from "../github/mirror.ts";
-import { UNCONNECTED_DEPS } from "../guard/deps.ts";
+import { connectRollback, UNCONNECTED_DEPS } from "../guard/deps.ts";
+import { collectMetrics, UNCONNECTED_ANALYTICS } from "../services/deploys.ts";
 import { checkOverruns, checkThresholds } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import { announceNotice } from "../live/publish.ts";
@@ -77,6 +78,9 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
     ctx.waitUntil(pollBatches(env, weekly, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "batch_poll_failed", error }, clock)));
     const forge = vaultForge(env, { fetcher: weekly.fetch, clock, cache: SHARED_TOKENS });
     ctx.waitUntil(retryMirrors(env, forge, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "mirror_retry_failed", error }, clock)));
+    // サービスの様子を読み、デプロイの後の失敗で止めた時は rollback.yml で戻す。分析の口は #131 までつながず、何も書かない
+    const deps = { ...UNCONNECTED_DEPS, rollback: connectRollback(env, forge, () => clock.now()) };
+    ctx.waitUntil(collectMetrics(env, UNCONNECTED_ANALYTICS, clock.now(), deps).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "service_metrics_failed", error }, clock)));
   }
   ctx.waitUntil(
     checkStorage(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "storage_check_failed", error }, clock)),

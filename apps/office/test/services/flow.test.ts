@@ -1,9 +1,11 @@
 // アイデアから運用までの流れ。案を足し、社長が調べ、オーナーが段階ごとに決め、サービスから元の案をたどる (サービスと拡張の 3.1)
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { connect } from "../helpers/github.ts";
 import { api, clockIn, idOf, MINUTE, purposeAndGoal, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
 
-const world = useWork();
+// 作ると決める時にリポジトリを選ぶので、代わりの GitHub につなぐ
+const world = useWork({ github: true });
 
 // 差し替えたバインディングを、テストごとに元へ戻す
 const restores: (() => void)[] = [];
@@ -72,7 +74,7 @@ const Detail = Card.extend({
   revenueEstimateMicroUsd: z.number(),
   study: z.string().nullable(),
   droppedReason: z.string().nullable(),
-  metrics: z.record(z.string(), z.unknown()),
+  status: z.object({ kind: z.string() }).loose(),
   events: z.array(z.object({ at: z.string(), kind: z.string(), by: z.string(), detail: z.record(z.string(), z.unknown()) }).strict()),
 }).strict();
 
@@ -115,6 +117,18 @@ function advance(w: WorkWorld, serviceId: string, body: Record<string, unknown>,
  */
 async function detailOf(w: WorkWorld, serviceId: string): Promise<z.infer<typeof Detail>> {
   return Detail.parse(await api(w, "GET", `/api/v1/services/${serviceId}`));
+}
+
+/**
+ * 作ると決める。まだなら GitHub とつなぎ、触れるリポジトリを選ぶ
+ * @param w テストの物
+ * @param serviceId サービス ID
+ * @param status 待つステータス
+ * @returns 返った data
+ */
+async function toPrototype(w: WorkWorld, serviceId: string, status = 200): Promise<unknown> {
+  if ((await rows(w.d1.DB, "SELECT 1 FROM vault WHERE name = 'github_installation' AND revoked_at IS NULL")).length === 0) await connect(w);
+  return advance(w, serviceId, { to: "prototype", reason: "作る", staffId: "builder", repo: "example/know-office" }, status);
 }
 
 /** 調べた材料。社長が study_submit で出す */
@@ -216,16 +230,16 @@ describe("アイデアから運用までの流れ", () => {
     expect(detail).toMatchObject({ stage: "dropped", droppedReason: "似た物が安く出ている", study: STUDY, aim: VIDEO.aim });
     expect(z.array(Card).parse(await api(world, "GET", "/api/v1/services?stage=dropped")).map((s) => s.id)).toEqual([id]);
     // 見送った案は先へ進めない
-    expect(await advance(world, id, { to: "prototype", reason: "やはり作る", staffId: "builder" }, 409)).toMatchObject({ code: "conflict" });
+    expect(await advance(world, id, { to: "prototype", reason: "やはり作る", staffId: "builder", repo: "example/know-office" }, 409)).toMatchObject({ code: "conflict" });
     expect(world.gate.audits.filter((a) => a.action === "service.advance")).toHaveLength(2);
   });
 
   it("サービスから元の案をたどる", async () => {
     const id = await ownerIdea(world);
     await studied(world, id);
-    // 作ると決める時に担当の社員を決める。決めずに進めると 422
+    // 作ると決める時に担当の社員とリポジトリを決める。決めずに進めると 422
     expect(await advance(world, id, { to: "prototype", reason: "作る" }, 422)).toMatchObject({ code: "validation_failed" });
-    expect(Card.parse(await advance(world, id, { to: "prototype", reason: "作る", staffId: "builder" }))).toMatchObject({ stage: "prototype", staffId: "builder" });
+    expect(Card.parse(await toPrototype(world, id))).toMatchObject({ stage: "prototype", staffId: "builder", repo: "example/know-office" });
     await advance(world, id, { to: "service", reason: "本番に出す" });
     // 段階を飛ばしては移れない
     expect(await advance(world, id, { to: "study", reason: "戻す" }, 409)).toMatchObject({ code: "conflict" });
@@ -252,7 +266,7 @@ describe("アイデアから運用までの流れ", () => {
 async function closeRequested(w: WorkWorld, operation: boolean): Promise<{ id: string; approvalId: string; task: string }> {
   const id = await ownerIdea(w);
   await studied(w, id);
-  await advance(w, id, { to: "prototype", reason: "作る", staffId: "builder" });
+  await toPrototype(w, id);
   await advance(w, id, { to: "service", reason: "本番に出す" });
   if (operation) await advance(w, id, { to: "operation", reason: "運用に入る" });
   const { goal } = await purposeAndGoal(w);

@@ -37,6 +37,8 @@ export type Forge = {
   compare(repo: string, base: string, head: string): Promise<{ files: ChangedFile[]; truncated: boolean }>;
   /** コミット ref のファイルの中身を返す。無いか、ファイルでなければ null */
   readFile(repo: string, ref: string, path: string): Promise<string | null>;
+  /** リポジトリの既定のブランチで、.github/workflows/ の workflow を動かし、動かしたブランチを返す。actions の書きだけに絞った鍵で送る */
+  dispatchWorkflow(repo: string, workflow: string, inputs: Record<string, string>): Promise<string>;
 };
 
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
@@ -54,6 +56,7 @@ export const UNCONNECTED_FORGE: Forge = {
   pullFiles: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   compare: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   readFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  dispatchWorkflow: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
 };
 
 /** 社員 DO の中で次のタスクを取るのに使う、勤務の本の口 */

@@ -28,6 +28,10 @@ import { type Actor, appendNodeEvent } from "../work/nodes.ts";
 import { backToTodo, callMaker } from "../work/review.ts";
 import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
+import type { GuardDeps } from "../guard/deps.ts";
+import { receiveDeploymentStatus, receiveWorkflowRun } from "../services/deploys.ts";
+import { receivePush } from "../services/releases.ts";
+import type { Forge } from "../work/loop.ts";
 
 /** 受ける本文の上限 (5MB)。GitHub の通知の上限に合わせる */
 export const HOOK_BODY_BYTES = 5 * 1024 * 1024;
@@ -131,7 +135,12 @@ export async function receiveHook(c: Context<GateEnv>): Promise<void> {
   if (!head.success) throw new AppError("malformed_request", "本文の形が違う");
   // ほかのインストールの通知は知らない物として捨てる
   if (!link.installation || head.data.installation?.id !== link.installation.id) return;
-  await handle(c.env, { delivery: delivery.data, digest, event: event.data, action: head.data.action ?? null, repo: head.data.repository?.full_name ?? null, payload, link, now });
+  const hook = { delivery: delivery.data, digest, event: event.data, action: head.data.action ?? null, repo: head.data.repository?.full_name ?? null, payload, link, now };
+  if (SERVICE_EVENTS.has(hook.event)) {
+    await intakeServiceHook(c.env, hook, { forge: c.var.forge, guard: c.var.guard });
+    return;
+  }
+  await handle(c.env, hook);
 }
 
 /** 確かめた通知 */
@@ -146,6 +155,37 @@ type Hook = {
   link: GitHubLink;
   now: number;
 };
+
+/** サービスの公開、デプロイ、使う版を残す通知の種類 (サービスと拡張の 3.2) */
+const SERVICE_EVENTS: ReadonlySet<string> = new Set(["push", "deployment_status", "workflow_run"]);
+
+/**
+ * サービスの通知を受ける。受けた記録を先に取り、取れた 1 つだけが GitHub を読んで書く。途中で落ちたら記録を消し、送り直しを受けられるようにする
+ * @param env バインディング
+ * @param hook 確かめた通知
+ * @param ctx GitHub を呼ぶ口と、自動停止が外へ頼む口
+ * @param ctx.forge GitHub を呼ぶ口
+ * @param ctx.guard 自動停止が外へ頼む口
+ */
+async function intakeServiceHook(env: Bindings, hook: Hook, ctx: { forge: Forge; guard: GuardDeps }): Promise<void> {
+  const record = env.DB.prepare("INSERT OR IGNORE INTO github_deliveries (delivery_id, body_sha256, event, received_at) VALUES (?, ?, ?, ?)").bind(hook.delivery, hook.digest, hook.event, hook.now);
+  // 触れるリポジトリの外の通知は受けた事だけを残す
+  const scope = hook.repo === null ? null : await repoScope(env.DB, hook.repo);
+  if (hook.repo === null || (scope !== null && scope.repos !== null && !scope.repos.includes(hook.repo))) {
+    await record.run();
+    return;
+  }
+  const taken = await record.run();
+  if (taken.meta.changes === 0) return;
+  try {
+    if (hook.event === "push") await receivePush(env, ctx.forge, hook.payload, hook.now);
+    else if (hook.event === "deployment_status") await receiveDeploymentStatus(env, hook.payload, hook.now);
+    else await receiveWorkflowRun(env, hook.action, hook.payload, hook.now, ctx.guard);
+  } catch (error) {
+    await env.DB.prepare("DELETE FROM github_deliveries WHERE body_sha256 = ?").bind(hook.digest).run();
+    throw error;
+  }
+}
 
 /** 同じ本文の通知をまだ受けていない時だけ書く条件。重ねて届いた通知と送り直しは何もしない */
 const FRESH = "NOT EXISTS (SELECT 1 FROM github_deliveries WHERE body_sha256 = ?)";

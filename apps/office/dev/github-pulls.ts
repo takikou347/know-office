@@ -1,4 +1,4 @@
-// 開発環境の代わりの GitHub のうち、プルリクエストのレビューと行のコメント、Git の API (blobs、trees、commits、ブランチの先) に答える所。GitHub の決まりのうち know-office が当たる所だけを持つ
+// 開発環境の代わりの GitHub のうち、プルリクエストのレビューと行のコメント、Git の API (blobs、trees、commits、ブランチの先)、workflow を動かす要求に答える所。GitHub の決まりのうち know-office が当たる所だけを持つ
 import { z } from "zod";
 
 /** プルリクエストのレビューを出す要求。GitHub の POST /repos/{o}/{r}/pulls/{n}/reviews */
@@ -10,6 +10,8 @@ const BlobRequest = z.object({ content: z.string(), encoding: z.enum(["utf-8", "
 const TreeRequest = z.object({ base_tree: z.string(), tree: z.array(z.object({ path: z.string(), mode: z.string(), type: z.string(), sha: z.string() }).loose()) }).loose();
 const CommitRequest = z.object({ message: z.string(), tree: z.string(), parents: z.array(z.string()) }).loose();
 const RefRequest = z.object({ sha: z.string(), force: z.boolean().optional() }).loose();
+/** workflow を動かす要求。GitHub の POST /repos/{o}/{r}/actions/workflows/{file}/dispatches */
+const DispatchRequest = z.object({ ref: z.string().min(1), inputs: z.record(z.string(), z.string()).optional() }).strict();
 
 /** GitHub で操作した者。key は同じ者かを比べる印、login は通知に載る名前 */
 export type FakeActor = { key: string; login: string };
@@ -158,6 +160,12 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
         if (!deps.allows(token, repo, "pull_requests", "read")) return forbidden();
         const posts = what === "reviews" ? deps.posted.reviews : deps.posted.comments;
         return Response.json(posts.filter((p) => p.repo === repo && p.pr === Number(num)).map((p) => p.payload));
+      }
+      const dispatch = /^POST \/repos\/([^/]+\/[^/]+)\/actions\/workflows\/[^/]+\/dispatches$/.exec(route);
+      if (dispatch) {
+        if (!deps.allows(token, dispatch[1] ?? "", "actions", "write")) return forbidden();
+        // GitHub は受けると本文の無い 204 を返す
+        return DispatchRequest.safeParse(body).success ? new Response(null, { status: 204 }) : invalid();
       }
       const found = /^(GET|POST|PATCH) \/repos\/([^/]+\/[^/]+)\/git\/(blobs|trees|commits|refs\/heads)(?:\/([^?]+))?(?:\?.*)?$/.exec(route);
       if (!found) return null;

@@ -54,3 +54,13 @@ export function redirect(c: Context<GateEnv>, location: string) {
   c.header("Location", location);
   return c.body(null, 302);
 }
+
+/**
+ * 202 で受け付けた物を返す。処理は後で終わる
+ * @param c 要求の文脈
+ * @param data 受け付けた物
+ * @returns { data, meta } の 202
+ */
+export function accepted<T>(c: Context<GateEnv>, data: T) {
+  return c.json({ data, meta: { traceId: c.var.traceId } }, 202);
+}

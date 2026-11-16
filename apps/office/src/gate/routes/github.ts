@@ -1,13 +1,14 @@
 // GitHub 連携のルート。App を作って入れ、連携したリポジトリを読み、ルールを読み書きし、通知を受ける (ルートの一覧の 1.10、タスクとレビューの 3.2 から 3.5)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, GitHubCallbackQuery, GitHubInstallationRepos, GitHubInstalledQuery, GitHubLink, GitHubManifest, GitHubRules, GitHubRulesApplied, newId, Repo, Secret, UpdateGitHubRulesInput } from "@know-office/core";
+import { AppError, GitHubCallbackQuery, GitHubInstalledQuery, GitHubLink, GitHubManifest, GitHubRules, GitHubRulesApplied, newId, Repo, Secret, UpdateGitHubRulesInput } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { storeStatements } from "../auth/vault.ts";
 import { endpoints } from "../endpoints.ts";
-import { appExists, appManifest, callGitHub, checkInstallation, consumeState, DROP_GONE_APP, exchangeCode, githubToken, loadLink, NOT_LINKED, parseGitHub, signState } from "../github/app.ts";
+import { appExists, appManifest, checkInstallation, consumeState, DROP_GONE_APP, exchangeCode, loadLink, NOT_LINKED, signState } from "../github/app.ts";
 import { guardDo } from "../guard/actions.ts";
 import { receiveHook } from "../github/hooks.ts";
+import { installationRepos } from "../github/repos.ts";
 import { claimLock, releaseLock } from "../db/locks.ts";
 import { loadGitHubRules, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
 import { audit } from "../ledger/record.ts";
@@ -181,16 +182,8 @@ export const githubRoutes = router
     const parsed = PageCursor.safeParse(cursor ?? "1");
     if (!parsed.success) throw new AppError("validation_failed", "cursor の形が違う", { errors: [{ pointer: "#/query/cursor", detail: "前の返事の meta.next を送る" }] });
     const page = Number(parsed.data);
-    const token = await githubToken(c.env, c.var.github, null, { metadata: "read" });
-    const res = await callGitHub(c.env, c.var.fetch, `installation/repositories?per_page=${String(limit)}&page=${String(page)}`, { headers: { authorization: `Bearer ${token.reveal()}` } });
-    if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
-    const found = await parseGitHub(res, GitHubInstallationRepos);
-    const next = page * limit < found.total_count ? String(page + 1) : null;
-    return list(
-      c,
-      found.repositories.map((r) => ({ fullName: r.full_name, private: r.private })),
-      next,
-    );
+    const found = await installationRepos(c.env, c.var.github, page, limit);
+    return list(c, found.repos, page * limit < found.total ? String(page + 1) : null);
   })
   .openapi(getGitHubRulesRoute, async (c) => ok(c, await loadGitHubRules(c.env.DB)))
   .openapi(updateGitHubRulesRoute, async (c) => {

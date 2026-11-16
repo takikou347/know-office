@@ -1,10 +1,12 @@
 // サービス: アイデアから運用まで。案を足し、一覧と詳細を読み、オーナーが段階を移す (ルートの一覧の 1.11、サービスと拡張の 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AdvanceInput, CreateIdeaInput, ServiceCard, ServiceDetail, ServiceStage } from "@know-office/core";
+import { AdvanceInput, AppError, CreateIdeaInput, Deployment, RollbackInput, ServiceCard, ServiceDetail, ServiceStage } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
-import { created, list, ok } from "../respond.ts";
+import { stepUpGate } from "../auth/passkey.ts";
+import { accepted, created, list, ok } from "../respond.ts";
+import { rollbackService } from "../services/rollback.ts";
 import { advanceService, createIdea, listServices, loadService, toCard } from "../services/flow.ts";
 
 const router = createRouter();
@@ -48,7 +50,18 @@ const advanceServiceRoute = createRoute({
   operationId: "advanceService",
   tags: ["services"],
   request: { params: ServiceParam, body: jsonBody(AdvanceInput) },
-  responses: { 200: okResponse(ServiceCard), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
+  responses: { 200: okResponse(ServiceCard), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
+});
+
+const rollbackServiceRoute = createRoute({
+  method: "post",
+  path: "/api/v1/services/{serviceId}/rollback",
+  operationId: "rollbackService",
+  tags: ["services"],
+  "x-step-up": true,
+  middleware: [stepUpGate] as const,
+  request: { params: ServiceParam, body: jsonBody(RollbackInput) },
+  responses: { 202: okResponse(Deployment, "受け付けた。処理は非同期で完了する"), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
 });
 
 /** サービスのルート */
@@ -68,7 +81,16 @@ export const serviceRoutes = router
   .openapi(advanceServiceRoute, async (c) => {
     const { serviceId } = c.req.valid("param");
     const input = c.req.valid("json");
-    const row = await advanceService(c.env, serviceId, input, { by: "owner", now: c.var.clock.now(), traceId: c.var.traceId });
-    await audit(c, "service.advance", serviceId, { to: input.to, reason: input.reason });
+    const row = await advanceService(c.env, serviceId, input, { by: "owner", now: c.var.clock.now(), traceId: c.var.traceId }, c.var.github);
+    await audit(c, "service.advance", serviceId, { to: input.to, reason: input.reason, ...(input.repo === undefined ? {} : { repo: input.repo }) });
     return ok(c, toCard(row));
+  })
+  .openapi(rollbackServiceRoute, async (c) => {
+    const { serviceId } = c.req.valid("param");
+    const { reason } = c.req.valid("json");
+    const deployment = await rollbackService(c.env, c.var.forge, { serviceId, by: "owner", reason, now: c.var.clock.now() });
+    // 手で戻す時は直前の戻しを 409 で断るので、null は返らない
+    if (!deployment) throw new AppError("internal", "戻しを受け付けられなかった");
+    await audit(c, "service.rollback", serviceId, { reason, deploymentId: deployment.id });
+    return accepted(c, deployment);
   });

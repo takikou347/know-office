@@ -13,7 +13,7 @@ import {
   weakens,
   WorkSchedule,
 } from "@know-office/core";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z, type ZodType } from "zod";
 import { toFieldErrors } from "../app.ts";
@@ -155,27 +155,31 @@ export async function serviceRules(db: D1Database, serviceId: string): Promise<S
  * @param input.version 読んだ版
  * @param input.now 今の時刻
  * @param stepUp 弱める変更の時に呼ぶ、パスキーの確認を求める関数
+ * @param repoCheck リポジトリを変える時に呼ぶ。触れるリポジトリかを確かめ、書く時に重ねる条件を返す
  * @returns 変えた後の設定
- * @throws not_found サービスか項目が無い時、リポジトリを変えようとした時
- * @throws validation_failed 値が項目の形に合わない時、初期値を持たない項目を null にした時
+ * @throws not_found サービスか項目が無い時
+ * @throws validation_failed 値が項目の形に合わない時、初期値を持たない項目を null にした時、触れるリポジトリに無い時 (repoCheck が投げる)
  * @throws step_up_required 守りを弱める変更で、パスキーの確認が無い時 (stepUp が投げる)
- * @throws conflict 版が違う時、初期値に戻す間に office の初期値が変わった時
+ * @throws conflict 版が違う時、初期値に戻す間に office の初期値が変わった時、GitHub とつないでいないのにリポジトリを変える時と、確かめた後に連携が変わった時
+ * @throws upstream_failed 触れるリポジトリを GitHub から読めない時 (repoCheck が投げる)
  */
 export async function updateServiceSetting(
   db: D1Database,
   input: { serviceId: string; key: string; value: unknown; version: number; now: number },
   stepUp: () => void,
+  repoCheck: (repo: string) => Promise<SQL>,
 ): Promise<Setting> {
   const { serviceId, key, version, now } = input;
   await findService(db, serviceId);
-  // リポジトリは触れるリポジトリの中から選ぶので、触れるリポジトリを読めるまで変えさせない
-  if (key !== "staffId" && !isInheritedKey(key)) throw new AppError("not_found", "変えられる設定の項目でない");
+  if (key !== "staffId" && key !== "repo" && !isInheritedKey(key)) throw new AppError("not_found", "変えられる設定の項目でない");
   let value: unknown = null;
-  if (key === "staffId") value = checkValue(OWN_SETTINGS.staffId, input.value);
+  if (key === "staffId" || key === "repo") value = checkValue(OWN_SETTINGS[key], input.value);
   else if (input.value !== null) value = checkValue(INHERITED_SETTINGS[key], input.value);
   const current = (await loadServiceSettings(db, serviceId)).find((s) => s.key === key);
   // 弱めるかは読んだ版の値と比べる。古い版のまま送った変更は、今の値と比べず先に断る
   if (current?.version !== version) throw new AppError("conflict", "バージョンが違う");
+  // リポジトリは触れるリポジトリの中から選び、確かめた時の連携のままの時だけ書く
+  const linked = key === "repo" ? await repoCheck(OWN_SETTINGS.repo.parse(value)) : null;
   let defaultVersion: number | null = null;
   if (isInheritedKey(key)) {
     // 初期値に戻す時は、受け継いだ後の実効値で比べる
@@ -183,7 +187,7 @@ export async function updateServiceSetting(
     if (value === null) defaultVersion = office.version;
     if (weakens(key, current?.value, value === null ? office.value : value)) stepUp();
   }
-  await appendServiceSetting(db, { serviceId, key, value, version, defaultVersion, now });
+  await appendServiceSetting(db, { serviceId, key, value, version, defaultVersion, now, ...(linked ? { when: linked } : {}) });
   const after = (await loadServiceSettings(db, serviceId)).find((s) => s.key === key);
   if (!after) throw new AppError("internal", "書いた設定が読めない");
   return after;
@@ -343,11 +347,12 @@ export async function updateSchedule(db: D1Database, input: { value: unknown; ve
  * @param row.version 読んだ版
  * @param row.defaultVersion 初期値に戻す時に読んだ office の初期値の版。戻さない時は null
  * @param row.now 今の時刻
- * @throws conflict 版が違う時、初期値に戻す間に office の初期値が変わった時
+ * @param row.when 書く時に重ねる条件。リポジトリは確かめた時の連携のままである事
+ * @throws conflict 版が違う時、初期値に戻す間に office の初期値が変わった時、重ねた条件が合わない時
  */
 export async function appendServiceSetting(
   db: D1Database,
-  row: { serviceId: string; key: string; value: unknown; version: number; defaultVersion: number | null; now: number },
+  row: { serviceId: string; key: string; value: unknown; version: number; defaultVersion: number | null; now: number; when?: SQL },
 ): Promise<void> {
   const { serviceId, key, value, version, now } = row;
   const id = newId(clockAt(now));
@@ -359,19 +364,21 @@ export async function appendServiceSetting(
     row.defaultVersion === null
       ? sql``
       : sql` AND COALESCE((SELECT MAX(${settings.version}) FROM ${settings} WHERE ${settings.key} = ${`${DEFAULT_PREFIX}${key}`} AND ${settings.scope} = 'office'), 0) = ${row.defaultVersion}`;
+  const extra = row.when === undefined ? sql`` : sql` AND ${row.when}`;
   const insert = orm
     .insert(serviceSettings)
     .select(
-      sql`SELECT ${id}, ${serviceId}, ${key}, ${json}, ${next}, 'owner', ${now} WHERE NOT EXISTS (SELECT 1 FROM ${serviceSettings} WHERE ${serviceSettings.serviceId} = ${serviceId} AND ${serviceSettings.key} = ${key} AND ${serviceSettings.version} >= ${next})${sameDefault}`,
+      sql`SELECT ${id}, ${serviceId}, ${key}, ${json}, ${next}, 'owner', ${now} WHERE NOT EXISTS (SELECT 1 FROM ${serviceSettings} WHERE ${serviceSettings.serviceId} = ${serviceId} AND ${serviceSettings.key} = ${key} AND ${serviceSettings.version} >= ${next})${sameDefault}${extra}`,
     )
     .returning({ id: serviceSettings.id });
-  if (key === "staffId") {
-    // 一覧の担当も同じ時に直す。行を書けた時だけ直す
+  if (key === "staffId" || key === "repo") {
+    // 一覧の担当とリポジトリも同じ時に直す。行を書けた時だけ直す
+    const own = key === "staffId" ? { staffId: OWN_SETTINGS.staffId.parse(value) } : { repo: OWN_SETTINGS.repo.parse(value) };
     const [written] = await orm.batch([
       insert,
       orm
         .update(services)
-        .set({ staffId: OWN_SETTINGS.staffId.parse(value) })
+        .set(own)
         .where(and(eq(services.id, serviceId), sql`EXISTS (SELECT 1 FROM ${serviceSettings} WHERE ${serviceSettings.id} = ${id})`)),
     ]);
     if (written.length === 0) throw new AppError("conflict", "バージョンが違う");

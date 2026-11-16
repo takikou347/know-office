@@ -205,6 +205,59 @@ export const GitHubWebhookHead = z
   })
   .loose();
 
+/** 通知の本文のリポジトリ。既定のブランチも持つ */
+const HookRepository = z.object({ full_name: RepoName, default_branch: z.string().min(1).max(255) }).loose();
+
+/** 道の並び。GitHub は push の 1 コミットに 3,000 ファイルまでを並べる */
+const HookPaths = z.array(z.string().max(4096)).max(3000);
+
+/** push の通知のうち使う所。commits は 2,048 件までで、超えた分は並ばない */
+export const GitHubPushEvent = z
+  .object({
+    ref: z.string().max(255),
+    after: Sha,
+    repository: HookRepository,
+    commits: z
+      .array(z.object({ added: HookPaths.optional(), modified: HookPaths.optional(), removed: HookPaths.optional() }).loose())
+      .max(2048)
+      .optional(),
+  })
+  .loose();
+
+/** deployment_status の通知のうち使う所 */
+export const GitHubDeploymentStatusEvent = z
+  .object({
+    deployment_status: z.object({ state: z.string().max(64), environment: z.string().max(255) }).loose(),
+    deployment: z.object({ id: GitHubId, sha: Sha, task: z.string().max(255), environment: z.string().max(255) }).loose(),
+    repository: HookRepository,
+  })
+  .loose();
+
+/** workflow_run の通知のうち使う所 */
+export const GitHubWorkflowRunEvent = z
+  .object({
+    workflow_run: z
+      .object({ id: GitHubId, path: z.string().max(255), head_branch: z.string().max(255).nullable(), head_sha: Sha, status: z.string().max(64), conclusion: z.string().max(64).nullable() })
+      .loose(),
+    repository: HookRepository,
+  })
+  .loose();
+
+/** npm のパッケージの名前。npm の決まりで 214 字まで */
+export const PackageName = z
+  .string()
+  .max(214)
+  .regex(/^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/);
+
+/** リポジトリから読んだ package.json のうち使う所。dependencies は使う側の版を読むのに使う */
+export const PackageManifest = z
+  .object({
+    name: PackageName,
+    version: z.string().max(64).optional(),
+    dependencies: z.record(z.string().max(214), z.string().max(255)).optional(),
+  })
+  .loose();
+
 /** check_run の通知のうち使う所 */
 export const CheckRunEvent = z
   .object({

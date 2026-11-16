@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: know-office API
-  version: 1.17.0
+  version: 1.18.0
   description: know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。
 servers:
 - url: /
@@ -4613,7 +4613,9 @@ paths:
       description: '処理の流れ:
 
 
-        1. `services`、`service_events`、最新の `service_metrics` を取得し、検討の材料を R2 の `study_key` から読む
+        1. `services` と `service_events` を取得し、検討の材料を R2 の `study_key` から読む
+
+        2. 種類ごとの様子を組み立てる。ライブラリは最新の `release` の版とそろい、最新の `deploy` (npm への公開の結果)、使っているサービスごとの最新の `uses` の版。Web アプリは最新の `deploy` と `rollback`、`service_metrics` の最新の利用者数と直前 24 時間の失敗率、`usage` の今月の費用。コンテンツは `deploy` の一覧と、直前 24 時間の読まれた数
 
 
         このルート固有のエラー:
@@ -4621,7 +4623,8 @@ paths:
 
         - 404 `not_found`: サービスが存在しない'
       x-steps:
-      - '`services`、`service_events`、最新の `service_metrics` を取得し、検討の材料を R2 の `study_key` から読む'
+      - '`services` と `service_events` を取得し、検討の材料を R2 の `study_key` から読む'
+      - 種類ごとの様子を組み立てる。ライブラリは最新の `release` の版とそろい、最新の `deploy` (npm への公開の結果)、使っているサービスごとの最新の `uses` の版。Web アプリは最新の `deploy` と `rollback`、`service_metrics` の最新の利用者数と直前 24 時間の失敗率、`usage` の今月の費用。コンテンツは `deploy` の一覧と、直前 24 時間の読まれた数
       x-errors:
       - '404 `not_found`: サービスが存在しない'
       parameters:
@@ -4672,13 +4675,15 @@ paths:
 
         1. サービスを取得し、現在の段階から移れる段階かを確認する。移れるのは `idea` から `study` か `dropped`、`study` から `prototype` か `dropped`、`prototype` から `service` か `dropped`、`service` から `operation` か `closed`、`operation` から `closed`
 
-        2. `prototype` に進める場合は担当の社員を `staffId` で決める。`dropped` にする場合は理由を `dropped_reason` に残す
+        2. `prototype` に進める場合は担当の社員を `staffId` で、リポジトリを `repo` で決める。`repo` は `prototype` に進める時だけ受ける。`dropped` にする場合は理由を `dropped_reason` に残す
 
-        3. `study` に進める場合は、office の受け付けのプロジェクトの下に置く、似た物、作る量、セキュリティの要る所を調べる社長のタスクを組み立てる
+        3. `repo` は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を `GET /installation/repositories` で確かめる
 
-        4. 読んだ段階のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
+        4. `study` に進める場合は、office の受け付けのプロジェクトの下に置く、似た物、作る量、セキュリティの要る所を調べる社長のタスクを組み立てる
 
-        5. 監査ログに `service.advance` を記録する
+        5. 読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
+
+        6. 監査ログに `service.advance` を記録する
 
 
         このルート固有のエラー:
@@ -4686,19 +4691,23 @@ paths:
 
         - 404 `not_found`: サービスが存在しない
 
-        - 409 `conflict`: 移れない段階、または読んだ後に段階が変わった
+        - 409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、または確かめた後に連携が変わった
 
-        - 422 `validation_failed`: `prototype` に進めるのに `staffId` が無い'
+        - 422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い
+
+        - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
       - サービスを取得し、現在の段階から移れる段階かを確認する。移れるのは `idea` から `study` か `dropped`、`study` から `prototype` か `dropped`、`prototype` から `service` か `dropped`、`service` から `operation` か `closed`、`operation` から `closed`
-      - '`prototype` に進める場合は担当の社員を `staffId` で決める。`dropped` にする場合は理由を `dropped_reason` に残す'
+      - '`prototype` に進める場合は担当の社員を `staffId` で、リポジトリを `repo` で決める。`repo` は `prototype` に進める時だけ受ける。`dropped` にする場合は理由を `dropped_reason` に残す'
+      - '`repo` は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を `GET /installation/repositories` で確かめる'
       - '`study` に進める場合は、office の受け付けのプロジェクトの下に置く、似た物、作る量、セキュリティの要る所を調べる社長のタスクを組み立てる'
-      - 読んだ段階のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
+      - 読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
       - 監査ログに `service.advance` を記録する
       x-errors:
       - '404 `not_found`: サービスが存在しない'
-      - '409 `conflict`: 移れない段階、または読んだ後に段階が変わった'
-      - '422 `validation_failed`: `prototype` に進めるのに `staffId` が無い'
+      - '409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、または確かめた後に連携が変わった'
+      - '422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い'
+      - '502 `upstream_failed`: GitHub がエラーを返した'
       parameters:
       - name: serviceId
         in: path
@@ -4752,6 +4761,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
   /api/v1/services/{serviceId}/rollback:
     post:
       operationId: rollbackService
@@ -4764,11 +4775,15 @@ paths:
         処理の流れ:
 
 
-        1. Web アプリであることを確認する
+        1. サービスを取得し、Web アプリで、リポジトリがある事を確かめる
 
-        2. そのリポジトリの `rollback.yml` を GitHub App で実行する
+        2. `locks` の `service.rollback:<サービス ID>` を 10 分の長さで 1 文で取る。取れなければ断る。取った錠は切れるまで持ち、直前の戻しと同時の戻しを重ねない
 
-        3. `service_events` に `rollback` を追加し、監査ログに `service.rollback` を記録して通知を出す
+        3. そのリポジトリの既定のブランチを読み、`rollback.yml` を GitHub App で動かす (`actions` の書きに絞った鍵)。失敗したら錠を外し、何も残さない
+
+        4. `service_events` への `rollback` の追加と、通知 `service_rollback` を 1 回のバッチで書く。書けなければ、GitHub には届いているので、エラーログと通知 `service_rollback_unrecorded` に残す
+
+        5. 監査ログに `service.rollback` を記録する
 
 
         このルート固有のエラー:
@@ -4776,16 +4791,18 @@ paths:
 
         - 404 `not_found`: サービスが存在しない
 
-        - 409 `conflict`: Web アプリではない
+        - 409 `conflict`: Web アプリではない、リポジトリが無い、または直前 10 分の間に戻したか戻している最中
 
         - 502 `upstream_failed`: GitHub がエラーを返した'
       x-steps:
-      - Web アプリであることを確認する
-      - そのリポジトリの `rollback.yml` を GitHub App で実行する
-      - '`service_events` に `rollback` を追加し、監査ログに `service.rollback` を記録して通知を出す'
+      - サービスを取得し、Web アプリで、リポジトリがある事を確かめる
+      - '`locks` の `service.rollback:<サービス ID>` を 10 分の長さで 1 文で取る。取れなければ断る。取った錠は切れるまで持ち、直前の戻しと同時の戻しを重ねない'
+      - そのリポジトリの既定のブランチを読み、`rollback.yml` を GitHub App で動かす (`actions` の書きに絞った鍵)。失敗したら錠を外し、何も残さない
+      - '`service_events` への `rollback` の追加と、通知 `service_rollback` を 1 回のバッチで書く。書けなければ、GitHub には届いているので、エラーログと通知 `service_rollback_unrecorded` に残す'
+      - 監査ログに `service.rollback` を記録する
       x-errors:
       - '404 `not_found`: サービスが存在しない'
-      - '409 `conflict`: Web アプリではない'
+      - '409 `conflict`: Web アプリではない、リポジトリが無い、または直前 10 分の間に戻したか戻している最中'
       - '502 `upstream_failed`: GitHub がエラーを返した'
       x-step-up: true
       parameters:
@@ -4801,7 +4818,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReasonInput'
+              $ref: '#/components/schemas/RollbackInput'
       security:
       - accessJwt: []
         session: []
@@ -4930,36 +4947,39 @@ paths:
 
         2. `version` が現在と一致することを確認する
 
-        3. 今の実効値と変えた後の実効値 (`null` は受け継いだ後の値) を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める
+        3. `key` が `repo` の時は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を確かめる
 
-        4. `service_settings` に追加し、監査ログに `service.setting` を記録する。担当の社員を変える時は `services.staff_id` も同じ時に直す
+        4. 今の実効値と変えた後の実効値 (`null` は受け継いだ後の値) を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める
 
-        5. `key` が `mergeWhen` の時は、そのサービスのリポジトリが公開なら、ルールセット「know-office」を新しい条件で設定し直す
+        5. `service_settings` に追加し、監査ログに `service.setting` を記録する。担当の社員かリポジトリを変える時は `services.staff_id` か `services.repo` も同じバッチで直す。リポジトリは確かめた時の連携のままの時だけ書く
+
+        6. `key` が `mergeWhen` の時は、そのサービスのリポジトリが公開なら、ルールセット「know-office」を新しい条件で設定し直す
 
 
         このルート固有のエラー:
 
 
-        - 404 `not_found`: サービスが存在しない、設定項目が存在しない、またはリポジトリを変えようとした (触れるリポジトリから選ぶので、GitHub と連携するまで変えられない)
+        - 404 `not_found`: サービスが存在しない、または設定項目が存在しない
 
         - 401 `step_up_required`: 守りを弱める変更で、パスキーの確認がない
 
-        - 409 `conflict`: バージョンが異なる、または初期値に戻す間に office の初期値が変わった
+        - 409 `conflict`: バージョンが異なる、初期値に戻す間に office の初期値が変わった、GitHub と連携していないのにリポジトリを変える、または確かめた後に連携が変わった
 
-        - 422 `validation_failed`: 値が項目の形に合わない、または初期値を持たない項目に `null` を送った
+        - 422 `validation_failed`: 値が項目の形に合わない、初期値を持たない項目に `null` を送った、またはリポジトリが触れるリポジトリに無い
 
         - 502 `upstream_failed`: GitHub がエラーを返した。変えた設定と監査ログは残る'
       x-steps:
       - サービスを取得し、`key` がサービスの設定項目かを確認し、キーごとの Zod スキーマで値を検証する。`null` は初期値を持つ項目だけに使える
       - '`version` が現在と一致することを確認する'
-      - '今の実効値と変えた後の実効値 (`null` は受け継いだ後の値) を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める'
-      - '`service_settings` に追加し、監査ログに `service.setting` を記録する。担当の社員を変える時は `services.staff_id` も同じ時に直す'
+      - '`key` が `repo` の時は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を確かめる'
+      - 今の実効値と変えた後の実効値 (`null` は受け継いだ後の値) を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める
+      - '`service_settings` に追加し、監査ログに `service.setting` を記録する。担当の社員かリポジトリを変える時は `services.staff_id` か `services.repo` も同じバッチで直す。リポジトリは確かめた時の連携のままの時だけ書く'
       - '`key` が `mergeWhen` の時は、そのサービスのリポジトリが公開なら、ルールセット「know-office」を新しい条件で設定し直す'
       x-errors:
-      - '404 `not_found`: サービスが存在しない、設定項目が存在しない、またはリポジトリを変えようとした (触れるリポジトリから選ぶので、GitHub と連携するまで変えられない)'
+      - '404 `not_found`: サービスが存在しない、または設定項目が存在しない'
       - '401 `step_up_required`: 守りを弱める変更で、パスキーの確認がない'
-      - '409 `conflict`: バージョンが異なる、または初期値に戻す間に office の初期値が変わった'
-      - '422 `validation_failed`: 値が項目の形に合わない、または初期値を持たない項目に `null` を送った'
+      - '409 `conflict`: バージョンが異なる、初期値に戻す間に office の初期値が変わった、GitHub と連携していないのにリポジトリを変える、または確かめた後に連携が変わった'
+      - '422 `validation_failed`: 値が項目の形に合わない、初期値を持たない項目に `null` を送った、またはリポジトリが触れるリポジトリに無い'
       - '502 `upstream_failed`: GitHub がエラーを返した。変えた設定と監査ログは残る'
       x-step-up: conditional
       parameters:
@@ -8773,9 +8793,8 @@ components:
             - string
             - 'null'
             description: 見送った理由。見送っていなければ null
-          metrics:
-            type: object
-            additionalProperties: true
+          status:
+            $ref: '#/components/schemas/ServiceStatus'
           events:
             type: array
             items:
@@ -8791,6 +8810,7 @@ components:
                   - deploy
                   - rollback
                   - release
+                  - uses
                 by:
                   type: string
                   description: '`owner`、社員 ID、`system` のどれか'
@@ -8811,8 +8831,160 @@ components:
         - revenueEstimateMicroUsd
         - study
         - droppedReason
-        - metrics
+        - status
         - events
+        additionalProperties: false
+    ServiceStatus:
+      oneOf:
+      - type: object
+        properties:
+          kind:
+            type: string
+            enum:
+            - library
+          version:
+            type:
+            - string
+            - 'null'
+            description: 最新の公開の版。そろっていなければいちばん新しい版。まだ無ければ null
+          packages:
+            type: array
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                version:
+                  type: string
+              required:
+              - name
+              - version
+              additionalProperties: false
+            description: 最新の push で読んだパッケージと説明のサイトの版
+          aligned:
+            type: boolean
+            description: パッケージと説明のサイトの版がそろっているか
+          releasedAt:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          publish:
+            type:
+            - object
+            - 'null'
+            properties:
+              at:
+                type: string
+                format: date-time
+              passed:
+                type: boolean
+            required:
+            - at
+            - passed
+            additionalProperties: false
+            description: 最新の npm への公開の結果
+          usedBy:
+            type: array
+            items:
+              type: object
+              properties:
+                serviceId:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+                version:
+                  type: string
+                behind:
+                  type: boolean
+              required:
+              - serviceId
+              - name
+              - version
+              - behind
+              additionalProperties: false
+            description: このライブラリを使っているサービスと版。behind は最新の公開より古いか
+        required:
+        - kind
+        - version
+        - packages
+        - aligned
+        - releasedAt
+        - publish
+        - usedBy
+        additionalProperties: false
+      - type: object
+        properties:
+          kind:
+            type: string
+            enum:
+            - web_app
+          version:
+            type:
+            - string
+            - 'null'
+          deployedAt:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          rolledBackAt:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          users:
+            type:
+            - integer
+            - 'null'
+            description: 最新の 5 分の利用者数。まだ無ければ null
+          errorRate:
+            type:
+            - number
+            - 'null'
+            description: 直前 24 時間の失敗の割合 (0 から 1)。返事が無ければ null
+          costMicroUsd:
+            type: integer
+            description: 今月の費用
+        required:
+        - kind
+        - version
+        - deployedAt
+        - rolledBackAt
+        - users
+        - errorRate
+        - costMicroUsd
+        additionalProperties: false
+      - type: object
+        properties:
+          kind:
+            type: string
+            enum:
+            - content
+          published:
+            type: array
+            items:
+              type: object
+              properties:
+                at:
+                  type: string
+                  format: date-time
+                title:
+                  type: string
+              required:
+              - at
+              - title
+              additionalProperties: false
+          reads:
+            type:
+            - integer
+            - 'null'
+            description: 直前 24 時間の読まれた数。まだ無ければ null
+        required:
+        - kind
+        - published
+        - reads
         additionalProperties: false
     CreateIdeaInput:
       type: object
@@ -8876,6 +9048,11 @@ components:
           - builder
           - reviewer
           description: '`prototype` に進める時に決める担当の社員'
+        repo:
+          type: string
+          maxLength: 140
+          pattern: ^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.{1,2}$)[\w.-]{1,100}$
+          description: '`prototype` に進める時に、GitHub の触れるリポジトリから決めるリポジトリ'
       required:
       - to
       - reason
@@ -8921,6 +9098,16 @@ components:
       properties:
         reason:
           type: string
+      required:
+      - reason
+      additionalProperties: false
+    RollbackInput:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
       required:
       - reason
       additionalProperties: false

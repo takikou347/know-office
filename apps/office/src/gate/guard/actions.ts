@@ -174,7 +174,7 @@ export async function applyStop(env: Bindings, input: StopInput, now: number, de
     traceId: input.traceId,
   });
   try {
-    await enforce(env, input, subject.staffId, now, deps);
+    await enforce(env, { ...input, stopId }, subject.staffId, now, deps);
   } catch (error) {
     const failed = notice(now, "stop", "guard_stop_failed", `${SCOPE_LABEL[input.scope]}を止める動きが途中で失敗した`, "止めた記録は残っている。止まっていない所があるので、記録を確かめる");
     await orm.insert(notices).values(failed);
@@ -210,12 +210,12 @@ async function subjectOf(db: D1Database, input: StopInput): Promise<{ staffId: S
 /**
  * 範囲ごとに止める動きを効かせる
  * @param env バインディング
- * @param input 止める範囲と相手
+ * @param input 止める範囲と相手、止めた記録の ID
  * @param staffId タスクを持っていた社員
  * @param now 今の時刻
  * @param deps 外へ頼む口
  */
-async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null, now: number, deps: GuardDeps): Promise<void> {
+async function enforce(env: Bindings, input: StopInput & { stopId: string }, staffId: StaffId | null, now: number, deps: GuardDeps): Promise<void> {
   const orm = drizzle(env.DB);
   switch (input.scope) {
     case "task": {
@@ -234,7 +234,7 @@ async function enforce(env: Bindings, input: StopInput, staffId: StaffId | null,
       // ライブラリは公開を断るだけで、戻すのは Web アプリだけ。戻せなくても、止めた記録が開いている間は公開を断る
       if (service?.kind !== "web_app") return;
       try {
-        await deps.rollback(input.target);
+        await deps.rollback(input.target, input.stopId);
       } catch (error) {
         const failed = notice(now, "stop", "guard_rollback_failed", `${input.target} を前のバージョンに戻せなかった`, "公開は止めている。前のバージョンへは手で戻す");
         await orm.insert(notices).values(failed);

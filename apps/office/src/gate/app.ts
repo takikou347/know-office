@@ -11,7 +11,7 @@ import type { GateEnv } from "./env.ts";
 import { endpoints } from "./endpoints.ts";
 import { revokeTokens, SHARED_TOKENS, type TokenCache, vaultForge } from "./github/app.ts";
 import { type GitHubAccess, httpForge } from "./github/forge.ts";
-import { type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
+import { connectRollback, type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
 import { trace } from "./trace.ts";
 
@@ -88,11 +88,13 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
     c.set("fetch", fetcher);
     const github = options.github;
     const tokens = { fetcher, clock, cache: options.githubTokens ?? SHARED_TOKENS };
-    // 全体を止めた時は、この入口がためた鍵を、この入口の fetch で取り消す
-    c.set("guard", { ...(options.guard ?? UNCONNECTED_DEPS), revokeGitHubTokens: (env) => revokeTokens(env, tokens) });
-    c.set("github", tokens);
     // vault はルートが GitHub を呼ぶ時に初めて読む
-    c.set("forge", github ? httpForge(endpoints(c.env).github, fetcher, github) : vaultForge(c.env, tokens));
+    const forge = github ? httpForge(endpoints(c.env).github, fetcher, github) : vaultForge(c.env, tokens);
+    // 全体を止めた時は、この入口がためた鍵を、この入口の fetch で取り消す。サービスを止めた時は、この入口の GitHub の口で戻す
+    const guard = options.guard ?? { ...UNCONNECTED_DEPS, rollback: connectRollback(c.env, forge, () => clock.now()) };
+    c.set("guard", { ...guard, revokeGitHubTokens: (env) => revokeTokens(env, tokens) });
+    c.set("github", tokens);
+    c.set("forge", forge);
     await next();
   });
   app.use("*", trace);

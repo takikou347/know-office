@@ -16,7 +16,6 @@ const STILL_MOCK: Record<string, string> = {
   "pages/office/layout.ts": "#87",
   "pages/office/motion.ts": "#87",
   "pages/office/room.ts": "#87",
-  "pages/services/ServicesPage.tsx": "#109",
 };
 
 /** 画面のソースの拡張子 */
