@@ -1,0 +1,61 @@
+# know-office が前のバージョンに戻す時に、GitHub App で動かす。本番の Worker を wrangler rollback で 1 つ前に戻し、task が rollback のデプロイとその成功を残す。
+# know-office は task が rollback のデプロイを、デプロイとしても自動停止の数える始まりとしても使わない (サービスと拡張の 3.2、運用手順の 2 章)
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 戻す理由
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # environment は付けない。付けると GitHub が task の deploy のデプロイを作り、戻した版を新しいデプロイとして数えてしまう。鍵はリポジトリの秘密で読める
+    permissions:
+      contents: read
+      deployments: write
+    # 本番のデプロイと重ねない。途中で止めない
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: 鍵がそろっているか
+        run: |
+          set -eu
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Cloudflare の鍵が無いので戻せない"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: 前のバージョンに戻す
+        working-directory: apps/office
+        env:
+          REASON: ${{ inputs.reason }}
+        # Cloudflare のデプロイの文は 100 字までにする
+        run: pnpm exec wrangler rollback --name know-office --yes --message "${REASON:0:100}"
+      - name: 戻したデプロイを残す
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -eu
+          id=$(jq -n --arg ref "$GITHUB_SHA" --arg reason "${REASON:0:140}" '{ref: $ref, environment: "production", task: "rollback", auto_merge: false, required_contexts: [], description: $reason}' \
+            | gh api "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)
+          gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" -f state=success -f environment=production > /dev/null

@@ -325,6 +325,11 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
       return info.default_branch;
     },
+    defaultHead: async (repo) => {
+      const info = await call(repo, read, { method: "GET", path: "" }, GitHubRepo);
+      const ref = await call(repo, readContents, { method: "GET", path: `/git/ref/heads/${branchPath(info.default_branch)}` }, GitHubRef);
+      return commitSha(ref.object.sha);
+    },
     protectMain: async (repo, when) => {
       const info = await call(repo, read, { method: "GET", path: "" }, GitHubRepo);
       if (info.private) return "private";

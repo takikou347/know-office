@@ -82,6 +82,7 @@ function fakeForge(): FakeForge {
     pullFiles: () => Promise.resolve([]),
     compare: () => Promise.resolve({ files: [], truncated: false }),
     readFile: () => Promise.resolve(null),
+    defaultHead: () => Promise.resolve("b".repeat(40)),
     dispatchWorkflow: (repo, workflow, inputs) => {
       forge.dispatched.push({ repo, workflow, inputs });
       return Promise.resolve("main");

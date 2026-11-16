@@ -1,6 +1,6 @@
 // デプロイの通知と 5 分ごとの様子から、service_events の deploy、service_metrics、自動停止の deploy_result を作る (サービスと拡張の 3.2、自動停止の 3.1)
 import { DeployDetail, GitHubDeploymentStatusEvent, GitHubWorkflowRunEvent, newId } from "@know-office/core";
-import { and, asc, desc, eq, gt, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { services, serviceEvents } from "../db/main.ts";
 import { serviceMetrics } from "../db/records.ts";
@@ -11,6 +11,7 @@ import { observe } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
 import { recordsOf } from "../work/nodes.ts";
+import { ROLLBACK_COOLDOWN_MS } from "./rollback.ts";
 import { latestRelease } from "./status.ts";
 
 /** 5 分ごとの様子の 1 区切り */
@@ -41,7 +42,23 @@ export type Analytics = {
 export const UNCONNECTED_ANALYTICS: Analytics = { read: () => Promise.resolve(null) };
 
 /**
- * 本番のデプロイが終わった通知を受け、Web アプリとコンテンツのサービスに deploy を残す。戻しのデプロイと本番でない環境は残さない
+ * そのサービスを、at までの 10 分の間に戻したか。戻しの workflow が task を付け忘れても、戻した版のデプロイを数えない
+ * @param env バインディング
+ * @param serviceId サービス ID
+ * @param at 比べる時刻
+ * @returns 戻していれば true
+ */
+async function rolledBackBefore(env: Bindings, serviceId: string, at: number): Promise<boolean> {
+  const [row] = await drizzle(env.DB)
+    .select({ at: serviceEvents.at })
+    .from(serviceEvents)
+    .where(and(eq(serviceEvents.serviceId, serviceId), eq(serviceEvents.kind, "rollback"), gte(serviceEvents.at, at - ROLLBACK_COOLDOWN_MS), lte(serviceEvents.at, at)))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * 本番のデプロイが終わった通知を受け、Web アプリとコンテンツのサービスに deploy を残す。戻しのデプロイ、戻してから 10 分の間のデプロイ、本番でない環境は残さない
  * @param env バインディング
  * @param payload 通知の本文
  * @param now 今の時刻
@@ -56,6 +73,7 @@ export async function receiveDeploymentStatus(env: Bindings, payload: unknown, n
     .from(services)
     .where(and(eq(services.repo, repository.full_name), ne(services.kind, "library")));
   for (const owner of owners) {
+    if (await rolledBackBefore(env, owner.id, now)) continue;
     const event = { id: newId(clockAt(now)), at: now, serviceId: owner.id, kind: "deploy" as const, by: "system", detail: { deploymentId: deployment.id, version: deployment.sha.slice(0, 7), commit: deployment.sha } };
     await insertedWhen(env.DB, serviceEvents, event, sql`NOT EXISTS (SELECT 1 FROM ${serviceEvents} WHERE ${serviceEvents.serviceId} = ${owner.id} AND ${serviceEvents.kind} = 'deploy' AND json_extract(${serviceEvents.detail}, '$.deploymentId') = ${deployment.id})`);
   }
@@ -105,6 +123,7 @@ async function recentDeploy(env: Bindings, serviceId: string, at: number): Promi
     .limit(1);
   // 窓はデプロイからちょうど 10 分の区切りまで
   if (!deploy || !DeployDetail.safeParse(deploy.detail).success || at > deploy.at + DEPLOY_WINDOW_MS) return null;
+  if (await rolledBackBefore(env, serviceId, deploy.at)) return null;
   const [base] = await drizzle(recordsOf(env, deploy.at))
     .select({ requests: sql<number>`COALESCE(SUM(${serviceMetrics.requests}), 0)`, errors: sql<number>`COALESCE(SUM(${serviceMetrics.errors}), 0)` })
     .from(serviceMetrics)

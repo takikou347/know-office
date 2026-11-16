@@ -1,7 +1,7 @@
 // deploy.yml と wrangler.jsonc の previews が、デプロイの流れと鍵の扱いの決まりを守る事を確かめる (ログインと記録の 3.7、運用手順の 1 章と 2 章)
 // node:test の describe と it は Promise を返すが、node:test が待つので void で示す
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const deploy = readFileSync(join(root, ".github", "workflows", "deploy.yml"), "utf8");
 const check = readFileSync(join(root, ".github", "workflows", "check.yml"), "utf8");
+const rollbackPath = join(root, ".github", "workflows", "rollback.yml");
+const rollback = existsSync(rollbackPath) ? readFileSync(rollbackPath, "utf8") : "";
 
 /**
  * ワークフローの jobs の下を、ジョブの名前ごとの文に分ける
@@ -116,6 +118,13 @@ void describe("自動のデプロイとプレビュー環境", () => {
     assert.equal(group.exec(remove)?.[2], "false");
   });
 
+  void it("本番の job は environment の production で回し、GitHub がデプロイ (task は deploy) と結果を残す", () => {
+    // environment を持つ job には、GitHub がデプロイを作り、job の終わりに deployment_status を送る。確かめが落ちると failure になり、know-office は数えない
+    const production = all.get("production") ?? "";
+    assert.match(production, /^ {4}environment:\n {6}name: production\n/m);
+    assert.doesNotMatch(production, /deployment: false/);
+  });
+
   void it("プレビューは本番と別の D1 と R2 を結ぶ", () => {
     type Store = { binding: string; database_name?: string; bucket_name?: string };
     type Config = { vars: Record<string, string>; d1_databases: Store[]; r2_buckets: Store[]; previews: { vars: Record<string, string>; d1_databases: Store[]; r2_buckets: Store[] } };
@@ -133,5 +142,33 @@ void describe("自動のデプロイとプレビュー環境", () => {
     }
     assert.equal(config.previews.vars["ENVIRONMENT"], "preview");
     assert.equal(config.previews.vars["URGENT_SCAN"], "off");
+  });
+});
+
+void describe("前のバージョンに戻す workflow", () => {
+  const job = jobs(rollback).get("rollback") ?? "";
+
+  void it("know-office が理由を入れて手で動かし、本番と同じ鍵で wrangler rollback を回す", () => {
+    assert.match(rollback, /^on:\n {2}workflow_dispatch:\n {4}inputs:\n {6}reason:\n/m);
+    assert.match(job, /^ {6}CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}$/m);
+    assert.match(job, /wrangler rollback --name know-office --yes/);
+    // 本番のデプロイと重ねない
+    assert.match(job, /^ {6}group: deploy-production\n {6}cancel-in-progress: false$/m);
+  });
+
+  void it("戻した後に、task が rollback のデプロイとその成功を残し、デプロイとして数えさせない", () => {
+    inOrder(job, ["wrangler rollback", "task: \"rollback\"", "/deployments", "/statuses", "state=success"]);
+    // environment を付けると GitHub が task の deploy のデプロイを作るので付けない。鍵はリポジトリの秘密で読める
+    assert.doesNotMatch(job, /^ {4}environment:/m);
+  });
+
+  void it("権限はデプロイを書くだけを足し、入れた理由を命令の文に直に入れない", () => {
+    assert.match(rollback, /^permissions:\n {2}contents: read\n\n/m);
+    assert.match(job, /^ {4}permissions:\n {6}contents: read\n {6}deployments: write\n/m);
+    assert.deepEqual([...rollback.matchAll(/^ +[\w-]+: write$/gm)].map((m) => m[0].trim()), ["deployments: write"]);
+    for (const line of rollback.split("\n").filter((l) => l.includes("inputs.reason") || l.includes("secrets."))) {
+      assert.match(line, /^ +[A-Z_]+: \$\{\{ (inputs\.reason|secrets\.[A-Z_]+) \}\}$/, line);
+    }
+    for (const uses of rollback.matchAll(/uses: (\S+)/g)) assert.match(uses[1] ?? "", /^actions\/[\w-]+@v\d+$/, uses[0]);
   });
 });

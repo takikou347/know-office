@@ -1,8 +1,12 @@
 // 自動停止が外へ頼む口と、DO が返す数えた答えの形 (自動停止の 3.4、3.6)
-import type { Judgment } from "@know-office/core";
+import { type Judgment, newId } from "@know-office/core";
+import { drizzle } from "drizzle-orm/d1";
+import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { revokeTokens, SHARED_TOKENS } from "../github/app.ts";
+import { auditFrom } from "../ledger/record.ts";
 import { rollbackService } from "../services/rollback.ts";
+import { clockAt } from "../work/attendance.ts";
 import type { Forge } from "../work/loop.ts";
 
 /** 直前の出来事 1 件。出来事の項目はどれも文字、数、真偽、null */
@@ -56,7 +60,7 @@ export const UNCONNECTED_DEPS: GuardDeps = {
 };
 
 /**
- * 自動停止の戻しを GitHub の rollback.yml につないだ口を作る。直前に戻していれば送らない
+ * 自動停止の戻しを GitHub の rollback.yml につないだ口を作る。直前に戻していれば送らず、飛ばした事を監査ログと通知に残す
  * @param env バインディング
  * @param forge GitHub を呼ぶ口
  * @param now 今の時刻を返す関数
@@ -64,6 +68,13 @@ export const UNCONNECTED_DEPS: GuardDeps = {
  */
 export function connectRollback(env: Bindings, forge: Forge, now: () => number): GuardDeps["rollback"] {
   return async (serviceId, stopId) => {
-    await rollbackService(env, forge, { serviceId, by: "system", reason: "自動停止がサービスを止めた", stopId, now: now() });
+    const at = now();
+    const sent = await rollbackService(env, forge, { serviceId, by: "system", reason: "自動停止がサービスを止めた", stopId, now: at });
+    if (sent) return;
+    // 直前に戻したか、同じ止めた記録で戻した後なので送らなかった。オーナーが飛ばした事を見られるよう残す
+    await auditFrom(env, { at, actor: "system", action: "service.rollback_skipped", target: serviceId, scope: serviceId, detail: { stopId } });
+    await drizzle(env.DB)
+      .insert(notices)
+      .values({ id: newId(clockAt(at)), at, level: "warn", kind: "service_rollback_skipped", title: "自動停止の戻しを飛ばした", body: "直前に戻したか、同じ止めた記録で戻した後なので、rollback.yml を動かさなかった", scope: serviceId });
   };
 }

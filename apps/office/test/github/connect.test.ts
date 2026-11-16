@@ -49,8 +49,10 @@ describe("ボタン 1 つで連携する", () => {
       redirect_url: "http://localhost/api/v1/github/callback",
       setup_url: "http://localhost/api/v1/github/installed",
       hook_attributes: { url: "http://localhost/hooks/v1/github", active: true },
-      default_permissions: { contents: "write", pull_requests: "write", issues: "write", checks: "read", statuses: "read", administration: "write", metadata: "read" },
     });
+    // 戻しの rollback.yml を動かす actions の書きと、deployment_status を受ける deployments の読みを持つ
+    expect(data.manifest["default_permissions"]).toEqual({ contents: "write", pull_requests: "write", issues: "write", checks: "read", statuses: "read", administration: "write", metadata: "read", actions: "write", deployments: "read" });
+    expect(data.manifest["default_events"]).toEqual(expect.arrayContaining(["push", "deployment_status", "workflow_run"]));
     expect(Object.keys(z.record(z.string(), z.unknown()).parse(data.manifest["default_permissions"]))).not.toContain("workflows");
 
     // GitHub の画面で「作成」を押す

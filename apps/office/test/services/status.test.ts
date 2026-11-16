@@ -203,11 +203,23 @@ describe("最初のサービスは knowidea-ui", () => {
     expect(await bumpTasks(world)).toHaveLength(1);
   });
 
-  it("know-office の push ではタスクを作らず、差だけを出す", async () => {
+  it("公開の後に know-office の push で古い版が分かっても、タスクを 1 つ作る", async () => {
     const link = await linked(world);
     await pushUi(world, link, 1, "0.13.0");
     await pushOffice(world, link, 10, "0.12.1");
-    expect(await bumpTasks(world)).toEqual([]);
+    await pushOffice(world, link, 11, "0.12.2");
+    expect((await bumpTasks(world)).map((t) => t["source"])).toEqual([`ui-bump:${OFFICE_ID}:0.13.0`]);
+    expect(await statusOf(world, UI_ID)).toMatchObject({ usedBy: [{ serviceId: OFFICE_ID, version: "0.12.2", behind: true }] });
+  });
+
+  it("使う版をまだ読んでいないサービスに公開が先に届くと、既定のブランチの package.json を読んでタスクを 1 つ作る", async () => {
+    const link = await linked(world);
+    // 代わりの GitHub は、既定のブランチの先をどのリポジトリでも b の 40 桁で返す
+    const deps = { "knowidea-css": "0.12.1", "knowidea-icons": "0.12.1", "knowidea-tokens": "0.12.1", "knowidea-ui": "0.12.1" };
+    world.gate.github.contents.set(`${"b".repeat(40)}:apps/office/package.json`, JSON.stringify({ name: "@know-office/office", dependencies: deps }));
+    await pushUi(world, link, 1, "0.13.0");
+    await pushUi(world, link, 2, "0.13.0");
+    expect((await bumpTasks(world)).map((t) => t["source"])).toEqual([`ui-bump:${OFFICE_ID}:0.13.0`]);
     expect(await statusOf(world, UI_ID)).toMatchObject({ usedBy: [{ serviceId: OFFICE_ID, version: "0.12.1", behind: true }] });
   });
 

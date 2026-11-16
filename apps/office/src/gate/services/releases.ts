@@ -1,11 +1,12 @@
 // 既定のブランチへの push の通知から、ライブラリの公開 (release) と、ほかのサービスが使うライブラリの版 (uses) を残し、使う側の版が古ければ上げるタスクを足す (サービスと拡張の 3.2)
 import { compareSemver, GitHubPushEvent, newId, PackageManifest, type ReleaseDetail, Semver } from "@know-office/core";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, notInArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { z } from "zod";
 import { nodes, services, serviceEvents } from "../db/main.ts";
 import { insertedWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
+import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
 import { type Forge, notifyStaff } from "../work/loop.ts";
 import { type Actor, intakeProject, newNodeRow, recordCreated } from "../work/nodes.ts";
@@ -90,12 +91,13 @@ async function libraryPackages(forge: Forge, repo: string, commit: string): Prom
 /**
  * ライブラリの公開を残す。版の組が前の公開と違い、前より下がっていない時だけ書く。上がった時は使う側に版を上げるタスクを足す
  * @param env バインディング
+ * @param forge GitHub を呼ぶ口
  * @param library ライブラリのサービスの行
  * @param packages 読んだパッケージ
  * @param commit コミット
  * @param now 今の時刻
  */
-async function release(env: Bindings, library: ServiceRow, packages: Package[], commit: string, now: number): Promise<void> {
+async function release(env: Bindings, forge: Forge, library: ServiceRow, packages: Package[], commit: string, now: number): Promise<void> {
   const sorted = packages.toSorted((a, b) => a.name.localeCompare(b.name));
   const version = sorted.map((p) => p.version).reduce((a, b) => (compareSemver(a, b) >= 0 ? a : b));
   const detail: z.output<typeof ReleaseDetail> = {
@@ -115,9 +117,51 @@ async function release(env: Bindings, library: ServiceRow, packages: Package[], 
     .run();
   if (written.meta.changes === 0) return;
   if (prev && compareSemver(version, prev.detail.version) === 0) return;
-  for (const user of await usersOf(env.DB, library.id)) {
+  const users = await usersOf(env.DB, library.id);
+  for (const user of users) {
     if (compareSemver(user.version, version) < 0) await bumpTask(env, library, user, version, now);
   }
+  await readUnknownUsers(env, forge, new Set(users.map((u) => u.serviceId)), now);
+}
+
+/**
+ * 使う版をまだ読んでいないサービスの、既定のブランチの package.json を読んで使う版を残す。古ければ recordUses が版を上げるタスクを足す。
+ * 1 つのサービスが読めなくても、エラーログに残してほかを読む。公開は書けているので、通知を送り直させない
+ * @param env バインディング
+ * @param forge GitHub を呼ぶ口
+ * @param known 使う版を読んだサービス ID
+ * @param now 今の時刻
+ */
+async function readUnknownUsers(env: Bindings, forge: Forge, known: Set<string>, now: number): Promise<void> {
+  const others = await drizzle(env.DB)
+    .select()
+    .from(services)
+    .where(and(ne(services.kind, "library"), isNotNull(services.repo), notInArray(services.stage, ["dropped", "closed"])))
+    .orderBy(asc(services.id));
+  for (const user of others) {
+    if (known.has(user.id) || user.repo === null) continue;
+    try {
+      const head = await forge.defaultHead(user.repo);
+      await recordUses(env, user, await readDependencies(forge, user.repo, head, [...DEPENDENCY_MANIFESTS]), head, now);
+    } catch (error) {
+      await recordError(env, { source: "gate", level: "warn", code: "service_uses_unread", error }, clockAt(now));
+    }
+  }
+}
+
+/**
+ * 使う側の package.json の dependencies を合わせて読む。無いか形の違うファイルは数えない
+ * @param forge GitHub を呼ぶ口
+ * @param repo リポジトリ
+ * @param commit コミット
+ * @param paths 読む道
+ * @returns パッケージの名前から、書いた版
+ */
+async function readDependencies(forge: Forge, repo: string, commit: string, paths: string[]): Promise<Record<string, string>> {
+  const read = await Promise.all(paths.map((p) => readManifest(forge, repo, commit, p)));
+  const deps: Record<string, string> = {};
+  for (const m of read) if (m !== null && m !== "invalid") Object.assign(deps, m.dependencies ?? {});
+  return deps;
 }
 
 /**
@@ -159,7 +203,7 @@ async function bumpTask(env: Bindings, library: ServiceRow, user: { serviceId: s
 }
 
 /**
- * 使う側のサービスが入れているライブラリの版を残す。前に読んだ版と違う時だけ書く
+ * 使う側のサービスが入れているライブラリの版を残す。前に読んだ版と違う時だけ書く。最新の公開より古ければ、版を上げるタスクを足す (同じ版のタスクは 1 つだけ)
  * @param env バインディング
  * @param user 使う側のサービスの行
  * @param deps 読んだ package.json の dependencies を合わせた物
@@ -179,10 +223,12 @@ async function recordUses(env: Bindings, user: ServiceRow, deps: Record<string, 
       .reduce<string | null>((a, b) => (a === null || compareSemver(b, a) < 0 ? b : a), null);
     if (used === null) continue;
     const before = (await usersOf(env.DB, library.id)).find((u) => u.serviceId === user.id);
-    if (before?.version === used) continue;
-    await drizzle(env.DB)
-      .insert(serviceEvents)
-      .values({ id: newId(clockAt(now)), at: now, serviceId: user.id, kind: "uses", by: "system", detail: { library: library.id, version: used, commit } });
+    if (before?.version !== used) {
+      await drizzle(env.DB)
+        .insert(serviceEvents)
+        .values({ id: newId(clockAt(now)), at: now, serviceId: user.id, kind: "uses", by: "system", detail: { library: library.id, version: used, commit } });
+    }
+    if (released && compareSemver(used, released.detail.version) < 0) await bumpTask(env, library, { serviceId: user.id, staffId: user.staffId, version: used }, released.detail.version, now);
   }
 }
 
@@ -205,13 +251,11 @@ export async function receivePush(env: Bindings, forge: Forge, payload: unknown,
   const libraries = owners.filter((s) => s.kind === "library");
   if (libraries.length > 0 && touched(LIBRARY_MANIFESTS, changed).length > 0) {
     const packages = await libraryPackages(forge, repo, push.after);
-    if (packages) for (const library of libraries) await release(env, library, packages, push.after, now);
+    if (packages) for (const library of libraries) await release(env, forge, library, packages, push.after, now);
   }
   const users = owners.filter((s) => s.kind !== "library");
   const paths = touched(DEPENDENCY_MANIFESTS, changed);
   if (users.length === 0 || paths.length === 0) return;
-  const read = await Promise.all(paths.map((p) => readManifest(forge, repo, push.after, p)));
-  const deps: Record<string, string> = {};
-  for (const m of read) if (m !== null && m !== "invalid") Object.assign(deps, m.dependencies ?? {});
+  const deps = await readDependencies(forge, repo, push.after, paths);
   for (const user of users) await recordUses(env, user, deps, push.after, now);
 }
