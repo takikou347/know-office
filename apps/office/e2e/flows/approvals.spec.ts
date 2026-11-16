@@ -123,12 +123,14 @@ test.describe("オーナーに上げる事", () => {
   });
 
   test("新しい外部連携を差し戻すと、理由が残る", async ({ page }) => {
-    request("external_integration", "Slack", { reason: "通知を Slack に送る" });
-    const item = await approvalItem(page, "外部連携: Slack");
+    // 前の通しが差し戻した同じ名前の承認と分けるため、名前を毎回変える
+    const target = `Slack ${String(Date.now())}`;
+    request("external_integration", target, { reason: "通知を Slack に送る" });
+    const item = await approvalItem(page, `外部連携: ${target}`);
     await decide(page, item, "差し戻す", "今はつながない");
-    await expect(part(page, "承認を待つ物").getByText("「外部連携: Slack」を差し戻しました")).toBeVisible();
+    await expect(part(page, "承認を待つ物").getByText(`「外部連携: ${target}」を差し戻しました`)).toBeVisible();
     const rejected = Approvals.parse(await (await page.request.get("/api/v1/approvals?status=rejected")).json());
-    expect(rejected.data.find((a) => a.target === "Slack")?.reason).toBe("今はつながない");
+    expect(rejected.data.find((a) => a.target === target)?.reason).toBe("今はつながない");
   });
 
   test("ほかの画面で決める種類は、決める画面へのリンクを出す", async ({ page }) => {
