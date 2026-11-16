@@ -52,18 +52,34 @@ function probes(env: Bindings, now: number): Probe[] {
 }
 
 /**
- * 部分ごとに通るかを確かめ、health_checks に 1 回のバッチで残す。書けない時は投げずにエラーログに残す
+ * clock で測るストップウォッチを作る
+ * @param clock 時刻
+ * @returns 測り始め、答えまでの長さを返す関数を返す関数
+ */
+function clockStopwatch(clock: Clock): () => () => number {
+  return () => {
+    const started = clock.now();
+    return () => clock.now() - started;
+  };
+}
+
+/**
+ * 部分ごとに通るかを確かめ、health_checks に 1 回のバッチで残し、答えなかった部分を故障、遅かった部分を遅れとして通知に入れる。
+ * 確かめを書けない時も、通知を書けない時も、投げずにエラーログに残す。通知が書けなくても確かめの行とほかの部分の通知は残す
  * @param env バインディング
  * @param clock 時刻
- * @param timeoutMs 1 つの部分の答えを待つ長さ。省くと 10 秒
+ * @param options 確かめ方。省くと 10 秒待ち、clock で答えまでの長さを測る
+ * @param options.timeoutMs 1 つの部分の答えを待つ長さ
+ * @param options.stopwatch 部分ごとに測り始め、答えまでの長さを返す関数を返す
  */
-export async function checkHealth(env: Bindings, clock: Clock, timeoutMs = PROBE_TIMEOUT_MS): Promise<void> {
+export async function checkHealth(env: Bindings, clock: Clock, options: { timeoutMs?: number; stopwatch?: (part: string) => () => number } = {}): Promise<void> {
+  const { timeoutMs = PROBE_TIMEOUT_MS, stopwatch = clockStopwatch(clock) } = options;
   const now = clock.now();
   const results = await Promise.all(
     probes(env, now).map(async (probe) => {
-      const started = clock.now();
+      const elapsed = stopwatch(probe.part);
       const ok = await within(probe.run, timeoutMs);
-      return { part: probe.part, ok, ms: Math.max(0, clock.now() - started) };
+      return { part: probe.part, ok, ms: Math.max(0, elapsed()) };
     }),
   );
   try {
