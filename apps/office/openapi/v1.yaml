@@ -8857,7 +8857,7 @@ components:
           - string
           - 'null'
           maxLength: 200
-          pattern: ^\/[a-z0-9/-]*$
+          pattern: ^\/(?!\/)[a-z0-9/-]*$
           description: 画面の中の開く先 (例 `/approvals/<承認 ID>`)。無ければ null
       required:
       - id
