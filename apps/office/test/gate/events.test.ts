@@ -167,6 +167,34 @@ describe("働いた事がゲートウェイに届く", () => {
     expect(await statusOf(world, work.nodeId)).toBe("done");
   });
 
+  it("止めたタスクを社員が持ち続けず、ワークスペースの今の呼び出しを止める", async () => {
+    const work = await builderAtWork(world);
+    await api(world, "POST", "/api/v1/guard/stops", { scope: "task", target: work.nodeId, reason: "確かめ" }, 201);
+    expect(await statusOf(world, work.nodeId)).toBe("stopped");
+    expect((await world.gate.staff.builder.book.status(world.clock.now())).nodeId).not.toBe(work.nodeId);
+    expect(world.gate.staff.builder.workspace).toContain("abort");
+  });
+
+  it("止めた後に届いた終わりは、そのタスクに書かない", async () => {
+    const work = await builderAtWork(world);
+    await api(world, "POST", "/api/v1/guard/stops", { scope: "task", target: work.nodeId, reason: "確かめ" }, 201);
+    // 止めた時に作業トークンを失効させたので、遅れて届いた終わりは断る
+    expect((await send(world, work, [{ kind: "result", nodeId: work.nodeId, result: "done" }])).status).toBe(401);
+    expect((await send(world, work, [{ kind: "error", name: "sdk_failed", message: "止めた" }, { kind: "result", nodeId: work.nodeId, result: "handed_back" }])).status).toBe(401);
+    expect(await statusOf(world, work.nodeId)).toBe("stopped");
+    expect(await rows(world.d1.REC_2026, "SELECT kind FROM node_events WHERE node_id = ? AND kind IN ('finished', 'run_failed')", work.nodeId)).toEqual([]);
+  });
+
+  it.each([["done"], ["handed_back"]])("止めてから社員が離れるまでの間に届いた終わり (%s) も、そのタスクに書かない", async (result) => {
+    const work = await builderAtWork(world);
+    // 止める動きがタスクを stopped にした後、社員 DO に知らせる前の境目。社員はまだタスクを持ち、作業トークンも使える
+    await world.gate.env.DB.prepare("UPDATE nodes SET status = 'stopped', version = version + 1 WHERE id = ?").bind(work.nodeId).run();
+    expect((await send(world, work, [{ kind: "result", nodeId: work.nodeId, result }])).status).toBe(204);
+    expect(await statusOf(world, work.nodeId)).toBe("stopped");
+    expect(await rows(world.d1.REC_2026, "SELECT kind FROM node_events WHERE node_id = ? AND kind IN ('finished', 'run_failed')", work.nodeId)).toEqual([]);
+    expect((await staffOf(world, "builder").runState(work.nodeId)).failures).toBe(0);
+  });
+
   it("51 件と空の並びは 422、作業トークンが無ければ 401 で断る", async () => {
     const work = await builderAtWork(world);
     const many = Array.from({ length: 51 }, () => ({ kind: "message", body: "x" }));

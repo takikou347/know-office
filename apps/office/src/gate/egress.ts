@@ -26,7 +26,7 @@ export type { Caller } from "./work/ticket.ts";
 export const WORKSPACE_EGRESS = { http: ["gate.internal"], https: ["api.anthropic.com", "api.github.com", "github.com"] } as const;
 
 /** 作業トークンを要らないルート。プロキシが送ったコンテナから社員を決める (ルートの一覧の 1.15) */
-const OPEN_PATHS = new Set(["/ws/v1/heartbeat", "/ws/v1/checkpoints"]);
+export const OPEN_PATHS = new Set(["/ws/v1/heartbeat", "/ws/v1/checkpoints"]);
 
 /** 受け手の依り所 */
 export type EgressOptions = {

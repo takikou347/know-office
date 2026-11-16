@@ -1,6 +1,6 @@
 // タスク 1 件分の SDK の呼び出しを持ち、作業トークンが差し替わったら今の呼び出しを終えて続きから呼び直す。呼び直す前と終わった時に会話の記録の増えを送る (社員が考えるの 3.2、3.6)
 import { type AgentEvent, AppError, log, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
-import { type Agent, agentOptions } from "./agent.ts";
+import { type Agent, agentOptions, type LocalRun } from "./agent.ts";
 import { type HookDeps, preToolUse } from "./hooks.ts";
 import { SdkFailure } from "./sdk.ts";
 import { staffServer } from "./staff-tools.ts";
@@ -99,7 +99,7 @@ export class Runner {
   readonly #reporter: Reporter;
   /** 走りを空けた後に、終わりかエラーを送っているタスク */
   #reporting: Current | undefined;
-  readonly #baseUrl: string | undefined;
+  readonly #local: LocalRun | undefined;
 
   /**
    * タスクを持つ入れ物を、SDK を呼ぶ関数と失敗の知らせ先と一緒に作る
@@ -108,15 +108,15 @@ export class Runner {
    * @param hookBase フックの依り所。省くとゲートウェイを fetch で呼ぶ
    * @param transcripts 会話の記録を送り、戻す口。省くと送らない。本番は main.ts が TranscriptShipper を渡す
    * @param reporter 働いた事をゲートウェイに届ける口。省くと届けない。本番は main.ts が gateReporter を渡す
-   * @param baseUrl SDK の Claude の宛先。開発の代わりのワークスペースだけが渡し、本番は省いて宛先を変えない
+   * @param local SDK の Claude の宛先と手元の置き場。開発の代わりのワークスペースだけが渡し、本番は省いて宛先と置き場を変えない
    */
-  constructor(agent: Agent, onFailure: (error: unknown) => void, hookBase: HookBase = DEFAULT_HOOK, transcripts: Transcripts = NO_TRANSCRIPTS, reporter: Reporter = NO_REPORTER, baseUrl?: string) {
+  constructor(agent: Agent, onFailure: (error: unknown) => void, hookBase: HookBase = DEFAULT_HOOK, transcripts: Transcripts = NO_TRANSCRIPTS, reporter: Reporter = NO_REPORTER, local?: LocalRun) {
     this.#agent = agent;
     this.#onFailure = onFailure;
     this.#hookBase = hookBase;
     this.#transcripts = transcripts;
     this.#reporter = reporter;
-    this.#baseUrl = baseUrl;
+    this.#local = local;
   }
 
   /**
@@ -258,7 +258,7 @@ export class Runner {
         try {
           text = await this.#agent({
             prompt,
-            options: agentOptions({ ...current.input, ticket: current.ticket, hook, staff, abortController: controller, resume: current.sessionId, baseUrl: this.#baseUrl }),
+            options: agentOptions({ ...current.input, ticket: current.ticket, hook, staff, abortController: controller, resume: current.sessionId, local: this.#local }),
             onSession: (sessionId) => {
               current.sessionId = sessionId;
               const kind = current.pending;

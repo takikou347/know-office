@@ -14,6 +14,16 @@ export function staffHome(): string {
   return "/home/staff";
 }
 
+/** 開発の代わりのワークスペースだけが渡す、手元の宛先と置き場。コンテナでは渡さない */
+export type LocalRun = {
+  /** 代わりの Claude API の宛先 */
+  baseUrl: string;
+  /** 作業の置き場。手元には /work が無いので、作った一時の置き場を使う */
+  cwd: string;
+  /** SDK のホーム。手元には /home/staff が無いので、作った一時の置き場を使う */
+  home: string;
+};
+
 /** SDK の query() に渡す options のうち、ワークスペースが決める所 */
 export type AgentOptions = {
   /** モデル */
@@ -73,7 +83,7 @@ export type Agent = (call: AgentCall) => Promise<string | undefined | void>;
  * @param input.staff 社員のツールの MCP の受け手
  * @param input.abortController 呼び出しを終える口
  * @param input.resume 続きから呼ぶ session
- * @param input.baseUrl Claude の宛先。開発の代わりのワークスペースだけが渡す
+ * @param input.local 手元の宛先と置き場。開発の代わりのワークスペースだけが渡す
  * @returns SDK の options
  */
 export function agentOptions(input: {
@@ -85,14 +95,15 @@ export function agentOptions(input: {
   staff: McpSdkServerConfigWithInstance;
   abortController: AbortController;
   resume?: string | undefined;
-  baseUrl?: string | undefined;
+  local?: LocalRun | undefined;
 }): AgentOptions {
+  const local = input.local;
   return {
     model: input.model,
     effort: input.effort,
     systemPrompt: input.systemPrompt,
     settingSources: [],
-    cwd: WORK_ROOT,
+    cwd: local?.cwd ?? WORK_ROOT,
     env: {
       ANTHROPIC_API_KEY: input.ticket,
       // SDK が裏で呼ぶ軽い呼び出し (題を付けるなど) も、プロキシが許す軽いモデルにする
@@ -100,11 +111,11 @@ export function agentOptions(input: {
       ANTHROPIC_SMALL_FAST_MODEL: HAIKU,
       // 更新の確かめや報告など、作業に要らない外への通信をしない
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-      HOME: staffHome(),
+      HOME: local?.home ?? staffHome(),
       PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
       NODE_EXTRA_CA_CERTS: CONTAINER_CA,
       // コンテナでは宛先を変えず、受け手がプロキシに回す。開発の代わりのワークスペースだけが手元の代わりの Claude を渡す
-      ...(input.baseUrl === undefined ? {} : { ANTHROPIC_BASE_URL: input.baseUrl }),
+      ...(local === undefined ? {} : { ANTHROPIC_BASE_URL: local.baseUrl }),
     },
     hooks: { PreToolUse: [{ hooks: [input.hook] }] },
     mcpServers: { staff: input.staff },

@@ -22,15 +22,16 @@ export type RunningFakes = {
 
 /**
  * 代わりの物を /access、/anthropic、/github、/workspace の下に立てる
- * @param options 待ち受けの番号と、代わりの Access の設定
+ * @param options 待ち受けの番号、手元のゲートウェイの宛先を返す関数、代わりの Access の設定
  * @returns 立てた代わりの物
  */
-export async function startFakes(options: FakeAccessOptions & { port: number }): Promise<RunningFakes> {
+export async function startFakes(options: FakeAccessOptions & { port: number; gateBase: () => string }): Promise<RunningFakes> {
   const access = await createFakeAccess(options);
   const claude = createFakeClaude();
   const github = createFakeGitHub();
   // 代わりのワークスペースの SDK は、ここに立てた代わりの Claude API だけを呼ぶ
-  const workspaces = createDevWorkspaces(`http://127.0.0.1:${String(options.port)}/anthropic`);
+  // 出来事は手元のゲートウェイの開発の道に送る
+  const workspaces = createDevWorkspaces(`http://127.0.0.1:${String(options.port)}/anthropic`, options.gateBase);
   const app = new Hono().route("/access", access.app).route("/anthropic", claude.app).route("/github", github.app).route("/workspace", workspaces.app);
   const server = serve({ fetch: app.fetch, port: options.port, hostname: "127.0.0.1" });
   return {

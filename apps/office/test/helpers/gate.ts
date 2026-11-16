@@ -132,6 +132,7 @@ function testStaff(staffId: StaffId, d1: TestD1): TestStaff {
     start: () => Promise.resolve(void calls.push("start")),
     stop: () => Promise.resolve(void calls.push("stop")),
     wrapUp: () => Promise.resolve(void calls.push("wrapUp")),
+    abort: () => Promise.resolve(void calls.push("abort")),
     restart: () => Promise.resolve(void calls.push("restart")),
   };
   const storage = staffStorage();

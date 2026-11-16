@@ -9,7 +9,7 @@ import { z } from "zod";
 export type DevWorkspace = { port: number; events: unknown[][]; close(): Promise<void> };
 
 /** 代わりのワークスペースを起こす関数。apps/workspace/src/dev.ts の startDevWorkspace と同じ形 */
-export type StartDevWorkspace = (options: { key: string; anthropicUrl: string }) => Promise<DevWorkspace>;
+export type StartDevWorkspace = (options: { key: string; anthropicUrl: string; gateUrl: string }) => Promise<DevWorkspace>;
 
 /** 代わりのワークスペースが受けたタスクの開始 */
 export type ReceivedRun = { staffId: StaffId; nodeId: string };
@@ -53,10 +53,11 @@ async function loadWorkspace(): Promise<StartDevWorkspace> {
 /**
  * 代わりのワークスペースの置き場を作る
  * @param anthropicUrl 代わりの Claude API の宛先 (DEV_FAKES_URL/anthropic)
+ * @param gateBase 手元のゲートウェイの宛先 (http://localhost:<番号>) を返す関数。開発サーバーが待ち受けた後に決まるので、起こす時に読む
  * @param start 代わりのワークスペースを起こす関数。省くと apps/workspace の物
  * @returns Hono、受けたタスクの開始、止める口
  */
-export function createDevWorkspaces(anthropicUrl: string, start?: StartDevWorkspace): DevWorkspaces {
+export function createDevWorkspaces(anthropicUrl: string, gateBase: () => string, start?: StartDevWorkspace): DevWorkspaces {
   // 起こした社員の鍵と、起こした Node のサーバー。サーバーと SDK は最初の /v1/runs か /v1/restore まで読み込まない
   const booted = new Map<StaffId, { key: string; server?: Promise<DevWorkspace> }>();
   const runs: ReceivedRun[] = [];
@@ -66,8 +67,9 @@ export function createDevWorkspaces(anthropicUrl: string, start?: StartDevWorksp
     const server = await held?.server?.catch(() => undefined);
     await server?.close();
   };
-  const serverOf = (held: { key: string; server?: Promise<DevWorkspace> }) => {
-    held.server ??= (start ? Promise.resolve(start) : loadWorkspace()).then((begin) => begin({ key: held.key, anthropicUrl }));
+  const serverOf = (staffId: StaffId, held: { key: string; server?: Promise<DevWorkspace> }) => {
+    // 出来事は社員ごとのゲートウェイの開発の道に送らせる
+    held.server ??= (start ? Promise.resolve(start) : loadWorkspace()).then((begin) => begin({ key: held.key, anthropicUrl, gateUrl: `${gateBase()}/__dev/workspace/${staffId}` }));
     return held.server;
   };
   const app = new Hono()
@@ -102,7 +104,7 @@ export function createDevWorkspaces(anthropicUrl: string, start?: StartDevWorksp
         if (route === "POST /v1/messages") return c.body(null, 409);
         if (route !== "POST /v1/runs" && route !== "POST /v1/restore") return c.body(null, 404);
       }
-      const server = await serverOf(held);
+      const server = await serverOf(staffId.data, held);
       const body = c.req.method === "GET" ? undefined : await c.req.text();
       const headers: Record<string, string> = { "content-type": "application/json" };
       const auth = c.req.header("authorization");

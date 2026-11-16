@@ -25,6 +25,8 @@ export type Workspace = {
   stop(): Promise<void>;
   /** 30 分か 2 時間を過ぎた時に、経過を書き残させる */
   wrapUp(): Promise<void>;
+  /** 持っていたタスクが doing を離れた時に、そのタスクの今の呼び出しを止めさせる。止め終えたら次のタスクを取る。now は離れた時刻 */
+  abort(now: number): Promise<void>;
   /** ハートビートが途切れた時と止めた時に作り直す。now は作り直しを決めた時刻で、続きの作業トークンの発行に使う */
   restart(now: number): Promise<void>;
 };
@@ -283,7 +285,7 @@ export class StaffBook {
   }
 
   /**
-   * 自動停止で止めたタスクを離れ、した仕事を結果 stopped で残す。社員は止まらず、次のタスクを取れる。呼び出しの途中なら退勤する
+   * 止めたタスクを離れ、した仕事を結果 stopped で残し、ワークスペースの今の呼び出しを止めさせる。社員は止まらず、次のタスクを取れる。呼び出しの途中なら退勤する
    * @param nodeId 止めたタスクの ID
    * @param now 今の時刻
    * @returns 無し
@@ -296,6 +298,8 @@ export class StaffBook {
     // 呼び出しはそのタスクのためだけなので、finish と同じく退勤する。残すと次の割り振りで呼び出せない
     if (s.m.state === "wrapping" || s.m.state === "called") await this.#clockOut(s, now);
     await this.#save(s, now);
+    // 止めさせるのは離れた事を書いた後。止め終えるまで待たず、終えた後の結果は作業トークンの失効と今のタスクの確かめで捨てる
+    await this.workspace.abort(now);
   }
 
   /**

@@ -477,6 +477,18 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
       start: () => request("start", (stub) => stub.start(staffId)),
       stop: () => request("stop", (stub) => stub.stop()),
       wrapUp: () => request("wrapUp", (stub) => stub.wrapUp()),
+      // 止め終えるまでワークスペースは次の runs を断るので、止め終えた後に次のタスクを取る。時刻は離れた時刻に待った長さを足す
+      abort: (now) => {
+        const began = systemClock.now();
+        return request("abort", async (stub) => {
+          try {
+            await stub.abort("task_left");
+          } finally {
+            await this.pull(now + Math.max(0, systemClock.now() - began));
+          }
+          return null;
+        });
+      },
       // 作り直した後は、持っているタスクの会話の記録を戻して続きを呼び、記録が無ければ最初から呼ぶ。止めている間は呼ばない
       restart: (now) =>
         request("restart", async (stub) => {

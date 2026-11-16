@@ -4,12 +4,13 @@ import { AgentEventsInput, AppError, type AgentEvent, type Clock, type StaffId, 
 import type { Bindings, GateEnv } from "../env.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { recordError } from "../ledger/errors.ts";
-import { ensureRunning, staffOf } from "../guard/actions.ts";
+import { ensureRunning, openStop, staffOf } from "../guard/actions.ts";
 import { observe } from "../guard/observe.ts";
 import { problems } from "../openapi.ts";
 import { noContent } from "../respond.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { finishTask } from "./loop.ts";
+import { findNode } from "./nodes.ts";
 import { addStaffMessage, reachCheckpoint } from "./progress.ts";
 import { AUTH_FAILED_NOTICE, noticeOnce, runFailed } from "./run.ts";
 import { bearer, type Caller, revokeTaskTickets, ticketTask } from "./ticket.ts";
@@ -76,6 +77,8 @@ async function settle(ctx: EventContext, target: string, result: WorkResult): Pr
     await staff.arm(now).catch(rethrowRpc);
     return;
   }
+  // タスクを止めた後、社員 DO が離れるまでの間に届いた終わり。そのタスクにも失敗の数にも書かず、離すのは止めた側に任せる
+  if (await leftDoing(env, nodeId)) return;
   if (result === "done") {
     await ensureRunning(env, staffId, nodeId);
     await finishTask(env, staffId, nodeId, now);
@@ -85,6 +88,17 @@ async function settle(ctx: EventContext, target: string, result: WorkResult): Pr
   }
   if (result === "handed_back") await runFailed(env, staffId, nodeId, "sdk_failed", now);
   // stopped と continued は、止めた側と続きを始めた側が扱う
+}
+
+/**
+ * タスクが doing を離れたか、止めた記録が開いているかを返す
+ * @param env バインディング
+ * @param nodeId タスク ID
+ * @returns 離れたか止められていれば true
+ */
+async function leftDoing(env: Bindings, nodeId: string): Promise<boolean> {
+  const row = await findNode(env.DB, nodeId);
+  return row.status !== "doing" || (await openStop(env.DB, "task", nodeId)) !== null;
 }
 
 /**

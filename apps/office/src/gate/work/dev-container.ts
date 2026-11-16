@@ -1,7 +1,13 @@
 // 開発環境のワークスペースのコンテナの代わり。手元に Containers が無い時、代わりの物の置き場に立てた Node のワークスペースへ要求を回す (ログインと記録の 3.9、社員が考えるの 3.1)
-import { AppError, type StaffId, WORKSPACE_KEY_ENV } from "@know-office/core";
+import { AppError, StaffId, WORKSPACE_KEY_ENV } from "@know-office/core";
 import { devWorkspaceBase, type EndpointEnv } from "../endpoints.ts";
+import { type EgressOptions, OPEN_PATHS, routeEgress } from "../egress.ts";
+import type { Bindings } from "../env.ts";
+import { workspaceIdOf } from "./ticket.ts";
 import type { ContainerLike } from "./workspace-box.ts";
+
+/** 代わりのワークスペースがゲートウェイの受け手に送る道。/__dev/workspace/<社員 ID> の後に受け手の道を続ける */
+const DEV_EGRESS = /^\/__dev\/workspace\/([^/]+)(\/ws\/v1\/.+)$/;
 
 /** 代わりのワークスペースを起こす時の待ち (10 秒) */
 const BOOT_TIMEOUT_MS = 10_000;
@@ -118,4 +124,25 @@ export function containerFor<F>(env: EndpointEnv, real: ContainerLike<F> | undef
   if (real) return real;
   // 本番、プレビュー、ENVIRONMENT の無い所では、コンテナが無ければ動かさない。代わりの宛先へ回さない
   return new DevContainer<F>(devWorkspaceBase(env), staffId, fetcher);
+}
+
+/**
+ * 開発の代わりのワークスペースが送った要求を、その社員のワークスペースの受け手に回す。代わりのワークスペースは Containers の外向きの通信を通らないので、ここで社員を道から決める
+ * 道の社員は信じず、作業トークンが発行された先のワークスペースと合う時だけ受ける。作業トークンの要らない道 (ハートビート、チェックポイント) は受けない
+ * @param request 入口に届いた要求
+ * @param env バインディング
+ * @param options 時刻と自動停止の口
+ * @returns 受け手の返事。development でない時か、開発の道でない時は null で、ゲートウェイに任せる
+ */
+export function devWorkspaceEgress(request: Request, env: Bindings, options: EgressOptions): Promise<Response> | null {
+  const url = new URL(request.url);
+  const match = DEV_EGRESS.exec(url.pathname);
+  if (!match || env.ENVIRONMENT !== "development") return null;
+  // DEV_FAKES_URL が手元でなければ、代わりのワークスペースも無いので受けない
+  devWorkspaceBase(env);
+  const staffId = StaffId.safeParse(match[1]);
+  const path = match[2] ?? "";
+  if (!staffId.success || OPEN_PATHS.has(path)) return Promise.resolve(new Response(null, { status: 404 }));
+  const forwarded = new Request(`http://gate.internal${path}${url.search}`, request);
+  return routeEgress(forwarded, env, { staffId: staffId.data, workspaceId: workspaceIdOf(env, staffId.data) }, options);
 }

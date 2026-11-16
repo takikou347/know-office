@@ -141,7 +141,12 @@ export function devFakes(): Plugin {
     apply: "serve",
     async configureServer(server) {
       const vars = parseDevVars(readFileSync(join(server.config.root, ".dev.vars"), "utf8"));
-      const fakes = await startFakes({ ...vars, clock: systemClock });
+      // 代わりのワークスペースが出来事を送る先は、この開発サーバーが待ち受けた番号
+      const gateBase = () => {
+        const address = server.httpServer?.address();
+        return `http://localhost:${String(typeof address === "object" && address !== null ? address.port : server.config.server.port)}`;
+      };
+      const fakes = await startFakes({ ...vars, clock: systemClock, gateBase });
       // 証明は 1 時間で切れるので、切り替えの要求に渡す物を 10 分ごとに出し直す
       let token = await fakes.access.sign();
       const refresh = setInterval(() => {

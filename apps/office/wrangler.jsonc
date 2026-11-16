@@ -66,8 +66,8 @@
     }
   },
   "assets": {
-    // /api の下と GitHub の通知の道だけ入口が受け、ほかは画面のファイルを返す
+    // /api の下、GitHub の通知の道、/__dev の下 (開発の代わりのワークスペースの道。development の時だけ受け、ほかでは 404) を入口が受け、ほかは画面のファイルを返す
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/hooks/v1/github"]
+    "run_worker_first": ["/api/*", "/hooks/v1/github", "/__dev/*"]
   }
 }

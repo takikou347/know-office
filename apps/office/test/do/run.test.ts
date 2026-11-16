@@ -121,6 +121,26 @@ describe("社員が自分で働き始める", () => {
     expect(await runs(worker)).toHaveLength(1);
   });
 
+  it("止めたタスクを離れると、ワークスペースの呼び出しを止めさせ、止め終えた後に次のタスクを取って呼ぶ", async () => {
+    const next = "0190f4a8-0000-7000-8000-000000000102";
+    await worker.query(
+      "DB",
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, body, status, priority, assignee, task_kind, repo, created_by, created_at, updated_at) VALUES ('${next}', 'task', NULL, 'office', '次のタスク', NULL, 'todo', 2, 'builder', 'build', 'takikou347/know-office', 'president', 0, 0)`,
+    );
+    await worker.staff("builder", "pull", jst(9, 1));
+    await until(async () => (await runs(worker)).length > 0);
+    // 止める動きがタスクを stopped にしてから社員 DO に知らせる
+    await worker.query("DB", `UPDATE nodes SET status = 'stopped' WHERE id = '${TASK.nodeId}'`);
+    await worker.staff("builder", "dropTask", TASK.nodeId, jst(9, 2));
+    await until(async () => (await runs(worker)).length > 1);
+    const calls = (await worker.workspace("builder")).map((c) => c.method);
+    expect(calls.filter((m) => m === "abort")).toHaveLength(1);
+    // 止め終えてから次を呼ぶ
+    expect(calls.lastIndexOf("run")).toBeGreaterThan(calls.indexOf("abort"));
+    expect((await runs(worker)).map((r) => r.nodeId)).toEqual([TASK.nodeId, next]);
+    expect(await worker.staff("builder", "status", jst(9, 3))).toMatchObject({ nodeId: next });
+  });
+
   it("タスクを取った後に runs を呼ばずに落ちても、arm が見つけて呼ぶ", async () => {
     await worker.query("DB", `UPDATE nodes SET status = 'doing' WHERE id = '${TASK.nodeId}'`);
     // pull を通らずに持たせ、runs を呼ぶ前に DO が落ちた形にする

@@ -150,6 +150,8 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   restart(staffId: string): Promise<null>;
   /** 経過を書き残させる。走っている呼び出しを止め、送っていない会話の記録を送らせる */
   wrapUp(): Promise<null>;
+  /** 走っている呼び出しを止めさせる。送っていない会話の記録を送らせ、止めた呼び出しの結果は送らせない */
+  abort(reason: string): Promise<null>;
   /** タスク 1 件分の SDK の呼び出しを始めさせる */
   run(input: unknown): Promise<null>;
   /** 作業トークンを差し替えさせる */

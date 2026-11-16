@@ -253,6 +253,7 @@ async function crashOnClockOut(s: Hired): Promise<void> {
     start: () => Promise.resolve(),
     stop: () => Promise.reject(new Error("ワークスペースを止める前に落ちた")),
     wrapUp: () => Promise.resolve(),
+    abort: () => Promise.resolve(),
     restart: () => Promise.resolve(),
   });
   await expect(crashing.take(TASK, 20 * MINUTE, jst(16, 46))).rejects.toThrow("ワークスペースを止める前に落ちた");

@@ -83,6 +83,17 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
   }
 
   /**
+   * 走っている呼び出しを止めさせる (POST /v1/abort)。持っていたタスクが doing を離れた時に呼ぶ。コンテナが止まっていれば何もしない
+   * @param reason 止める訳
+   * @returns 無し
+   * @throws unavailable ワークスペースが答えない時
+   */
+  async abort(reason: string): Promise<null> {
+    await this.#box(await this.#staffId()).abort(reason);
+    return null;
+  }
+
+  /**
    * タスク 1 件分の SDK の呼び出しを始めさせる
    * @param input RunInput
    * @returns 無し

@@ -1,4 +1,4 @@
-// 社員の仕事の始まりの通し。オーナーが目的と組織図の画面でタスクを足して頼み、社員が取り、開発のコンテナの代わりがタスクの開始 (POST /v1/runs) を受ける。ゲートウェイの返事は差し替えず、SDK は手元の代わりの Claude API だけを呼ぶ (社員が考えるの 3.2)
+// 社員の仕事の通し。オーナーが目的と組織図の画面でタスクを足して頼み、社員が取り、開発のコンテナの代わりがタスクの開始 (POST /v1/runs) を受け、SDK が終えた知らせがゲートウェイに届いてタスクが done になる。ゲートウェイの返事は差し替えず、SDK は手元の代わりの Claude API だけを呼ぶ (社員が考えるの 3.2)
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
@@ -26,7 +26,6 @@ const NodeStatus = z.object({ data: z.object({ status: z.string() }).loose() });
 const NodeVersion = z.object({ data: z.object({ version: z.number() }).loose() });
 const Runs = z.array(z.object({ staffId: z.string(), nodeId: z.string() }));
 const State = z.object({ data: z.object({ stopped: z.array(z.object({ scope: z.string(), stopId: z.string() })) }) });
-const StopMade = z.object({ data: z.object({ stopId: z.uuid() }) });
 
 /**
  * 前の通しが止めたままにした社員を再開する。止まった社員はタスクを取らない
@@ -38,18 +37,12 @@ async function resumeStaff(page: Page): Promise<void> {
 }
 
 /**
- * 社員が持ったタスクを、手で止めて社員から離し、再開して記録を閉じ、見送りにする。代わりのワークスペースはゲートウェイに終わりを送らないので、社員が持ったままになるのを片付ける
+ * 代わりの Claude API に、社員の SDK が受ける終わりの返事を 1 つ積む
  * @param page 画面を開いたページ
- * @param nodeId タスク ID
  */
-async function release(page: Page, nodeId: string): Promise<void> {
-  const headers = { Origin: new URL(page.url()).origin };
-  const made = await page.request.post("/api/v1/guard/stops", { headers, data: { scope: "task", target: nodeId, reason: "通しの片付け" } });
-  expect(made.status()).toBe(201);
-  const { stopId } = StopMade.parse(await made.json()).data;
-  expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
-  // 再開でタスクは todo に戻るので、社員が取る前に見送りにする
-  seedMain(`UPDATE nodes SET status = 'dropped', version = version + 1 WHERE id = '${nodeId}' AND status = 'todo'`);
+async function scriptFinish(page: Page): Promise<void> {
+  const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { content: [{ type: "text", text: "通しのタスクを終えた" }] } });
+  expect(res.status()).toBe(204);
 }
 
 /**
@@ -97,30 +90,28 @@ async function addTask(page: Page, title: string, assignee: string): Promise<str
 }
 
 /**
- * 社員がタスクを取り、開発のコンテナの代わりがタスクの開始を受けるのを待つ
+ * 社員がタスクを取り、開発のコンテナの代わりがタスクの開始を受け、終えた知らせでタスクが done になるのを待つ。社員は終えて離れるので、通しの後に片付けない
  * @param page 画面を開いたページ
  * @param nodeId タスク ID
  */
-async function startedBy(page: Page, nodeId: string): Promise<void> {
-  await expect.poll(async () => NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status).toBe("doing");
-  // 社員 DO は取った後に鎖の外で呼び出しを始め、開発のコンテナの代わりが /v1/runs を受ける
+async function finishedBy(page: Page, nodeId: string): Promise<void> {
+  // 社員 DO は取った後に鎖の外で呼び出しを始め、開発のコンテナの代わりが /v1/runs を受ける。すぐ終えるので doing の間は待たない
   await expect
     .poll(async () => Runs.parse(await (await page.request.get(`${FAKES}/workspace/__fake/runs`)).json()), { timeout: 30_000 })
     .toContainEqual({ staffId: "reviewer", nodeId });
+  // SDK が終えると、代わりのワークスペースがゲートウェイの開発の道に終わりを送り、タスクが done になって社員が離れる
+  await expect.poll(async () => NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status, { timeout: 60_000 }).toBe("done");
 }
 
 test("オーナーが画面で頼んだタスクを社員が取り、ワークスペースがタスクの開始を受ける", async ({ page }) => {
   await openTree(page);
+  await scriptFinish(page);
   // レビュー担当には見本の todo が無いので、頼んだタスクをすぐ取る。勤務時間外なら呼び出して取る
   const title = `通しのタスク ${String(Date.now())}`;
   const nodeId = await addTask(page, title, "レビュー担当");
-  try {
-    await startedBy(page, nodeId);
-    await page.reload();
-    await expect(page.getByText(`タスク: ${title}`)).toBeVisible();
-  } finally {
-    await release(page, nodeId);
-  }
+  await finishedBy(page, nodeId);
+  await page.reload();
+  await expect(page.getByText(`タスク: ${title}`)).toBeVisible();
 });
 
 test("オーナーが画面でタスクを取り消し、頼む先を後から変える", async ({ page }) => {
@@ -138,17 +129,14 @@ test("オーナーが画面でタスクを取り消し、頼む先を後から�
   // 頼む先の無いタスクは誰も取らず、頼む先を付けるとその社員が取る
   const later = `後から頼むタスク ${String(Date.now())}`;
   const nodeId = await addTask(page, later, "まだ頼まない");
-  try {
-    await main.getByRole("button", { name: `${later}を変える` }).click();
-    const dialog = page.getByRole("dialog", { name: `${later}を変える` });
-    await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "レビュー担当" }).click();
-    await dialog.getByRole("button", { name: "頼む先を変える" }).click();
-    await expect(dialog).toBeHidden();
-    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${later}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
-    await startedBy(page, nodeId);
-  } finally {
-    await release(page, nodeId);
-  }
+  await scriptFinish(page);
+  await main.getByRole("button", { name: `${later}を変える` }).click();
+  const dialog = page.getByRole("dialog", { name: `${later}を変える` });
+  await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "レビュー担当" }).click();
+  await dialog.getByRole("button", { name: "頼む先を変える" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${later}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
+  await finishedBy(page, nodeId);
 });
 
 test("ほかで先に頼む先が変わっていたら、木の上に知らせて今の頼む先を出す", async ({ page }) => {
@@ -156,19 +144,18 @@ test("ほかで先に頼む先が変わっていたら、木の上に知らせ�
   const main = page.getByRole("main");
   const title = `先に変わるタスク ${String(Date.now())}`;
   const nodeId = await addTask(page, title, "まだ頼まない");
-  try {
-    await main.getByRole("button", { name: `${title}を変える` }).click();
-    const dialog = page.getByRole("dialog", { name: `${title}を変える` });
-    await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "社長" }).click();
-    // 画面が読んだ後に、ゲートウェイへ直に頼む先を変えて版を進める
-    const { version } = NodeVersion.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data;
-    const moved = await page.request.patch(`/api/v1/nodes/${nodeId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, assignee: "reviewer" } });
-    expect(moved.status()).toBe(200);
-    await dialog.getByRole("button", { name: "頼む先を変える" }).click();
-    await expect(main.getByText("ほかで先に変わっていたので読み直しました")).toBeVisible();
-    await expect(dialog).toBeHidden();
-    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
-  } finally {
-    await release(page, nodeId);
-  }
+  // 直に頼む先をレビュー担当に変えると、レビュー担当が取って終える
+  await scriptFinish(page);
+  await main.getByRole("button", { name: `${title}を変える` }).click();
+  const dialog = page.getByRole("dialog", { name: `${title}を変える` });
+  await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "社長" }).click();
+  // 画面が読んだ後に、ゲートウェイへ直に頼む先を変えて版を進める
+  const { version } = NodeVersion.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data;
+  const moved = await page.request.patch(`/api/v1/nodes/${nodeId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, assignee: "reviewer" } });
+  expect(moved.status()).toBe(200);
+  await dialog.getByRole("button", { name: "頼む先を変える" }).click();
+  await expect(main.getByText("ほかで先に変わっていたので読み直しました")).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
+  await finishedBy(page, nodeId);
 });
