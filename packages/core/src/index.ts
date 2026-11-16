@@ -140,6 +140,7 @@ export {
   WorkResult,
   WorkSchedule,
 } from "./schemas/workday.ts";
+export { checkServiceDocs, DOCS_REPO_KEY, type DocsProblem, DocsRepo, DocsRepoValue, docsMergeNeeds, serviceDirs, UpdateDocsRepoInput } from "./devloop/docs.ts";
 export { Finding, FindingAnswer, FindingEffect, FindingKind, FindingNeeds, FindingStatus, Fingerprint } from "./schemas/findings.ts";
 export {
   CreateStopInput,
