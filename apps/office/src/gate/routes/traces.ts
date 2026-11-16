@@ -1,7 +1,7 @@
 // エラーログの一覧と、traceId で 1 つの要求を追うルート。年ごとの置き場 REC_<年> から読む (ログインと記録の 3.8)
 import { createRoute, z } from "@hono/zod-openapi";
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, ERROR_SOURCES, ErrorEvent, ErrorEventCode, jstDayStart, jstYear, Trace, TraceId } from "@know-office/core";
+import { AppError, ERROR_SOURCES, ErrorEvent, ErrorEventCode, jstDayStart, jstYear, redactText, Trace, TraceId } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
@@ -109,7 +109,8 @@ function toErrorEvent(row: z.infer<typeof ErrorRow>): ErrorEvent {
     source: row.source,
     level: row.level,
     code: row.code,
-    message: row.message,
+    // 書いた側が伏せ損ねた鍵と作業トークンも、返す前にもう 1 度伏せる
+    message: redactText(row.message),
     route: row.route,
     status: row.status,
     staffId: row.staff_id,
@@ -139,7 +140,8 @@ function traceRead<T extends { id: string; at: number }>(kind: TraceLine["kind"]
     sql,
     line: (raw) => {
       const parsed = Row.parse(raw);
-      return { id: parsed.id, at: parsed.at, summary: summary(parsed) };
+      // 会話とエラーの文に混じった鍵と作業トークンを、画面に出す前に伏せる
+      return { id: parsed.id, at: parsed.at, summary: redactText(summary(parsed)) };
     },
   };
 }
@@ -169,7 +171,8 @@ const TRACE_READS: TraceRead[] = [
     "SELECT id, at, staff_id, sender, body FROM messages",
     row({ staff_id: text, sender: text, body: text }),
     // 会話は頭だけを出す。サロゲートの組を割らないよう、コードポイントで切る
-    (r) => `${r.sender === "owner" ? "owner" : r.staff_id} の発言: ${Array.from(r.body).slice(0, MESSAGE_HEAD).join("")}`,
+    // 頭で切ると鍵の形が崩れて伏せ損ねるので、切る前に伏せる
+    (r) => `${r.sender === "owner" ? "owner" : r.staff_id} の発言: ${Array.from(redactText(r.body)).slice(0, MESSAGE_HEAD).join("")}`,
   ),
 ];
 

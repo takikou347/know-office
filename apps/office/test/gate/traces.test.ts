@@ -159,4 +159,23 @@ describe("要求をたどる", () => {
       expect({ bad, status: res.status }).toEqual({ bad, status: 422 });
     }
   });
+
+  it("会話とエラーログの文に混じった鍵と作業トークンは、summary と message に出さない", async () => {
+    await stepUp();
+    const ticket = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyZXZpZXdlciIsInRyYyI6ImFhYSJ9.c2lnbmF0dXJlLW9mLXRoZS10aWNrZXQ";
+    const secrets = ["sk-ant-api03-SECRETVALUE", "ghp_SECRETVALUE0123456789", ticket, "s3cr3t-value"];
+    await d1.REC_2027.prepare("INSERT INTO messages (id, at, staff_id, node_id, sender, body, body_key, trace_id) VALUES (?, ?, 'reviewer', ?, 'owner', ?, NULL, ?)")
+      .bind(idOf(21), NEW_YEAR + MINUTE, NODE, `鍵 ${secrets[0] ?? ""} を使う`, TRACE)
+      .run();
+    await d1.REC_2027.prepare("INSERT INTO error_events (id, at, source, level, code, message, route, status, fingerprint, trace_id) VALUES (?, ?, 'workspace', 'error', 'sdk_failed', ?, '/x', 500, ?, ?)")
+      .bind(idOf(22), NEW_YEAR + 2 * MINUTE, `token ${secrets[1] ?? ""} と切符 ${ticket} と password=${secrets[3] ?? ""} で落ちた`, "f".repeat(64), TRACE)
+      .run();
+    const trace = await (await gate.request(`/api/v1/traces/${TRACE}`, { headers })).text();
+    const errors = await (await gate.request("/api/v1/errors", { headers })).text();
+    for (const secret of secrets) {
+      expect({ secret, inTrace: trace.includes(secret), inErrors: errors.includes(secret) }).toEqual({ secret, inTrace: false, inErrors: false });
+    }
+    expect(trace).toContain("[伏せた]");
+    expect(errors).toContain("[伏せた]");
+  });
 });

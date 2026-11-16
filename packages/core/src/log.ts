@@ -5,6 +5,8 @@ const SECRET_TEXT: [RegExp, string][] = [
   // ヘッダーの行は値に空白や ; を含むので、行の終わりまで伏せる
   [/\b(authorization|proxy-authorization|cookie|set-cookie)("?\s*[:=]\s*)[^\n]*/gi, "$1$2[伏せた]"],
   [/\bBearer\s+[\w.~+/=-]+/gi, "Bearer [伏せた]"],
+  // 作業トークン (JWT)。署名の無い 2 つの部分だけでも伏せる
+  [/eyJ[\w-]+\.[\w-]+(?:\.[\w-]*)?/g, "[伏せた]"],
   // GitHub と Anthropic の鍵の頭。名前が付いていなくても形で分かる
   [/\b(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/g, "[伏せた]"],
   // 名前=値、名前: 値、JSON の "名前":"値"
@@ -26,8 +28,6 @@ const PUBLIC_TEXT: [RegExp, string][] = [
   [/\b([a-z][a-z\d+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[伏せた]@"],
   // Bearer の後の値は短くても、: や = で区切られていても伏せる
   [/\b(Bearer)(?:\s*[:=]\s*|\s+)(?!\[伏せた\])[^\s"',;]+/gi, "$1 [伏せた]"],
-  // JWT は署名の無い 2 つの部分だけでも伏せる
-  [/eyJ[\w-]+\.[\w-]+(?:\.[\w-]*)?/g, "[伏せた]"],
   // 鍵の頭は語の途中に埋まっていても伏せる
   [/(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/g, "[伏せた]"],
   [/\bsk-[\w-]+/g, "[伏せた]"],
