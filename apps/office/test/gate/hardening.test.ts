@@ -59,7 +59,6 @@ const writeRoutes = apiRoutes.filter((r) => !SAFE.has(r.method));
 /** 本文を受けるメソッドのルート。DELETE は本文を読まない */
 const bodyRoutes = apiRoutes.filter((r) => ["POST", "PUT", "PATCH"].includes(r.method));
 
-
 /**
  * パスの変数を埋めた URL を作る
  * @param path v1.yaml の形のパス
