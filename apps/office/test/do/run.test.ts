@@ -1,5 +1,5 @@
 // 社員がタスクを取った時に自分で最初の runs を呼び、失敗を数え、鍵の失敗の間は呼ばない事を、本物の workerd で確かめる (社員が考えるの 3.2、タスクとレビューの 3.1)
-import { ORG_RULES, ROLE_TOOLS } from "@know-office/core";
+import { ORG_RULES, ROLE_TOOLS, toBase64 } from "@know-office/core";
 import { decodeJwt } from "jose";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -185,5 +185,70 @@ describe("社員 DO の最初の alarm", () => {
   it("alarm の無い社員 DO に arm で次の始まりの alarm を掛け、掛かっていれば変えない", async () => {
     expect(await worker.staff("builder", "arm", jst(8))).toEqual({ alarm: jst(9) });
     expect(await worker.staff("builder", "arm", jst(8, 30))).toEqual({ alarm: jst(9) });
+  });
+});
+
+describe("チェックポイントで退勤する", () => {
+  const SESSION = "0190f4a8-0000-7000-8000-00000000c101";
+  const OTHER = "0190f4a8-0000-7000-8000-000000000104";
+  const NEXT_DAY = 24 * 60 * 60_000;
+  let worker: TestWorker;
+  beforeEach(async () => {
+    worker = await startTestWorker();
+    await worker.query(
+      "DB",
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, body, status, priority, assignee, task_kind, repo, created_by, created_at, updated_at) VALUES ('${TASK.nodeId}', 'task', NULL, 'office', '${TASK.title}', 'パスワードを忘れた人が入れない', 'todo', 1, 'builder', 'build', 'takikou347/know-office', 'president', 0, 0)`,
+    );
+    await worker.staff("builder", "wake", jst(9));
+    await worker.staff("builder", "heartbeat", jst(9, 1));
+  }, 30_000);
+  afterEach(() => worker.dispose());
+
+  const line = toBase64(new TextEncoder().encode(`{"type":"user","sessionId":"${SESSION}","message":{"role":"user","content":"ログインを直す"}}\n`));
+
+  /** タスクを取り、チェックポイントまでの会話の記録を送り、17 時を過ぎてチェックポイントに届いてタスクを持ったまま退勤する */
+  async function clockOutHolding(): Promise<void> {
+    expect(await worker.staff("builder", "pull", jst(9, 1))).toEqual({ taken: true, nodeId: TASK.nodeId });
+    await until(async () => (await runs(worker)).length > 0);
+    await worker.staff("builder", "appendTranscript", TASK.nodeId, { sessionId: SESSION, seq: 0, chunk: line }, jst(16, 59));
+    await worker.staff("builder", "heartbeat", jst(16, 59, 30));
+    await worker.staff("builder", "checkpoint", { kind: "commit", nodeId: TASK.nodeId }, jst(17, 0, 10));
+  }
+
+  it("翌日に続ける", async () => {
+    await clockOutHolding();
+    expect(await worker.staff("builder", "status", jst(17, 1))).toMatchObject({ state: "off", nodeId: null });
+    expect(await worker.query("DB", `SELECT status FROM nodes WHERE id = '${TASK.nodeId}'`)).toEqual([{ status: "todo" }]);
+    expect(await worker.query("DB", "SELECT node_id, result FROM work_entries")).toEqual([{ node_id: TASK.nodeId, result: "continued" }]);
+    expect(await worker.query("REC_2030", "SELECT node_id, staff_id, at FROM node_events WHERE kind = 'continued'")).toEqual([{ node_id: TASK.nodeId, staff_id: "builder", at: jst(17, 0, 10) }]);
+
+    // 夜の間に、優先度の高いタスクが足される
+    await worker.query(
+      "DB",
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, body, status, priority, assignee, task_kind, repo, created_by, created_at, updated_at) VALUES ('${OTHER}', 'task', NULL, 'office', '別のタスク', NULL, 'todo', 0, 'builder', 'build', 'takikou347/know-office', 'president', 1, 1)`,
+    );
+    // 翌日の始まりに出勤し、前の日に続けたタスクを先に取り、最後の会話の記録から続ける
+    await worker.staff("builder", "wake", jst(9) + NEXT_DAY);
+    await worker.staff("builder", "heartbeat", jst(9, 1) + NEXT_DAY);
+    expect(await worker.staff("builder", "pull", jst(9, 1) + NEXT_DAY)).toEqual({ taken: true, nodeId: TASK.nodeId });
+    await until(async () => (await runs(worker)).length > 1);
+    const calls = await worker.workspace("builder");
+    const restored = calls.filter((c) => c.method === "restore");
+    expect(restored.map((c) => c.args[0])).toEqual([{ sessionId: SESSION, transcript: line, nextSeq: 1 }]);
+    expect((await runs(worker))[1]).toMatchObject({ nodeId: TASK.nodeId, resume: SESSION });
+    expect(await worker.query("DB", `SELECT id, status FROM nodes WHERE kind = 'task' ORDER BY id`)).toEqual([
+      { id: TASK.nodeId, status: "doing" },
+      { id: OTHER, status: "todo" },
+    ]);
+  });
+
+  it("時間外に続きのタスクを呼ばれた時も、最後の会話の記録から続ける", async () => {
+    await clockOutHolding();
+    // ゲートウェイの呼び出しは、タスクを doing にしてから社員 DO に渡す
+    await worker.query("DB", `UPDATE nodes SET status = 'doing' WHERE id = '${TASK.nodeId}'`);
+    await worker.staff("builder", "call", TASK, jst(21));
+    await until(async () => (await runs(worker)).length > 1);
+    expect((await worker.workspace("builder")).filter((c) => c.method === "restore")).toHaveLength(1);
+    expect((await runs(worker))[1]).toMatchObject({ nodeId: TASK.nodeId, resume: SESSION });
   });
 });

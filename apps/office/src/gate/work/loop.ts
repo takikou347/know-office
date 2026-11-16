@@ -1,8 +1,8 @@
 // タスクの繰り返し。社員が自分の山から 1 つ取り、空なら上司に求め、終えたら次を取る (タスクとレビューの 3.1)
 import { AppError, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { approvals, nodes, staff } from "../db/main.ts";
+import { approvals, nodes, staff, workEntries } from "../db/main.ts";
 import type { Bindings, Staff } from "../env.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
@@ -75,6 +75,9 @@ export type TaskBook = {
 /** 次のタスクを取った結果。nodeId は取ったか、もう持っていたタスク */
 export type Pulled = { taken: boolean; nodeId: string | null };
 
+/** 社員 DO の中で取った結果。carried は前の勤務で続きにしたタスクを取った時に true で、呼び出しを会話の記録の続きから始める */
+export type PulledNext = Pulled & { carried: boolean };
+
 /**
  * 社員 DO を返す
  * @param env バインディング
@@ -86,19 +89,43 @@ export function staffDo(env: Bindings, staffId: string): Staff {
 }
 
 /**
- * 社員の次の todo のタスクを、優先度の小さい順、作った順に 1 つ読む
+ * 社員がそのタスクを前の勤務で続きにしたか (その社員の最後のした仕事が continued か) の式。1 か 0
+ * @param staffId 社員 ID
+ * @param nodeId タスク ID の列
+ * @returns SQL の式
+ */
+function carriedBy(staffId: string, nodeId: SQLWrapper): SQL<number> {
+  const last = sql`(SELECT ${workEntries.result} FROM ${workEntries} WHERE ${workEntries.nodeId} = ${nodeId} AND ${workEntries.staffId} = ${staffId} ORDER BY ${workEntries.endedAt} DESC, ${workEntries.id} DESC LIMIT 1)`;
+  return sql<number>`coalesce(${last} = 'continued', 0)`.mapWith(Number);
+}
+
+/**
+ * 社員が前の勤務で続きにしたタスクかを読む。続きにしたタスクは、呼び出しを最後の会話の記録から始める
  * @param env バインディング
  * @param staffId 社員 ID
- * @returns タスク。無ければ undefined
+ * @param nodeId タスク ID
+ * @returns 続きにしたタスクなら true
  */
-async function nextTodo(env: Bindings, staffId: string): Promise<NodeRow | undefined> {
-  const [row] = await drizzle(env.DB)
-    .select()
+export async function wasCarried(env: Bindings, staffId: string, nodeId: string): Promise<boolean> {
+  const [row] = await drizzle(env.DB).select({ carried: carriedBy(staffId, nodes.id) }).from(nodes).where(eq(nodes.id, nodeId)).limit(1);
+  return row?.carried === 1;
+}
+
+/**
+ * 社員の次の todo のタスクを 1 つ読む。前の勤務で続きにしたタスク (この社員の最後のした仕事が continued) を先に、ほかは優先度の小さい順、作った順
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @returns タスクと、続きにしたタスクか。無ければ undefined
+ */
+async function nextTodo(env: Bindings, staffId: string): Promise<{ row: NodeRow; carried: boolean } | undefined> {
+  const carried = carriedBy(staffId, nodes.id);
+  const [found] = await drizzle(env.DB)
+    .select({ row: nodes, carried })
     .from(nodes)
     .where(and(eq(nodes.kind, "task"), eq(nodes.assignee, staffId), eq(nodes.status, "todo")))
-    .orderBy(asc(nodes.priority), asc(nodes.createdAt), asc(nodes.id))
+    .orderBy(desc(carried), asc(nodes.priority), asc(nodes.createdAt), asc(nodes.id))
     .limit(1);
-  return row;
+  return found ? { row: found.row, carried: found.carried === 1 } : undefined;
 }
 
 /**
@@ -152,17 +179,18 @@ async function start(env: Bindings, staffId: string, row: NodeRow, now: number, 
  * @param now 今の時刻
  * @returns 取ったか
  */
-export async function pullNext(env: Bindings, book: TaskBook, now: number): Promise<Pulled> {
+export async function pullNext(env: Bindings, book: TaskBook, now: number): Promise<PulledNext> {
   const status = await book.status(now);
-  if (status.state !== "working" || status.nodeId !== null) return { taken: false, nodeId: status.nodeId };
-  const row = await nextTodo(env, book.staffId);
-  if (!row) {
+  if (status.state !== "working" || status.nodeId !== null) return { taken: false, nodeId: status.nodeId, carried: false };
+  const next = await nextTodo(env, book.staffId);
+  if (!next) {
     await askBoss(env, book.staffId, "山が空になった", now);
-    return { taken: false, nodeId: null };
+    return { taken: false, nodeId: null, carried: false };
   }
+  const { row, carried } = next;
   // TODO(#54): 中央値を直前 7 日のチェックポイントの記録から出す。今は null で渡し、早い退勤を考えない
   const taken = await start(env, book.staffId, row, now, async (task) => (await book.take(task, null, now)).taken);
-  return taken ? { taken: true, nodeId: row.id } : { taken: false, nodeId: null };
+  return taken ? { taken: true, nodeId: row.id, carried } : { taken: false, nodeId: null, carried: false };
 }
 
 /**
@@ -183,9 +211,9 @@ export async function notifyStaff(env: Bindings, staffId: string, now: number, c
     return;
   }
   if (status.state !== "off" || !call) return;
-  const row = await nextTodo(env, id.data);
-  if (!row) return;
-  await start(env, id.data, row, now, async (task) => {
+  const next = await nextTodo(env, id.data);
+  if (!next) return;
+  await start(env, id.data, next.row, now, async (task) => {
     await target.call(task, now, traceId);
     return true;
   });

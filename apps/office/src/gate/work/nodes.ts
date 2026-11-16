@@ -1,6 +1,6 @@
 // 目的からタスクまでの木。作る、変える、読む、受け付ける、出来事を残す (タスクとレビューの 3.1、データの 2.5)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, jstYear, newId, type Node, type NodeEvent, type NodeKind, type NodeStatus, type NodeTree, type StaffId, type TaskKind } from "@know-office/core";
+import { AppError, jstYear, keyedId, newId, type Node, type NodeEvent, type NodeKind, type NodeStatus, type NodeTree, type StaffId, type TaskKind } from "@know-office/core";
 import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -57,12 +57,15 @@ export function recordsOf(env: Bindings, at: number): D1Database {
  * @param input.staffId 起こした社員。オーナーとゲートウェイは null
  * @param input.kind 出来事の種類 (created、started、review_rejected など)
  * @param input.detail 中身。鍵やオーナーの情報は入れない
+ * @param input.key 書き直しても 1 行にする時の鍵。ID を時刻とこの鍵から決める。無ければ新しい ID
  * @param actor 時刻とトレース ID
  */
-export async function appendNodeEvent(env: Bindings, input: { nodeId: string; staffId: string | null; kind: string; detail: Record<string, unknown> }, actor: Actor): Promise<void> {
+export async function appendNodeEvent(env: Bindings, input: { nodeId: string; staffId: string | null; kind: string; detail: Record<string, unknown>; key?: string }, actor: Actor): Promise<void> {
+  const id = input.key === undefined ? newId(clockAt(actor.now)) : await keyedId(actor.now, input.key);
   await drizzle(recordsOf(env, actor.now))
     .insert(nodeEvents)
-    .values({ id: newId(clockAt(actor.now)), at: actor.now, nodeId: input.nodeId, staffId: input.staffId, kind: input.kind, detail: input.detail, traceId: actor.traceId ?? null });
+    .values({ id, at: actor.now, nodeId: input.nodeId, staffId: input.staffId, kind: input.kind, detail: input.detail, traceId: actor.traceId ?? null })
+    .onConflictDoNothing();
   // 木の 1 件が変わる時は必ず出来事を足すので、ここで印を配れば画面はどの変わり方でも読み直せる
   await announce(env, { type: "node", node: { id: input.nodeId } }, clockAt(actor.now));
 }

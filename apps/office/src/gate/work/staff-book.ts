@@ -1,12 +1,13 @@
 // 社員 1 人の勤務の時刻と勤怠の判断。StaffDO が持ち、テストは同じ物を手元の入れ物で使う (社員と勤怠の 3 章)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, CheckpointInput, jstDay, OrderKind, type StaffId, type StaffStatus, StaffTask, WorkResult } from "@know-office/core";
+import { AppError, CheckpointInput, jstDay, type StaffId, type StaffStatus, StaffTask, WorkResult } from "@know-office/core";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
-import { attendance, workEntries } from "../db/main.ts";
+import { attendance } from "../db/main.ts";
 import { correctAttendance, rebuildDailyTotals, rebuildStoredDay } from "./attendance.ts";
-import { planDay, upcomingPlan } from "./plan.ts";
+import { type CarriedTask, carriedOf, workStatements } from "./carry.ts";
+import { DayOrder, planDay, upcomingPlan } from "./plan.ts";
 import { ACTIVE, EMPTY_MEMORY, HEARTBEAT_TIMEOUT_MS, Memory, RETRY_MS, Shift, WRAP_MS } from "./shift.ts";
 
 /** 記憶の入れ物。DO の ctx.storage と同じ形。読んだ物は Zod で確かめてから使う */
@@ -34,20 +35,6 @@ export type Workspace = {
 /** 終わりまでがこれを切ると、新しいタスクを取る前に早い退勤を考える */
 export const EARLY_WINDOW_MS = 15 * 60_000;
 
-/** ゲートウェイが day_orders に足した指示の行 */
-const DayOrder = z
-  .object({
-    id: z.string(),
-    staffId: z.string(),
-    day: z.string(),
-    kind: OrderKind,
-    until: z.number().nullable(),
-    source: z.enum(["button", "chat"]),
-    cancels: z.string().nullable(),
-    createdAt: z.number(),
-  })
-  .strict();
-
 /** 社員 1 人の勤務の時刻と勤怠を決める。時刻はすべて引数で受ける */
 export class StaffBook {
   #orm;
@@ -58,6 +45,7 @@ export class StaffBook {
    * @param db D1 の DB。勤怠、日ごとの集計、した仕事を書く
    * @param workspace ワークスペースを動かす口
    * @param announce 新しく足した通知を配信の印で配る。無ければ配らない
+   * @param carried 次の勤務へ続けたタスクを D1 に書いた後に、タスクの出来事を残す。書き直す時も同じ行で呼ぶので、1 行だけ残す形にする。無ければ残さない
    */
   constructor(
     readonly staffId: StaffId,
@@ -65,6 +53,7 @@ export class StaffBook {
     private readonly db: D1Database,
     private readonly workspace: Workspace,
     private readonly announce: (noticeId: string) => Promise<void> = () => Promise.resolve(),
+    private readonly carried: (row: CarriedTask) => Promise<void> = () => Promise.resolve(),
   ) {
     this.#orm = drizzle(db);
   }
@@ -486,12 +475,13 @@ export class StaffBook {
     const { attendance: segments, work, totals } = s.m.pending;
     const statements: BatchItem<"sqlite">[] = [
       ...segments.map((row) => this.#orm.insert(attendance).values(row).onConflictDoNothing()),
-      ...work.map((row) => this.#orm.insert(workEntries).values(row).onConflictDoNothing()),
+      ...workStatements(this.#orm, this.staffId, work),
     ];
     if (statements.length === 0 && totals.length === 0) return;
     await this.storage.put("memory", s.m);
     const [first, ...rest] = statements;
     if (first) await this.#orm.batch([first, ...rest]);
+    for (const row of carriedOf(work)) await this.carried(row);
     for (const t of totals) await this.#announced(await rebuildDailyTotals(this.db, { staffId: this.staffId, day: t.day, clockIn: null, out: true, reasons: t.reasons }, t.at));
     s.m.pending = { attendance: [], work: [], totals: [] };
   }

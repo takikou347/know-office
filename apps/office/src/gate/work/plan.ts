@@ -1,10 +1,24 @@
 // その日の勤務の予定。勤務の時刻とその日の指示から、始まりと終わりの時刻を決める (社員と勤怠の 2 章、3.3、3.4)
 import type { D1Database } from "@cloudflare/workers-types";
-import { jstDay, type StaffId } from "@know-office/core";
+import { jstDay, OrderKind, type StaffId } from "@know-office/core";
 import { z } from "zod";
 import { loadOrders, loadSchedule } from "./attendance.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
+
+/** ゲートウェイが day_orders に足した指示の行 */
+export const DayOrder = z
+  .object({
+    id: z.string(),
+    staffId: z.string(),
+    day: z.string(),
+    kind: OrderKind,
+    until: z.number().nullable(),
+    source: z.enum(["button", "chat"]),
+    cancels: z.string().nullable(),
+    createdAt: z.number(),
+  })
+  .strict();
 
 /** その日の予定。指示で直した後の時刻 */
 export const Plan = z

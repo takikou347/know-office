@@ -272,7 +272,11 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
         await book.call(task, now);
         return null;
       }),
-      pull: (now: number) => pullNext(env, book, now),
+      // 社員 DO と同じく、続きにしたタスクかは呼び出しの始め方に使うだけで返さない
+      pull: async (now: number) => {
+        const { carried: _carried, ...pulled } = await pullNext(env, book, now);
+        return pulled;
+      },
       ...staffRunFakes(env, id, book, runMarks),
       heartbeat: overRpc(book.heartbeat.bind(book)),
       checkpoint: overRpc(book.checkpoint.bind(book)),

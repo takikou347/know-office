@@ -6,8 +6,9 @@ import type { DurableObjectStub } from "@cloudflare/workers-types";
 import type { Bindings, Staff, WorkspaceContainer } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
 import { type IssuedTicket, type RenewedTicket, StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
-import { type Pulled, pullNext } from "../work/loop.ts";
+import { type Pulled, pullNext, wasCarried } from "../work/loop.ts";
 import { announce, announceNotice } from "../live/publish.ts";
+import { appendNodeEvent } from "../work/nodes.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
 import { startRun } from "../work/run.ts";
 import { appendTranscript, continueRun, loadTranscript, type TranscriptStore } from "../work/transcript.ts";
@@ -111,9 +112,9 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 取ったか。nodeId は取ったか、もう持っていたタスク
    */
   async pull(now: number, traceId?: string): Promise<Pulled> {
-    const pulled = await this.#serial((book) => pullNext(this.env, book, now), now);
-    // 呼び出しは鎖の外で始める。作業トークンの発行がこの DO の鎖を通るので、鎖の中で待つと止まる
-    if (pulled.taken) this.#begin("start", now, traceId);
+    const { carried, ...pulled } = await this.#serial((book) => pullNext(this.env, book, now), now);
+    // 呼び出しは鎖の外で始める。作業トークンの発行がこの DO の鎖を通るので、鎖の中で待つと止まる。前の勤務で続きにしたタスクは、最後の会話の記録から続ける
+    if (pulled.taken) this.#begin(carried ? "continue" : "start", now, traceId);
     return pulled;
   }
 
@@ -199,7 +200,9 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    */
   async call(task: unknown, now: number, traceId?: string): Promise<null> {
     await this.#run((book) => book.call(task, now), now);
-    this.#begin("start", now, traceId);
+    // 前の勤務で続きにしたタスクを呼ばれた時は、最後の会話の記録から続ける
+    const { nodeId } = await this.status(now);
+    this.#begin(nodeId !== null && (await wasCarried(this.env, (await this.#open()).staffId, nodeId)) ? "continue" : "start", now, traceId);
     return null;
   }
 
@@ -523,7 +526,16 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
     if (named !== undefined) await this.ctx.storage.put("staffId", named);
     const parsed = StaffId.safeParse(named ?? (await this.ctx.storage.get("staffId")));
     if (!parsed.success) throw new AppError("internal", "社員 DO の社員 ID が分からない");
-    this.#book = new StaffBook(parsed.data, this.ctx.storage, this.env.DB, this.#workspace(parsed.data), (noticeId) => announceNotice(this.env, noticeId, systemClock));
+    const staffId = parsed.data;
+    this.#book = new StaffBook(
+      staffId,
+      this.ctx.storage,
+      this.env.DB,
+      this.#workspace(staffId),
+      (noticeId) => announceNotice(this.env, noticeId, systemClock),
+      // 書き直しても 1 行にするよう、出来事の ID をした仕事の行から決める
+      (row) => appendNodeEvent(this.env, { nodeId: row.nodeId, staffId, kind: "continued", detail: {}, key: `continued:${row.workId}` }, { by: staffId, now: row.at }),
+    );
     return this.#book;
   }
 }
