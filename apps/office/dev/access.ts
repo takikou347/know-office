@@ -12,6 +12,8 @@ export type FakeAccessOptions = {
   email: string;
   /** 時刻 */
   clock: Clock;
+  /** 証明の RSA の鍵の組を作る。無ければその場で作る。テストは作った鍵を使い回して速くする */
+  keyPair?: () => Promise<CryptoKeyPair>;
 };
 
 /** 代わりの Access */
@@ -29,12 +31,21 @@ export type FakeAccess = {
 const ALGORITHM = { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" } as const;
 
 /**
+ * 証明に使う RSA の鍵の組を作る
+ * @returns 書き出せる鍵の組
+ */
+export function generateAccessKeyPair(): Promise<CryptoKeyPair> {
+  return crypto.subtle.generateKey(ALGORITHM, true, ["sign", "verify"]);
+}
+
+/**
  * 起動ごとに鍵を作り、代わりの Access を作る
  * @param options チーム名、宛先、メールアドレス、時刻
  * @returns 公開鍵を返す Hono と、証明を出す sign
  */
 export async function createFakeAccess(options: FakeAccessOptions): Promise<FakeAccess> {
-  let current = await newKey();
+  const makeKey = () => newKey(options.keyPair);
+  let current = await makeKey();
 
   const app = new Hono().get("/cdn-cgi/access/certs", (c) =>
     c.json({ keys: [current.jwk], public_cert: { kid: current.jwk.kid }, public_certs: [{ kid: current.jwk.kid }] }),
@@ -65,7 +76,7 @@ export async function createFakeAccess(options: FakeAccessOptions): Promise<Fake
     kid: () => current.jwk.kid,
     sign,
     rotate: async () => {
-      current = await newKey();
+      current = await makeKey();
     },
   };
 }
@@ -81,10 +92,11 @@ function jsonPart(value: unknown): string {
 
 /**
  * 証明に使う RSA の鍵の組と、公開鍵の JWK を作る
+ * @param keyPair 鍵の組を作る物。無ければその場で作る
  * @returns 秘密鍵と、kid を付けた公開鍵の JWK
  */
-async function newKey(): Promise<{ privateKey: CryptoKey; jwk: { kty?: string; n?: string; e?: string; kid: string; alg: string; use: string } }> {
-  const pair = await crypto.subtle.generateKey(ALGORITHM, true, ["sign", "verify"]);
+async function newKey(keyPair?: () => Promise<CryptoKeyPair>): Promise<{ privateKey: CryptoKey; jwk: { kty?: string; n?: string; e?: string; kid: string; alg: string; use: string } }> {
+  const pair = await (keyPair ?? generateAccessKeyPair)();
   const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
   return { privateKey: pair.privateKey, jwk: { kty: publicJwk.kty, n: publicJwk.n, e: publicJwk.e, kid: crypto.randomUUID(), alg: "RS256", use: "sig" } };
 }

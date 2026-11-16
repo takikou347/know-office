@@ -102,4 +102,6 @@ export type FakeGitHub = {
 export type FakeGitHubOptions = {
   /** 今の時刻。1 時間の鍵の期限と、App の JWT の期限に使う */
   now?: () => number;
+  /** App を作る時の RSA の鍵の組を作る。無ければその場で作る。テストは作った鍵を使い回して速くする */
+  appKey?: () => { privateKey: KeyObject; publicKey: KeyObject };
 };

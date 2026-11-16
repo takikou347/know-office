@@ -153,7 +153,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       const raw = form["manifest"];
       const manifest = Manifest.parse(JSON.parse(typeof raw === "string" ? raw : ""));
       const id = next();
-      const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const { privateKey, publicKey } = options.appKey?.() ?? generateKeyPairSync("rsa", { modulusLength: 2048 });
       // GitHub は PKCS#1 の PEM で秘密鍵を渡す
       const pem = privateKey.export({ type: "pkcs1", format: "pem" });
       apps.set(id, { id, slug: `${manifest.name.toLowerCase()}-${String(id)}`, manifest, webhookSecret: `whsec-${String(id)}-${crypto.randomUUID()}`, publicKey });

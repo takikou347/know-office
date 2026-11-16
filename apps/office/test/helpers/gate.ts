@@ -19,6 +19,7 @@ import { type Forge, pullNext, UNCONNECTED_FORGE } from "../../src/gate/work/loo
 import { appendTranscript, loadTranscript, type TranscriptStore } from "../../src/gate/work/transcript.ts";
 import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/work/staff-book.ts";
 import type { TestD1 } from "./d1.ts";
+import { accessKeyPair, githubAppKey } from "./keys.ts";
 import { fakeLive, type TestLive } from "./live.ts";
 import { overRpc } from "./rpc.ts";
 import { type RunMarks, staffRunFakes, workspaceFake } from "./staff-runs.ts";
@@ -203,10 +204,10 @@ function githubPath(github: TestGate["github"], path: string): string {
  * @returns ゲートウェイと、ログインの手伝い
  */
 export async function createTestGate(options: { clock: Clock; d1: TestD1; extensions?: readonly ExtensionDefinition[]; github?: boolean }): Promise<TestGate> {
-  const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock });
+  const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock, keyPair: accessKeyPair });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
-  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now() }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map() });
+  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map() });
   const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];
   const githubAccess: GitHubAccess = {

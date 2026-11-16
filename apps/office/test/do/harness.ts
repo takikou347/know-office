@@ -2,14 +2,71 @@
 import { DurableObject } from "cloudflare:workers";
 import { AppError, toBase64 } from "@know-office/core";
 import { z } from "zod";
-import { GuardDO } from "../../src/gate/do/guard.ts";
-import { LiveDO } from "../../src/gate/do/live.ts";
-import { RecorderDO } from "../../src/gate/do/recorder.ts";
-import { StaffDO } from "../../src/gate/do/staff.ts";
+import { GuardDO as BaseGuardDO } from "../../src/gate/do/guard.ts";
+import { LiveDO as BaseLiveDO } from "../../src/gate/do/live.ts";
+import { RecorderDO as BaseRecorderDO } from "../../src/gate/do/recorder.ts";
+import { StaffDO as BaseStaffDO } from "../../src/gate/do/staff.ts";
 import { WorkspaceDO } from "../../src/gate/do/workspace.ts";
 import type { Bindings, WorkspaceContainer } from "../../src/gate/env.ts";
 
-export { GuardDO, LiveDO, RecorderDO, StaffDO, WorkspaceDO };
+export { WorkspaceDO };
+
+/**
+ * DO の記憶と alarm を消し、DO を作り直させる。workerd をファイルで 1 つにし、テストの間で DO を起き直した事にする
+ * @param ctx DO の ctx
+ * @returns 返らない。abort が投げる
+ */
+async function wipe(ctx: DurableObjectState): Promise<null> {
+  await ctx.storage.deleteAlarm();
+  await ctx.storage.deleteAll();
+  // 記憶の外 (フィールド) に持つ物も捨てるため、次の呼び出しで新しく作らせる
+  ctx.abort("テストの間で作り直す");
+  return null;
+}
+
+/** テストの間で作り直せる全体のセキュリティ DO */
+export class GuardDO extends BaseGuardDO {
+  /**
+   * 記憶を消して作り直させる
+   * @returns 返らない
+   */
+  testReset(): Promise<null> {
+    return wipe(this.ctx);
+  }
+}
+
+/** テストの間で作り直せる配信 DO */
+export class LiveDO extends BaseLiveDO {
+  /**
+   * 記憶を消して作り直させる
+   * @returns 返らない
+   */
+  testReset(): Promise<null> {
+    return wipe(this.ctx);
+  }
+}
+
+/** テストの間で作り直せる記録 DO */
+export class RecorderDO extends BaseRecorderDO {
+  /**
+   * 記憶を消して作り直させる
+   * @returns 返らない
+   */
+  testReset(): Promise<null> {
+    return wipe(this.ctx);
+  }
+}
+
+/** テストの間で作り直せる社員 DO */
+export class StaffDO extends BaseStaffDO {
+  /**
+   * 記憶を消して作り直させる
+   * @returns 返らない
+   */
+  testReset(): Promise<null> {
+    return wipe(this.ctx);
+  }
+}
 
 /** DO と入口が console.error に出したエラーログの行。手元の workerd では DO と入口が同じ isolate で動くので、ここに並べてテストで読む */
 const ERROR_LOGS: string[] = [];
@@ -141,16 +198,27 @@ export class RecordingWorkspace extends DurableObject<Bindings> implements Works
   restore(input: unknown): Promise<null> {
     return this.#push("restore", input);
   }
+
+  /**
+   * 記憶を消して作り直させる
+   * @returns 返らない
+   */
+  testReset(): Promise<null> {
+    return wipe(this.ctx);
+  }
 }
 
 const Binding = z.enum(["DB", "REC_2026", "REC_2027", "REC_2030"]);
 const Migrate = z.object({ binding: Binding, statements: z.array(z.string()) });
 const Query = z.object({ binding: Binding, sql: z.string() });
+const Reset = z.object({ main: z.array(z.string()), ledger: z.array(z.string()) });
+/** 社員 ID。入口が受ける物と同じ */
+const STAFF_IDS = ["president", "builder", "reviewer"] as const;
 const AdmitMany = z.object({ times: z.number().int().positive(), args: z.tuple([z.string(), z.enum(["api", "auth"]), z.number()]) });
 const AppendMany = z.object({ entries: z.array(z.unknown()) });
 const Call = z.object({ method: z.enum(["append", "verify", "size", "find"]), args: z.array(z.unknown()) });
 const StaffCall = z.object({
-  staffId: z.enum(["president", "builder", "reviewer"]),
+  staffId: z.enum(STAFF_IDS),
   method: z.enum([
     "wake",
     "pull",
@@ -229,6 +297,36 @@ export default {
     if (path === "/migrate") {
       const { binding, statements } = Migrate.parse(body);
       for (const sql of statements) await d1(env, binding).prepare(sql).run();
+      return new Response(null, { status: 204 });
+    }
+    if (path === "/reset") {
+      // 入口が名前を付けて起こす DO は、全体の 1 つずつと社員ごとの物だけ。DO の中から呼ぶ先も同じ名前に限られる
+      const { main, ledger } = Reset.parse(body);
+      const named = [
+        env.GUARD.get(env.GUARD.idFromName("guard")),
+        env.RECORDER.get(env.RECORDER.idFromName("recorder")),
+        live,
+        ...STAFF_IDS.flatMap((id) => [env.STAFF.get(env.STAFF.idFromName(id)), env.WORKSPACE.get(env.WORKSPACE.idFromName(id))]),
+      ];
+      // どの DO にもこの入口が testReset を足している
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      const stubs = named as unknown as { testReset(): Promise<null> }[];
+      // abort で必ず投げるので、投げた事は気にしない
+      await Promise.all(stubs.map((stub) => stub.testReset().catch(() => null)));
+      // エラーログの行は isolate に並べているので、前のテストの物を捨てる
+      ERROR_LOGS.length = 0;
+      for (const binding of Binding.options) {
+        const db = d1(env, binding);
+        const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all<{ name: string }>();
+        const drops = tables.results.map((t) => db.prepare(`DROP TABLE IF EXISTS "${t.name}"`));
+        if (drops.length > 0) await db.batch(drops);
+        await db.batch((binding === "DB" ? main : ledger).map((sql) => db.prepare(sql)));
+      }
+      for (;;) {
+        const listed = await env.FILES.list({ limit: 1000 });
+        if (listed.objects.length === 0) break;
+        await env.FILES.delete(listed.objects.map((o) => o.key));
+      }
       return new Response(null, { status: 204 });
     }
     if (path === "/query") {

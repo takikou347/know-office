@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startTestWorker, type TestWorker } from "../helpers/worker.ts";
 
-// テストごとに workerd と D1 を作り直し、前のテストの数に頼らない
+// テストごとに DO と D1 を空にし、前のテストの数に頼らない
 let worker: TestWorker;
 beforeEach(async () => {
   worker = await startTestWorker();

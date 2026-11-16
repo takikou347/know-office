@@ -1,9 +1,10 @@
-// DO のテストの入口と、本物の wrangler.jsonc の Worker を本物の workerd で起こす
+// DO のテストの入口と、本物の wrangler.jsonc の Worker を本物の workerd で起こす。DO のテストの入口はファイルで 1 つにし、テストごとに空にする
 import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unstable_startWorker } from "wrangler";
 import { z } from "zod";
+import { atFileEnd } from "./file-end.ts";
 
 /** 起こしたテストの入口 */
 export type TestWorker = {
@@ -31,7 +32,7 @@ export type TestWorker = {
   workspaceMode(staffId: string, mode: "ok" | "busy" | "down" | "abort_down"): Promise<void>;
   /** DO と入口が出したエラーログの行 */
   errorLogs(): Promise<string[]>;
-  /** 止める */
+  /** 何もしない。workerd はファイルの終わりに止める */
   dispose(): Promise<void>;
 };
 
@@ -56,11 +57,41 @@ function statements(folder: "main" | "ledger"): string[] {
     .filter(Boolean);
 }
 
+/** ファイルで 1 つの、DO のテストの入口。workerd の起動と組み立てに 1 秒ほどかかるので、テストごとには起こさない */
+let shared: Promise<{ api: TestWorker; reset: () => Promise<void>; dispose: () => Promise<void> }> | null = null;
+/** shared をもうテストに渡したか。渡した後は、次に渡す前に DO と D1 と R2 を空にする */
+let handedOut = false;
+
 /**
- * DO のテストの入口を起こす
- * @returns DO を呼ぶ call、D1 を読む query、dispose
+ * ファイルで 1 つの入口を止める
+ */
+async function stop(): Promise<void> {
+  const worker = shared;
+  shared = null;
+  handedOut = false;
+  if (worker) await (await worker).dispose();
+}
+
+/**
+ * DO のテストの入口を渡す。workerd はファイルで 1 つ起こし、2 回目からは DO の記憶と alarm、D1、R2 を空にし、DO を作り直させて渡す。テストごとに呼んでよい
+ * @returns DO を呼ぶ call、D1 を読む query、dispose。dispose は何もしない (workerd はファイルの終わりに止める)
  */
 export async function startTestWorker(): Promise<TestWorker> {
+  if (!shared) {
+    shared = boot();
+    atFileEnd(stop);
+  }
+  const worker = await shared;
+  if (handedOut) await worker.reset();
+  handedOut = true;
+  return worker.api;
+}
+
+/**
+ * DO のテストの入口を起こし、マイグレーションを流す
+ * @returns テストに渡す物、空にする reset、止める dispose
+ */
+async function boot(): Promise<{ api: TestWorker; reset: () => Promise<void>; dispose: () => Promise<void> }> {
   const worker = await unstable_startWorker({
     config: join(import.meta.dirname, "../do/wrangler.jsonc"),
     dev: { server: { port: 0 }, inspector: false, persist: false, logLevel: "error" },
@@ -76,7 +107,7 @@ export async function startTestWorker(): Promise<TestWorker> {
   await post("/migrate", { binding: "REC_2026", statements: statements("ledger") });
   await post("/migrate", { binding: "REC_2027", statements: statements("ledger") });
   await post("/migrate", { binding: "REC_2030", statements: statements("ledger") });
-  return {
+  const api: TestWorker = {
     call: (method, ...args) => post("/rpc", { method, args }),
     appendMany: async (entries) => {
       await post("/append-many", { entries });
@@ -98,6 +129,13 @@ export async function startTestWorker(): Promise<TestWorker> {
       await post("/workspace-mode", { staffId, mode });
     },
     errorLogs: async () => z.array(z.string()).parse(await post("/logs", {})),
+    dispose: () => Promise.resolve(),
+  };
+  return {
+    api,
+    reset: async () => {
+      await post("/reset", { main: statements("main"), ledger: statements("ledger") });
+    },
     dispose: () => worker.dispose(),
   };
 }

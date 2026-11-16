@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { startTestWorker, type TestWorker } from "../helpers/worker.ts";
 
-// テストごとに workerd と D1 を作り直し、前のテストが書いた行に頼らない
+// テストごとに DO と D1 を空にし、前のテストが書いた行に頼らない
 let worker: TestWorker;
 beforeEach(async () => {
   worker = await startTestWorker();
