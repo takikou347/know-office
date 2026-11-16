@@ -23,6 +23,7 @@ const Tree: z.ZodType<Tree> = z
   .loose();
 const Trees = z.object({ data: z.array(Tree) });
 const NodeStatus = z.object({ data: z.object({ status: z.string() }).loose() });
+const NodeVersion = z.object({ data: z.object({ version: z.number() }).loose() });
 const Runs = z.array(z.object({ staffId: z.string(), nodeId: z.string() }));
 const State = z.object({ data: z.object({ stopped: z.array(z.object({ scope: z.string(), stopId: z.string() })) }) });
 const StopMade = z.object({ data: z.object({ stopId: z.uuid() }) });
@@ -145,6 +146,28 @@ test("オーナーが画面でタスクを取り消し、頼む先を後から�
     await expect(dialog).toBeHidden();
     await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${later}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
     await startedBy(page, nodeId);
+  } finally {
+    await release(page, nodeId);
+  }
+});
+
+test("ほかで先に頼む先が変わっていたら、木の上に知らせて今の頼む先を出す", async ({ page }) => {
+  await openTree(page);
+  const main = page.getByRole("main");
+  const title = `先に変わるタスク ${String(Date.now())}`;
+  const nodeId = await addTask(page, title, "まだ頼まない");
+  try {
+    await main.getByRole("button", { name: `${title}を変える` }).click();
+    const dialog = page.getByRole("dialog", { name: `${title}を変える` });
+    await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "社長" }).click();
+    // 画面が読んだ後に、ゲートウェイへ直に頼む先を変えて版を進める
+    const { version } = NodeVersion.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data;
+    const moved = await page.request.patch(`/api/v1/nodes/${nodeId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, assignee: "reviewer" } });
+    expect(moved.status()).toBe(200);
+    await dialog.getByRole("button", { name: "頼む先を変える" }).click();
+    await expect(main.getByText("ほかで先に変わっていたので読み直しました")).toBeVisible();
+    await expect(dialog).toBeHidden();
+    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
   } finally {
     await release(page, nodeId);
   }
