@@ -13,11 +13,13 @@ describe("base64 の変換", () => {
   });
 
   it("会話の記録ほどの大きなバイト列も base64 にでき、戻せる", () => {
-    const big = Uint8Array.from({ length: 4 * 1024 * 1024 }, (_, i) => i % 251);
-    const back = fromBase64(toBase64(big));
-    // 4MB を 1 バイトずつ toEqual で比べると 5 秒かかるので、長さと中身の一致を 1 度に見る
-    expect(back?.length).toBe(big.length);
-    expect(back?.every((b, i) => b === big[i])).toBe(true);
+    const big = new Uint8Array(4 * 1024 * 1024);
+    for (let i = 0; i < big.length; i += 1) big[i] = i % 251;
+    const back = fromBase64(toBase64(big)) ?? new Uint8Array(0);
+    // 4MB を toEqual で 1 バイトずつ比べると負荷の高い時に 9 秒かかるので、長さと、最初に違うバイトの位置 (無ければ -1) を見る
+    let differs = -1;
+    for (let i = 0; i < big.length && differs < 0; i += 1) if (back[i] !== big[i]) differs = i;
+    expect({ length: back.length, differs }).toEqual({ length: big.length, differs: -1 });
   });
 
   it.each(["a", "!!", "AAH6+/z9", "A=A="])("壊れた base64url %s は null", (text) => {
