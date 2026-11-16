@@ -2,6 +2,7 @@
 import { createServer } from "node:http";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createDevWorkspaces, type StartDevWorkspace } from "../../dev/workspace.ts";
 
 const KEY = "b".repeat(64);
@@ -84,6 +85,40 @@ describe("開発の代わりのワークスペースの置き場", () => {
     expect(booted).toHaveLength(1);
     expect(seen).toEqual([`POST /v1/restore Bearer ${KEY}`, `POST /v1/runs Bearer ${KEY}`]);
     await ws.close();
+  });
+
+  it("起こすとゲートウェイの開発の道にワークスペースの鍵でハートビートを送り始め、30 秒ごとに送り、止めると送らない", async () => {
+    const { start } = stubStart();
+    const sent: { url: string; auth: string | null; body: unknown }[] = [];
+    const Body = z.object({ at: z.string() });
+    const timers: { fn: () => void; ms: number; stopped: boolean }[] = [];
+    const ws = createDevWorkspaces("http://127.0.0.1:5199/anthropic", () => "http://localhost:5198", start, {
+      fetcher: async (url, init) => {
+        sent.push({ url, auth: new Headers(init?.headers).get("authorization"), body: Body.parse(JSON.parse(typeof init?.body === "string" ? init.body : "null")) });
+        return Promise.resolve(new Response(null, { status: 204 }));
+      },
+      every: (fn, ms) => {
+        const timer = { fn, ms, stopped: false };
+        timers.push(timer);
+        return () => void (timer.stopped = true);
+      },
+    });
+    expect((await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) })).status).toBe(204);
+    // 本物のワークスペースと同じく、起きた時に 1 度送る
+    await expect.poll(() => sent.length).toBe(1);
+    expect(sent[0]).toMatchObject({ url: "http://localhost:5198/__dev/workspace/builder/ws/v1/heartbeat", auth: `Bearer ${KEY}`, body: { at: expect.stringMatching(/^\d{4}-/) as unknown } });
+    expect(timers.map((t) => t.ms)).toEqual([30_000]);
+    timers[0]?.fn();
+    await expect.poll(() => sent.length).toBe(2);
+    expect((await ws.app.request("/builder/stop", { method: "POST" })).status).toBe(204);
+    expect(timers[0]?.stopped).toBe(true);
+    // 起こし直すと、前の送り手を止めてから新しい鍵で送る
+    const next = "c".repeat(64);
+    expect((await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: next }) })).status).toBe(204);
+    await expect.poll(() => sent.length).toBe(3);
+    expect(sent[2]?.auth).toBe(`Bearer ${next}`);
+    await ws.close();
+    expect(timers.map((t) => t.stopped)).toEqual([true, true]);
   });
 
   it("知らない社員と形の違う鍵は起こさない", async () => {

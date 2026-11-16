@@ -124,6 +124,15 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
   }
 
   /**
+   * 動いているコンテナに起こした時に渡した鍵と同じかを確かめる。開発の代わりのワークスペースのハートビートを、その社員の物と決めるのに使う
+   * @param key ワークスペースが示した鍵
+   * @returns 同じなら true
+   */
+  async holdsKey(key: string): Promise<boolean> {
+    return this.#box(await this.#staffId()).holdsKey(key);
+  }
+
+  /**
    * コンテナを包む。初めの 1 回だけ作り、後は同じ物を返す
    * @param staffId 社員 ID
    * @returns WorkspaceBox

@@ -38,6 +38,23 @@ function send(env: Bindings, path: string, token: string, events: unknown[]): Pr
   return devWorkspaceEgress(request, env, { clock: world.clock, guard: world.gate.deps });
 }
 
+/**
+ * 代わりのワークスペースと同じ形で、開発の入口にハートビートを送る
+ * @param env バインディング
+ * @param path 入口の道
+ * @param key ワークスペースの鍵。省くと付けない
+ * @returns 返事。開発の道でなければ null
+ */
+function beat(env: Bindings, path: string, key: string | undefined): Promise<Response> | null {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (key !== undefined) headers["authorization"] = `Bearer ${key}`;
+  const request = new Request(`http://localhost:5174${path}`, { method: "POST", headers, body: JSON.stringify({ at: new Date(world.clock.now()).toISOString() }) });
+  return devWorkspaceEgress(request, env, { clock: world.clock, guard: world.gate.deps });
+}
+
+/** 起こした時にワークスペースの DO が渡した鍵 */
+const WORKSPACE_KEY = "b".repeat(64);
+
 describe("開発の代わりのワークスペースの出来事", () => {
   it("社員の道で受けた終わりを、その社員のワークスペースの受け手に回し、タスクを done にする", async () => {
     const { nodeId, token } = await builderAtWork(world);
@@ -53,11 +70,35 @@ describe("開発の代わりのワークスペースの出来事", () => {
     expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", nodeId)).toEqual([{ status: "doing" }]);
   });
 
-  it("作業トークンの要らないハートビートとチェックポイント、知らない社員は 404 で断る", async () => {
+  it("作業トークンの要らないチェックポイントと、知らない社員は 404 で断る", async () => {
     const { token } = await builderAtWork(world);
-    for (const path of ["/__dev/workspace/builder/ws/v1/heartbeat", "/__dev/workspace/builder/ws/v1/checkpoints", "/__dev/workspace/nobody/ws/v1/events"]) {
+    for (const path of ["/__dev/workspace/builder/ws/v1/checkpoints", "/__dev/workspace/nobody/ws/v1/events", "/__dev/workspace/nobody/ws/v1/heartbeat"]) {
       expect((await send(world.gate.env, path, token, []))?.status).toBe(404);
     }
+  });
+
+  it("ワークスペースの鍵で送ったハートビートを、その社員のハートビートとして受け、90 秒を過ぎても待ちにしない", async () => {
+    await builderAtWork(world);
+    world.gate.workspaces.builder.key = WORKSPACE_KEY;
+    world.clock.advance(80_000);
+    const res = await beat(world.gate.env, "/__dev/workspace/builder/ws/v1/heartbeat", WORKSPACE_KEY);
+    expect(res?.status).toBe(204);
+    world.clock.advance(80_000);
+    await world.gate.staff.builder.book.wake(world.clock.now());
+    expect((await world.gate.staff.builder.book.status(world.clock.now())).state).toBe("working");
+  });
+
+  it("ワークスペースの鍵が無いか違うハートビートと、ほかの社員の鍵のハートビートは 401 で断り、待ちになる", async () => {
+    await builderAtWork(world);
+    world.gate.workspaces.builder.key = WORKSPACE_KEY;
+    world.gate.workspaces.reviewer.key = "c".repeat(64);
+    world.clock.advance(80_000);
+    for (const key of [undefined, "d".repeat(64), "c".repeat(64)]) expect((await beat(world.gate.env, "/__dev/workspace/builder/ws/v1/heartbeat", key))?.status).toBe(401);
+    // 鍵をまだ持たない (起こしていない) 社員も断る
+    expect((await beat(world.gate.env, "/__dev/workspace/president/ws/v1/heartbeat", WORKSPACE_KEY))?.status).toBe(401);
+    world.clock.advance(80_000);
+    await world.gate.staff.builder.book.wake(world.clock.now());
+    expect((await world.gate.staff.builder.book.status(world.clock.now())).state).toBe("waiting");
   });
 
   it.each([["production"], ["preview"], [undefined]])("development でない所 (%s) では受けず、ゲートウェイに任せる", async (environment) => {

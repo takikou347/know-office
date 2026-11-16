@@ -267,6 +267,21 @@ describe("ワークスペースを分ける", () => {
     expect(keys.value).toBe(second);
   });
 
+  it("起こした時に渡した鍵だけを、そのワークスペースの鍵と認め、起こす前と止めて起こし直した後の前の鍵は認めない", async () => {
+    const { container, seen } = fakeContainer();
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps());
+    expect(await box.holdsKey("b".repeat(64))).toBe(false);
+    await box.start();
+    const first = String(seen.started[0]?.env?.WORKSPACE_KEY);
+    expect(await box.holdsKey(first)).toBe(true);
+    expect(await box.holdsKey(first.slice(0, 63))).toBe(false);
+    expect(await box.holdsKey("")).toBe(false);
+    await box.stop();
+    await box.start();
+    expect(await box.holdsKey(first)).toBe(false);
+    expect(await box.holdsKey(String(seen.started[1]?.env?.WORKSPACE_KEY))).toBe(true);
+  });
+
   it("復号した会話の記録を鍵を付けて戻させ、形の違う物は送らない", async () => {
     const { container, seen } = fakeContainer();
     const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps());

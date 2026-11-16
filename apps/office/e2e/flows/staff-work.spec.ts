@@ -1,8 +1,9 @@
-// 社員の仕事の通し。オーナーが目的と組織図の画面でタスクを足して頼み、社員が取り、開発のコンテナの代わりがタスクの開始 (POST /v1/runs) を受け、SDK が終えた知らせがゲートウェイに届いてタスクが done になる。ゲートウェイの返事は差し替えず、SDK は手元の代わりの Claude API だけを呼ぶ (社員が考えるの 3.2)
-import type { Page } from "@playwright/test";
+// 社員の仕事の通し。オーナーが目的と組織図の画面でタスクを足して頼み、社員が取り、開発のコンテナの代わりがタスクの開始 (POST /v1/runs) を受け、社員がツールで発言とチェックポイントを伝え、SDK が終えた知らせがゲートウェイに届いてタスクが done になる。ゲートウェイの返事は差し替えず、SDK は手元の代わりの Claude API だけを呼ぶ (社員が考えるの 3.2)
+import type { Locator, Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { seedMain } from "./helpers/seed.ts";
+import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { part, post } from "./helpers/screen.ts";
 import { FAKES } from "../helpers/fakes.ts";
 
@@ -25,6 +26,7 @@ const Trees = z.object({ data: z.array(Tree) });
 const NodeStatus = z.object({ data: z.object({ status: z.string() }).loose() });
 const NodeVersion = z.object({ data: z.object({ version: z.number() }).loose() });
 const Runs = z.array(z.object({ staffId: z.string(), nodeId: z.string() }));
+const Staff = z.object({ data: z.array(z.object({ id: z.string(), state: z.string() }).loose()) });
 const State = z.object({ data: z.object({ stopped: z.array(z.object({ scope: z.string(), stopId: z.string() })) }) });
 
 /**
@@ -34,6 +36,71 @@ const State = z.object({ data: z.object({ stopped: z.array(z.object({ scope: z.s
 async function resumeStaff(page: Page): Promise<void> {
   const state = State.parse(await (await page.request.get("/api/v1/guard/state")).json());
   for (const s of state.data.stopped.filter((x) => x.scope === "staff")) expect(await post(page, `/api/v1/guard/stops/${s.stopId}/resume`)).toBe(200);
+}
+
+/**
+ * 設定の画面を開き、勤務の時刻のカードが読めるのを待つ
+ * @param page 画面を開くページ
+ * @returns カード
+ */
+async function scheduleCard(page: Page): Promise<Locator> {
+  await page.goto("/settings");
+  const box = page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "勤務の時刻", exact: true }) });
+  await expect(box.getByLabel("終わり (日本時間)")).toHaveValue(/^\d\d:\d\d$/);
+  return box;
+}
+
+/**
+ * 設定の画面の勤務の時刻を変える。時間を足す変更はパスキーで確かめる
+ * @param page 画面を開くページ。useOwnerPasskey を付けておく
+ * @param start 始まり (日本時間)
+ * @param end 終わり (日本時間)
+ */
+async function setSchedule(page: Page, start: string, end: string): Promise<void> {
+  const box = await scheduleCard(page);
+  await box.getByLabel("始まり (日本時間)").fill(start);
+  await box.getByLabel("終わり (日本時間)").fill(end);
+  await box.getByLabel("勤務の時刻を変える理由").fill("社員の仕事の通し");
+  await box.getByRole("button", { name: "勤務の時刻を変える" }).click();
+  await expect(box.getByText(/勤務の時刻を変えました/)).toBeVisible();
+}
+
+/**
+ * レビュー担当の今の状態を読む
+ * @param page 画面を開いたページ
+ * @returns 状態
+ */
+async function reviewerState(page: Page): Promise<string | undefined> {
+  return Staff.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "reviewer")?.state;
+}
+
+/**
+ * レビュー担当を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
+ * 前に流した時のワークスペースが落ちて待っていれば、止めて再開して作り直させる。勤務の時間の外なら、勤務の時刻を一日に広げて出勤させる
+ * @param page 画面を開いたページ
+ * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
+ */
+async function clockInReviewer(page: Page): Promise<() => Promise<void>> {
+  if ((await reviewerState(page)) === "waiting") {
+    const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "reviewer", reason: "社員の仕事の通しの前に作り直す" } });
+    expect(stopped.status()).toBe(201);
+    await resumeStaff(page);
+    await expect.poll(() => reviewerState(page), { timeout: 30_000 }).not.toMatch(/^(waiting|stopped)$/);
+  }
+  if ((await reviewerState(page)) === "working") return () => Promise.resolve();
+  await useOwnerPasskey(page);
+  const box = await scheduleCard(page);
+  const was = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
+  await setSchedule(page, "00:00", "23:59");
+  const restore = () => setSchedule(page, was.start, was.end);
+  try {
+    // 勤務の時刻を変えると社員 DO の alarm を掛け直し、始まりを過ぎた社員はその場で出勤する
+    await expect.poll(() => reviewerState(page), { message: "同じ日に退勤した社員は、その日にもう出勤しない" }).toBe("working");
+  } catch (error) {
+    await restore();
+    throw error;
+  }
+  return restore;
 }
 
 /**
@@ -104,15 +171,59 @@ async function finishedBy(page: Page, nodeId: string): Promise<void> {
   await expect.poll(async () => NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status, { timeout: 60_000 }).toBe("done");
 }
 
-test("オーナーが画面で頼んだタスクを社員が取り、ワークスペースがタスクの開始を受ける", async ({ page }) => {
-  await openTree(page);
+/**
+ * 代わりの Claude API に、レビュー担当の SDK が受ける返事を 1 つ積む
+ * @param page 画面を開いたページ
+ * @param content 返す中身のブロック
+ * @param stopReason 止まった理由
+ */
+async function scriptReply(page: Page, content: Record<string, unknown>[], stopReason: "tool_use" | "end_turn"): Promise<void> {
+  const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { staffId: "reviewer", content, stop_reason: stopReason } });
+  expect(res.status()).toBe(204);
+}
+
+/**
+ * 代わりの Claude API に、レビュー担当が発言し、チェックポイントを伝え、終わりの文で終える返事を順に積む
+ * @param page 画面を開いたページ
+ * @param said 発言の本文
+ */
+async function scriptWork(page: Page, said: string): Promise<void> {
+  await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_report", name: "mcp__staff__report", input: { body: said } }], "tool_use");
+  await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_checkpoint", name: "mcp__staff__checkpoint", input: { kind: "note", note: "通しの経過" } }], "tool_use");
   await scriptFinish(page);
-  // レビュー担当には見本の todo が無いので、頼んだタスクをすぐ取る。勤務時間外なら呼び出して取る
-  const title = `通しのタスク ${String(Date.now())}`;
-  const nodeId = await addTask(page, title, "レビュー担当");
-  await finishedBy(page, nodeId);
-  await page.reload();
-  await expect(page.getByText(`タスク: ${title}`)).toBeVisible();
+}
+
+test("オーナーが画面で頼んだタスクを社員が取り、発言とチェックポイントを伝えて終え、記録に残る", async ({ page }) => {
+  // 勤務の時刻を変え、SDK が 3 度呼ぶのを待つ
+  test.slow();
+  await openTree(page);
+  const restore = await clockInReviewer(page);
+  try {
+    const said = `通しのタスクを読んだ ${String(Date.now())}`;
+    await scriptWork(page, said);
+    await page.goto("/goals");
+    // レビュー担当には見本の todo が無いので、頼んだタスクをすぐ取る
+    const title = `通しのタスク ${String(Date.now())}`;
+    const nodeId = await addTask(page, title, "レビュー担当");
+    await finishedBy(page, nodeId);
+
+
+    // タスクの木で済になる
+    await page.reload();
+    await expect(page.getByRole("main").getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("済", { exact: true })).toBeVisible();
+
+    // 社員と仕事の画面の会話に、社員の発言が出る
+    await page.goto("/staff/reviewer?tab=talk");
+    await expect(page.getByRole("log", { name: "レビュー担当との会話" }).getByText(said)).toBeVisible();
+
+    // タスクの詳細の作業の流れに、始めた、チェックポイント、終えたが出る
+    await page.goto(`/staff/reviewer/tasks/${nodeId}`);
+    await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+    const flow = part(page, "作業の流れ");
+    for (const kind of ["started", "checkpoint", "finished"]) await expect(flow.getByText(kind, { exact: true })).toBeVisible();
+  } finally {
+    await restore();
+  }
 });
 
 test("オーナーが画面でタスクを取り消し、頼む先を後から変える", async ({ page }) => {

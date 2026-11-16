@@ -89,6 +89,15 @@ export type ContainerLike<F = unknown> = {
   destroy(): Promise<void>;
 };
 
+/**
+ * 文字列の SHA-256 を返す。鍵を同じ長さにそろえて比べる
+ * @param value 文字列
+ * @returns 32 バイト
+ */
+async function digest(value: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+}
+
 /** 社員 1 人のワークスペースのコンテナ。WorkspaceDO が持ち、テストは代わりのコンテナで使う */
 export class WorkspaceBox<F = unknown> {
   /** 起こしている途中の物。同じ時の start() はこれを待ち、鍵を作って置く順が食い違わないようにする */
@@ -167,6 +176,20 @@ export class WorkspaceBox<F = unknown> {
     // 記憶に鍵が残っていても、コンテナが止まっていれば届かない。起きている時は /v1/health を 1 度見るだけ
     await this.start();
     await this.#call("POST", "/v1/runs", parsed.data, 202);
+  }
+
+  /**
+   * 動いているコンテナに起こした時に渡した鍵と同じかを確かめる。SHA-256 にそろえてから全部のバイトを比べ、どこで違うかで時間を変えない
+   * @param key ワークスペースが示した鍵
+   * @returns 同じなら true。止まっているか、鍵が記憶に無ければ false
+   */
+  async holdsKey(key: string): Promise<boolean> {
+    const held = this.container.running ? await this.deps.keys.get() : undefined;
+    if (held === undefined) return false;
+    const [a, b] = await Promise.all([digest(held), digest(key)]);
+    let diff = 0;
+    for (const [i, byte] of a.entries()) diff |= byte ^ (b[i] ?? 0);
+    return diff === 0;
   }
 
   /**

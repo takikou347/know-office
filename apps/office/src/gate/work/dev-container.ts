@@ -9,6 +9,9 @@ import type { ContainerLike } from "./workspace-box.ts";
 /** 代わりのワークスペースがゲートウェイの受け手に送る道。/__dev/workspace/<社員 ID> の後に受け手の道を続ける */
 const DEV_EGRESS = /^\/__dev\/workspace\/([^/]+)(\/ws\/v1\/.+)$/;
 
+/** ハートビートの道。代わりのワークスペースはワークスペースの鍵を付けて送る */
+const HEARTBEAT_PATH = "/ws/v1/heartbeat";
+
 /** 代わりのワークスペースを起こす時の待ち (10 秒) */
 const BOOT_TIMEOUT_MS = 10_000;
 
@@ -128,7 +131,7 @@ export function containerFor<F>(env: EndpointEnv, real: ContainerLike<F> | undef
 
 /**
  * 開発の代わりのワークスペースが送った要求を、その社員のワークスペースの受け手に回す。代わりのワークスペースは Containers の外向きの通信を通らないので、ここで社員を道から決める
- * 道の社員は信じず、作業トークンが発行された先のワークスペースと合う時だけ受ける。作業トークンの要らない道 (ハートビート、チェックポイント) は受けない
+ * 道の社員は信じず、作業トークンが発行された先のワークスペースと合う時だけ受ける。ハートビートはワークスペースの鍵が合う時だけ受け、作業トークンの要らないほかの道 (チェックポイント) は受けない
  * @param request 入口に届いた要求
  * @param env バインディング
  * @param options 時刻と自動停止の口
@@ -146,7 +149,29 @@ export function devWorkspaceEgress(request: Request, env: Bindings, options: Egr
   }
   const staffId = StaffId.safeParse(match[1]);
   const path = match[2] ?? "";
-  if (!staffId.success || OPEN_PATHS.has(path)) return Promise.resolve(new Response(null, { status: 404 }));
+  if (!staffId.success) return Promise.resolve(new Response(null, { status: 404 }));
   const forwarded = new Request(`http://gate.internal${path}${url.search}`, request);
-  return routeEgress(forwarded, env, { staffId: staffId.data, workspaceId: workspaceIdOf(env, staffId.data) }, options);
+  const caller = { staffId: staffId.data, workspaceId: workspaceIdOf(env, staffId.data) };
+  if (path === HEARTBEAT_PATH) return devHeartbeat(forwarded, env, caller, options);
+  if (OPEN_PATHS.has(path)) return Promise.resolve(new Response(null, { status: 404 }));
+  return routeEgress(forwarded, env, caller, options);
+}
+
+/**
+ * 開発の代わりのワークスペースのハートビートを受ける。道の社員は信じず、その社員のワークスペースの DO が起こした時に渡した鍵を示した時だけ、その社員のハートビートとして受け手に回す
+ * 本物のコンテナは外向きの通信の受け手が社員を決めるが、代わりのワークスペースはそれを通らないので、鍵で決める
+ * @param request ゲートウェイの受け手の道に直した要求
+ * @param env バインディング
+ * @param caller 道の社員とそのワークスペース
+ * @param options 時刻と自動停止の口
+ * @returns 受け手の返事。鍵が無いか違えば 401
+ */
+async function devHeartbeat(request: Request, env: Bindings, caller: { staffId: StaffId; workspaceId: string }, options: EgressOptions): Promise<Response> {
+  const key = /^Bearer ([0-9a-f]{64})$/.exec(request.headers.get("authorization") ?? "")?.[1];
+  const held = key !== undefined && (await env.WORKSPACE.get(env.WORKSPACE.idFromName(caller.staffId)).holdsKey(key));
+  if (!held) return new Response(null, { status: 401 });
+  const headers = new Headers(request.headers);
+  // 受け手には鍵を渡さない。作業トークンと取り違えない
+  headers.delete("authorization");
+  return routeEgress(new Request(request, { headers }), env, caller, options);
 }

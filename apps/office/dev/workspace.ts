@@ -1,7 +1,7 @@
-// 開発環境の代わりのワークスペースの置き場。ゲートウェイの DevContainer が起こさせ、起動確認と軽い要求には自分で答え、タスクの開始と記録の戻しから Node のサーバーを起こして回す (ログインと記録の 3.9、社員が考えるの 3.1)
+// 開発環境の代わりのワークスペースの置き場。ゲートウェイの DevContainer が起こさせ、起きた時からハートビートを送り、起動確認と軽い要求には自分で答え、タスクの開始と記録の戻しから Node のサーバーを起こして回す (ログインと記録の 3.9、社員が考えるの 3.1)
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { health, StaffId } from "@know-office/core";
+import { health, StaffId, systemClock } from "@know-office/core";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -22,6 +22,20 @@ export type DevWorkspaces = {
   runs: ReceivedRun[];
   /** 起こした物をすべて止める */
   close(): Promise<void>;
+};
+
+/** ハートビートを送る間。本物のワークスペース (apps/workspace/src/heartbeat.ts) と同じ 30 秒 */
+export const DEV_HEARTBEAT_EVERY_MS = 30_000;
+
+/** ハートビートを待つ長さ */
+const HEARTBEAT_TIMEOUT_MS = 10_000;
+
+/** ハートビートの送り方。テストは代わりを渡す */
+export type DevHeartbeatDeps = {
+  /** ゲートウェイを呼ぶ fetch。省くと fetch */
+  fetcher?: (url: string, init?: RequestInit) => Promise<Response>;
+  /** 間をおいて繰り返す。止める関数を返す。省くと setInterval */
+  every?: (fn: () => void, ms: number) => () => void;
 };
 
 const Boot = z.object({ key: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
@@ -55,15 +69,49 @@ async function loadWorkspace(): Promise<StartDevWorkspace> {
  * @param anthropicUrl 代わりの Claude API の宛先 (DEV_FAKES_URL/anthropic)
  * @param gateBase 手元のゲートウェイの宛先 (http://localhost:<番号>) を返す関数。開発サーバーが待ち受けた後に決まるので、起こす時に読む
  * @param start 代わりのワークスペースを起こす関数。省くと apps/workspace の物
+ * @param heartbeat ハートビートの送り方。省くと fetch と setInterval
  * @returns Hono、受けたタスクの開始、止める口
  */
-export function createDevWorkspaces(anthropicUrl: string, gateBase: () => string, start?: StartDevWorkspace): DevWorkspaces {
-  // 起こした社員の鍵と、起こした Node のサーバー。サーバーと SDK は最初の /v1/runs か /v1/restore まで読み込まない
-  const booted = new Map<StaffId, { key: string; server?: Promise<DevWorkspace> }>();
+export function createDevWorkspaces(anthropicUrl: string, gateBase: () => string, start?: StartDevWorkspace, heartbeat: DevHeartbeatDeps = {}): DevWorkspaces {
+  // 起こした社員の鍵、ハートビートを止める関数、起こした Node のサーバー。サーバーと SDK は最初の /v1/runs か /v1/restore まで読み込まない
+  const booted = new Map<StaffId, { key: string; stopBeat: () => void; server?: Promise<DevWorkspace> }>();
   const runs: ReceivedRun[] = [];
+  const fetcher = heartbeat.fetcher ?? ((url: string, init?: RequestInit) => fetch(url, init));
+  const every =
+    heartbeat.every ??
+    ((fn: () => void, ms: number) => {
+      const timer = setInterval(fn, ms);
+      // 開発サーバーを閉じる時に待たせない
+      timer.unref();
+      return () => clearInterval(timer);
+    });
+  /**
+   * 本物のコンテナと同じく、起きた時から 30 秒ごとにゲートウェイへハートビートを送る。代わりのワークスペースはコンテナの外向きの通信の受け手を通らないので、ワークスペースの鍵を付けて社員を示す
+   * @param staffId 社員 ID
+   * @param key ワークスペースの鍵
+   * @returns 止める関数
+   */
+  const startBeat = (staffId: StaffId, key: string) => {
+    const beat = () => {
+      fetcher(`${gateBase()}/__dev/workspace/${staffId}/ws/v1/heartbeat`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+        body: JSON.stringify({ at: new Date(systemClock.now()).toISOString() }),
+        signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS),
+      })
+        .then(async (res) => {
+          await res.body?.cancel();
+        })
+        // 届かなければ社員 DO が 90 秒で作り直すので、ここでは何もしない
+        .catch(() => undefined);
+    };
+    beat();
+    return every(beat, DEV_HEARTBEAT_EVERY_MS);
+  };
   const stop = async (staffId: StaffId) => {
     const held = booted.get(staffId);
     booted.delete(staffId);
+    held?.stopBeat();
     const server = await held?.server?.catch(() => undefined);
     await server?.close();
   };
@@ -79,7 +127,7 @@ export function createDevWorkspaces(anthropicUrl: string, gateBase: () => string
       const body = Boot.safeParse(await c.req.json().catch(() => null));
       if (!staffId.success || !body.success) return c.body(null, 400);
       await stop(staffId.data);
-      booted.set(staffId.data, { key: body.data.key });
+      booted.set(staffId.data, { key: body.data.key, stopBeat: startBeat(staffId.data, body.data.key) });
       return c.body(null, 204);
     })
     .post("/:staffId/stop", async (c) => {

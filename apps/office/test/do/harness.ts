@@ -138,6 +138,14 @@ export class RecordingWorkspace extends DurableObject<Bindings> implements Works
   }
 
   /**
+   * 鍵を確かめる。コンテナを起こさないので、どの鍵も認めない
+   * @returns false
+   */
+  holdsKey(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  /**
    * 経過を書き残させる
    * @returns 無し
    */

@@ -158,6 +158,8 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   replaceTicket(ticket: string): Promise<null>;
   /** 会話の記録を SDK の置き場に戻させる */
   restore(input: unknown): Promise<null>;
+  /** 起こした時に渡した鍵と同じかを確かめる。開発の代わりのワークスペースのハートビートを、その社員の物と決めるのに使う */
+  holdsKey(key: string): Promise<boolean>;
 }
 
 /** 記録を年ごとに置く D1 のバインディングの名前。04-detail.md の 3.5 */

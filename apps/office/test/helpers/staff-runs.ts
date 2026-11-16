@@ -38,15 +38,16 @@ export function staffRunFakes(env: Bindings, id: StaffId, book: StaffBook, marks
 }
 
 /** ワークスペースの DO の代わりが受けた物 */
-type WorkspaceSeen = { tickets: string[]; runs: unknown[]; down: boolean };
+type WorkspaceSeen = { tickets: string[]; runs: unknown[]; down: boolean; key?: string };
 
 /**
  * ワークスペースの DO の代わりを作る。down の間は届かない
  * @param seen 受けた物を足す先
- * @returns replaceTicket と run
+ * @returns replaceTicket、run、holdsKey
  */
 export function workspaceFake(seen: WorkspaceSeen) {
   return {
+    holdsKey: (key: string) => Promise.resolve(seen.key !== undefined && seen.key === key),
     replaceTicket: (ticket: string) => {
       if (seen.down) return Promise.reject(new Error("ワークスペースに届かない"));
       seen.tickets.push(ticket);

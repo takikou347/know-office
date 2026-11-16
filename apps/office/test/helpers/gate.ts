@@ -102,6 +102,8 @@ export type TestWorkspace = {
   runs: unknown[];
   /** true なら届かない */
   down: boolean;
+  /** 起こした時に渡した鍵。起こしていなければ無い */
+  key?: string;
 };
 
 /**
