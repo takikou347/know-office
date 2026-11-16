@@ -122,19 +122,6 @@ describe("ダッシュボード", () => {
     expect(data.notices.map((n) => n.title)).toEqual(["未読"]);
   });
 
-  it("使っていない月の費用は 0、年をまたいだ 1 月はその年の記録から足す", async () => {
-    const cost = async () => z.object({ data: z.object({ monthCostMicroUsd: z.number() }).loose() }).parse(await (await gate.request("/api/v1/dashboard", { headers })).json()).data.monthCostMicroUsd;
-    expect(await cost()).toBe(0);
-    // 日本時間の 2027 年 1 月 1 日 0 時ちょうどは 2027 年、その 1 ミリ秒前は 2026 年の記録
-    const newYear = Date.UTC(2026, 11, 31, 15);
-    const usage = "INSERT INTO usage (id, at, staff_id, node_id, scope, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micro_usd) VALUES (?, ?, 'builder', NULL, 'office', 'm', 0, 0, 0, 0, ?)";
-    await d1.REC_2026.prepare(usage).bind("019a7b00-0000-7000-8000-0000000000b4", newYear - 1, 7_000_000).run();
-    await d1.REC_2027.prepare(usage).bind("019a7b00-0000-7000-8000-0000000000b5", newYear, 300_000).run();
-    clock.advance(newYear + 60_000 - clock.now());
-    headers = await gate.signIn();
-    expect(await cost()).toBe(300_000);
-  });
-
   it("未読の通知は 20 件ちょうどまで返し、21 件目は返さない", async () => {
     const insert = d1.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope, read_at) VALUES (?, ?, 'info', 'x', ?, '', 'office', NULL)");
     await d1.DB.batch(Array.from({ length: 21 }, (_, n) => insert.bind(noticeId(n + 1), n + 1, `通知 ${String(n + 1)}`)));

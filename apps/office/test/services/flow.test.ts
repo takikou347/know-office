@@ -166,8 +166,7 @@ describe("アイデアから運用までの流れ", () => {
     expect(world.gate.audits.map((a) => a.action)).toContain("service.create");
   });
 
-  describe("検討の材料", () => {
-  it("社長に調べるタスクが足され、出した材料が読める", async () => {
+  it("検討の材料", async () => {
     const id = await ownerIdea(world);
     expect(Card.parse(await advance(world, id, { to: "study", reason: "売り上げの見込みが大きい" }))).toMatchObject({ id, stage: "study" });
     // 社長に調べるタスクが足される。アイデアの検討はどのサービスにも入らないので office の分
@@ -184,41 +183,42 @@ describe("アイデアから運用までの流れ", () => {
     await expect(tool(world, "president", "study_submit", { serviceId: other, body: STUDY })).rejects.toMatchObject({ code: "conflict" });
   });
 
-  it("調べるタスクを足せなければ、段階も検討に移らない", async () => {
-    const id = await ownerIdea(world);
-    // 調べるタスクの書き込みだけを断る
-    await world.d1.DB.prepare("CREATE TRIGGER study_task_fails BEFORE INSERT ON nodes WHEN NEW.source LIKE 'study:%' BEGIN SELECT RAISE(ABORT, 'test'); END").run();
-    try {
-      await advance(world, id, { to: "study", reason: "調べる" }, 500);
-    } finally {
-      await world.d1.DB.prepare("DROP TRIGGER study_task_fails").run();
-    }
-    expect((await detailOf(world, id)).stage).toBe("idea");
-    expect((await detailOf(world, id)).events.map((e) => e.detail["to"])).toEqual(["idea"]);
-    // 直った後に移し直すと、調べるタスクが 1 つだけ足される
-    await advance(world, id, { to: "study", reason: "調べる" });
-    expect(await rows(world.d1.DB, "SELECT title FROM nodes WHERE kind = 'task' AND assignee = 'president'")).toEqual([{ title: "調べる: 動画を作るサービス" }]);
-  });
+  describe("検討の材料の境目", () => {
+    it("調べるタスクを足せなければ、段階も検討に移らない", async () => {
+      const id = await ownerIdea(world);
+      // 調べるタスクの書き込みだけを断る
+      await world.d1.DB.prepare("CREATE TRIGGER study_task_fails BEFORE INSERT ON nodes WHEN NEW.source LIKE 'study:%' BEGIN SELECT RAISE(ABORT, 'test'); END").run();
+      try {
+        await advance(world, id, { to: "study", reason: "調べる" }, 500);
+      } finally {
+        await world.d1.DB.prepare("DROP TRIGGER study_task_fails").run();
+      }
+      expect((await detailOf(world, id)).stage).toBe("idea");
+      expect((await detailOf(world, id)).events.map((e) => e.detail["to"])).toEqual(["idea"]);
+      // 直った後に移し直すと、調べるタスクが 1 つだけ足される
+      await advance(world, id, { to: "study", reason: "調べる" });
+      expect(await rows(world.d1.DB, "SELECT title FROM nodes WHERE kind = 'task' AND assignee = 'president'")).toEqual([{ title: "調べる: 動画を作るサービス" }]);
+    });
 
-  it("同時に検討に移すと、片方は 409 で、調べるタスクは 1 つ", async () => {
-    const id = await ownerIdea(world);
-    beforeNextBatch(world, () => advance(world, id, { to: "study", reason: "先に移す" }));
-    expect(await advance(world, id, { to: "study", reason: "後から移す" }, 409)).toMatchObject({ code: "conflict" });
-    expect(await rows(world.d1.DB, "SELECT title FROM nodes WHERE kind = 'task' AND assignee = 'president'")).toEqual([{ title: "調べる: 動画を作るサービス" }]);
-  });
+    it("同時に検討に移すと、片方は 409 で、調べるタスクは 1 つ", async () => {
+      const id = await ownerIdea(world);
+      beforeNextBatch(world, () => advance(world, id, { to: "study", reason: "先に移す" }));
+      expect(await advance(world, id, { to: "study", reason: "後から移す" }, 409)).toMatchObject({ code: "conflict" });
+      expect(await rows(world.d1.DB, "SELECT title FROM nodes WHERE kind = 'task' AND assignee = 'president'")).toEqual([{ title: "調べる: 動画を作るサービス" }]);
+    });
 
-  it("2 度目に出した材料に替わり、出す間に検討の段階でなくなった材料は捨てる", async () => {
-    const id = await ownerIdea(world);
-    await studied(world, id);
-    await tool(world, "president", "study_submit", { serviceId: id, body: "直した材料" });
-    expect((await detailOf(world, id)).study).toBe("直した材料");
-    // 出している間にオーナーが見送ると、出した材料は置かず、前の材料が残る
-    beforeNext(world, "FILES", "put", () => setStage(world, id, "dropped"));
-    await expect(tool(world, "president", "study_submit", { serviceId: id, body: "遅れた材料" })).rejects.toMatchObject({ code: "conflict" });
-    expect((await detailOf(world, id)).study).toBe("直した材料");
-    const listed = await world.gate.env.FILES.list({ prefix: `studies/${id}/` });
-    expect(listed.objects).toHaveLength(2);
-  });
+    it("2 度目に出した材料に替わり、出す間に検討の段階でなくなった材料は捨てる", async () => {
+      const id = await ownerIdea(world);
+      await studied(world, id);
+      await tool(world, "president", "study_submit", { serviceId: id, body: "直した材料" });
+      expect((await detailOf(world, id)).study).toBe("直した材料");
+      // 出している間にオーナーが見送ると、出した材料は置かず、前の材料が残る
+      beforeNext(world, "FILES", "put", () => setStage(world, id, "dropped"));
+      await expect(tool(world, "president", "study_submit", { serviceId: id, body: "遅れた材料" })).rejects.toMatchObject({ code: "conflict" });
+      expect((await detailOf(world, id)).study).toBe("直した材料");
+      const listed = await world.gate.env.FILES.list({ prefix: `studies/${id}/` });
+      expect(listed.objects).toHaveLength(2);
+    });
   });
 
   it("見送る", async () => {
@@ -290,26 +290,26 @@ async function approvalStatus(w: WorkWorld, approvalId: string): Promise<unknown
 }
 
 describe("段階ごとのオーナーの判断", () => {
-  describe("閉じる案", () => {
-    it("社員の案はオーナーが承認するまで閉じない", async () => {
-      const { id, approvalId, task } = await closeRequested(world, true);
-      // オーナーが決めるまでサービスは閉じない
-      expect((await detailOf(world, id)).stage).toBe("operation");
-      const [approval] = z.array(z.object({ id: z.string(), kind: z.string(), target: z.string(), payload: z.record(z.string(), z.unknown()) }).loose()).parse(await api(world, "GET", "/api/v1/approvals"));
-      expect(approval).toMatchObject({ id: approvalId, kind: "service_close", target: id, payload: { nodeId: task, reason: "半年使われていない" } });
-      expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "waiting_owner" }]);
-      // サービスか運用の段階でない案には閉じる案を出せない
-      const idea = await ownerIdea(world);
-      await expect(tool(world, "builder", "service_close_request", { serviceId: idea, reason: "要らない" })).rejects.toMatchObject({ code: "conflict" });
+  it("閉じる案", async () => {
+    const { id, approvalId, task } = await closeRequested(world, true);
+    // オーナーが決めるまでサービスは閉じない
+    expect((await detailOf(world, id)).stage).toBe("operation");
+    const [approval] = z.array(z.object({ id: z.string(), kind: z.string(), target: z.string(), payload: z.record(z.string(), z.unknown()) }).loose()).parse(await api(world, "GET", "/api/v1/approvals"));
+    expect(approval).toMatchObject({ id: approvalId, kind: "service_close", target: id, payload: { nodeId: task, reason: "半年使われていない" } });
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "waiting_owner" }]);
+    // サービスか運用の段階でない案には閉じる案を出せない
+    const idea = await ownerIdea(world);
+    await expect(tool(world, "builder", "service_close_request", { serviceId: idea, reason: "要らない" })).rejects.toMatchObject({ code: "conflict" });
 
-      // オーナーが承認すると閉じ、待っていたタスクは戻る
-      await api(world, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "閉じてよい" });
-      const closed = await detailOf(world, id);
-      expect(closed.stage).toBe("closed");
-      expect(closed.events.at(-1)).toMatchObject({ by: "owner", detail: { to: "closed", reason: "半年使われていない", approvalId } });
-      expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "todo" }]);
-    });
+    // オーナーが承認すると閉じ、待っていたタスクは戻る
+    await api(world, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "閉じてよい" });
+    const closed = await detailOf(world, id);
+    expect(closed.stage).toBe("closed");
+    expect(closed.events.at(-1)).toMatchObject({ by: "owner", detail: { to: "closed", reason: "半年使われていない", approvalId } });
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "todo" }]);
+  });
 
+  describe("閉じる案の境目", () => {
     it("差し戻した閉じる案ではサービスは変わらない", async () => {
       const { id, approvalId } = await closeRequested(world, false);
       await api(world, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "reject", reason: "まだ続ける" });
