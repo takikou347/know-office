@@ -1,10 +1,14 @@
-// 稼働の確かめ。5 分ごとの定期ジョブが部分ごとに通るかを health_checks に残し、記録の画面が読む月の稼働率をそこから出す (サービスと拡張の 3.5)
+// 稼働の確かめ。5 分ごとの定期ジョブが部分ごとに通るかを health_checks に残し、故障と遅れを通知にし、記録の画面が読む月の稼働率をそこから出す (サービスと拡張の 3 章)
 import { type Clock, jstDayStart, newId, StaffId, type Uptime } from "@know-office/core";
 import type { Bindings } from "../env.ts";
+import { announceNotice } from "../live/publish.ts";
 import { recordError } from "./errors.ts";
 
 /** 1 つの部分の答えを待つ長さの初期値。外を呼ぶ時の初期値と同じ 10 秒 */
 const PROBE_TIMEOUT_MS = 10_000;
+
+/** 答えたがこの長さを超えた部分は、遅れとして知らせる */
+export const SLOW_PROBE_MS = 3_000;
 
 /** 1 つの部分の確かめ。part は health_checks の part */
 type Probe = { part: string; run: () => Promise<unknown> };
@@ -68,6 +72,52 @@ export async function checkHealth(env: Bindings, clock: Clock, timeoutMs = PROBE
   } catch (error) {
     await recordError(env, { source: "job", level: "error", code: "health_check_failed", error }, clock);
   }
+  for (const r of results) {
+    const notice = r.ok ? (r.ms > SLOW_PROBE_MS ? slowNotice(r.part, r.ms) : null) : downNotice(r.part, timeoutMs);
+    if (notice === null) continue;
+    await noticeOnce(env, clock, notice).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "health_notice_failed", error }, clock));
+  }
+}
+
+/** 稼働の通知の種類と文 */
+type HealthNotice = { kind: "health_down" | "health_slow"; title: string; body: string };
+
+/**
+ * 答えなかった部分の通知を作る
+ * @param part 部分
+ * @param timeoutMs 待った長さ
+ * @returns 通知
+ */
+function downNotice(part: string, timeoutMs: number): HealthNotice {
+  // 題は、同じ部分の通知を重ねないための鍵も兼ねる
+  return { kind: "health_down", title: `${part} が答えない`, body: `5 分ごとの確かめで ${String(timeoutMs / 1000)} 秒の内に答えなかった` };
+}
+
+/**
+ * 答えが遅かった部分の通知を作る
+ * @param part 部分
+ * @param ms 答えまでの長さ
+ * @returns 通知
+ */
+function slowNotice(part: string, ms: number): HealthNotice {
+  return { kind: "health_slow", title: `${part} の答えが遅い`, body: `5 分ごとの確かめで答えまで ${(ms / 1000).toFixed(1)} 秒かかった` };
+}
+
+/**
+ * 稼働の通知を足す。同じ種類と題の未読があれば足さない。足した時は配信の印で画面に届ける
+ * @param env バインディング
+ * @param clock 時刻
+ * @param notice 通知
+ */
+async function noticeOnce(env: Bindings, clock: Clock, notice: HealthNotice): Promise<void> {
+  const id = newId(clock);
+  // 未読の同じ通知が無い時だけ 1 文で足す。同時に走った 2 つの確かめが、どちらも無いと読んでから足すと重なるため
+  const res = await env.DB.prepare(
+    "INSERT INTO notices (id, at, level, kind, title, body, scope, link) SELECT ?, ?, 'warn', ?, ?, ?, 'office', '/records' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = ? AND title = ? AND read_at IS NULL)",
+  )
+    .bind(id, clock.now(), notice.kind, notice.title, notice.body, notice.kind, notice.title)
+    .run();
+  if (res.meta.changes === 1) await announceNotice(env, id, clock);
 }
 
 /**

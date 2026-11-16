@@ -21,6 +21,7 @@ beforeEach(async () => {
 });
 afterEach(() => d1.dispose());
 
+const Notices = z.object({ data: z.array(z.object({ id: z.string(), level: z.string(), kind: z.string(), title: z.string(), scope: z.string(), link: z.string().nullable(), readAt: z.string().nullable() }).loose()) }).loose();
 const Uptime = z.object({ data: z.object({ month: z.string(), ratio: z.number().nullable(), checks: z.number() }).strict() }).loose();
 
 /**
@@ -55,6 +56,31 @@ function moveTo(to: number): void {
   clock.advance(to - clock.now());
 }
 
+/**
+ * 1 つの社員 DO の答えを決めた長さだけ遅らせた env を作る。時計はほかの部分と共にあるので、ほかが答えた後に進める
+ * @param late 遅らせる社員
+ * @param ms 遅らせる長さ
+ * @returns env
+ */
+function envWithSlow(late: StaffId, ms: number): typeof gate.env {
+  const staff = gate.env.STAFF;
+  const slow = {
+    idFromName: (name: StaffId) => name,
+    get: (name: StaffId) =>
+      name === late
+        ? {
+            status: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              clock.advance(ms);
+              return null;
+            },
+          }
+        : staff.get(staff.idFromName(name)),
+  };
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return { ...gate.env, STAFF: slow } as unknown as typeof gate.env;
+}
+
 describe("止まらなさ", () => {
   it("稼働率を見る", async () => {
     // 日本時間の 11 月 1 日 0 時ちょうどは今月、その 1 ミリ秒前は先月に数える
@@ -81,6 +107,45 @@ describe("止まらなさ", () => {
     expect(Uptime.parse(await res.json()).data).toEqual({ month: "2026-11", ratio: 12 / 13, checks: 13 });
     // 先月は月の頭の 1 ミリ秒前の 1 件だけ
     expect(Uptime.parse(await (await uptime("2026-10")).json()).data).toEqual({ month: "2026-10", ratio: 0, checks: 1 });
+  });
+
+  it("故障を知らせる", async () => {
+    await checkHealth(envWithFailing("builder"), clock);
+    const res = await gate.request("/api/v1/notices", { headers });
+    const items = Notices.parse(await res.json()).data;
+    expect(items).toEqual([expect.objectContaining({ level: "warn", kind: "health_down", scope: "office", link: "/records", readAt: null })]);
+    expect(items[0]?.title).toContain("staff:builder");
+  });
+
+  it("遅れを知らせる", async () => {
+    // 社員 DO の 1 つが答えるまでに 4 秒かかる。通るが、遅れとして知らせる
+    await checkHealth(envWithSlow("reviewer", 4_000), clock);
+    const items = Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data;
+    expect(items).toEqual([expect.objectContaining({ level: "warn", kind: "health_slow", scope: "office", link: "/records" })]);
+    expect(items[0]?.title).toContain("staff:reviewer");
+    const row = await d1.DB.prepare("SELECT ok FROM health_checks WHERE part = 'staff:reviewer'").first();
+    expect(row).toEqual({ ok: 1 });
+  });
+
+  it("答えが 3 秒ちょうどまでなら知らせない", async () => {
+    await checkHealth(envWithSlow("reviewer", 3_000), clock);
+    expect(Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data).toEqual([]);
+  });
+
+  it("同じ部分の故障は、読むまで重ねず、読んだ後にまた落ちれば知らせる", async () => {
+    await Promise.all([checkHealth(envWithFailing("builder"), clock), checkHealth(envWithFailing("builder"), clock)]);
+    moveTo(at(16, 10, 5));
+    await checkHealth(envWithFailing("builder"), clock);
+    // ほかの部分の故障は別に知らせる
+    await checkHealth(envWithFailing("president"), clock);
+    let items = Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data;
+    expect(items.map((n) => n.title).toSorted()).toEqual([expect.stringContaining("staff:builder"), expect.stringContaining("staff:president")]);
+    const builder = items.find((n) => n.title.includes("staff:builder"));
+    await gate.request(`/api/v1/notices/${builder?.id ?? ""}/read`, { method: "PUT", headers });
+    moveTo(at(16, 10, 10));
+    await checkHealth(envWithFailing("builder"), clock);
+    items = Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data;
+    expect(items.filter((n) => n.title.includes("staff:builder"))).toHaveLength(2);
   });
 
   it("確かめの無い月は稼働率を出さず、形の違う月は 422", async () => {
