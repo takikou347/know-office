@@ -72,10 +72,15 @@ export const vault = sqliteTable(
 );
 
 /** 部分ごとの稼働確認。追記専用 */
-export const healthChecks = sqliteTable("health_checks", {
-  id: id(),
-  at: time("at").notNull(),
-  part: text("part").notNull(),
-  ok: flag("ok").notNull(),
-  ms: integer("ms").notNull(),
-});
+export const healthChecks = sqliteTable(
+  "health_checks",
+  {
+    id: id(),
+    at: time("at").notNull(),
+    part: text("part").notNull(),
+    ok: flag("ok").notNull(),
+    ms: integer("ms").notNull(),
+  },
+  // 行は消さずに年 60 万行ほど増えるので、月の稼働率はその月の行だけを読む
+  (t) => [index("health_checks_at").on(t.at)],
+);

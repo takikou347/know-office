@@ -171,6 +171,12 @@ describe("止まらなさ", () => {
     expect(results).toEqual([{ code: "health_notice_failed" }]);
   });
 
+  it("月の稼働率は、その月の確かめの行だけを索引で読む", async () => {
+    // 確かめの行は消さずに年 60 万行ほど増えるので、月の稼働率が全部の行を読まない事を確かめる
+    const plan = await d1.DB.prepare("EXPLAIN QUERY PLAN SELECT count(*) AS checks, coalesce(sum(ok), 0) AS passed FROM health_checks WHERE at >= ? AND at < ?").bind(0, 1).all<{ detail: string }>();
+    expect(plan.results.map((r) => r.detail).join("\n")).toMatch(/SEARCH health_checks USING (?:COVERING )?INDEX health_checks_at \(at>\? AND at<\?\)/);
+  });
+
   it("確かめの無い月は稼働率を出さず、形の違う月は 422", async () => {
     expect(Uptime.parse(await (await uptime("2026-12")).json()).data).toEqual({ month: "2026-12", ratio: null, checks: 0 });
     for (const month of ["2026-13", "2026-1", "202611", "2026-00"]) expect((await uptime(month)).status).toBe(422);
