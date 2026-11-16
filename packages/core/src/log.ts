@@ -1,16 +1,38 @@
 // 1 行の JSON のログ。Workers Logs に残る。鍵や作業トークンは伏せる (ログインと記録の 3.6)
 const SECRET_KEY = /authorization|cookie|token|secret|key|password/i;
+// 名前=値、名前: 値、JSON の "名前":"値" の値。引用符で囲んだ値は、エスケープした引用符と空白を含めて閉じる引用符まで (閉じなければ行の終わりまで) を 1 つの値とし、
+// 囲まない値は区切りまでを取り、途中から始まる引用符はその引用符の閉じまでを値に含める。どの枝も頭の 1 字で分かれるので、長い入力でも戻りが増えない
+const NAMED_SECRET = new RegExp(
+  [
+    String.raw`(\b[\w-]*(?:token|secret|key|password)[\w-]*"?\s*[:=]\s*)(?!"?\[伏せた\])`,
+    String.raw`(?:"(?:\\.|[^"\\\n])*"?|'[^'\n]*'?|(?:[^\s"',;&}]|'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?)+)`,
+  ].join(""),
+  "gi",
+);
+
+/**
+ * 名前の付いた鍵の値を伏せる。引用符で囲んだ値は引用符を残して中だけを伏せる
+ * @param match 当たった所
+ * @param name 名前と区切り
+ * @returns 伏せた所
+ */
+function maskNamed(match: string, name: string): string {
+  const value = match.slice(name.length);
+  const quote = value[0] === '"' || value[0] === "'" ? value[0] : "";
+  return `${name}${quote}[伏せた]${quote && value.length > 1 && value.endsWith(quote) ? quote : ""}`;
+}
+
 // 文の中に混じった鍵らしい物。上から順に置き換える。値だけを伏せ、何を伏せたかは名前で分かるようにする
-const SECRET_TEXT: [RegExp, string][] = [
+const SECRET_TEXT: [RegExp, string | ((match: string, name: string) => string)][] = [
   // ヘッダーの行は値に空白や ; を含むので、行の終わりまで伏せる
   [/\b(authorization|proxy-authorization|cookie|set-cookie)("?\s*[:=]\s*)[^\n]*/gi, "$1$2[伏せた]"],
+  // 名前の付いた値は、中の Bearer や JWT より先に値ごと伏せる
+  [NAMED_SECRET, maskNamed],
   [/\bBearer\s+[\w.~+/=-]+/gi, "Bearer [伏せた]"],
   // 作業トークン (JWT)。署名の無い 2 つの部分だけでも伏せる
   [/eyJ[\w-]+\.[\w-]+(?:\.[\w-]*)?/g, "[伏せた]"],
   // GitHub と Anthropic の鍵の頭。名前が付いていなくても形で分かる
   [/\b(?:gh[pousr]_|github_pat_|sk-ant-)[\w-]+/g, "[伏せた]"],
-  // 名前=値、名前: 値、JSON の "名前":"値"
-  [/(\b[\w-]*(?:token|secret|key|password)[\w-]*"?\s*[:=]\s*"?)(?!\[伏せた\])[^\s",;&}]+/gi, "$1[伏せた]"],
 ];
 
 /**
@@ -19,7 +41,7 @@ const SECRET_TEXT: [RegExp, string][] = [
  * @returns 伏せた文
  */
 export function redactText(text: string): string {
-  return SECRET_TEXT.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), text);
+  return SECRET_TEXT.reduce((out, [pattern, replacement]) => (typeof replacement === "string" ? out.replace(pattern, replacement) : out.replace(pattern, replacement)), text);
 }
 
 // 外 (GitHub の Issue) に出す文で、鍵に加えて伏せる物。上から順に置き換える
