@@ -115,13 +115,34 @@ export function browserLive(api: Api): LiveDeps {
   };
 }
 
+/** 重ねないために覚えておく印の数。開いたままの画面で際限なく増えないよう、直近の物だけを覚える */
+export const MARK_MEMORY = 200;
+
+/**
+ * 直近の MARK_MEMORY 個の印を覚える入れ物を作る
+ * @returns 覚えているかを見る has と、覚える add
+ */
+function recentIds(): { has: (id: string) => boolean; add: (id: string) => void } {
+  const ids = new Set<string>();
+  return {
+    has: (id) => ids.has(id),
+    add: (id) => {
+      ids.add(id);
+      // Set は足した順に並ぶので、先頭が一番古い
+      if (ids.size <= MARK_MEMORY) return;
+      const [oldest] = ids;
+      if (oldest !== undefined) ids.delete(oldest);
+    },
+  };
+}
+
 /**
  * 印を受けて読み直す関数を作る。同じ印は 1 回だけ読み、読み直している間に来た印はまとめて終わった後に 1 回だけ読む
  * @param pull 読み直す
  * @returns 印の ID を渡す関数
  */
 export function markReloader(pull: () => Promise<void>): (id: string) => void {
-  const seen = new Set<string>();
+  const seen = recentIds();
   let running = false;
   let again = false;
   const run = (): void => {
@@ -203,15 +224,19 @@ export function useLiveEvent(listener: LiveListener): void {
 }
 
 /**
- * 出来事の印の鍵。同じ鍵の印を 2 回受けても読み直しを重ねない。社員は状態とタスクまで含め、変わった時だけ読み直す
- * @param event 出来事
- * @returns 鍵
+ * 出来事を数えるかを決める関数を作る。通知と発言は 1 件に 1 つの ID なので、同じ印を 2 回受けても 1 回だけ数える。
+ * 社員は社員 DO が変わった時だけ出し、前と同じ状態に戻る事もあるので毎回数える。木の 1 件は何度も変わるので毎回数える
+ * @returns 出来事を受けて、数えるなら true を返す関数
  */
-export function markKey(event: LiveEvent): string {
-  if (event.type === "staff") return `staff:${event.staff.id}/${event.staff.state}/${event.staff.nodeId ?? ""}`;
-  if (event.type === "notice") return `notice:${event.notice.id}`;
-  if (event.type === "node") return `node:${event.node.id}`;
-  return `message:${event.message.id}`;
+export function liveTickCounter(): (event: LiveEvent) => boolean {
+  const seen = recentIds();
+  return (event) => {
+    if (event.type === "staff" || event.type === "node") return true;
+    const key = event.type === "notice" ? `notice:${event.notice.id}` : `message:${event.message.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  };
 }
 
 /**
@@ -222,14 +247,9 @@ export function markKey(event: LiveEvent): string {
 export function useLiveTick(match: (event: LiveEvent) => boolean): number {
   const { connected } = useLive();
   const [tick, setTick] = useState(0);
-  const [seen] = useState(() => new Set<string>());
+  const [count] = useState(liveTickCounter);
   useLiveEvent((event) => {
-    if (!match(event)) return;
-    // 木の 1 件は何度も変わるので、同じ印を重ねないのは社員と通知と発言だけにする
-    const key = markKey(event);
-    if (event.type !== "node" && seen.has(key)) return;
-    seen.add(key);
-    setTick((t) => t + 1);
+    if (match(event) && count(event)) setTick((t) => t + 1);
   });
   // つながり直した時は、切れていた間の変わりを拾うため 1 回読み直す
   const [was, setWas] = useState(connected);

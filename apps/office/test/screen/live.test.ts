@@ -1,7 +1,7 @@
 // 画面の配信。切れたら新しい作業トークンで待ちを倍にしてつなぎ直し、知らない形は捨てて受け続け、同じ印で読み直しを重ねない (社員と自動の 3.7)
 import type { LiveEvent } from "@know-office/core";
 import { describe, expect, it } from "vitest";
-import { type LiveDeps, markReloader, RETRY_FIRST_MS, RETRY_MAX_MS, runLive, type SocketLike } from "../../src/screen/parts/live.tsx";
+import { type LiveDeps, liveTickCounter, MARK_MEMORY, markReloader, RETRY_FIRST_MS, RETRY_MAX_MS, runLive, type SocketLike } from "../../src/screen/parts/live.tsx";
 
 const NOTICE = "01a22eaf-c180-7411-9da6-a341454f0f6c";
 const OTHER = "01a22eaf-c180-7809-93bb-887b2a06b445";
@@ -164,5 +164,47 @@ describe("印で読み直す", () => {
     reload(OTHER);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toBe(2);
+  });
+
+  it("覚える印は直近の数までにし、古い印はまた読む", async () => {
+    let calls = 0;
+    const reload = markReloader(() => {
+      calls += 1;
+      return Promise.resolve();
+    });
+    for (let n = 0; n <= MARK_MEMORY; n += 1) {
+      reload(`id-${String(n)}`);
+      await tick();
+    }
+    expect(calls).toBe(MARK_MEMORY + 1);
+    // 直近の物は重ねず、一番古い物は忘れているのでまた読む
+    reload(`id-${String(MARK_MEMORY)}`);
+    await tick();
+    expect(calls).toBe(MARK_MEMORY + 1);
+    reload("id-0");
+    await tick();
+    expect(calls).toBe(MARK_MEMORY + 2);
+  });
+});
+
+/**
+ * 社員の様子の印
+ * @param state 社員の状態
+ * @returns 印
+ */
+const staff = (state: "working" | "off"): LiveEvent => ({ type: "staff", staff: { id: "builder", state, nodeId: null } });
+
+describe("出来事で読み直す数", () => {
+  it("社員が前と同じ状態に戻っても、そのたびに読み直す", () => {
+    const count = liveTickCounter();
+    expect([staff("working"), staff("off"), staff("working")].map(count)).toEqual([true, true, true]);
+  });
+
+  it("木の印は毎回、通知と発言の同じ印は 1 回だけ数える", () => {
+    const count = liveTickCounter();
+    const node: LiveEvent = { type: "node", node: { id: NOTICE } };
+    const notice: LiveEvent = { type: "notice", notice: { id: NOTICE } };
+    const message: LiveEvent = { type: "message", message: { id: OTHER, at: "2026-11-16T00:00:00.000Z", staffId: "builder", nodeId: null, sender: "owner", body: "a", truncated: false } };
+    expect([node, node, notice, notice, message, message].map(count)).toEqual([true, true, true, false, true, false]);
   });
 });
