@@ -180,7 +180,8 @@ test.describe("全体を止める", () => {
     await main.getByRole("button", { name: "GitHub App の鍵を入れる" }).click();
     await main.getByLabel("新しい API の鍵").fill(`sk-ant-e2e-${crypto.randomUUID()}`);
     await main.getByRole("button", { name: "Claude の鍵を入れる" }).click();
-    await expect(main.getByText("入れ直した")).toHaveCount(2);
+    // 手順の文にも「入れ直した」があるので、印の言葉だけをちょうどで数える
+    await expect(main.getByText("入れ直した", { exact: true })).toHaveCount(2);
 
     await page.goto("/guard");
     await page.getByRole("main").getByRole("button", { name: "すべての社員を再開する" }).click();
