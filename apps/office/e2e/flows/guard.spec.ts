@@ -103,6 +103,11 @@ test.describe("通知と手で止めるボタン", () => {
     await expect(dialog.getByText("止まる社員: 社長")).toBeVisible();
     await dialog.getByRole("button", { name: "取り消す" }).click();
     await expect(dialog).toBeHidden();
+    // 全体を止める確認の画面も、取り消すと止めない
+    await page.getByRole("button", { name: "すべての社員を止める" }).click();
+    const all = page.getByRole("dialog", { name: "全体を止めますか" });
+    await all.getByRole("button", { name: "取り消す" }).click();
+    await expect(all).toBeHidden();
     await page.reload();
     await expect(part(page, "止めている物").getByText("止めている物は無い")).toBeVisible();
 

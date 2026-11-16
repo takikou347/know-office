@@ -104,11 +104,12 @@ describe("セッション", () => {
     const headers = await gate.signIn();
     const cookie = headers["Cookie"] ?? "";
     const token = cookie.split(".")[0] ?? "";
+    const bads = { 書き換え: `${cookie.slice(0, -2)}AA`, a: `${token}.a`, "!!": `${token}.!!`, 空: `${token}.` };
     const statuses: Record<string, number> = {};
-    for (const bad of [`${cookie.slice(0, -2)}AA`, ...["a", "!!", ""].map((signature) => `${token}.${signature}`)]) {
-      statuses[bad] = (await gate.request("/api/v1/me", { headers: { ...headers, Cookie: bad } })).status;
+    for (const [name, bad] of Object.entries(bads)) {
+      statuses[name] = (await gate.request("/api/v1/me", { headers: { ...headers, Cookie: bad } })).status;
     }
-    expect(Object.values(statuses)).toEqual([401, 401, 401, 401]);
+    expect(statuses).toEqual({ 書き換え: 401, a: 401, "!!": 401, 空: 401 });
   });
 
   it("2 時間操作が無いと切れる。操作があれば続く", async () => {
