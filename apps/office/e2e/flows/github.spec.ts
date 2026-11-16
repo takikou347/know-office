@@ -40,11 +40,12 @@ function githubCard(page: Page): Locator {
  * @param repo リポジトリ
  */
 async function recordRepo(page: Page, repo: string): Promise<void> {
+  // 代わりの GitHub は /github の下に立つので、置く道もその下の道にする
   const replies: [string, unknown][] = [
-    [`GET /repos/${repo}`, { full_name: repo, private: false, default_branch: "main" }],
-    [`GET /repos/${repo}/commits/main/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] }],
-    [`GET /repos/${repo}/rulesets`, []],
-    [`POST /repos/${repo}/rulesets`, { id: 7, name: "know-office" }],
+    [`GET /github/repos/${repo}`, { full_name: repo, private: false, default_branch: "main" }],
+    [`GET /github/repos/${repo}/commits/main/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] }],
+    [`GET /github/repos/${repo}/rulesets`, []],
+    [`POST /github/repos/${repo}/rulesets`, { id: 7, name: "know-office" }],
   ];
   for (const [route, body] of replies) {
     const res = await page.request.post(`${FAKE_GITHUB}/__fake/routes`, { data: { route, body } });
@@ -102,6 +103,7 @@ test.beforeEach(() => {
 test.afterEach(async ({ page }) => {
   await resumeOffice(page, linked);
   unlink();
+  expect((await page.request.delete(`${FAKE_GITHUB}/__fake/failures`)).status()).toBe(204);
 });
 
 test.describe("ボタン 1 つで連携する", () => {
@@ -116,7 +118,7 @@ test.describe("ボタン 1 つで連携する", () => {
   test("連携していても GitHub がリポジトリを返さなければ、読めなかった事を出す", async ({ page }) => {
     await useOwnerPasskey(page);
     linked = await linkFromScreen(page);
-    const res = await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: "GET /installation/repositories", status: 500 } });
+    const res = await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: "GET /installation/repositories", status: 500, times: 2 } });
     expect(res.status()).toBe(204);
     await page.reload();
     await expect(githubCard(page).getByText("連携済み")).toBeVisible();

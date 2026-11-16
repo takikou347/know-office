@@ -1,6 +1,7 @@
 // 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、プルリクエストのレビューと行のコメント、Git の API のコミットを GitHub と同じ形で持つ
 import { generateKeyPairSync } from "node:crypto";
 import { Hono } from "hono";
+import { flowRoutes } from "./github-flows.ts";
 import { renewAppKey } from "./github-keys.ts";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
@@ -10,8 +11,6 @@ import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, 
 export type { FakeApp, FakeGitHub, FakeGitHubOptions, FakeToken, GitHubRequest } from "./github-types.ts";
 
 const FakeRoute = z.object({ route: z.string(), body: z.unknown() });
-/** 次の 1 度だけ失敗を返す道と、返すステータス */
-const FakeFailure = z.object({ route: z.string(), status: z.number().int().min(400).max(599) });
 
 const TokenRequest = z.object({ repositories: z.array(z.string()).optional(), permissions: z.record(z.string(), Permission).optional() }).strict();
 
@@ -39,7 +38,15 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const state = { gitStatus: null as number | null, nextMint: null as FakeGitHub["nextMint"] };
   const visibility = new Map<string, boolean>();
   const sent: FakeGitHub["sent"] = [];
-  const failures = new Map<string, number>();
+  const failures = new Map<string, { status: number; left: number }>();
+  // 置いた失敗を 1 度返す。画面の通しは、開発の画面が読み込みを 2 度走らせるので 2 度置ける
+  const takeFailure = (route: string): Response | null => {
+    const failure = failures.get(route);
+    if (failure === undefined) return null;
+    if (failure.left > 1) failures.set(route, { ...failure, left: failure.left - 1 });
+    else failures.delete(route);
+    return new Response(JSON.stringify({ message: "fake failure" }), { status: failure.status, headers: { "content-type": "application/json" } });
+  };
   const heads = new Map<string, string>();
   const trees = new Map<string, FakeTreeEntry[]>();
   const posted: FakePosted = { reviews: [], comments: [] };
@@ -146,12 +153,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       return c.body(null, 204);
     })
     .get("/__fake/requests", (c) => c.json(requests))
-    // 次の 1 度だけ、その道に失敗を返す。画面の通しで GitHub の失敗を出すのに使う
-    .post("/__fake/failures", async (c) => {
-      const { route, status } = FakeFailure.parse(await c.req.json());
-      failures.set(route, status);
-      return c.body(null, 204);
-    })
+    .route("/", flowRoutes(apps, failures))
     // 画面: オーナーが「作成」を押すと App ができ、manifest の redirect_url に code と state を付けて戻す
     .post("/web/settings/apps/new", async (c) => {
       const form = await c.req.parseBody();
@@ -168,12 +170,6 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       url.searchParams.set("code", code);
       url.searchParams.set("state", c.req.query("state") ?? "");
       return c.redirect(url.toString(), 302);
-    })
-    // 画面: オーナーが App の設定で「Generate a private key」を押すと、新しい秘密鍵の PEM が落ちてくる
-    .post("/web/settings/apps/:slug/keys", (c) => {
-      const found = [...apps.values()].find((a) => a.slug === c.req.param("slug"));
-      if (!found) return c.text("Not Found", 404);
-      return c.text(renewAppKey(found), 200, { "content-type": "application/x-pem-file" });
     })
     // 画面: オーナーが「インストール」を押すと、pick のリポジトリに入れ、setup_url に installation_id を付けて戻す
     .get("/web/apps/:slug/installations/new", (c) => {
@@ -273,11 +269,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     .get("/installation/repositories", (c) => {
       const token = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
       remember("GET /installation/repositories", "", token);
-      const failure = failures.get("GET /installation/repositories");
-      if (failure !== undefined) {
-        failures.delete("GET /installation/repositories");
-        return new Response(JSON.stringify({ message: "fake failure" }), { status: failure, headers: { "content-type": "application/json" } });
-      }
+      const failed = takeFailure("GET /installation/repositories");
+      if (failed) return failed;
       const t = live(token);
       if (!t) return c.json({ message: "Bad credentials" }, 401);
       const all = (installations.get(t.installationId)?.repos ?? []).filter((r) => reaches(t, r));
@@ -335,11 +328,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       if (/^POST \/app\/installations\/\d+\/access_tokens$/.test(route)) {
         return c.json({ token: `ghs_test${String(next())}`, expires_at: "2099-01-01T00:00:00Z" }, 201);
       }
-      const failure = failures.get(route);
-      if (failure !== undefined) {
-        failures.delete(route);
-        return new Response(JSON.stringify({ message: "fake failure" }), { status: failure, headers: { "content-type": "application/json" } });
-      }
+      const failed = takeFailure(route);
+      if (failed) return failed;
       if (!routes.has(route)) return pulls.answer(route, text, token) ?? c.json({ message: "Not Found" }, 404);
       const body = routes.get(route);
       // 出したプルリクエストは、出した者を覚える。自分で可を付ける事を断るのに使う
@@ -379,7 +369,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     uninstall: (installationId: number): void => void installations.delete(installationId),
     newPrivateKey: (appId: number): string => renewAppKey(apps.get(appId)),
     sent,
-    failNext: (route: string, status: number): void => void failures.set(route, status),
+    failNext: (route: string, status: number): void => void failures.set(route, { status, left: 1 }),
     heads,
     trees,
     posted,

@@ -58,7 +58,7 @@ test.describe("再開", () => {
     await main.getByLabel("新しい Webhook secret").fill(SECRET);
     await main.getByRole("button", { name: "GitHub App の鍵を入れる" }).click();
     await expect(main.getByRole("button", { name: "GitHub App の鍵を入れる" })).toBeDisabled();
-    // パスキーで確かめてから 1 度だけ送り直す
+    // 確認の期限が切れているので、送る前にパスキーで確かめてから 1 度だけ送る
     expect(stepUps).toHaveLength(1);
     expect(stepUps[0]).toMatchObject({ type: "public-key", response: { authenticatorData: expect.any(String), signature: expect.any(String) } });
 
@@ -67,7 +67,6 @@ test.describe("再開", () => {
     await expect(main.getByText("鍵を入れ直しました")).toBeVisible();
     await expect(main.getByText("古い秘密鍵を、Anthropic の Console で古い API の鍵を消してから", { exact: false })).toBeVisible();
     expect(sent).toEqual([
-      { path: "/api/v1/guard/keys/github-app", body: { privateKey: PEM, webhookSecret: SECRET } },
       { path: "/api/v1/guard/keys/github-app", body: { privateKey: PEM, webhookSecret: SECRET } },
       { path: "/api/v1/guard/keys/claude", body: { apiKey: API_KEY } },
     ]);

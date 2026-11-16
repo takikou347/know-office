@@ -78,7 +78,7 @@ test.describe("組織図", () => {
     await expect(part(page, "承認を待つ物").getByText("承認を待つ物は無い")).toBeVisible();
 
     await page.goto("/goals");
-    await expect(page.getByRole("main").getByText("開発と運用の担当")).toBeVisible();
+    await expect(page.getByRole("main").getByText("開発と運用の担当", { exact: true })).toBeVisible();
   });
 
   test("社員の追加は、承認しても社員が増えない事を出す", async ({ page }) => {

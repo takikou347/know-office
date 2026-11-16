@@ -16,8 +16,9 @@ async function sessionId(w: WorkWorld): Promise<string> {
 
 const denied = (w: WorkWorld) => w.gate.audits.filter((a) => a.action === "step_up.denied");
 
-describe("パスキーの確認が無くて断った変更", () => {
-  it("守りを弱める設定の変更を断ると、ルート、変えようとした項目、ログインセッションを残す", async () => {
+describe("大事な操作の前にパスキーで確かめる", () => {
+  // 守りを弱める設定の変更を断ると、ルート、変えようとした項目、ログインセッションを残す
+  it("確かめずに変えようとして断られる", async () => {
     await api(world, "PUT", "/api/v1/settings/service.protectedPaths", { version: 0, value: [], reason: "弱める" }, 401);
     expect(denied(world)).toEqual([
       expect.objectContaining({

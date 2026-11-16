@@ -150,15 +150,18 @@ test.describe("止める仕組みを守る", () => {
       await dialog.getByRole("button", { name: "変える" }).click();
     };
 
-    // 1 度目はパスキーの確認が無いので断られ、画面がパスキーで確かめてから 1 度だけ送り直す
-    const refused = page.waitForResponse((r) => r.url().endsWith("/api/v1/guard/thresholds") && r.request().method() === "PUT" && r.status() === 401);
+    // 確認の期限が切れているので、画面は送る前にパスキーで確かめ、断られずに 1 度だけ送る
+    const puts: number[] = [];
+    page.on("response", (r) => {
+      if (r.url().endsWith("/api/v1/guard/thresholds") && r.request().method() === "PUT") puts.push(r.status());
+    });
     const confirmed = page.waitForResponse((r) => r.url().endsWith("/api/v1/me/step-up") && r.status() === 200);
     await change(next, "通しの確かめで上げる");
-    await refused;
     await confirmed;
     await expect(basis.getByText(`タスクを止める、同じ失敗の続いた数を ${String(next)} 回 に変えました (バージョン ${String(before.version + 1)})`)).toBeVisible();
     await expect(basis.getByText(`基準のバージョン ${String(before.version + 1)}`)).toBeVisible();
     await expect(basis.getByRole("row", { name: /タスクを止める、同じ失敗の続いた数/ })).toContainText(`${String(next)} 回`);
+    expect(puts).toEqual([200]);
 
     // 読み直しても新しい値のまま
     await page.reload();

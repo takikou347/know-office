@@ -66,6 +66,11 @@ describe("開発環境の代わりの物", () => {
     expect((await github.app.request("/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(502);
     // 失敗は 1 度だけで、次は鍵を確かめる
     expect((await github.app.request("/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(401);
+    // 回数を決めて置いた失敗はその回数だけ返し、片付けで外せる
+    await github.app.request("/__fake/failures", { method: "POST", body: JSON.stringify({ route: "GET /installation/repositories", status: 500, times: 2 }) });
+    expect((await github.app.request("/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(500);
+    expect((await github.app.request("/__fake/failures", { method: "DELETE" })).status).toBe(204);
+    expect((await github.app.request("/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(401);
   });
 
   it("代わりの GitHub は積んだ返事を返し、無い物は 404 で返す", async () => {

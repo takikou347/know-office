@@ -39,6 +39,24 @@ async function asked(w: WorkWorld, kind: "external_integration" | "cost_increase
 }
 
 /**
+ * 承認をパスキー無しで断り、確かめた後に通す事を確かめる
+ * @param w テストの物
+ * @param kind 外部連携か費用の増える事
+ */
+async function stepUpFirst(w: WorkWorld, kind: "external_integration" | "cost_increase"): Promise<void> {
+  const { approvalId, nodeId } = await asked(w, kind);
+  expect(await api(w, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "よい" }, 401)).toMatchObject({ code: "step_up_required" });
+  expect(await statusOf(w, "approvals", approvalId)).toBe("pending");
+  expect(await statusOf(w, "nodes", nodeId)).toBe("waiting_owner");
+
+  await stepUp(w);
+  expect(await api(w, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "よい" })).toMatchObject({ status: "approved", reason: "よい" });
+  expect(await statusOf(w, "nodes", nodeId)).toBe("todo");
+  // 決めた承認をもう 1 度決める事はできない
+  await api(w, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "よい" }, 409);
+}
+
+/**
  * 承認を求めるタスクの無い承認の行を直に置く
  * @param w テストの物
  * @param kind 種類
@@ -87,21 +105,15 @@ describe("社員の追加", () => {
   });
 });
 
-describe("外部連携と費用の増える事", () => {
-  for (const kind of ["external_integration", "cost_increase"] as const) {
-    it(`${kind} の承認はパスキーで確かめ、確かめるまで承認を待ったままにする`, async () => {
-      const { approvalId, nodeId } = await asked(world, kind);
-      expect(await api(world, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "よい" }, 401)).toMatchObject({ code: "step_up_required" });
-      expect(await statusOf(world, "approvals", approvalId)).toBe("pending");
-      expect(await statusOf(world, "nodes", nodeId)).toBe("waiting_owner");
+describe("大事な操作の前にパスキーで確かめる", () => {
+  // 外部連携と費用の増える事の承認はパスキーで確かめ、確かめるまで承認を待ったままにする
+  it("費用の増える事と外部連携の承認", async () => {
+    await expect(stepUpFirst(world, "external_integration")).resolves.toBeUndefined();
+  });
 
-      await stepUp(world);
-      expect(await api(world, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "よい" })).toMatchObject({ status: "approved", reason: "よい" });
-      expect(await statusOf(world, "nodes", nodeId)).toBe("todo");
-      // 決めた承認をもう 1 度決める事はできない
-      await api(world, "POST", `/api/v1/approvals/${approvalId}/decision`, { decision: "approve", reason: "よい" }, 409);
-    });
-  }
+  it("費用の増える事の承認も、パスキーで確かめるまで待ったままにする", async () => {
+    await expect(stepUpFirst(world, "cost_increase")).resolves.toBeUndefined();
+  });
 
   it("差し戻しはパスキー無しで通る", async () => {
     const { approvalId, nodeId } = await asked(world, "cost_increase");
