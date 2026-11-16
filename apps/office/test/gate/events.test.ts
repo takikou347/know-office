@@ -68,6 +68,12 @@ describe("働いた事がゲートウェイに届く", () => {
     const key = String(said[1]?.["body_key"]);
     expect(key).toMatch(/^messages\/builder\/[0-9a-f-]{36}\.txt$/);
     expect(await (await world.d1.FILES.get(key))?.text()).toBe(long);
+    // 開いている画面にも配り、長い本文は頭だけにして印を付ける
+    const live = world.gate.live.published.filter((e) => JSON.stringify(e).startsWith('{"type":"message"'));
+    expect(live).toMatchObject([
+      { message: { staffId: "builder", sender: "staff", body: "ログインを直した", truncated: false } },
+      { message: { staffId: "builder", sender: "staff", truncated: true } },
+    ]);
   });
 
   it("エラーをエラーログに残し、鍵の形を伏せ、決めた名前のほかは 422 で断る", async () => {

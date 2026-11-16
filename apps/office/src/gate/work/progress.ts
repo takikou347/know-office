@@ -1,16 +1,12 @@
 // 社員の進みを受ける所。チェックポイントを社員 DO と出来事に渡して作業トークンを差し替え、社員の発言を会話に残す。社員のツールとワークスペースの出来事の両方から呼ぶ (社員が考えるの 3.2、3.7)
-import { type CheckpointInput, newId, type StaffId } from "@know-office/core";
-import { drizzle } from "drizzle-orm/d1";
-import { messages } from "../db/records.ts";
+import { type CheckpointInput, type StaffId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import { rethrowRpc } from "../rpc.ts";
+import { appendMessage } from "../routes/messages.ts";
 import { clockAt } from "./attendance.ts";
-import { appendNodeEvent, recordsOf } from "./nodes.ts";
+import { appendNodeEvent } from "./nodes.ts";
 import { renewTicket } from "./ticket.ts";
-
-/** 会話の行に置く本文の長さ。超える分は R2 に置く (ルートの一覧の 1.6) */
-export const MESSAGE_INLINE_CHARS = 2000;
 
 /**
  * チェックポイントを社員 DO に渡し、node_events に残し、残りが 10 分を切った作業トークンを差し替える
@@ -30,7 +26,7 @@ export async function reachCheckpoint(env: Bindings, staffId: StaffId, input: Ch
 }
 
 /**
- * 社員の発言を会話に 1 行足す。2,000 字を超える本文は R2 に置き、行には頭だけを置く
+ * 社員の発言を会話に 1 行足し、開いている画面に配る。2,000 字を超える本文は R2 に置き、行と配る出来事には頭だけを置く
  * @param env バインディング
  * @param said 社員、タスク、本文
  * @param said.staffId 社員 ID
@@ -41,16 +37,6 @@ export async function reachCheckpoint(env: Bindings, staffId: StaffId, input: Ch
  * @returns 足した行の ID
  */
 export async function addStaffMessage(env: Bindings, said: { staffId: StaffId; nodeId: string; body: string }, now: number, traceId?: string): Promise<string> {
-  const id = newId(clockAt(now));
-  let bodyKey: string | null = null;
-  if (said.body.length > MESSAGE_INLINE_CHARS) {
-    // R2 の置き場は確かめた社員 ID と作った ID だけから組み立てる
-    bodyKey = `messages/${said.staffId}/${id}.txt`;
-    await env.FILES.put(bodyKey, said.body);
-  }
-  await drizzle(recordsOf(env, now))
-    .insert(messages)
-    .values({ id, at: now, staffId: said.staffId, nodeId: said.nodeId, sender: "staff", body: said.body.slice(0, MESSAGE_INLINE_CHARS), bodyKey, traceId: traceId ?? null });
-  // TODO(#76): 開いている画面へ LiveDO で配る
-  return id;
+  const message = await appendMessage(env, { ...said, sender: "staff", traceId: traceId ?? null }, clockAt(now));
+  return message.id;
 }
