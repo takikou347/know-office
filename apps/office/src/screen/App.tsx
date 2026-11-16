@@ -24,20 +24,20 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
   const screen = screenOf(pathname, shown);
   return (
     <NoticeProvider>
-      <AppShell
-        items={sideItemsWith(shown)}
-        current={more ? undefined : screen.id}
-        bottomItems={bottomItems}
-        bottomCurrent={bottomCurrentOf(pathname, shown)}
-        brand={{ name: "know-office" }}
-        header={
-          <>
-            <AppBar title={more ? "その他" : screen.label} position="sticky" />
-            <LiveNoticeBar />
-          </>
-        }
-      >
-        <NoticeHold>
+      <NoticeHold>
+        <AppShell
+          items={sideItemsWith(shown)}
+          current={more ? undefined : screen.id}
+          bottomItems={bottomItems}
+          bottomCurrent={bottomCurrentOf(pathname, shown)}
+          brand={{ name: "know-office" }}
+          header={
+            <>
+              <AppBar title={more ? "その他" : screen.label} position="sticky" />
+              <LiveNoticeBar />
+            </>
+          }
+        >
           <Page
             screen={more ? "more" : screen.id}
             pathname={pathname}
@@ -47,8 +47,8 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
             extensions={extensions}
             toggleExtension={toggleExtension}
           />
-        </NoticeHold>
-      </AppShell>
+        </AppShell>
+      </NoticeHold>
     </NoticeProvider>
   );
 }

@@ -8,7 +8,7 @@ import { jstTime } from "../format.ts";
 /** 通知を読み直す間。起きてから 5 分以内に画面に出すので、それより短くする */
 export const NOTICE_POLL_MS = 60_000;
 
-/** 開いた時に、初めの通知を待って中身を隠しておく長さの上限。帯が後から差し込まれて、押そうとした物がずれないようにする */
+/** 開いた時に、初めの通知を待って画面を描かずにおく長さの上限。帯が後から差し込まれて、押そうとした物がずれないようにする */
 export const NOTICE_HOLD_MS = 1_000;
 
 /** 1 度に読む通知の数 */
@@ -24,7 +24,7 @@ type NoticesState = {
   state: "loading" | "ok" | "error";
   /** 通知を既読にする */
   markRead: (id: string) => void;
-  /** 初めの通知を待って、中身を隠しているか */
+  /** 初めの通知を待って、画面を描かずにいるか */
   holding: boolean;
 };
 
@@ -64,7 +64,7 @@ export function watchNotices(pull: () => void, view: NoticeView | null): () => v
   };
 }
 
-/** 中身を隠すのを止める時を決める物 */
+/** 画面を描き始める時を決める物 */
 export type NoticeHoldTimer = {
   /** 初めの通知が届いた (読めなかった時も含む) */
   settled: () => void;
@@ -74,7 +74,7 @@ export type NoticeHoldTimer = {
 
 /**
  * 初めの通知が届くか、ms が過ぎるかの早い方で、1 度だけ release を呼ぶ
- * @param release 中身を出す関数
+ * @param release 画面を描き始める関数
  * @param ms 待つ長さの上限
  * @returns 届いた事を伝える関数と、止める関数
  */
@@ -151,18 +151,19 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
 }
 
 export interface NoticeHoldProps {
-  /** 隠す中身 */
+  /** 待ってから描く画面 */
   children: ReactNode;
 }
 
 /**
- * 開いた時に、初めの通知が届くまで (長くて NOTICE_HOLD_MS) 中身を隠し、帯と一緒に出す。隠す間も場所は取る
- * @param props 中身
- * @returns 中身
+ * 開いた時に、初めの通知が届くまで (長くて NOTICE_HOLD_MS) 画面を描かず、帯と中身を一緒に描く。
+ * 隠して描くと、待つ間に移った画面で focus と Tab の行き先が隠れた物に当たるので、描かずに待つ
+ * @param props 画面
+ * @returns 画面。待つ間は何も描かない
  */
 export function NoticeHold({ children }: NoticeHoldProps) {
   const { holding } = useContext(NoticesContext);
-  return <div style={{ display: "contents", visibility: holding ? "hidden" : undefined }}>{children}</div>;
+  return holding ? null : children;
 }
 
 export interface NoticeBarProps {
