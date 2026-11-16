@@ -89,6 +89,9 @@ async function reviewerState(page: Page): Promise<string | undefined> {
   return Staff.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "reviewer")?.state;
 }
 
+/** 通しの間だけ広げる勤務の時刻 */
+const ALL_DAY = { start: "00:00", end: "23:59" };
+
 /**
  * レビュー担当を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
  * 前に流した時のワークスペースが落ちて待っていれば、止めて再開して作り直させる。勤務の中でなければ、勤務の時刻を一日に広げて出勤させる
@@ -106,9 +109,11 @@ async function clockInReviewer(page: Page, allDay = false): Promise<() => Promis
   if (!allDay && (await reviewerState(page)) === "working") return () => Promise.resolve();
   await ownerPasskey(page);
   const box = await scheduleCard(page);
-  const was = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
+  const read = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
+  // 前の通しが落ちて一日に広げたまま残していれば、それを元にせず、勤務の時刻の初期値 (DEFAULT_SCHEDULE) に戻す
+  const was = read.start === ALL_DAY.start && read.end === ALL_DAY.end ? { start: "09:00", end: "17:00" } : read;
   const restore = () => setSchedule(page, was.start, was.end);
-  await setSchedule(page, "00:00", "23:59");
+  await setSchedule(page, ALL_DAY.start, ALL_DAY.end);
   try {
     // 同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して流し直す時は、開発の道で退勤した日の印を消して出勤させる
     expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);
@@ -382,6 +387,8 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
     // 早退の時刻を過ぎてから、SDK がチェックポイントを伝える。それまで社員はタスクの途中にいる
     const checkpoint = { type: "tool_use", id: "toolu_flow_carry", name: "mcp__staff__checkpoint", input: { kind: "note", note: "続きは明日" } };
     await scriptReply(page, [checkpoint], "tool_use", until.at - Date.now() + 15_000);
+    // チェックポイントで退勤した後も SDK はその次を求めるので、終わりの文で閉じさせる。社員はもうタスクを離れているので、この終わりはタスクを済にしない
+    await scriptReply(page, [{ type: "text", text: "今日はここまで" }], "end_turn");
     await page.goto("/goals");
     const title = `${CARRY_TITLE} ${String(Date.now())}`;
     const nodeId = await addTask(page, title, "レビュー担当");
@@ -407,14 +414,20 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
     const active = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("listitem").filter({ hasText: "に出した" });
     await active.getByRole("button", { name: "早退の指示を取り消す" }).click();
     await expect(page.getByText("早退の指示を取り消しました")).toBeVisible();
+    // 出勤し直すとすぐ取って SDK が呼ぶので、終わりの返事は出勤させる前に積む。前の呼び出しは閉じたので、ほかに取られない
+    await scriptFinish(page);
     expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);
     await expect.poll(async () => Runs.parse(await (await page.request.get(`${FAKES}/workspace/__fake/runs`)).json()).filter((r) => r.staffId === "reviewer" && r.nodeId === nodeId), { timeout: 30_000 }).toHaveLength(2);
-    await scriptFinish(page);
     await expect.poll(async () => NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status, { timeout: 60_000 }).toBe("done");
+    // 呼び直しが返事の無い代わりの Claude API に当たって、ワークスペースを待つ事になっていない
+    expect(await reviewerState(page)).not.toBe("waiting");
   } finally {
-    // 途中で落ちても、早退の指示、続けるタスク、広げた勤務の時刻を次の通しに残さない
-    cancelLeftOrders("reviewer");
-    await dropLeftovers(page);
-    await restore();
+    // 途中で落ちても、広げた勤務の時刻、早退の指示、続けるタスクを次の通しに残さない。片付けは落ちうるので、勤務の時刻を先に戻す
+    try {
+      await restore();
+    } finally {
+      cancelLeftOrders("reviewer");
+      await dropLeftovers(page);
+    }
   }
 });
