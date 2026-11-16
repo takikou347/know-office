@@ -1,7 +1,9 @@
-// 毎日 0 時 5 分の定期ジョブ。前の日の日ごとの集計を、社員 DO を通して作り直し、直した Issue の効き目を確かめる (社員と勤怠の 3.6、サービスと拡張の 3.7)
+// 毎日 0 時 5 分の定期ジョブ。前の日の日ごとの集計を、社員 DO を通して作り直し、全部の年の監査ログのつなぎを確かめ、直した Issue の効き目を確かめる (社員と勤怠の 3.6、ログインと記録の 3.4、サービスと拡張の 3.7)
 import { type Clock, jstDay, jstDayStart, StaffId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { checkEffects } from "../findings/effect.ts";
+import { type GuardDeps, UNCONNECTED_DEPS } from "../guard/deps.ts";
+import { observe } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import type { WeeklyDeps } from "./weekly.ts";
 
@@ -21,6 +23,26 @@ export async function rebuildYesterday(env: Bindings, clock: Clock): Promise<voi
 }
 
 /**
+ * record_years の全部の年のハッシュチェーンを記録 DO で頭から確かめ、合わない年があれば確かな不正として全体を止める
+ * 記録 DO の verify は確かめ始めた時の最後の行までを読み、行は 1 文で前のハッシュと一緒に書くので、書いている途中の行を合わないと見ない
+ * 記録 DO に届かない年は止めずにエラーログに残し、ほかの年を確かめ続ける。次の日にまた確かめる
+ * @param env バインディング
+ * @param clock 時刻
+ * @param deps 自動停止が外へ頼む口
+ */
+export async function verifyChains(env: Bindings, clock: Clock, deps: GuardDeps): Promise<void> {
+  const { results } = await env.DB.prepare("SELECT year FROM record_years ORDER BY year").all<{ year: number }>();
+  const recorder = env.RECORDER.get(env.RECORDER.idFromName("recorder"));
+  for (const { year } of results) {
+    const check = await recorder.verify(year).catch(async (error: unknown) => {
+      await recordError(env, { source: "job", level: "error", code: "chain_verify_failed", error }, clock);
+      return null;
+    });
+    if (check && !check.ok) await observe(env, { type: "chain_broken", year }, clock.now(), deps);
+  }
+}
+
+/**
  * 0 時 5 分の定期ジョブを走らせる。失敗は投げずにエラーログに残す。次の日の 0 時 5 分か、出勤や訂正でまた作り直す
  * 週のバッチ処理の口を渡した時は、直してから 7 日たった Issue の効き目も確かめる (サービスと拡張の 3.7)
  * @param env バインディング
@@ -33,6 +55,8 @@ export function runDaily(env: Bindings, ctx: { waitUntil(promise: Promise<unknow
   ctx.waitUntil(
     rebuildYesterday(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "daily_totals_rebuild_failed", error }, clock)),
   );
+  // 書き換えは監査ログを読んだ時だけでなく、毎日 1 度は全部の年で確かめる
+  ctx.waitUntil(verifyChains(env, clock, UNCONNECTED_DEPS).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "chain_verify_failed", error }, clock)));
   if (weekly) {
     ctx.waitUntil(checkEffects(env, weekly.tracker, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "finding_effect_failed", error }, clock)));
   }
