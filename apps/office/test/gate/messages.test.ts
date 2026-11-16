@@ -149,7 +149,7 @@ describe("会話の境目", () => {
   });
 
   it("R2 に置けなければ D1 にも足さず、配らない", async () => {
-    // getPlatformProxy の R2 は差し替えを受けないので、env の FILES ごと包む
+    // R2 はファイルで共有するので中を差し替えず、このテストの env の FILES だけを包む
     const files = gate.env.FILES;
     gate.env.FILES = wrap(files, "put", () => Promise.reject(new Error("R2 down")));
     expect((await send({ body: "あ".repeat(2001) })).status).toBe(500);
@@ -160,7 +160,7 @@ describe("会話の境目", () => {
   it("R2 に置いた後に D1 に足せなければ、置いた本文を消す", async () => {
     const rec = gate.env.REC_2026;
     if (!rec) throw new Error("REC_2026 が無い");
-    // getPlatformProxy の D1 は差し替えを受けないので、env の REC_2026 ごと包む
+    // D1 はファイルで共有するので中を差し替えず、このテストの env の REC_2026 だけを包む
     gate.env.REC_2026 = wrap(rec, "prepare", (sql: string) => {
       if (sql.startsWith("INSERT INTO messages")) throw new Error("D1 down");
       return rec.prepare(sql);
