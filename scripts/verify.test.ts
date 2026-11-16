@@ -49,9 +49,10 @@ void describe("走らせる手順を並べる", () => {
     assert.equal(stepsFor("/repo/know-office", ["--e2e"], env).at(-1)?.name, "e2e");
   });
 
-  void it("2-routes.md が v1.yaml と合うかを knowidea の道具で比べる", () => {
-    const step = stepsFor("/repo/know-office", [], { KNOWIDEA_DIR: "/repo/knowidea" }).find((s) => s.name === "routes");
-    assert.equal(step?.cmd, 'python3 "/repo/knowidea/tools/routes_md.py" --check "/repo/know-office/apps/office/openapi/v1.yaml"');
+  void it("lint、型、テスト、ビルド、check.py の順に並べ、ルートの一覧の照合は置かない", () => {
+    const steps = stepsFor("/repo/know-office", [], { KNOWIDEA_DIR: "/repo/knowidea" });
+    assert.deepEqual(steps.map((step) => step.name), ["lint", "typecheck", "test", "build", "check.py"]);
+    assert.equal(steps.some((step) => step.cmd.includes("routes_md")), false);
   });
 
   void it("knowidea が無い時は check.py の手順が落ちて置き場の渡し方を出す", () => {
@@ -95,7 +96,8 @@ void describe("knowidea の置き場を決める", () => {
   });
 
   void it("並べた手順は、作業ツリーからでもメインの隣の knowidea の check.py を呼ぶ", () => {
-    const step = stepsFor(worktree, [], {}, () => "/home/claude/know-office/.git").find((s) => s.name === "routes");
-    assert.match(step?.cmd ?? "", /^python3 "\/home\/claude\/knowidea\/tools\/routes_md\.py"/);
+    const step = stepsFor(worktree, [], {}, () => "/home/claude/know-office/.git").find((s) => s.name === "check.py");
+    // knowidea が無い CI でも、落ちる手順の文に同じ置き場が出る
+    assert.match(step?.cmd ?? "", /\/home\/claude\/knowidea(\/tools\/check\.py|\s)/);
   });
 });

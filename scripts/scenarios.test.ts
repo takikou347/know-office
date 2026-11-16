@@ -29,30 +29,44 @@ function repo(files: Record<string, string>): string {
 const DOC = [
   "# 見本",
   "",
-  "## 4. テスト",
+  "## 1. テストの置き場",
   "",
-  "### 4.1 要件とシナリオ",
+  "| 置き場 | 層 | 確かめる事 |",
+  "| --- | --- | --- |",
+  "| 拾わない | 単体 | x |",
   "",
-  "| 要件 | 中身とシナリオ |",
-  "| --- | --- |",
-  "| 見本の要件 | 本文の **太字** は拾わない。<br>1. 並び<br>**見本の要求**: 証明が無い → 断る<br>**見本の人**: 人が違う → 断る \\| 403 |",
-  "| 見本のチェック | 本文。<br>**見本の部品**: 部品が古い → 落ちる |",
+  "## 2. 要件ごとのシナリオ",
   "",
-  "### 4.2 テストの置き場",
+  "要件の名前は **太字** でも拾わない。",
   "",
-  "| 要件のシナリオ | テストの置き場 |",
-  "| --- | --- |",
-  "| 別の章 | <br>**拾わない**: x |",
+  "### 2.1 見本の要件",
+  "",
+  "| シナリオ | 場面 | 層 |",
+  "| --- | --- | --- |",
+  "| 見本の要求 | 証明が無い | 単体 |",
+  "| 見本の人 | 人が違う \\| 403 | 単体、通し |",
+  "",
+  "### 2.10 見本のチェック",
+  "",
+  "| シナリオ | 場面 | 層 |",
+  "| --- | --- | --- |",
+  "| 見本の部品 | 部品が古い | 画面 |",
+  "",
+  "## 3. 別の章",
+  "",
+  "| シナリオ | 場面 | 層 |",
+  "| --- | --- | --- |",
+  "| 拾わない | x | 単体 |",
   "",
 ].join("\n");
 
 void describe("要件のシナリオとテストを突き合わせる", () => {
-  void it("詳細設計の要件とシナリオの章から、要件の名前とシナリオの名前を順に読む", () => {
-    const dir = repo({ "6-guard.md": DOC });
-    assert.deepEqual(readScenarios(join(dir, "6-guard.md")), [
-      { doc: "6-guard", requirement: "見本の要件", scenario: "見本の要求" },
-      { doc: "6-guard", requirement: "見本の要件", scenario: "見本の人" },
-      { doc: "6-guard", requirement: "見本のチェック", scenario: "見本の部品" },
+  void it("テスト設計の要件ごとのシナリオの章から、節の名前を要件、表の 1 列目をシナリオとして順に読む", () => {
+    const dir = repo({ "4-guard.md": DOC });
+    assert.deepEqual(readScenarios(join(dir, "4-guard.md")), [
+      { doc: "4-guard", requirement: "見本の要件", scenario: "見本の要求" },
+      { doc: "4-guard", requirement: "見本の要件", scenario: "見本の人" },
+      { doc: "4-guard", requirement: "見本のチェック", scenario: "見本の部品" },
     ]);
   });
 
@@ -71,21 +85,35 @@ void describe("要件のシナリオとテストを突き合わせる", () => {
 
   void it("テストの無いシナリオを返す", () => {
     const scenarios = [
-      { doc: "6-guard", requirement: "r", scenario: "a" },
-      { doc: "6-guard", requirement: "r", scenario: "c" },
+      { doc: "4-guard", requirement: "r", scenario: "a" },
+      { doc: "4-guard", requirement: "r", scenario: "c" },
     ];
     const result = matchScenarios(scenarios, new Map([["a", ["x.test.ts"]]]));
     assert.deepEqual(result.rows.map((row) => [row.scenario, row.where]), [["a", "x.test.ts"], ["c", "無い"]]);
     assert.deepEqual(result.missing.map((row) => row.scenario), ["c"]);
   });
 
-  void it("文書の名前から、04-detail.md か 04-detail/ の機能ごとの文書を指す", () => {
-    assert.equal(docPath("/k", "04-detail"), "/k/services/know-office/docs/04-detail.md");
-    assert.equal(docPath("/k", "6-guard"), "/k/services/know-office/docs/04-detail/6-guard.md");
+  void it("文書の名前から、05-test/ の機能ごとのテスト設計を指す", () => {
+    assert.equal(docPath("/k", "4-guard"), "/k/services/know-office/docs/05-test/4-guard.md");
+  });
+
+  void it("名前を渡さない時は、05-test/ の index.md のほかの文書を全部読む", () => {
+    const dir = repo({
+      "services/know-office/docs/05-test/index.md": DOC,
+      "services/know-office/docs/05-test/4-guard.md": DOC,
+    });
+    // 見本のシナリオの名前は、このファイルの見本の it と test にある
+    const run = spawnSync(process.execPath, [join(root, "scripts", "scenarios.ts")], {
+      encoding: "utf8",
+      env: { ...process.env, KNOWIDEA_DIR: dir },
+    });
+    assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
+    assert.equal(run.stdout.match(/^\| 4-guard: /gm)?.length, 3);
+    assert.doesNotMatch(run.stdout, /^\| index: /m);
   });
 
   void it("knowidea が無い時は突き合わせを飛ばす", () => {
-    const run = spawnSync(process.execPath, [join(root, "scripts", "scenarios.ts"), "6-guard"], {
+    const run = spawnSync(process.execPath, [join(root, "scripts", "scenarios.ts"), "4-guard"], {
       encoding: "utf8",
       env: { ...process.env, KNOWIDEA_DIR: join(tmpdir(), "no-knowidea") },
     });
@@ -94,19 +122,19 @@ void describe("要件のシナリオとテストを突き合わせる", () => {
   });
 
   void it("要件とシナリオの章の無い文書を渡すと落ちる", () => {
-    const dir = repo({ "services/know-office/docs/04-detail/6-guard.md": "# 見本\n" });
-    const run = spawnSync(process.execPath, [join(root, "scripts", "scenarios.ts"), "6-guard"], {
+    const dir = repo({ "services/know-office/docs/05-test/4-guard.md": "# 見本\n" });
+    const run = spawnSync(process.execPath, [join(root, "scripts", "scenarios.ts"), "4-guard"], {
       encoding: "utf8",
       env: { ...process.env, KNOWIDEA_DIR: dir },
     });
     assert.equal(run.status, 1);
-    assert.match(run.stdout, /6-guard に要件とシナリオが無い/);
+    assert.match(run.stdout, /4-guard に要件とシナリオが無い/);
   });
 
   const knowidea = knowideaDir(root, process.env);
-  void it("自動停止 (6-guard) のシナリオはどれもテストがある", { skip: existsSync(knowidea) ? false : `knowidea が ${knowidea} に無い` }, () => {
-    const run = spawnSync(process.execPath, [join(root, "scripts", "scenarios.ts"), "6-guard"], { encoding: "utf8" });
+  void it("自動停止 (4-guard) のシナリオはどれもテストがある", { skip: existsSync(knowidea) ? false : `knowidea が ${knowidea} に無い` }, () => {
+    const run = spawnSync(process.execPath, [join(root, "scripts", "scenarios.ts"), "4-guard"], { encoding: "utf8" });
     assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
-    assert.match(run.stdout, /\| 6-guard: 止めるのはシステム \| タスク 1 つを止める \| apps\/office\/test\/guard\/stop\.test\.ts/);
+    assert.match(run.stdout, /\| 4-guard: 止めるのはシステム \| タスク 1 つを止める \| apps\/office\/test\/guard\/stop\.test\.ts/);
   });
 });

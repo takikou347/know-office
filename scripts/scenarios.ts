@@ -1,11 +1,11 @@
-// 詳細設計 (knowidea) の要件のシナリオごとに、同じ名前の it か test があるかを突き合わせる。
+// テスト設計 (knowidea) の要件のシナリオごとに、同じ名前の it か test があるかを突き合わせる。
 // node scripts/scenarios.ts [文書の名前]... で一覧を出し、無ければ落ちる。knowidea が無い所 (CI) では飛ばす
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { knowideaDir } from "./verify.ts";
 
-/** 要件の 1 つのシナリオ。doc は詳細設計の文書の名前 (例 6-guard) */
+/** 要件の 1 つのシナリオ。doc はテスト設計の機能の文書の名前 (例 4-guard) */
 export type Scenario = { doc: string; requirement: string; scenario: string };
 
 /** 突き合わせた 1 行。where はテストの置き場、無ければ「無い」 */
@@ -14,24 +14,23 @@ export type Row = Scenario & { where: string };
 const SKIP_DIRS = new Set(["node_modules", "dist", ".wrangler", "test-results", "playwright-report", ".git", ".claude"]);
 const TEST_FILE = /\.(test|spec)\.tsx?$/;
 const TEST_CALL = /\b(?:it|test)(?:\.(?!describe\b)\w+)?\(\s*(["'`])(.+?)\1/g;
-const SECTION = /^#+ .*要件とシナリオ/;
-const ROW = /^\| (.+?) \| (.*) \|$/;
-const SCENARIO = /<br>\*\*(.+?)\*\*: /g;
+const CHAPTER = /^## .*要件ごとのシナリオ/;
+const REQUIREMENT = /^### (?:\d+(?:\.\d+)*\.? )?(.+?)\s*$/;
+const ROW = /^\| (.+?) \|/;
 
 /**
  * 文書の名前から置き場を求める
  * @param knowidea knowidea の置き場
- * @param name 文書の名前。`04-detail` は目次の文書、ほかは 04-detail/ の機能ごとの文書
+ * @param name 文書の名前。05-test/ の機能ごとのテスト設計 (例 4-guard)
  * @returns 文書の道
  */
 export function docPath(knowidea: string, name: string): string {
-  const docs = join(knowidea, "services", "know-office", "docs");
-  return name === "04-detail" ? join(docs, "04-detail.md") : join(docs, "04-detail", `${name}.md`);
+  return join(knowidea, "services", "know-office", "docs", "05-test", `${name}.md`);
 }
 
 /**
- * 詳細設計の 1 つの文書の「要件とシナリオ」の章から、要件とシナリオの名前を順に読む。
- * 章の表は 1 行 1 要件で、1 列目が要件の名前、2 列目に `<br>**<シナリオの名前>**: ` でシナリオを並べる
+ * テスト設計の 1 つの文書の「要件ごとのシナリオ」の章から、要件とシナリオの名前を順に読む。
+ * 章の中の節 (`### 2.1 <要件の名前>`) が要件で、節の表の 1 列目がシナリオの名前
  * @param file 文書の道
  * @returns シナリオの並び
  */
@@ -39,14 +38,21 @@ export function readScenarios(file: string): Scenario[] {
   const doc = basename(file, ".md");
   const out: Scenario[] = [];
   let inside = false;
+  let requirement = "";
   for (const line of readFileSync(file, "utf8").split("\n")) {
-    if (line.startsWith("#")) inside = SECTION.test(line);
-    const row = inside ? ROW.exec(line) : null;
-    if (!row?.[1] || !row[2] || row[1] === "要件" || row[1].startsWith("---")) continue;
-    const requirement = row[1].trim();
-    for (const match of row[2].matchAll(SCENARIO)) {
-      out.push({ doc, requirement, scenario: (match[1] ?? "").trim() });
+    if (line.startsWith("## ")) {
+      inside = CHAPTER.test(line);
+      requirement = "";
+      continue;
     }
+    if (!inside) continue;
+    if (line.startsWith("### ")) {
+      requirement = REQUIREMENT.exec(line)?.[1] ?? "";
+      continue;
+    }
+    const scenario = requirement ? ROW.exec(line)?.[1]?.trim() : undefined;
+    if (!scenario || scenario === "シナリオ" || scenario.startsWith("---")) continue;
+    out.push({ doc, requirement, scenario });
   }
   return out;
 }
@@ -97,12 +103,13 @@ export function matchScenarios(scenarios: Scenario[], names: ReadonlyMap<string,
  * 突き合わせて一覧の文と終わりのコードを作る
  * @param root know-office の置き場
  * @param knowidea knowidea の置き場
- * @param names 文書の名前。空なら要件とシナリオの章のある文書を全部
+ * @param names 文書の名前。空なら 05-test/ の index.md のほかの文書を全部
  * @returns 出す文と終わりのコード
  */
 function report(root: string, knowidea: string, names: string[]): { text: string; code: number } {
   if (!existsSync(knowidea)) return { text: `knowidea が ${knowidea} に無いので飛ばす。KNOWIDEA_DIR で置き場を渡す`, code: 0 };
-  const all = ["04-detail", ...readdirSync(dirname(docPath(knowidea, "x"))).filter((f) => f.endsWith(".md")).map((f) => basename(f, ".md"))];
+  const dir = dirname(docPath(knowidea, "x"));
+  const all = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "index.md").map((f) => basename(f, ".md")) : [];
   const problems: string[] = [];
   const scenarios = (names.length > 0 ? names : all).flatMap((name) => {
     const file = docPath(knowidea, name);
