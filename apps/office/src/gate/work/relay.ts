@@ -24,10 +24,10 @@ const COUNT_TOKENS = "/v1/messages/count_tokens";
 /** Claude API に引き継ぐ要求のヘッダー。鍵と作業トークンは引き継がない */
 const REQUEST_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta"] as const;
 
-/** ワークスペースに返す返事のヘッダー。ほかは頭が anthropic-ratelimit- の物だけを返し、組織の ID などは出さない */
 /** Claude のプロキシの返事に付ける印のヘッダー。forwarded は Claude API の返事、refused はプロキシが自分で断った返事。ワークスペースはこれで鍵の失敗とプロキシの断りを分ける */
 export const RELAY_HEADER = "x-know-relay";
 
+/** ワークスペースに返す返事のヘッダー。ほかは頭が anthropic-ratelimit- の物だけを返し、組織の ID などは出さない */
 const RESPONSE_HEADERS = new Set(["content-type", "request-id", "retry-after", "x-should-retry"]);
 
 /** 1 回の呼び出しを待つ上限。流れの返事は長く続くので、SDK の初期値と同じ 10 分にする */

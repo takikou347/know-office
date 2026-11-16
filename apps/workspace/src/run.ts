@@ -35,8 +35,8 @@ export function messagePrompt(bodies: readonly string[]): string {
 
 /** ゲートウェイに働いた事を届ける口。本物は events.ts の gateReporter */
 export type Reporter = {
-  /** 出来事を作業トークンを付けて送る。送れなくても投げない */
-  report(ticket: string, events: AgentEvent[]): Promise<void>;
+  /** 出来事を作業トークンを付けて送る。ticket は送る時の今の作業トークンを返す。送れなくても投げない */
+  report(ticket: () => string, events: AgentEvent[]): Promise<void>;
 };
 
 /** 届けない口 */
@@ -97,6 +97,8 @@ export class Runner {
   readonly #hookBase: HookBase;
   readonly #transcripts: Transcripts;
   readonly #reporter: Reporter;
+  /** 走りを空けた後に、終わりかエラーを送っているタスク */
+  #reporting: Current | undefined;
   readonly #baseUrl: string | undefined;
 
   /**
@@ -177,7 +179,11 @@ export class Runner {
    */
   replaceTicket(ticket: string): void {
     const current = this.#current;
-    if (!current) return;
+    if (!current) {
+      // 走りを空けた後、終わりを送っている間に届いた物も、送り直しに使えるよう渡す
+      if (this.#reporting) this.#reporting.ticket = ticket;
+      return;
+    }
     current.ticket = ticket;
     this.#interrupt(current, "ticket");
   }
@@ -279,7 +285,7 @@ export class Runner {
         }
         this.#release(current);
         const said: AgentEvent[] = text ? [{ kind: "message", body: text.slice(0, 20_000) }] : [];
-        await this.#reporter.report(current.ticket, [...said, { kind: "result", nodeId: current.input.nodeId, result: "done" }]);
+        await this.#report(current, [...said, { kind: "result", nodeId: current.input.nodeId, result: "done" }]);
         return;
       }
     } catch (error) {
@@ -287,13 +293,27 @@ export class Runner {
       this.#onFailure(error);
       // SDK の文は鍵を含みうるので、自分で付けた種類と文だけを送る
       const failure = error instanceof SdkFailure ? { name: error.name, message: error.message.slice(0, 200) } : { name: "sdk_failed" as const, message: "SDK の呼び出しが失敗した" };
-      await this.#reporter.report(current.ticket, [
+      await this.#report(current, [
         { kind: "error", ...failure },
         { kind: "result", nodeId: current.input.nodeId, result: "handed_back" },
       ]);
     } finally {
       this.#release(current);
       current.settle();
+    }
+  }
+
+  /**
+   * 走りを空けた後に、終わりかエラーを今の作業トークンで送る。送っている間に差し替わった作業トークンも使う
+   * @param current 今のタスク
+   * @param events 出来事
+   */
+  async #report(current: Current, events: AgentEvent[]): Promise<void> {
+    this.#reporting = current;
+    try {
+      await this.#reporter.report(() => current.ticket, events);
+    } finally {
+      if (this.#reporting === current) this.#reporting = undefined;
     }
   }
 

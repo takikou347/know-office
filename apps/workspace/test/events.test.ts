@@ -8,6 +8,14 @@ const SAID: AgentEvent = { kind: "message", body: "直した" };
 const DONE: AgentEvent = { kind: "result", nodeId: NODE, result: "done" };
 
 /**
+ * 作業トークンが効かない時のゲートウェイの返事を作る
+ * @returns 401 の返事
+ */
+function unauthorized(): Promise<Response> {
+  return Promise.resolve(Response.json({ code: "unauthenticated" }, { status: 401 }));
+}
+
+/**
  * 送った本文から出来事の並びを取り出す
  * @param body 本文
  * @returns 出来事の並び。形が違えば undefined
@@ -40,7 +48,7 @@ function gate(replies: (() => Promise<Response>)[]) {
 describe("働いた事をゲートウェイに届ける", () => {
   it("作業トークンを付けて送り、発言と終わりを分けて送る", async () => {
     const { fetcher, seen } = gate([]);
-    await gateReporter({ fetcher, wait: () => Promise.resolve() }).report("ticket-1", [SAID, DONE]);
+    await gateReporter({ fetcher, wait: () => Promise.resolve() }).report(() => "ticket-1", [SAID, DONE]);
     expect(seen).toEqual([
       { url: GATE_EVENTS_URL, authorization: "Bearer ticket-1", events: [SAID] },
       { url: GATE_EVENTS_URL, authorization: "Bearer ticket-1", events: [DONE] },
@@ -50,7 +58,7 @@ describe("働いた事をゲートウェイに届ける", () => {
   it("発言は届かなくても送り直さず、終わりは 3 回まで送り直す", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { fetcher, seen } = gate([down, down, down, down]);
-    await gateReporter({ fetcher, wait: () => Promise.resolve() }).report("ticket-1", [SAID, DONE]);
+    await gateReporter({ fetcher, wait: () => Promise.resolve() }).report(() => "ticket-1", [SAID, DONE]);
     warn.mockRestore();
     expect(seen.map((s) => s.events)).toEqual([[SAID], [DONE], [DONE], [DONE]]);
   });
@@ -58,8 +66,27 @@ describe("働いた事をゲートウェイに届ける", () => {
   it("終わりが 409 で断られたら送り直さない", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { fetcher, seen } = gate([() => Promise.resolve(Response.json({ code: "conflict" }, { status: 409 }))]);
-    await gateReporter({ fetcher, wait: () => Promise.resolve() }).report("ticket-1", [DONE]);
+    await gateReporter({ fetcher, wait: () => Promise.resolve() }).report(() => "ticket-1", [DONE]);
     warn.mockRestore();
     expect(seen).toHaveLength(1);
+  });
+
+  it("差し替えの間に前の作業トークンで送った終わりも、今の作業トークンで 1 回だけ送り直して届く", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 1 回目を送った所で作業トークンが差し替わる
+    const box = { ticket: "ticket-1" };
+    const swapped = gate([
+      () => {
+        box.ticket = "ticket-2";
+        return unauthorized();
+      },
+    ]);
+    await gateReporter({ fetcher: swapped.fetcher, wait: () => Promise.resolve() }).report(() => box.ticket, [DONE]);
+    expect(swapped.seen.map((s) => s.authorization)).toEqual(["Bearer ticket-1", "Bearer ticket-2"]);
+    // 作業トークンが変わっていなければ送り直さない
+    const same = gate([unauthorized, unauthorized]);
+    await gateReporter({ fetcher: same.fetcher, wait: () => Promise.resolve() }).report(() => "ticket-1", [{ kind: "error", name: "sdk_failed", message: "落ちた" }, DONE]);
+    expect(same.seen.map((s) => s.authorization)).toEqual(["Bearer ticket-1", "Bearer ticket-1"]);
+    warn.mockRestore();
   });
 });

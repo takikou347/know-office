@@ -197,7 +197,7 @@ function reporter() {
   const box: { runner?: Runner } = {};
   const reporterOf: Reporter = {
     report: (ticket, events) => {
-      sent.push({ ticket, events, running: box.runner?.running ?? false });
+      sent.push({ ticket: ticket(), events, running: box.runner?.running ?? false });
       return Promise.resolve();
     },
   };
