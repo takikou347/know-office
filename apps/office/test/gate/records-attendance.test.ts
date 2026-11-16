@@ -147,6 +147,17 @@ describe("ダッシュボード", () => {
     expect(data.notices.map((n) => n.title)).not.toContain("通知 1");
   });
 
+  it("未読の通知は、開く先があれば通知の一覧と同じ link を付けて返す", async () => {
+    await d1.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope, read_at, link) VALUES (?, 1, 'warn', 'x', '開く先あり', '', 'office', NULL, '/approvals/019a7b00-0000-7000-8000-0000000000a1'), (?, 2, 'info', 'x', '開く先なし', '', 'office', NULL, NULL)")
+      .bind(noticeId(1), noticeId(2))
+      .run();
+    const data = z.object({ data: z.object({ notices: z.array(z.object({ title: z.string(), link: z.string().nullable() }).loose()) }).loose() }).parse(await (await gate.request("/api/v1/dashboard", { headers })).json()).data;
+    expect(data.notices.map((n) => [n.title, n.link])).toEqual([
+      ["開く先なし", null],
+      ["開く先あり", "/approvals/019a7b00-0000-7000-8000-0000000000a1"],
+    ]);
+  });
+
   it("社員 DO が 1 人でも答えなければ 500 を返し、中身を出さない", async () => {
     vi.spyOn(gate.staff.reviewer.book, "status").mockRejectedValue(new Error("社員 DO の中身"));
     const res = await gate.request("/api/v1/dashboard", { headers });

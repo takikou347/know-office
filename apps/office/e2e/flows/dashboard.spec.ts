@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { seedMain } from "./helpers/seed.ts";
 
-// ダッシュボードと記録を、本物のゲートウェイの /dashboard と /records/attendance で通す。承認待ちとタスクは種に置き、応答を差し替えない (ルートの一覧の 1.4 と 1.12)
+// ダッシュボードと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance で通す。承認待ちとタスクは種に置き、応答を差し替えない (ルートの一覧の 1.4 と 1.12)
 
 const NODE = "019a7b00-0000-7000-8000-0000000000ea";
 const APPROVAL = "019a7b00-0000-7000-8000-0000000000eb";
 
 test.describe("ダッシュボード", () => {
-  test("社員、可を待つ物、今日の仕事、今月の費用を入口から出し、可を待つ物からタスクを開く", async ({ page }) => {
+  test("社員、承認を待つ物、今日の仕事、今月の費用を入口から出し、承認の 1 件と今日のタスクを開く", async ({ page }) => {
     seedMain(`DELETE FROM approvals WHERE id = '${APPROVAL}'; DELETE FROM nodes WHERE id = '${NODE}';`);
     seedMain(
       `INSERT INTO nodes (id, kind, parent_id, scope, title, body, task_kind, assignee, status, priority, created_by, created_at, updated_at) VALUES ('${NODE}', 'task', NULL, 'office', 'Slack に通知を送る', NULL, 'build', 'builder', 'waiting_owner', 1, 'president', 1, 1); ` +
@@ -19,8 +19,11 @@ test.describe("ダッシュボード", () => {
     await expect(page.getByText("今月の費用")).toBeVisible();
     const today = page.getByRole("list", { name: "今日の仕事" });
     await expect(today.getByText("Slack に通知を送る")).toBeVisible();
-    const waiting = page.getByRole("list", { name: "可を待つ物" });
-    await waiting.getByRole("link", { name: /Slack/ }).click();
+    // 承認を待つ物は承認の一覧から読み、承認を決める画面の 1 件へ移る
+    await page.getByRole("list", { name: "承認を待つ物" }).getByRole("link", { name: /Slack/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/approvals/${APPROVAL}$`));
+    await page.goBack();
+    await today.getByRole("link", { name: "Slack に通知を送る" }).click();
     await expect(page).toHaveURL(new RegExp(`/staff/builder/tasks/${NODE}$`));
     await expect(page.getByRole("heading", { level: 2, name: "Slack に通知を送る" })).toBeVisible();
   });

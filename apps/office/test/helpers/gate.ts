@@ -223,7 +223,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   };
   const audits: AuditInput[] = [];
   const storage: Record<string, number> = { DB: 1024, REC_2026: 2048, REC_2027: 1024 };
-  const guard = new GuardBook(memoryStorage(), () => Promise.resolve(), (at, count) => noticeDenied(env.DB, at, count));
+  const guard = new GuardBook(memoryStorage(), () => Promise.resolve(), (at, count) => noticeDenied(env, at, count, options.clock));
   const office = new OfficeGuard(memoryStorage());
   const staff: Record<StaffId, TestStaff> = { president: testStaff("president", options.d1), builder: testStaff("builder", options.d1), reviewer: testStaff("reviewer", options.d1) };
   const deps: TestGate["deps"] = {

@@ -263,6 +263,9 @@ describe("401、403、429 が 5 分に 50 回を超えたら知らせる", () =>
     expect(await bursts()).toBe(1);
     const row = await d1.DB.prepare("SELECT level, scope, read_at FROM notices WHERE kind = 'denied_burst'").first();
     expect(row).toEqual({ level: "warn", scope: "office", read_at: null });
+    // 開いている画面には配信の印で届ける
+    const id = await d1.DB.prepare("SELECT id FROM notices WHERE kind = 'denied_burst'").first<string>("id");
+    expect(test.live.published).toContainEqual({ type: "notice", notice: { id } });
   });
 
   it("401、403、429 を合わせて数える", async () => {

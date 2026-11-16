@@ -1,11 +1,12 @@
 // ダッシュボード: 社員、承認待ち、今日のタスク、今月の費用、未読の通知を 1 回で返す (ルートの一覧の 1.12)
 import { createRoute, z } from "@hono/zod-openapi";
-import { type Approval, ApprovalStatus, Dashboard, jstDay, jstDayStart, jstYear, type Notice } from "@know-office/core";
+import { type Approval, ApprovalStatus, Dashboard, jstDay, jstDayStart, jstYear } from "@know-office/core";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
 import { approvals, nodes, notices } from "../db/main.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
+import { toNotice } from "../ledger/notices.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
 import { toNode } from "../work/nodes.ts";
@@ -77,6 +78,5 @@ export const dashboardRoutes = router.openapi(getDashboardRoute, async (c) => {
       reason: row.reason,
     };
   };
-  const toNotice = (row: (typeof unread)[number]): Notice => ({ id: row.id, at: iso(row.at), level: row.level, kind: row.kind, title: row.title, body: row.body ?? "", scope: row.scope, readAt: null });
   return ok(c, { staff, approvals: waiting.map(toApproval), todayTasks: today.map((r) => toNode(r, r.status === "done" ? 1 : 0)), monthCostMicroUsd: cost, notices: unread.map(toNotice) });
 });

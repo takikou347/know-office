@@ -19,7 +19,7 @@ export const CLAUDE_FAILURE_LIMIT = 3;
  * @param row notices の行
  * @returns 通知
  */
-function toNotice(row: typeof notices.$inferSelect): Notice {
+export function toNotice(row: typeof notices.$inferSelect): Notice {
   return {
     id: row.id,
     at: new Date(row.at).toISOString(),
@@ -79,19 +79,21 @@ export async function markNoticeRead(db: D1Database, noticeId: string, now: numb
 }
 
 /**
- * 401、403、429 が 5 分に 50 回を超えた事を、通知 denied_burst にする。同じ通知は、オーナーが読むまで重ねて出さない
- * @param db 主の D1
+ * 401、403、429 が 5 分に 50 回を超えた事を、通知 denied_burst にする。同じ通知は、オーナーが読むまで重ねて出さない。足した時は配信の印で画面に届ける
+ * @param env バインディング
  * @param at 超えた時刻
  * @param count 5 分の窓の数
+ * @param clock 配信の印の時刻
  */
-export async function noticeDenied(db: D1Database, at: number, count: number): Promise<void> {
+export async function noticeDenied(env: Bindings, at: number, count: number, clock: Clock): Promise<void> {
+  const id = newId({ now: () => at });
   // 未読の同じ通知が無い時だけ 1 文で足す。GuardDO が起き直して数え直しても重ならない
-  await db
-    .prepare(
-      "INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'denied_burst', ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = 'denied_burst' AND read_at IS NULL)",
-    )
-    .bind(newId({ now: () => at }), at, "断った要求が続いている", `401、403、429 が 5 分に ${String(count)} 回になった。送信元と道はログインの記録と監査ログで確かめる`)
+  const res = await env.DB.prepare(
+    "INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'denied_burst', ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = 'denied_burst' AND read_at IS NULL)",
+  )
+    .bind(id, at, "断った要求が続いている", `401、403、429 が 5 分に ${String(count)} 回になった。送信元と道はログインの記録と監査ログで確かめる`)
     .run();
+  if (res.meta.changes === 1) await announceNotice(env, id, clock);
 }
 
 /**

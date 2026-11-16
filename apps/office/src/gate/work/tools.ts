@@ -33,6 +33,7 @@ import { auditFrom } from "../ledger/record.ts";
 import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
+import { announceNotice } from "../live/publish.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, updateNode } from "./nodes.ts";
 import { backToTodo, findReview, madeTaskOf, mergeIfReady, repoRefusal } from "./review.ts";
@@ -136,6 +137,7 @@ async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff
       .where(and(eq(nodes.id, task.id), eq(nodes.version, task.version), eq(nodes.status, "doing"), eq(nodes.assignee, call.staffId)))
       .returning({ id: nodes.id }),
   ];
+  const noticeId = newId(clockAt(call.now));
   if (!reuse) {
     // タスクを待たせられた時だけ承認と通知を書く。3 つを 1 回で書き、途中で落ちても片方だけ残さない
     const payload = JSON.stringify({ ...approval.payload, nodeId: task.id });
@@ -146,13 +148,15 @@ async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff
       orm
         .insert(notices)
         .select(
-          sql`SELECT ${newId(clockAt(call.now))}, ${call.now}, 'info', 'approval_requested', ${`承認を待っています: ${APPROVAL_KIND_LABEL[approval.kind]}`}, (SELECT ${staff.role} FROM ${staff} WHERE ${staff.id} = ${call.staffId}) || ': ' || ${approval.target}, ${task.scope}, NULL, ${`/approvals/${id}`} WHERE EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${id})`,
+          sql`SELECT ${noticeId}, ${call.now}, 'info', 'approval_requested', ${`承認を待っています: ${APPROVAL_KIND_LABEL[approval.kind]}`}, (SELECT ${staff.role} FROM ${staff} WHERE ${staff.id} = ${call.staffId}) || ': ' || ${approval.target}, ${task.scope}, NULL, ${`/approvals/${id}`} WHERE EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${id})`,
         ),
     );
   }
   const results: readonly unknown[] = await orm.batch(statements);
   if (Moved.parse(results[0]).length === 0) throw new AppError("conflict", "タスクが変わった");
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "waiting_owner", detail: { approvalId: id, kind: approval.kind } }, actorOf(call));
+  // タスクを待たせられた時だけ承認と通知が書かれている
+  if (!reuse) await announceNotice(env, noticeId, clockAt(call.now));
   if (!reuse) await auditFrom(env, { at: call.now, actor: call.staffId, action: "approval.request", target: id, scope: task.scope, detail: { kind: approval.kind, target: approval.target }, traceId: call.traceId });
   // 答えを待つ間は次のタスクを進める
   await leaveTask(env, call.staffId, "handed_back", call.now);

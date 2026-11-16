@@ -49,6 +49,9 @@ describe("承認を求める", () => {
     // 通知から承認を決める画面の 1 件へ移れる
     const notices = z.array(z.object({ kind: z.string(), link: z.string().nullable() }).loose()).parse(await api(world, "GET", "/api/v1/notices"));
     expect(notices.filter((n) => n.kind === "approval_requested").map((n) => n.link)).toEqual([`/approvals/${approvalId}`]);
+    // 開いている画面には配信の印で届ける
+    const id = await world.d1.DB.prepare("SELECT id FROM notices WHERE kind = 'approval_requested'").first<string>("id");
+    expect(world.gate.live.published).toContainEqual({ type: "notice", notice: { id } });
   });
 });
 
