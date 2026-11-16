@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { attendance } from "../db/main.ts";
 import { correctAttendance, rebuildDailyTotals, rebuildStoredDay } from "./attendance.ts";
-import { type CarriedTask, carriedOf, workStatements } from "./carry.ts";
+import { type CarriedTask, carriedOf, workStatements, writeCarried } from "./carry.ts";
 import { DayOrder, planDay, upcomingPlan } from "./plan.ts";
 import { ACTIVE, EMPTY_MEMORY, HEARTBEAT_TIMEOUT_MS, Memory, RETRY_MS, Shift, WRAP_MS } from "./shift.ts";
 
@@ -472,18 +472,23 @@ export class StaffBook {
    * @param s 記憶
    */
   async #commit(s: Shift): Promise<void> {
-    const { attendance: segments, work, totals } = s.m.pending;
-    const statements: BatchItem<"sqlite">[] = [
-      ...segments.map((row) => this.#orm.insert(attendance).values(row).onConflictDoNothing()),
-      ...workStatements(this.#orm, this.staffId, work),
-    ];
-    if (statements.length === 0 && totals.length === 0) return;
-    await this.storage.put("memory", s.m);
+    const { attendance: segments, work, totals, events } = s.m.pending;
+    const head = segments.map((row) => this.#orm.insert(attendance).values(row).onConflictDoNothing());
+    const tail = workStatements(this.#orm, this.staffId, work, head.length);
+    const statements: BatchItem<"sqlite">[] = [...head, ...tail.statements];
+    if (statements.length === 0 && totals.length === 0 && events.length === 0) return;
     const [first, ...rest] = statements;
-    if (first) await this.#orm.batch([first, ...rest]);
-    for (const row of carriedOf(work)) await this.carried(row);
+    if (first) {
+      await this.storage.put("memory", s.m);
+      const results: unknown[] = await this.#orm.batch([first, ...rest]);
+      // 区分、した仕事、todo への戻しはバッチが通った所で決まる。出来事は戻せたタスクだけ溜め、書けるまで持つ
+      const carried = await carriedOf(this.#orm, this.staffId, tail, results);
+      s.m.pending = { attendance: [], work: [], totals, events: [...events, ...carried.filter((c) => !events.some((e) => e.workId === c.workId))] };
+    }
+    if (totals.length > 0) await this.storage.put("memory", s.m);
     for (const t of totals) await this.#announced(await rebuildDailyTotals(this.db, { staffId: this.staffId, day: t.day, clockIn: null, out: true, reasons: t.reasons }, t.at));
-    s.m.pending = { attendance: [], work: [], totals: [] };
+    s.m.pending.totals = [];
+    s.m.pending.events = await writeCarried(this.staffId, s.m.pending.events, this.carried);
   }
 
   /**

@@ -57,6 +57,9 @@ const PendingWork = z
 /** 退勤の後に作り直す日ごとの集計。区分の行を書いた後に何度作り直しても、集計の値は変わらず、区分が重なった時の通知も社員と日で 1 件 */
 const PendingTotals = z.object({ day: z.string(), reasons: z.array(z.string()), at: z.number() }).strict();
 
+/** D1 に書いた後に残す、次の勤務へ続けたタスクの出来事。workId はした仕事の行の ID、at は離れた時刻。記録の D1 に書けるまで溜める */
+const PendingEvent = z.object({ workId: z.string(), nodeId: z.string(), at: z.number() }).strict();
+
 /** 社員 DO の記憶。DO が起き直しても残す */
 export const Memory = z
   .object({
@@ -83,7 +86,9 @@ export const Memory = z
     /** 次に集計を作り直す時に足す、勤怠の行に出ない理由 (`<出来事>:<理由>`) */
     reasons: z.array(z.string()),
     /** まだ D1 に書いたと確かめていない行と、まだ作り直したと確かめていない集計。起き直したら同じ ID で書き直し、集計を作り直す */
-    pending: z.object({ attendance: z.array(PendingAttendance), work: z.array(PendingWork), totals: z.array(PendingTotals).default([]) }).strict(),
+    pending: z
+      .object({ attendance: z.array(PendingAttendance), work: z.array(PendingWork), totals: z.array(PendingTotals).default([]), events: z.array(PendingEvent).default([]) })
+      .strict(),
   })
   .strict();
 
@@ -105,7 +110,7 @@ export const EMPTY_MEMORY: Memory = {
   retryAt: null,
   workedMs: 0,
   reasons: [],
-  pending: { attendance: [], work: [], totals: [] },
+  pending: { attendance: [], work: [], totals: [], events: [] },
 };
 
 const isWorked = (kind: AttendanceKind) => (WORKED_KINDS as readonly string[]).includes(kind);

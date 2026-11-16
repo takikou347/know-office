@@ -68,14 +68,21 @@ export class StaffDO extends BaseStaffDO {
   }
 }
 
-/** DO と入口が console.error に出したエラーログの行。手元の workerd では DO と入口が同じ isolate で動くので、ここに並べてテストで読む */
+/** DO と入口が console.error と console.warn に出したエラーログの行 (error と warn)。手元の workerd では DO と入口が同じ isolate で動くので、ここに並べてテストで読む */
 const ERROR_LOGS: string[] = [];
 // oxlint-disable-next-line eslint/no-console
 const printError = console.error.bind(console);
 // oxlint-disable-next-line eslint/no-console
+const printWarn = console.warn.bind(console);
+// oxlint-disable-next-line eslint/no-console
 console.error = (...args: unknown[]) => {
   ERROR_LOGS.push(args.map(String).join(" "));
   printError(...args);
+};
+// oxlint-disable-next-line eslint/no-console
+console.warn = (...args: unknown[]) => {
+  ERROR_LOGS.push(args.map(String).join(" "));
+  printWarn(...args);
 };
 
 /** 配信 DO への呼び出し */

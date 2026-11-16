@@ -252,3 +252,29 @@ describe("チェックポイントで退勤する", () => {
     expect((await runs(worker))[1]).toMatchObject({ nodeId: TASK.nodeId, resume: SESSION });
   });
 });
+
+describe("記録の D1 が無い年の退勤", () => {
+  let worker: TestWorker;
+  beforeEach(async () => {
+    worker = await startTestWorker();
+    await worker.query(
+      "DB",
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, body, status, priority, assignee, task_kind, repo, created_by, created_at, updated_at) VALUES ('${TASK.nodeId}', 'task', NULL, 'office', '${TASK.title}', NULL, 'doing', 1, 'builder', 'build', 'takikou347/know-office', 'president', 0, 0)`,
+    );
+  }, 30_000);
+  afterEach(() => worker.dispose());
+
+  it("記録の D1 が無い年に退勤しても、社員は止まらず、タスクを todo に戻してエラーログに残す", async () => {
+    // テストの workerd は REC_2031 を持たないので、2031 年の出来事は書けない
+    const later = 365 * 24 * 60 * 60_000;
+    await worker.staff("builder", "wake", jst(9) + later);
+    await worker.staff("builder", "take", TASK, null, jst(9, 1) + later);
+    await worker.staff("builder", "heartbeat", jst(16, 59, 30) + later);
+    await worker.staff("builder", "checkpoint", { kind: "commit", nodeId: TASK.nodeId }, jst(17, 0, 10) + later);
+    expect(await worker.staff("builder", "status", jst(17, 1) + later)).toMatchObject({ state: "off", nodeId: null });
+    expect(await worker.query("DB", `SELECT status FROM nodes WHERE id = '${TASK.nodeId}'`)).toEqual([{ status: "todo" }]);
+    await worker.staff("builder", "heartbeat", jst(17, 2) + later);
+    await worker.staff("builder", "wake", jst(17, 3) + later);
+    expect((await worker.errorLogs()).some((line) => line.includes('"event":"staff_event_failed"'))).toBe(true);
+  });
+});
