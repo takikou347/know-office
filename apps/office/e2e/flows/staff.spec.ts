@@ -1,22 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { seedMain } from "./helpers/seed.ts";
+import { cancelLeftOrders, seedMain } from "./helpers/seed.ts";
 
 // 社員と仕事の画面を、本物のゲートウェイの /staff と指示と会話とタスクで通す。応答を差し替えない (社員と勤怠の 3.4、社員と自動の 3.7)
 
 const TASK = "019a7b00-0000-7000-8000-0000000000e9";
-
-/**
- * 前に流した時に残った、その社員のまだ有効な指示を取り消す。day_orders は追記だけなので、入口と同じく取り消しの行を足す
- * @param staffId 社員
- */
-function cancelLeftOrders(staffId: string): void {
-  const uuid = "lower(substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-7' || substr(h, 14, 3) || '-8' || substr(h, 18, 3) || '-' || substr(h, 21, 12))";
-  seedMain(
-    `INSERT INTO day_orders (id, staff_id, day, kind, until, source, cancels, created_at) SELECT ${uuid}, staff_id, day, kind, NULL, 'button', id, ${String(Date.now())} ` +
-      `FROM (SELECT hex(randomblob(16)) AS h, o.* FROM day_orders o WHERE o.staff_id = '${staffId}' AND o.cancels IS NULL AND NOT EXISTS (SELECT 1 FROM day_orders x WHERE x.cancels = o.id))`,
-  );
-}
 
 test.describe("オーナーの指示に合わせる", () => {
   test("その日だけ休みにする", async ({ page }) => {
