@@ -17,6 +17,7 @@ paths:
 - 1 つのシナリオを多くの画面や入力で回し、1 つの `it` では 5 秒を超える時は、`describe` をシナリオの名前にして、その中の `it` を画面や入力の名前にする
 - 置き場: 共通 `packages/core/test/<物>.test.ts`、ゲートウェイと DO `apps/office/test/<まとまり>/<物>.test.ts`、画面の通し `apps/office/e2e/<画面か流れ>.spec.ts`、ワークスペース `apps/workspace/test/<物>.test.ts`、型の食い違い `<物>.types.ts` に `@ts-expect-error`、リポジトリの道具 `scripts/<物>.test.ts` (`node:test`)
 - モックは境目だけ。D1 は `test/helpers/d1.ts` (wrangler の手元の本物の D1)、DO は `test/helpers/worker.ts` (本物の workerd に起こしたテストの入口)、時刻は `Clock` のモック、Claude と GitHub は記録した返事を返すモック
+- 並んで走る処理の順や長さを、実の時間の待ち (`setTimeout`) と共にある `Clock` の進みで作らない。ほかの処理が遅いと揺れるので、長さを測る口か合図を引数で渡して決める
 - テストは互いに独立させ、1 つ 5 秒以内。D1 と DO はテストのファイルごとに 1 度起こし、テストごとに戻す (D1 はマイグレーションの後の空、DO は空)
 - e2e のポートは作業ツリーの道から決まる `E2E_PORT` で、代わりの Claude と GitHub はその 1 つ上を使う。ほかの作業ツリーと重なれば起こす時に落ちる
 - 画面の通しは Chrome の幅 1,280 で全部、幅 360 で形の変わる画面 (a11y、screens、review、office) を流し、axe の critical と serious を 0 にする。Safari はデプロイの前に Mac で `E2E_BROWSERS=safari` を付けて 1 度流す
