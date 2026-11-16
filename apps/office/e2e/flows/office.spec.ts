@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { connectGitHub, fakeGitHubRoute } from "./helpers/github.ts";
+import { connectGitHub, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { seedMain } from "./helpers/seed.ts";
 
@@ -12,6 +12,9 @@ const PR = 7;
 const HEAD = "c".repeat(40);
 
 test.describe("オフィスの部屋", () => {
+  // 後の通し (設定など) は GitHub をつないでいない前提なので、つないだ物を消して返す
+  test.afterEach(() => forgetGitHub());
+
   test("出来事を動きで見せる", async ({ page }) => {
     await page.goto("/settings");
     await useOwnerPasskey(page);

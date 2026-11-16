@@ -84,8 +84,13 @@ async function focusProblem(page: Page): Promise<string | null> {
     const r = el.getBoundingClientRect();
     const inView = r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
     if (!inView) return `${name} が画面の外にある`;
-    // 上と下に貼り付く帯の下に隠れていない (WCAG 2.2 の 2.4.11)
-    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    // 上と下に貼り付く帯の下に隠れていない (WCAG 2.2 の 2.4.11 は全部が隠れない事を求める)。Chrome は textarea に Tab で入ると
+    // 入力の位置の行までしか寄せないので、画面に見えている所の真ん中で確かめる
+    const top = Math.max(r.top, 0);
+    const bottom = Math.min(r.bottom, innerHeight);
+    const left = Math.max(r.left, 0);
+    const right = Math.min(r.right, innerWidth);
+    const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
     return hit && (el === hit || el.contains(hit)) ? null : `${name} が別の物に隠れている`;
   }, BODY);
 }
@@ -148,7 +153,8 @@ test.describe("使いやすさ", () => {
     await expect(h1("社員と仕事")).toBeVisible();
     await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/社員と仕事/);
 
-    // 社員を選び、仕事の山のタブを矢印で選ぶ
+    // 社員を選び、仕事の山のタブを矢印で選ぶ。一覧は入口から読むので、読み終えてから Tab で進む
+    await expect(main.getByRole("link", { name: /開発担当/ })).toBeVisible();
     await tabTo(page, main.getByRole("link", { name: /開発担当/ }), webkit);
     await page.keyboard.press("Enter");
     await tabTo(page, page.getByRole("tab", { name: "会話" }), webkit);
@@ -157,10 +163,14 @@ test.describe("使いやすさ", () => {
     await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
     expect(await focusProblem(page)).toBeNull();
 
-    // 変更のある仕事を開き、承認を出す
+    // 変更のある仕事を開き、承認を出す。仕事の山とレビューも読み終えてから進む
+    await expect(page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ })).toBeVisible();
     await tabTo(page, page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }), webkit);
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "承認する" })).toBeVisible();
+    // 最初のファイルの変更は後から読むので、読み終えて形が落ち着いてから進む
+    await expect(page.getByText("const empty = 0;")).toBeVisible();
     await tabTo(page, page.getByRole("button", { name: "承認する" }), webkit);
     await page.keyboard.press("Enter");
     await expect(page.getByText("承認を出し、GitHub にも写しました")).toBeVisible();

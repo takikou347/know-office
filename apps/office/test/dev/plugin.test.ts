@@ -2,7 +2,7 @@
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import { describe, expect, it } from "vitest";
-import { attachAccess, localSessionCookie } from "../../dev/plugin.ts";
+import { attachAccess, localSessionCookie, upgradeAccess } from "../../dev/plugin.ts";
 import { cookieHeader, SESSION_COOKIE } from "../../src/gate/auth/session.ts";
 
 /**
@@ -61,5 +61,19 @@ describe("開発環境の代わりの物", () => {
     expect(req.headers.cookie).toBe("ko_session=abc");
     res.setHeader("Set-Cookie", cookieHeader("abc", 60));
     expect(res.getHeader("Set-Cookie")).toBe(cookieHeader("abc", 60));
+  });
+
+  it("WebSocket への切り替えの要求にも、証明と元の名前のクッキーを付ける", () => {
+    const req = request("/api/v1/live?ticket=t", { cookie: "theme=dark; ko_session=abc.def", "cf-access-jwt-assertion": "forged" });
+    upgradeAccess(req, "signed.jwt.token");
+    expect(req.headers["cf-access-jwt-assertion"]).toBe("signed.jwt.token");
+    expect(req.headers.cookie).toBe(`theme=dark; ${SESSION_COOKIE}=abc.def`);
+  });
+
+  it("vite の HMR などほかの切り替えの要求は変えない", () => {
+    const req = request("/?token=hmr", { cookie: "ko_session=abc" });
+    upgradeAccess(req, "signed.jwt.token");
+    expect(req.headers["cf-access-jwt-assertion"]).toBeUndefined();
+    expect(req.headers.cookie).toBe("ko_session=abc");
   });
 });

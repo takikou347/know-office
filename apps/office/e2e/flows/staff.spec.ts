@@ -6,38 +6,54 @@ import { seedMain } from "./helpers/seed.ts";
 
 const TASK = "019a7b00-0000-7000-8000-0000000000e9";
 
+/**
+ * 前に流した時に残った、その社員のまだ有効な指示を取り消す。day_orders は追記だけなので、入口と同じく取り消しの行を足す
+ * @param staffId 社員
+ */
+function cancelLeftOrders(staffId: string): void {
+  const uuid = "lower(substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-7' || substr(h, 14, 3) || '-8' || substr(h, 18, 3) || '-' || substr(h, 21, 12))";
+  seedMain(
+    `INSERT INTO day_orders (id, staff_id, day, kind, until, source, cancels, created_at) SELECT ${uuid}, staff_id, day, kind, NULL, 'button', id, ${String(Date.now())} ` +
+      `FROM (SELECT hex(randomblob(16)) AS h, o.* FROM day_orders o WHERE o.staff_id = '${staffId}' AND o.cancels IS NULL AND NOT EXISTS (SELECT 1 FROM day_orders x WHERE x.cancels = o.id))`,
+  );
+}
+
 test.describe("オーナーの指示に合わせる", () => {
   test("その日だけ休みにする", async ({ page }) => {
-    // 前に流した日の指示が残っていても、同じ指示の 409 にならないよう消してから始める
-    seedMain("DELETE FROM day_orders WHERE staff_id = 'reviewer'");
+    // 前に流した日の指示が残っていても、同じ指示の 409 にならないよう取り消してから始める
+    cancelLeftOrders("reviewer");
     await page.goto("/staff/reviewer");
     await expect(page.getByRole("heading", { level: 2, name: "レビュー担当" })).toBeVisible();
     await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "休み" }).click();
     await expect(page.getByLabel("終わりの時刻")).toHaveCount(0);
     await page.getByRole("button", { name: "指示を出す" }).click();
     await expect(page.getByText("レビュー担当を今日は休みにしました")).toBeVisible();
+    // 前に流した日の取り消した指示も並ぶので、まだ有効な物 (「に出した」) だけを見る
     const orders = page.getByRole("list", { name: "レビュー担当への今日の指示" });
-    await expect(orders.getByText("休み", { exact: true })).toBeVisible();
+    const active = orders.getByRole("listitem").filter({ hasText: "に出した" });
+    await expect(active).toHaveCount(1);
+    await expect(active.getByText("休み", { exact: true })).toBeVisible();
     // 同じ日に同じ指示は重ねて出せない
     await page.getByRole("button", { name: "指示を出す" }).click();
     await expect(page.getByText("ほかの所で先に変わりました。")).toBeVisible();
-    await orders.getByRole("button", { name: "休みの指示を取り消す" }).click();
+    await active.getByRole("button", { name: "休みの指示を取り消す" }).click();
     await expect(page.getByText("休みの指示を取り消しました")).toBeVisible();
-    await expect(orders.getByText(/に取り消した/)).toBeVisible();
+    await expect(active).toHaveCount(0);
   });
 
   test("延長はパスキーで確かめてから出す", async ({ page }) => {
-    seedMain("DELETE FROM day_orders WHERE staff_id = 'president'");
+    cancelLeftOrders("president");
     await page.goto("/staff/president");
     await useOwnerPasskey(page);
     await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "延長" }).click();
     await page.getByLabel("終わりの時刻").fill("23:59");
     await page.getByRole("button", { name: "指示を出す" }).click();
     await expect(page.getByText("社長に今日の延長を 23:59 までで出しました")).toBeVisible();
-    const orders = page.getByRole("list", { name: "社長への今日の指示" });
-    await expect(orders.getByText("延長 23:59 まで")).toBeVisible();
-    await orders.getByRole("button", { name: "延長の指示を取り消す" }).click();
-    await expect(orders.getByText(/に取り消した/)).toBeVisible();
+    const active = page.getByRole("list", { name: "社長への今日の指示" }).getByRole("listitem").filter({ hasText: "に出した" });
+    await expect(active).toHaveCount(1);
+    await expect(active.getByText("延長 23:59 まで")).toBeVisible();
+    await active.getByRole("button", { name: "延長の指示を取り消す" }).click();
+    await expect(active).toHaveCount(0);
   });
 });
 

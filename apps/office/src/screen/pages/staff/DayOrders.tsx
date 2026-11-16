@@ -59,7 +59,17 @@ export function DayOrders({ staff }: DayOrdersProps) {
   return (
     <Stack gap={3}>
       <SegmentedControl label="今日だけの指示" value={kind} onValueChange={(v) => isKind(v) && setKind(v)} options={KINDS.map((k) => ({ value: k.value, label: k.label }))} />
-      {kind === "off" ? null : <TextField label="終わりの時刻" type="time" value={until} onChange={(e) => setUntil(e.target.value)} hint={kind === "extend" ? "延長はパスキーで確かめます" : undefined} />}
+      {/* Chrome の type="time" は時計のボタンに focus の輪が出ないので、24 時間の文字で受ける。形はゲートウェイが確かめる */}
+      {kind === "off" ? null : (
+        <TextField
+          label="終わりの時刻"
+          inputMode="numeric"
+          autoComplete="off"
+          value={until}
+          onChange={(e) => setUntil(e.target.value)}
+          hint={kind === "extend" ? "24 時間の 時:分 で入れます。延長はパスキーで確かめます" : "24 時間の 時:分 で入れます"}
+        />
+      )}
       <Stack direction="row" gap={2}>
         <Button variant="secondary" loading={busy === "create"} disabled={busy !== null} onClick={submit}>
           指示を出す

@@ -58,6 +58,28 @@ function devHeaders(headers: OutgoingHttpHeaders | OutgoingHttpHeader[] | undefi
 }
 
 /**
+ * ブラウザーが送ったクッキーのうち、開発の名前のログインセッションを本物の名前に戻す。本物の名前が残っていても、開発の名前の物だけを使う
+ * @param req 要求
+ */
+function gatewayCookie(req: IncomingMessage): void {
+  const cookie = req.headers.cookie;
+  if (!cookie) return;
+  const pairs = cookie.split(";").map((p) => p.trim()).filter((p) => !p.startsWith(`${SESSION_COOKIE}=`));
+  req.headers.cookie = pairs.map((p) => (p.startsWith(`${DEV_SESSION_COOKIE}=`) ? `${SESSION_COOKIE}${p.slice(DEV_SESSION_COOKIE.length)}` : p)).join("; ");
+}
+
+/**
+ * WebSocket への切り替えの要求に、証明と本物の名前のクッキーを付ける。切り替えの要求は vite の middlewares を通らず、待たずに渡す必要があるので、先に出した証明を受ける
+ * @param req 切り替えの要求
+ * @param token 先に出しておいた証明
+ */
+export function upgradeAccess(req: IncomingMessage, token: string): void {
+  if (!PROTECTED.test(req.url ?? "")) return;
+  req.headers["cf-access-jwt-assertion"] = token;
+  gatewayCookie(req);
+}
+
+/**
  * 開発の入口は http://localhost なので、Secure のクッキーを受けないブラウザー (Linux の WebKit など) がある。API への要求だけ、
  * ログインセッションのクッキーを Secure の無い開発の名前でブラウザーに渡し、受けた時は本物の名前に戻してゲートウェイへ渡す。ゲートウェイは本物と同じ __Host- の名前だけを見る
  * @param req 要求
@@ -65,12 +87,7 @@ function devHeaders(headers: OutgoingHttpHeaders | OutgoingHttpHeader[] | undefi
  */
 export function localSessionCookie(req: IncomingMessage, res: ServerResponse): void {
   if (!PROTECTED.test(req.url ?? "")) return;
-  const cookie = req.headers.cookie;
-  if (cookie) {
-    // ブラウザーに本物の名前が残っていても、開発の名前の物だけを使う
-    const pairs = cookie.split(";").map((p) => p.trim()).filter((p) => !p.startsWith(`${SESSION_COOKIE}=`));
-    req.headers.cookie = pairs.map((p) => (p.startsWith(`${DEV_SESSION_COOKIE}=`) ? `${SESSION_COOKIE}${p.slice(DEV_SESSION_COOKIE.length)}` : p)).join("; ");
-  }
+  gatewayCookie(req);
   const setHeader = res.setHeader.bind(res);
   res.setHeader = (name: string, value: number | string | readonly string[]) => setHeader(name, name.toLowerCase() === "set-cookie" ? devSetCookies(value) : value);
   const appendHeader = res.appendHeader.bind(res);
@@ -125,7 +142,17 @@ export function devFakes(): Plugin {
     async configureServer(server) {
       const vars = parseDevVars(readFileSync(join(server.config.root, ".dev.vars"), "utf8"));
       const fakes = await startFakes({ ...vars, clock: systemClock });
-      server.httpServer?.once("close", () => fakes.close());
+      // 証明は 1 時間で切れるので、切り替えの要求に渡す物を 10 分ごとに出し直す
+      let token = await fakes.access.sign();
+      const refresh = setInterval(() => {
+        fakes.access.sign().then((next) => (token = next), (error: unknown) => server.config.logger.error(String(error)));
+      }, 600_000);
+      server.httpServer?.once("close", () => {
+        clearInterval(refresh);
+        fakes.close();
+      });
+      // cloudflare のプラグインより先に切り替えの要求を受ける
+      server.httpServer?.prependListener("upgrade", (req: IncomingMessage) => upgradeAccess(req, token));
       server.middlewares.use((req, res, next) => {
         localSessionCookie(req, res);
         attachAccess(req, fakes.access.sign).then(() => next(), next);

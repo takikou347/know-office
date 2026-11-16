@@ -65,12 +65,14 @@ export async function connectGitHub(page: Page): Promise<void> {
 }
 
 /**
- * 代わりの GitHub に、決まった道の返事を置く
+ * 代わりの GitHub に、決まった道の返事を置く。代わりの GitHub は /github の下に立ち、道をその頭ごと見るので、ここで頭を付ける
  * @param page 開いているページ
- * @param route 「メソッド 道」
+ * @param route 「メソッド 道」。道は GitHub の API と同じ /repos/... の形
  * @param body 返す JSON
  */
 export async function fakeGitHubRoute(page: Page, route: string, body: unknown): Promise<void> {
-  const res = await page.request.post(`${FAKE_GITHUB}/__fake/routes`, { data: { route, body } });
+  const [method, path] = route.split(" ");
+  const prefixed = `${method ?? ""} ${new URL(FAKE_GITHUB).pathname}${path ?? ""}`;
+  const res = await page.request.post(`${FAKE_GITHUB}/__fake/routes`, { data: { route: prefixed, body } });
   if (!res.ok()) throw new Error(`返事を置けない: ${route}`);
 }

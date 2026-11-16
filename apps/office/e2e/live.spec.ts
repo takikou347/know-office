@@ -5,7 +5,7 @@ import { expect, test } from "./helpers/test.ts";
 
 test.describe("速さ", () => {
   test("発言が届く速さ", async ({ page, context }) => {
-    const opened = page.waitForEvent("websocket");
+    const opened = page.waitForEvent("websocket", (ws) => ws.url().includes("/api/v1/live"));
     await page.goto("/staff/president");
     const socket = await opened;
     const log = page.getByRole("log", { name: "社長との会話" });

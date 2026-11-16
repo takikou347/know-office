@@ -24,9 +24,11 @@ function fakeLive(tickets: (string | null | Error)[]) {
   const sockets: FakeSocket[] = [];
   const waits: number[] = [];
   const asked: string[] = [];
+  const calls = { ticket: 0 };
   let release: (() => void) | null = null;
   const deps: LiveDeps = {
     ticket: () => {
+      calls.ticket += 1;
       const next = tickets.shift() ?? null;
       if (next instanceof Error) return Promise.reject(next);
       if (next !== null) asked.push(next);
@@ -59,7 +61,7 @@ function fakeLive(tickets: (string | null | Error)[]) {
     r?.();
     await tick();
   };
-  return { deps, sockets, waits, asked, go };
+  return { deps, sockets, waits, asked, calls, go };
 }
 
 describe("配信をつなぎ直す", () => {
@@ -101,6 +103,14 @@ describe("配信をつなぎ直す", () => {
     await tick();
     await f.go();
     expect(f.sockets).toHaveLength(1);
+  });
+
+  it("開いてすぐ閉じた時 (開発の StrictMode の付け外し) は、作業トークンを出させない", async () => {
+    const f = fakeLive(["t1"]);
+    runLive(f.deps, () => {}, () => {})();
+    await tick();
+    expect(f.calls.ticket).toBe(0);
+    expect(f.sockets).toHaveLength(0);
   });
 
   it("形の違う出来事は捨てて、その後も受け続ける", async () => {

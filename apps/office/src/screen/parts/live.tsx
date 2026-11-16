@@ -61,6 +61,8 @@ export function runLive(deps: LiveDeps, onEvent: LiveListener, onConnected: (con
     if (parsed.success) onEvent(parsed.data);
   };
   const connect = async (): Promise<void> => {
+    // 開発の StrictMode は付けてすぐ外す。同じ流れのうちに閉じられた時に作業トークンを無駄に出さないよう、1 拍待ってから始める
+    await Promise.resolve();
     while (!state.stopped) {
       // 作業トークンは 1 回だけ使えるので、つなぎ直すたびに出させる
       const ticket = await deps.ticket().catch(() => null);
