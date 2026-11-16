@@ -3,12 +3,22 @@ import { DurableObject } from "cloudflare:workers";
 import { toBase64 } from "@know-office/core";
 import { z } from "zod";
 import { GuardDO } from "../../src/gate/do/guard.ts";
+import { LiveDO } from "../../src/gate/do/live.ts";
 import { RecorderDO } from "../../src/gate/do/recorder.ts";
 import { StaffDO } from "../../src/gate/do/staff.ts";
 import { WorkspaceDO } from "../../src/gate/do/workspace.ts";
 import type { Bindings, WorkspaceContainer } from "../../src/gate/env.ts";
 
-export { GuardDO, RecorderDO, StaffDO, WorkspaceDO };
+export { GuardDO, LiveDO, RecorderDO, StaffDO, WorkspaceDO };
+
+/** 配信 DO への呼び出し */
+const LiveCall = z.discriminatedUnion("method", [
+  z.object({ method: z.literal("issue"), args: z.tuple([z.number()]) }),
+  z.object({ method: z.literal("redeem"), args: z.tuple([z.string(), z.number()]) }),
+  z.object({ method: z.literal("publish"), args: z.tuple([z.unknown()]) }),
+  z.object({ method: z.literal("closeSession"), args: z.tuple([z.string()]) }),
+  z.object({ method: z.literal("closeAll"), args: z.tuple([z.string().nullable()]) }),
+]);
 
 /** ワークスペースへの呼び出し 1 回 */
 const WorkspaceCalls = z.array(z.object({ method: z.string(), args: z.array(z.unknown()) }));
@@ -159,8 +169,24 @@ function d1(env: Bindings, name: z.infer<typeof Binding>) {
 
 export default {
   async fetch(req: Request, env: Bindings): Promise<Response> {
-    const path = new URL(req.url).pathname;
+    const url = new URL(req.url);
+    const path = url.pathname;
+    const live = env.LIVE.get(env.LIVE.idFromName("live"));
+    if (path === "/live-open") {
+      // ゲートウェイが確かめた後と同じ見出しで、配信 DO に WebSocket を開かせる
+      const headers = { Upgrade: "websocket", "x-live-session": url.searchParams.get("session") ?? "", "x-live-ip": url.searchParams.get("ip") ?? "", "x-live-at": url.searchParams.get("at") ?? "" };
+      const res = await live.fetch("https://live.internal/", { headers });
+      return new Response(null, { status: res.status, webSocket: res.webSocket });
+    }
     const body: unknown = await req.json();
+    if (path === "/live") {
+      const call = LiveCall.parse(body);
+      if (call.method === "issue") return Response.json(await live.issue(call.args[0]));
+      if (call.method === "redeem") return Response.json(await live.redeem(call.args[0], call.args[1]));
+      if (call.method === "publish") return Response.json(await live.publish(call.args[0]));
+      if (call.method === "closeSession") return Response.json(await live.closeSession(call.args[0]));
+      return Response.json(await live.closeAll(call.args[0]));
+    }
     if (path === "/migrate") {
       const { binding, statements } = Migrate.parse(body);
       for (const sql of statements) await d1(env, binding).prepare(sql).run();

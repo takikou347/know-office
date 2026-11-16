@@ -35,7 +35,6 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   { name: "社員の仕事の山", path: "/staff/builder?tab=tasks", heading: "社員と仕事" },
   // 勤怠は records.setup.ts が手元の D1 に置いた日を開き、表を読み終えてから掛ける
   { name: "社員の勤怠", path: "/staff/builder?tab=attendance&day=2026-11-13", heading: "社員と仕事", ready: "出勤 9:00" },
-  { name: "変更のレビュー", path: "/staff/builder/tasks/t2", heading: "社員と仕事" },
   // 入口にあるレビューは、境目のモックの返事で最初のファイルの変更を読み終えてから掛ける
   { name: "入口のレビュー", path: REVIEW_PATH, heading: "社員と仕事", ready: "const empty = 0;", mock: async (page) => void (await stubReview(page)) },
   { name: "サービスの様子", path: "/services/knowidea-ui", heading: "アイデアとサービス" },
@@ -139,6 +138,7 @@ test.describe("使いやすさ", () => {
     const webkit = browserName === "webkit";
     const h1 = (name: string) => page.getByRole("heading", { level: 1, name });
     const main = page.getByRole("main");
+    await stubReview(page);
     await page.goto("/");
     await expect(h1("ダッシュボード")).toBeVisible();
 
@@ -149,7 +149,7 @@ test.describe("使いやすさ", () => {
     await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/社員と仕事/);
 
     // 社員を選び、仕事の山のタブを矢印で選ぶ
-    await tabTo(page, main.getByRole("link", { name: /作る役/ }), webkit);
+    await tabTo(page, main.getByRole("link", { name: /開発担当/ }), webkit);
     await page.keyboard.press("Enter");
     await tabTo(page, page.getByRole("tab", { name: "会話" }), webkit);
     await page.keyboard.press("ArrowRight");
@@ -157,13 +157,13 @@ test.describe("使いやすさ", () => {
     await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
     expect(await focusProblem(page)).toBeNull();
 
-    // 変更のある仕事を開き、可を出す
-    await tabTo(page, page.getByRole("link", { name: /CodeEditor のページを足す/ }), webkit);
+    // 変更のある仕事を開き、承認を出す
+    await tabTo(page, page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }), webkit);
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("heading", { name: "CodeEditor のページを足す" })).toBeVisible();
-    await tabTo(page, page.getByRole("button", { name: "可", exact: true }), webkit);
+    await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
+    await tabTo(page, page.getByRole("button", { name: "承認する" }), webkit);
     await page.keyboard.press("Enter");
-    await expect(page.getByText("可を出しました")).toBeVisible();
+    await expect(page.getByText("承認を出し、GitHub にも写しました")).toBeVisible();
   });
 
   // 1 ページに 2 秒ほど掛かり、14 ページを 1 つの test で回すと 5 秒を超えるので、ページごとに分ける

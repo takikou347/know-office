@@ -8,6 +8,7 @@ import { nodes, staff } from "../db/main.ts";
 import { nodeEvents } from "../db/records.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 import { auditFrom } from "../ledger/record.ts";
+import { announce } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 
 /** nodes の行 */
@@ -62,6 +63,8 @@ export async function appendNodeEvent(env: Bindings, input: { nodeId: string; st
   await drizzle(recordsOf(env, actor.now))
     .insert(nodeEvents)
     .values({ id: newId(clockAt(actor.now)), at: actor.now, nodeId: input.nodeId, staffId: input.staffId, kind: input.kind, detail: input.detail, traceId: actor.traceId ?? null });
+  // 木の 1 件が変わる時は必ず出来事を足すので、ここで印を配れば画面はどの変わり方でも読み直せる
+  await announce(env, { type: "node", node: { id: input.nodeId } }, clockAt(actor.now));
 }
 
 /**

@@ -9,6 +9,7 @@ import { runScheduled } from "./jobs/health.ts";
 import { runWeekly, type WeeklyDeps } from "./jobs/weekly.ts";
 
 export { GuardDO } from "./do/guard.ts";
+export { LiveDO } from "./do/live.ts";
 export { RecorderDO } from "./do/recorder.ts";
 export { StaffDO } from "./do/staff.ts";
 export { WorkspaceDO, WorkspaceEgress } from "./do/workspace.ts";

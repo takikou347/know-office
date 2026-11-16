@@ -21,6 +21,10 @@ export type TestWorker = {
   query(binding: string, sql: string): Promise<unknown[]>;
   /** R2 の FILES に置いた物を、頭の道で選んで中身ごと返す */
   files(prefix: string): Promise<{ key: string; body: string | null }[]>;
+  /** 配信 DO のメソッドを呼ぶ */
+  live(method: string, ...args: unknown[]): Promise<unknown>;
+  /** 配信 DO に WebSocket を開かせる道。ws: から始まる */
+  liveUrl(query: { session: string; ip: string; at: number }): Promise<string>;
   /** 社員のワークスペースの代わりが受けた呼び出し */
   workspace(staffId: string): Promise<{ method: string; args: unknown[] }[]>;
   /** 止める */
@@ -78,6 +82,13 @@ export async function startTestWorker(): Promise<TestWorker> {
     staff: (staffId, method, ...args) => post("/staff", { staffId, method, args }),
     query: async (binding, sql) => z.array(z.unknown()).parse(await post("/query", { binding, sql })),
     files: async (prefix) => z.array(z.object({ key: z.string(), body: z.string().nullable() })).parse(await post("/files", { prefix })),
+    live: (method, ...args) => post("/live", { method, args }),
+    liveUrl: async (query) => {
+      const url = new URL("/live-open", await worker.url);
+      url.protocol = "ws:";
+      url.search = new URLSearchParams({ session: query.session, ip: query.ip, at: String(query.at) }).toString();
+      return url.toString();
+    },
     workspace: async (staffId) => z.array(z.object({ method: z.string(), args: z.array(z.unknown()) })).parse(await post("/workspace", { staffId })),
     dispose: () => worker.dispose(),
   };

@@ -27,22 +27,6 @@ function recordRequests(page: Page): string[] {
 const roomOf = (page: Page) => page.getByRole("region", { name: "オフィスの部屋" });
 
 /**
- * 読み込み直さずに、切り替えから画面へ移る。狭い幅で切り替えに無い画面は、その他から移る
- * @param page 見るページ
- * @param name 画面の名前
- */
-async function openInApp(page: Page, name: string): Promise<void> {
-  const side = page.locator("nav:visible").getByRole("link", { name, exact: true });
-  if (await side.isVisible()) {
-    await side.click();
-  } else {
-    await page.locator("nav:visible").getByRole("link", { name: "その他" }).click();
-    await page.getByRole("main").getByRole("link", { name, exact: true }).click();
-  }
-  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-}
-
-/**
  * 部屋の canvas の今の絵を返す
  * @param page 見るページ
  * @returns 絵の PNG
@@ -77,7 +61,7 @@ test.describe("画面の一覧", () => {
     // 社員の姿を覆う所を押す
     await room.getByRole("link", { name: /作る役/ }).click();
     await expect(page).toHaveURL(/\/staff\/builder$/);
-    await expect(page.getByRole("log", { name: "作る役との会話" })).toBeVisible();
+    await expect(page.getByRole("log", { name: "開発担当との会話" })).toBeVisible();
   });
 });
 
@@ -97,35 +81,6 @@ test.describe("速さ", () => {
 });
 
 test.describe("オフィスの部屋", () => {
-  test("出来事を動きで見せる", async ({ page }) => {
-    // 可を待つタスクは、作る役の仕事の山に「可待ち」で出る。ダッシュボードの承認を待つ物はオーナーの承認だけを出す
-    const waiting = page.getByRole("list", { name: "作る役の仕事" }).getByRole("listitem").filter({ hasText: "CodeEditor のページを足す" });
-    await page.goto("/staff/builder?tab=tasks");
-    await expect(waiting).toContainText("可待ち");
-    await page.goto("/office");
-    const room = roomOf(page);
-    await expect(room.getByRole("link", { name: "社長 働いている" })).toBeVisible();
-    await expect(room.getByRole("link", { name: "作る役 働いている" })).toBeVisible();
-    await expect(room.getByRole("link", { name: "見る役 待っている" })).toBeVisible();
-    await expect(room.getByRole("status")).toHaveText("直近の出来事はまだありません");
-
-    // 可を出すと、タスクの一覧も同じ置き場から読むので変わり、オフィスでは承認の出来事になる
-    await page.goto("/staff/builder/tasks/t2");
-    await page.getByRole("button", { name: "可", exact: true }).click();
-    await page.getByRole("link", { name: "仕事の山に戻る" }).click();
-    await expect(waiting).toBeVisible();
-    await expect(waiting).not.toContainText("可待ち");
-    await openInApp(page, "オフィス");
-    await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を承認した");
-
-    // 不可を出すと、差し戻しの出来事になる。読み込み直すと置き場は初めの状態に戻るので、同じページで確かめる。
-    // 別のページを開くと、GPU の無い headless では前のページの部屋も見えている扱いで描き続け、次の部屋を組むのが 5 秒を超える
-    await page.goto("/staff/builder/tasks/t2");
-    await page.getByRole("button", { name: "不可" }).click();
-    await openInApp(page, "オフィス");
-    await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を作る役に差し戻した");
-  });
-
   test("WebGL が無い時は 2D の一覧", async ({ page }) => {
     await withoutWebgl(page);
     const urls = recordRequests(page);
@@ -136,7 +91,7 @@ test.describe("オフィスの部屋", () => {
     await expect(page.locator("canvas")).toHaveCount(0);
     expect(urls.filter((u) => /three/.test(u))).toEqual([]);
     await list.getByRole("link", { name: /作る役/ }).click();
-    await expect(page.getByRole("log", { name: "作る役との会話" })).toBeVisible();
+    await expect(page.getByRole("log", { name: "開発担当との会話" })).toBeVisible();
   });
 
   test("動きを減らす設定では動かさない", async ({ page }) => {
@@ -190,7 +145,7 @@ test.describe("オフィスの部屋", () => {
     }
     await expect(target).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("log", { name: "見る役との会話" })).toBeVisible();
+    await expect(page.getByRole("log", { name: "レビュー担当との会話" })).toBeVisible();
   });
 });
 

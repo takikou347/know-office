@@ -1,0 +1,41 @@
+import { expect, test } from "@playwright/test";
+import { seedMain } from "./helpers/seed.ts";
+
+// ダッシュボードと記録を、本物のゲートウェイの /dashboard と /records/attendance で通す。承認待ちとタスクは種に置き、応答を差し替えない (ルートの一覧の 1.4 と 1.12)
+
+const NODE = "019a7b00-0000-7000-8000-0000000000ea";
+const APPROVAL = "019a7b00-0000-7000-8000-0000000000eb";
+
+test.describe("ダッシュボード", () => {
+  test("社員、可を待つ物、今日の仕事、今月の費用を入口から出し、可を待つ物からタスクを開く", async ({ page }) => {
+    seedMain(`DELETE FROM approvals WHERE id = '${APPROVAL}'; DELETE FROM nodes WHERE id = '${NODE}';`);
+    seedMain(
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, body, task_kind, assignee, status, priority, created_by, created_at, updated_at) VALUES ('${NODE}', 'task', NULL, 'office', 'Slack に通知を送る', NULL, 'build', 'builder', 'waiting_owner', 1, 'president', 1, 1); ` +
+        `INSERT INTO approvals (id, kind, target, payload, status, requested_by, requested_at) VALUES ('${APPROVAL}', 'external_integration', 'Slack', '{"nodeId":"${NODE}"}', 'pending', 'builder', 1);`,
+    );
+    await page.goto("/");
+    const staff = page.getByRole("main").locator("section", { has: page.getByRole("heading", { level: 2, name: "社員の様子" }) });
+    for (const role of ["社長", "開発担当", "レビュー担当"]) await expect(staff.getByText(role, { exact: true })).toBeVisible();
+    await expect(page.getByText("今月の費用")).toBeVisible();
+    const today = page.getByRole("list", { name: "今日の仕事" });
+    await expect(today.getByText("Slack に通知を送る")).toBeVisible();
+    const waiting = page.getByRole("list", { name: "可を待つ物" });
+    await waiting.getByRole("link", { name: /Slack/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/staff/builder/tasks/${NODE}$`));
+    await expect(page.getByRole("heading", { level: 2, name: "Slack に通知を送る" })).toBeVisible();
+  });
+});
+
+test.describe("記録", () => {
+  test("office 全体の勤怠を、社員の役の名前で新しい日から出す", async ({ page }) => {
+    const day = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+    seedMain(
+      `INSERT OR REPLACE INTO daily_totals (staff_id, day, clock_in, clock_out, worked_ms, extension_ms, call_ms, stopped_ms, waiting_ms, reasons) VALUES ('reviewer', '${day}', NULL, NULL, 5400000, 0, 0, 0, 0, '[]')`,
+    );
+    await page.goto("/records");
+    const table = page.getByRole("region", { name: "office 全体の勤怠" }).getByRole("table");
+    const row = table.getByRole("row", { name: new RegExp(`${day}.*レビュー担当`) });
+    await expect(row).toBeVisible();
+    await expect(row.getByText("1 時間 30 分")).toBeVisible();
+  });
+});

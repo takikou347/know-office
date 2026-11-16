@@ -94,6 +94,8 @@ const REASON: Record<string, string> = {
   network: "入口につながりません。",
   step_up_failed: "パスキーで確かめられませんでした。",
   conflict: "ほかの所で先に変わりました。",
+  stopped: "社員が止まっています。",
+  step_up_required: "パスキーで確かめてから出してください。",
   validation_failed: "入れた値の形が違います。",
 };
 

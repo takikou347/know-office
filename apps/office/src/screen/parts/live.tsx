@@ -199,3 +199,41 @@ export function useLiveEvent(listener: LiveListener): void {
   });
   useEffect(() => subscribe((e) => ref.current(e)), [subscribe]);
 }
+
+/**
+ * 出来事の印の鍵。同じ鍵の印を 2 回受けても読み直しを重ねない。社員は状態とタスクまで含め、変わった時だけ読み直す
+ * @param event 出来事
+ * @returns 鍵
+ */
+export function markKey(event: LiveEvent): string {
+  if (event.type === "staff") return `staff:${event.staff.id}/${event.staff.state}/${event.staff.nodeId ?? ""}`;
+  if (event.type === "notice") return `notice:${event.notice.id}`;
+  if (event.type === "node") return `node:${event.node.id}`;
+  return `message:${event.message.id}`;
+}
+
+/**
+ * 合う出来事を受けるたびと、配信がつながり直した時に増える数を返す。useLoad の読み直しの数に渡す
+ * @param match 読み直す出来事か
+ * @returns 読み直す数
+ */
+export function useLiveTick(match: (event: LiveEvent) => boolean): number {
+  const { connected } = useLive();
+  const [tick, setTick] = useState(0);
+  const [seen] = useState(() => new Set<string>());
+  useLiveEvent((event) => {
+    if (!match(event)) return;
+    // 木の 1 件は何度も変わるので、同じ印を重ねないのは社員と通知と発言だけにする
+    const key = markKey(event);
+    if (event.type !== "node" && seen.has(key)) return;
+    seen.add(key);
+    setTick((t) => t + 1);
+  });
+  // つながり直した時は、切れていた間の変わりを拾うため 1 回読み直す
+  const [was, setWas] = useState(connected);
+  if (was !== connected) {
+    setWas(connected);
+    if (connected) setTick((t) => t + 1);
+  }
+  return tick;
+}

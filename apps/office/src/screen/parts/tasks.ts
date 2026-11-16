@@ -1,24 +1,24 @@
-// 仮のデータのタスクの見せ方。状態の印、担当の役の名前、レビューへの道
+// タスクの状態の印と言葉、タスクの詳細への道。社員と仕事とダッシュボードで同じ物を使う
+import type { NodeStatus } from "@know-office/core";
 import type { StatusKind } from "knowidea-ui";
-import { type Task, staff } from "../mock.ts";
 
-/** タスクの状態ごとの印 */
-export const TASK_KIND: Record<Task["state"], StatusKind> = { 今: "working", 可待ち: "pending", 次: "neutral", 済: "success" };
-
-/**
- * 社員 ID から役の名前を返す
- * @param id 社員 ID
- * @returns 役の名前。知らない ID はそのまま
- */
-export function roleOf(id: string): string {
-  return staff.find((s) => s.id === id)?.role ?? id;
-}
+/** タスクの状態ごとの印の種類と言葉 */
+export const NODE_STATUSES: Readonly<Record<NodeStatus, { kind: StatusKind; label: string }>> = {
+  todo: { kind: "neutral", label: "次" },
+  doing: { kind: "working", label: "今" },
+  review: { kind: "pending", label: "レビュー待ち" },
+  done: { kind: "success", label: "済" },
+  stopped: { kind: "stopped", label: "止めた" },
+  waiting_owner: { kind: "pending", label: "オーナー待ち" },
+  dropped: { kind: "neutral", label: "やめた" },
+};
 
 /**
- * タスクのレビューへの道
- * @param t タスク
+ * タスクの詳細への道。社員 ID とタスク ID だけから組む
+ * @param staffId 担当の社員 ID
+ * @param nodeId タスク ID
  * @returns 道
  */
-export function reviewHref(t: Task): string {
-  return `/staff/${t.staffId}/tasks/${t.id}`;
+export function taskHref(staffId: string, nodeId: string): string {
+  return `/staff/${encodeURIComponent(staffId)}/tasks/${encodeURIComponent(nodeId)}`;
 }

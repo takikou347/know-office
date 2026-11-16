@@ -18,3 +18,6 @@ INSERT OR IGNORE INTO nodes (id, kind, parent_id, scope, title, body, task_kind,
   ('019a7b00-0000-7000-8000-0000000000d3', 'project', '019a7b00-0000-7000-8000-0000000000d2', 'office', '勤怠を本物の記録で出す', NULL, NULL, NULL, 'todo', 100, 'president', 1794528000000, 1794528000000),
   ('019a7b00-0000-7000-8000-0000000000c3', 'task', '019a7b00-0000-7000-8000-0000000000d3', 'office', '勤怠の表の画面を作る', NULL, 'build', 'builder', 'done', 10, 'president', 1794528000000, 1794557400000),
   ('019a7b00-0000-7000-8000-0000000000d4', 'task', '019a7b00-0000-7000-8000-0000000000d3', 'office', '勤怠の訂正を出す', NULL, 'build', 'builder', 'todo', 11, 'president', 1794528000000, 1794528000000);
+-- 社員と仕事の仕事の山とレビューに出す、レビュー待ちのタスク。レビューの中身は e2e/helpers/review.ts が境目のモックで返す
+INSERT OR IGNORE INTO nodes (id, kind, parent_id, scope, title, body, task_kind, assignee, status, priority, created_by, created_at, updated_at) VALUES
+  ('019a7b00-0000-7000-8000-0000000000d9', 'task', '019a7b00-0000-7000-8000-0000000000d3', 'office', '空の日の勤怠を 0 で出す', NULL, 'build', 'builder', 'review', 12, 'president', 1794528000000, 1794528000000);

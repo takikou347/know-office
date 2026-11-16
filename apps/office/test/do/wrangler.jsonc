@@ -19,8 +19,9 @@
       { "name": "GUARD", "class_name": "GuardDO" },
       { "name": "STAFF", "class_name": "StaffDO" },
       // コンテナは Docker で作るので、ワークスペースへの呼び出しを並べる代わりを置く。本物の WorkspaceBox は test/gate/egress.test.ts で確かめる
-      { "name": "WORKSPACE", "class_name": "RecordingWorkspace" }
+      { "name": "WORKSPACE", "class_name": "RecordingWorkspace" },
+      { "name": "LIVE", "class_name": "LiveDO" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO", "StaffDO", "WorkspaceDO", "RecordingWorkspace"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RecorderDO", "GuardDO", "StaffDO", "WorkspaceDO", "RecordingWorkspace", "LiveDO"] }]
 }

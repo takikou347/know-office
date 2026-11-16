@@ -37,7 +37,7 @@ export function OfficeList({ people }: { /** 出す社員 */ people: readonly St
   return (
     <List
       label="社員の様子"
-      items={people.map((s) => ({ id: s.id, title: s.role, href: `/staff/${s.id}`, meta: <><StaffStatus s={s} /> {s.now}</> }))}
+      items={people.map((s) => ({ id: s.id, title: s.role, href: `/staff/${s.id}`, meta: <><StaffStatus state={s.state} /> {s.now}</> }))}
     />
   );
 }

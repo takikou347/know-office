@@ -3,13 +3,8 @@ import { DurableObject } from "cloudflare:workers";
 import { log, systemClock } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings, Live } from "../env.ts";
+import { LIVE_MAX_AGE_MS, LIVE_MAX_SOCKETS } from "../live/limits.ts";
 import { LiveTickets } from "../live/tickets.ts";
-
-/** 1 本の接続を開いておける長さ。過ぎた物は alarm で閉じ、画面は新しい作業トークンでつなぎ直す */
-export const LIVE_MAX_AGE_MS = 60 * 60_000;
-
-/** 同時に開いておける接続の数。超えたら最も古い物を閉じる */
-export const LIVE_MAX_SOCKETS = 10;
 
 /** WebSocket に付けて休ませても残す、接続の印 */
 const Attachment = z.object({ sessionId: z.string(), ip: z.string(), openedAt: z.number() });
@@ -18,6 +13,20 @@ const Attachment = z.object({ sessionId: z.string(), ip: z.string(), openedAt: z
 const POLICY = 1008;
 /** 1000 (正常) で閉じる時の理由 */
 const NORMAL = 1000;
+
+/**
+ * 接続を閉じる。閉じかけで投げても、ほかの接続を閉じ続ける
+ * @param ws 接続
+ * @param code 閉じる理由の番号
+ * @param reason 閉じる理由
+ */
+function shut(ws: WebSocket, code: number, reason: string): void {
+  try {
+    ws.close(code, reason);
+  } catch (error) {
+    log("warn", "live_close_socket_failed", { error: error instanceof Error ? error.message : "unknown" });
+  }
+}
 
 /** 配信 DO */
 export class LiveDO extends DurableObject<Bindings> implements Live {
@@ -59,7 +68,7 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
     server.serializeAttachment({ sessionId, ip, openedAt });
     // 上限を超えた分は、古い物から閉じる。開いた順は休んでも残る印の時刻で決める
     const sockets = this.#sockets().toSorted((a, b) => a.openedAt - b.openedAt);
-    for (const old of sockets.slice(0, Math.max(0, sockets.length - LIVE_MAX_SOCKETS))) old.ws.close(POLICY, "too many connections");
+    for (const old of sockets.slice(0, Math.max(0, sockets.length - LIVE_MAX_SOCKETS))) shut(old.ws, POLICY, "too many connections");
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(openedAt + LIVE_MAX_AGE_MS);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -88,7 +97,7 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
    * @returns 無し
    */
   closeSession(sessionId: string): Promise<null> {
-    for (const ws of this.ctx.getWebSockets(`session:${sessionId}`)) ws.close(POLICY, "session ended");
+    for (const ws of this.ctx.getWebSockets(`session:${sessionId}`)) shut(ws, POLICY, "session ended");
     return Promise.resolve(null);
   }
 
@@ -98,7 +107,7 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
    * @returns 無し
    */
   closeIp(ip: string): Promise<null> {
-    for (const ws of this.ctx.getWebSockets(`ip:${ip}`)) ws.close(POLICY, "locked out");
+    for (const ws of this.ctx.getWebSockets(`ip:${ip}`)) shut(ws, POLICY, "locked out");
     return Promise.resolve(null);
   }
 
@@ -108,7 +117,7 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
    * @returns 無し
    */
   closeAll(except: string | null): Promise<null> {
-    for (const s of this.#sockets()) if (s.sessionId !== except) s.ws.close(POLICY, "closed by owner");
+    for (const s of this.#sockets()) if (s.sessionId !== except) shut(s.ws, POLICY, "closed by owner");
     return Promise.resolve(null);
   }
 
@@ -120,7 +129,7 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
     // alarm は時刻を受けないので、ここだけ時計を読む
     const now = systemClock.now();
     const sockets = this.#sockets();
-    for (const s of sockets) if (now - s.openedAt >= LIVE_MAX_AGE_MS) s.ws.close(NORMAL, "max age");
+    for (const s of sockets) if (now - s.openedAt >= LIVE_MAX_AGE_MS) shut(s.ws, NORMAL, "max age");
     const left = sockets.filter((s) => now - s.openedAt < LIVE_MAX_AGE_MS);
     const next = left.reduce((min, s) => Math.min(min, s.openedAt + LIVE_MAX_AGE_MS), Number.POSITIVE_INFINITY);
     if (Number.isFinite(next)) await this.ctx.storage.setAlarm(next);
@@ -131,7 +140,7 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
    * @param ws 送ってきた接続
    */
   override webSocketMessage(ws: WebSocket): void {
-    ws.close(POLICY, "client messages are not accepted");
+    shut(ws, POLICY, "client messages are not accepted");
   }
 
   /**
@@ -141,7 +150,7 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
    */
   override webSocketClose(ws: WebSocket, code: number): void {
     // 1005 (理由無し) と 1006 (異常) は送り返せない番号なので、正常で閉じ返す
-    ws.close(code === 1005 || code === 1006 ? NORMAL : code, "closed");
+    shut(ws, code === 1005 || code === 1006 ? NORMAL : code, "closed");
   }
 
   /**

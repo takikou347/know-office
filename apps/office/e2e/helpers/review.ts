@@ -1,8 +1,9 @@
 // レビューの画面の通しの手伝い。入口のレビューの返事を境目のモックで返し、画面が呼んだ道を並べる。入口の中身は test/review/ で確かめる
 import type { Page } from "@playwright/test";
+import { z } from "zod";
 
 /** 見本のレビューのタスク ID */
-export const REVIEW_ID = "019a7b00-0000-7000-8000-0000000000d1";
+export const REVIEW_ID = "019a7b00-0000-7000-8000-0000000000d9";
 
 /** 見本のレビューの道 */
 export const REVIEW_PATH = `/staff/builder/tasks/${REVIEW_ID}`;
@@ -70,6 +71,11 @@ export async function stubReview(page: Page, options: { firstLines?: number } = 
         return route.fulfill({ json: { data: path === "src/attendance.ts" ? first : addedDiff(path, 3), meta: META } });
       }
       if (method === "PUT" && rest === "/seen") return route.fulfill({ status: 204 });
+      if (method === "POST" && rest === "/verdict") {
+        const sent: unknown = route.request().postDataJSON();
+        const verdict = z.object({ verdict: z.string() }).loose().safeParse(sent).data?.verdict ?? "approve";
+        return route.fulfill({ json: { data: { nodeId: REVIEW_ID, ownerVerdict: verdict }, meta: META } });
+      }
       return route.fulfill({ status: 404, contentType: "application/problem+json", body: JSON.stringify({ code: "not_found", traceId: META.traceId }) });
     },
   );

@@ -1,5 +1,6 @@
 import { expect, test } from "./helpers/test.ts";
 import { screens } from "../src/screen/routes.ts";
+import { REVIEW_PATH, stubReview } from "./helpers/review.ts";
 
 // どの画面も 3 つの幅で開き、横にはみ出さず、切り替えで今いる所が分かる
 for (const s of screens) {
@@ -38,24 +39,25 @@ test("その他から、下の切り替えに無い画面へ移れる", async ({
 
 test("社員と仕事で、社員を選ぶと会話と勤怠の表が出る", async ({ page }) => {
   await page.goto("/staff");
-  await page.getByRole("main").getByRole("link", { name: /作る役/ }).click();
-  await expect(page.getByRole("log", { name: "作る役との会話" })).toBeVisible();
+  await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
+  await expect(page.getByRole("log", { name: "開発担当との会話" })).toBeVisible();
   await page.getByRole("tab", { name: "勤怠" }).click();
   // 表の名前は、表を包む区画に付く
-  const table = page.getByRole("region", { name: "作る役の勤怠" }).getByRole("table");
+  const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
   await expect(table.getByRole("columnheader", { name: "始めた" })).toBeVisible();
   await expect(table.getByRole("columnheader", { name: "終えた" })).toBeVisible();
   await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
 });
 
 test("社員と仕事で、変更のある仕事を選ぶと同じ画面にレビューが開く", async ({ page }) => {
+  await stubReview(page);
   await page.goto("/staff");
-  await page.getByRole("main").getByRole("link", { name: /作る役/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
   await page.getByRole("tab", { name: "仕事の山" }).click();
-  await page.getByRole("link", { name: /CodeEditor のページを足す/ }).click();
-  await expect(page.getByRole("heading", { name: "CodeEditor のページを足す" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "可", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "不可" })).toBeVisible();
+  await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
+  await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "承認する" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "差し戻す" })).toBeVisible();
 });
 
 test("画面が手元の入口とつながる", async ({ page }) => {
@@ -64,12 +66,14 @@ test("画面が手元の入口とつながる", async ({ page }) => {
 });
 
 // 一番幅の出る所も、3 つの幅で横にはみ出さない
-for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", "/staff/builder/tasks/t2"]) {
+for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", REVIEW_PATH]) {
   test(`${path} が横にはみ出さない`, async ({ page }) => {
+    await stubReview(page);
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1, name: "社員と仕事" })).toBeVisible();
     // 勤怠の表は記録を読み終えてから幅を測る
     if (path.includes("attendance")) await expect(page.getByText(/出勤 9:00/)).toBeVisible();
+    else await expect(page.locator(".ki-diff").first()).toBeVisible();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -79,7 +83,7 @@ for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", "/staff/buil
 
 test("スマートフォンの勤怠の表は 3 列を出し、行を開くと残りが出る", async ({ page }) => {
   await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
-  const table = page.getByRole("region", { name: "作る役の勤怠" }).getByRole("table");
+  const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
   await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
   const phone = (page.viewportSize()?.width ?? 0) < 600;
   await expect(table.getByRole("columnheader", { name: "掛かった" })).toBeVisible({ visible: !phone });
@@ -95,7 +99,7 @@ test("勤怠の上の 1 行は、出勤から止められていた時間まで�
   await expect(
     page.getByText("11/13 (金) 出勤 9:00、退勤 17:10、働いた 7 時間 55 分、延長 10 分 (チェックポイントを待った)、止められていた 15 分 (自動停止)"),
   ).toBeVisible();
-  const table = page.getByRole("region", { name: "作る役の勤怠" }).getByRole("table");
+  const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
   await expect(table.getByRole("row")).toHaveCount(4);
   await expect(table.getByRole("row").nth(1)).toContainText("DiffView の行番号を直す");
   await expect(table.getByRole("row").nth(3)).toContainText("勤怠の表の画面を作る");
@@ -134,7 +138,8 @@ test("記録の内訳を読めない時は、理由と問い合わせの番号�
 });
 
 test("レビューから戻ると、仕事の山のタブに戻る", async ({ page }) => {
-  await page.goto("/staff/builder/tasks/t2");
+  await stubReview(page);
+  await page.goto(REVIEW_PATH);
   await page.getByRole("link", { name: "仕事の山に戻る" }).click();
   await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
 });
@@ -142,26 +147,14 @@ test("レビューから戻ると、仕事の山のタブに戻る", async ({ pa
 test("スマートフォンで社員、仕事と進み、戻るで 1 つ前の列に戻る", async ({ page }) => {
   test.skip((page.viewportSize()?.width ?? 0) >= 600, "1 列になる幅だけ");
   await page.goto("/staff");
-  await page.getByRole("main").getByRole("link", { name: /作る役/ }).click();
+  await stubReview(page);
+  await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
   await page.getByRole("tab", { name: "仕事の山" }).click();
-  await page.getByRole("link", { name: /CodeEditor のページを足す/ }).click();
+  await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
   await page.getByRole("button", { name: "仕事の山へ戻る" }).click();
   await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("button", { name: "社員の一覧へ戻る" }).click();
-  await expect(page.getByRole("main").getByRole("link", { name: /見る役/ })).toBeVisible();
-});
-
-test("その日だけの指示を出せる", async ({ page }) => {
-  await page.goto("/staff/builder");
-  await page.getByRole("button", { name: "延長する" }).click();
-  await expect(page.getByText("作る役に延長を伝えました")).toBeVisible();
-});
-
-test("レビューで可を出すと、出した事が分かる", async ({ page }) => {
-  await page.goto("/staff/builder/tasks/t2");
-  await expect(page.getByRole("list").getByText("見る役とオーナーに可を頼んだ")).toBeVisible();
-  await page.getByRole("button", { name: "可", exact: true }).click();
-  await expect(page.getByText("可を出しました")).toBeVisible();
+  await expect(page.getByRole("main").getByRole("link", { name: /レビュー担当/ })).toBeVisible();
 });
 
 test("ダッシュボードに、承認を待つ物、今日の仕事、今月の費用、お知らせが出る", async ({ page }) => {
@@ -181,7 +174,7 @@ test("サービスを選ぶと、その様子と記録と設定が出る", async
 
 test("画面を移ると、題が変わり、中身に移る", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("main").getByRole("link", { name: /作る役/ }).first().click();
+  await page.getByRole("main").getByRole("link", { name: /開発担当/ }).first().click();
   await expect(page).toHaveTitle("社員と仕事 - know-office");
   await expect(page.getByRole("main")).toBeFocused();
 });

@@ -68,12 +68,13 @@ export const LiveTicket = z.object({ ticket: z.string(), expiresAt: z.iso.dateti
 export type LiveTicket = z.infer<typeof LiveTicket>;
 
 /**
- * LiveDO が画面に流す出来事。社員の状態が変わった、通知が足された (印だけで、画面が GET で読む)、発言が足された。
+ * LiveDO が画面に流す出来事。社員の状態が変わった、通知が足された、タスクの木の 1 件が変わった (この 2 つは印だけで、画面が GET で読む)、発言が足された。
  * 発言の本文は頭の 2,000 字までで、切った時は truncated にし、画面が GET で読み直す。オーナーの情報、鍵、作業トークンは載せない
  */
 export const LiveEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("staff"), staff: z.object({ id: StaffId, state: StaffState, nodeId: z.string().nullable() }).strict() }).strict(),
   z.object({ type: z.literal("notice"), notice: z.object({ id: z.uuid() }).strict() }).strict(),
+  z.object({ type: z.literal("node"), node: z.object({ id: z.uuid() }).strict() }).strict(),
   z
     .object({
       type: z.literal("message"),
