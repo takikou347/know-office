@@ -1,4 +1,5 @@
 // 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、届いた要求と鍵を残す。バッチ処理は受けた後にテストが終えさせる
+import { StaffId } from "@know-office/core";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -12,6 +13,29 @@ export const ScriptedMessage = z.object({
 
 /** 積む返事の型 */
 export type ScriptedMessage = z.infer<typeof ScriptedMessage>;
+
+/** 外から積む返事。staffId を付けると、その社員の作業トークンの呼び出しにだけ返す。同じ時に動くほかの社員の SDK に取られないようにする */
+const ScriptedInput = ScriptedMessage.extend({ staffId: StaffId.optional() });
+
+/** 積んだ返事か失敗と、渡す社員。null はどの呼び出しにも渡す */
+type Queued = { item: ScriptedMessage | ScriptedError; staffId: StaffId | null };
+
+/**
+ * 鍵が作業トークン (JWT) なら、その社員 ID (sub) を読む。署名は確かめず、積んだ返事の渡し先を選ぶのにだけ使う
+ * @param key x-api-key
+ * @returns 社員 ID。作業トークンでなければ null
+ */
+function staffOfKey(key: string | undefined): StaffId | null {
+  const payload = key?.split(".")[1];
+  if (key?.split(".").length !== 3 || payload === undefined) return null;
+  try {
+    const sub: unknown = z.looseObject({ sub: z.unknown() }).parse(JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))).sub;
+    const staffId = StaffId.safeParse(sub);
+    return staffId.success ? staffId.data : null;
+  } catch {
+    return null;
+  }
+}
 
 /** 積んだ失敗。鍵の失敗 (401)、上限 (429)、混み合い (529) を Anthropic の形で返す */
 type ScriptedError = { error: { status: 401 | 429 | 529 | 500; type: string } };
@@ -74,7 +98,7 @@ function toMessage(message: ScriptedMessage, model: unknown, index: number) {
  * @returns Hono、届いた要求、返事を積む push
  */
 export function createFakeClaude(): FakeClaude {
-  const queue: (ScriptedMessage | ScriptedError)[] = [];
+  const queue: Queued[] = [];
   const requests: z.infer<typeof MessagesRequest>[] = [];
   const keys: string[] = [];
   const batches: FakeBatch[] = [];
@@ -133,7 +157,10 @@ export function createFakeClaude(): FakeClaude {
     .post("/v1/messages", async (c) => {
       const body = MessagesRequest.parse(await c.req.json());
       requests.push(body);
-      const next = queue.shift();
+      // 渡し先を決めずに積んだ物と、この社員に積んだ物のうち、先に積んだ物を返す
+      const staffId = staffOfKey(c.req.header("x-api-key"));
+      const at = queue.findIndex((q) => q.staffId === null || q.staffId === staffId);
+      const next = at === -1 ? undefined : queue.splice(at, 1)[0]?.item;
       if (!next) {
         return c.json({ type: "error", error: { type: "api_error", message: "代わりの Claude API に返事が積まれていない" } }, 500);
       }
@@ -160,7 +187,10 @@ export function createFakeClaude(): FakeClaude {
       });
     })
     .post("/__fake/responses", async (c) => {
-      queue.push(ScriptedMessage.parse(await c.req.json()));
+      const input = ScriptedInput.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) return c.json({ type: "error", error: { type: "invalid_request_error", message: "積む返事の形が違う" } }, 400);
+      const { staffId, ...message } = input.data;
+      queue.push({ item: message, staffId: staffId ?? null });
       return c.body(null, 204);
     })
     .get("/__fake/requests", (c) => c.json(requests));
@@ -169,8 +199,8 @@ export function createFakeClaude(): FakeClaude {
     app,
     requests,
     keys,
-    push: (message) => queue.push(message),
-    pushError: (status, type) => queue.push({ error: { status, type } }),
+    push: (message) => queue.push({ item: message, staffId: null }),
+    pushError: (status, type) => queue.push({ item: { error: { status, type } }, staffId: null }),
     batches,
     endBatch: (id, answer) => {
       const batch = batches.find((b) => b.id === id);

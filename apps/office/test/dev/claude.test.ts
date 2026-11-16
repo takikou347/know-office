@@ -7,6 +7,15 @@ const HEADERS = { "x-api-key": "test-key", "anthropic-version": "2023-06-01", "c
 const REQUEST = { model: "claude-opus-5-5", max_tokens: 100, messages: [{ role: "user", content: "こんにちは" }] };
 const BODY = JSON.stringify(REQUEST);
 
+/**
+ * 社員の作業トークンの形 (JWT) の鍵を作る。代わりの Claude API は署名を確かめず、sub を渡し先を選ぶのにだけ読む
+ * @param staffId 社員 ID
+ * @returns 鍵
+ */
+function ticket(staffId: string): string {
+  return `e30.${Buffer.from(JSON.stringify({ sub: staffId, node: "n" })).toString("base64url")}.sig`;
+}
+
 describe("開発環境の代わりの物", () => {
   it("代わりの Claude API は積んだ返事を順に返し、届いた要求を残す", async () => {
     const claude = createFakeClaude();
@@ -52,6 +61,26 @@ describe("開発環境の代わりの物", () => {
     await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
     const res = await claude.app.request("/__fake/requests");
     expect(await res.json()).toMatchObject([{ model: "claude-opus-5-5" }]);
+  });
+
+  it("社員を決めて積んだ返事は、その社員の作業トークンの呼び出しにだけ返し、ほかの社員には先に積んだ物があっても渡さない", async () => {
+    const claude = createFakeClaude();
+    await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", content: [{ type: "text", text: "レビュー担当へ" }] }) });
+    const call = (key: string) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": key }, body: BODY });
+    expect((await call(ticket("builder"))).status).toBe(500);
+    expect((await call("test-key")).status).toBe(500);
+    const res = await call(ticket("reviewer"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ content: [{ type: "text", text: "レビュー担当へ" }] });
+    // 社員を決めずに積んだ物は、どの呼び出しにも返す
+    claude.push({ content: [{ type: "text", text: "誰にでも" }] });
+    expect((await call(ticket("builder"))).status).toBe(200);
+  });
+
+  it("社員の形でない渡し先を付けて積もうとすると 400 で断る", async () => {
+    const claude = createFakeClaude();
+    const res = await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "nobody", content: [{ type: "text", text: "x" }] }) });
+    expect(res.status).toBe(400);
   });
 
   it("代わりの Claude API は積んだ上限の返事を、その状態と Anthropic の形の失敗で返す", async () => {

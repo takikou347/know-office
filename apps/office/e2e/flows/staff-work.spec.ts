@@ -37,11 +37,12 @@ async function resumeStaff(page: Page): Promise<void> {
 }
 
 /**
- * 代わりの Claude API に、社員の SDK が受ける終わりの返事を 1 つ積む
+ * 代わりの Claude API に、レビュー担当の SDK が受ける終わりの返事を 1 つ積む
  * @param page 画面を開いたページ
  */
 async function scriptFinish(page: Page): Promise<void> {
-  const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { content: [{ type: "text", text: "通しのタスクを終えた" }] } });
+  // 開発担当なども同じ時に見本のタスクで SDK を呼ぶので、レビュー担当の作業トークンの呼び出しにだけ返させる
+  const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { staffId: "reviewer", content: [{ type: "text", text: "通しのタスクを終えた" }] } });
   expect(res.status()).toBe(204);
 }
 
