@@ -64,9 +64,10 @@ test.describe("記録", () => {
 
   test("新しいエラーログを出し、その要求をパスキーで確かめてたどる", async ({ page }) => {
     await useOwnerPasskey(page);
-    // エラーログは追記だけで消せないので、通しごとに別の ID と traceId で置く
+    // エラーログは追記だけで消せないので、通しごとに別の ID と traceId で置く。一覧は ID の新しい順なので、今の時刻の UUID v7 のうちいちばん後の ID にし、前の通しが残したエラーより先に出す
     const now = Date.now();
-    const id = `019a7b00-0000-7000-8000-${now.toString(16).padStart(12, "0").slice(-12)}`;
+    const ts = now.toString(16).padStart(12, "0");
+    const id = `${ts.slice(0, 8)}-${ts.slice(8, 12)}-7fff-bfff-ffffffffffff`;
     const traceId = `e2e0${now.toString(16).padStart(28, "0")}`.slice(0, 32);
     const year = new Intl.DateTimeFormat("en", { timeZone: "Asia/Tokyo", year: "numeric" }).format(new Date(now));
     runLocalD1([
