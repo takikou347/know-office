@@ -78,6 +78,40 @@ describe("オーナーの情報を扱う拡張のセキュリティ", () => {
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM owner_data WHERE ext_id = 'career'")).toEqual([{ n: 3 }]);
   });
 
+  it("同時に 2 つ置き換えても、項目ごとに 1 行で、値はどちらか一方の全項目と揃う", async () => {
+    await careerWithProfile(world);
+    const a = { summary: "A の自己紹介", history: "A の経歴", skills: "A のできる事" };
+    const b = { summary: "B の自己紹介", history: "B の経歴", skills: "B のできる事" };
+    await Promise.all([api(world, "PUT", "/api/v1/ext/career/profile", a), api(world, "PUT", "/api/v1/ext/career/profile", b)]);
+    expect(await rows(world.d1.DB, "SELECT field, count(*) AS n FROM owner_data WHERE ext_id = 'career' GROUP BY field ORDER BY field")).toEqual([
+      { field: "history", n: 1 },
+      { field: "skills", n: 1 },
+      { field: "summary", n: 1 },
+    ]);
+    expect([a, b]).toContainEqual(await api(world, "GET", "/api/v1/ext/career/profile"));
+  });
+
+  it("同じ項目の行を 2 つ置けない", async () => {
+    await careerWithProfile(world);
+    const [row] = await rows(world.d1.DB, "SELECT ciphertext, iv FROM owner_data WHERE ext_id = 'career' AND field = 'summary'");
+    await expect(
+      world.d1.DB.prepare("INSERT INTO owner_data (id, ext_id, field, ciphertext, iv, updated_at) VALUES ('019a7b00-0000-7000-8000-0000000000aa', 'career', 'summary', ?, ?, 0)")
+        .bind(row?.["ciphertext"], row?.["iv"])
+        .run(),
+    ).rejects.toThrow(/UNIQUE/);
+  });
+
+  it("暗号文を別の項目に写すと戻せず 500 で、読んだ記録は増えない", async () => {
+    await careerWithProfile(world);
+    // 項目の名前を追加の認証データにしているので、summary の暗号文を history の行に写しても history としては戻せない
+    await world.d1.DB.prepare(
+      "UPDATE owner_data SET ciphertext = (SELECT ciphertext FROM owner_data WHERE ext_id = 'career' AND field = 'summary'), iv = (SELECT iv FROM owner_data WHERE ext_id = 'career' AND field = 'summary') WHERE ext_id = 'career' AND field = 'history'",
+    ).run();
+    const before = await rows(world.d1.DB, "SELECT count(*) AS n FROM owner_data_reads");
+    expect(await api(world, "GET", "/api/v1/ext/career/profile", undefined, 500)).toMatchObject({ code: "internal" });
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM owner_data_reads")).toEqual(before);
+  });
+
   it("置き換えの途中で 1 項目を書けなければ、どの項目も前の値のまま", async () => {
     await careerWithProfile(world);
     await world.d1.DB.prepare("CREATE TRIGGER career_skills_fails BEFORE INSERT ON owner_data WHEN NEW.field = 'skills' BEGIN SELECT RAISE(ABORT, 'test'); END").run();

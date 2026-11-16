@@ -3,21 +3,24 @@ import { type Clock, jstDayStart, newId, StaffId, type Uptime } from "@know-offi
 import type { Bindings } from "../env.ts";
 import { recordError } from "./errors.ts";
 
-/** 1 つの部分の答えを待つ長さ。外を呼ぶ時の初期値と同じ 10 秒 */
+/** 1 つの部分の答えを待つ長さの初期値。外を呼ぶ時の初期値と同じ 10 秒 */
 const PROBE_TIMEOUT_MS = 10_000;
 
 /** 1 つの部分の確かめ。part は health_checks の part */
 type Probe = { part: string; run: () => Promise<unknown> };
 
 /**
- * 決めた長さの内に終わるかを待つ。間に合わなければ通らなかったとする
+ * 決めた長さの内に終わるかを待つ。間に合わなければ通らなかったとする。
+ * DO の RPC と D1 の問い合わせは AbortSignal で中断できないので、時間切れは決めた長さで解ける Promise との競争で作る。
+ * 時間切れの後も work() は走り続け、その結果は捨てる (確かめは読むだけなので、遅れて終わっても何も変えない)
  * @param work 確かめる処理
+ * @param timeoutMs 待つ長さ
  * @returns 通ったか
  */
-async function within(work: () => Promise<unknown>): Promise<boolean> {
+async function within(work: () => Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const late = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), PROBE_TIMEOUT_MS);
+    timer = setTimeout(() => resolve(false), timeoutMs);
   });
   try {
     return await Promise.race([work().then(() => true), late]);
@@ -48,13 +51,14 @@ function probes(env: Bindings, now: number): Probe[] {
  * 部分ごとに通るかを確かめ、health_checks に 1 回のバッチで残す。書けない時は投げずにエラーログに残す
  * @param env バインディング
  * @param clock 時刻
+ * @param timeoutMs 1 つの部分の答えを待つ長さ。省くと 10 秒
  */
-export async function checkHealth(env: Bindings, clock: Clock): Promise<void> {
+export async function checkHealth(env: Bindings, clock: Clock, timeoutMs = PROBE_TIMEOUT_MS): Promise<void> {
   const now = clock.now();
   const results = await Promise.all(
     probes(env, now).map(async (probe) => {
       const started = clock.now();
-      const ok = await within(probe.run);
+      const ok = await within(probe.run, timeoutMs);
       return { part: probe.part, ok, ms: Math.max(0, clock.now() - started) };
     }),
   );

@@ -78,6 +78,13 @@
       "when": 1794811953390,
       "tag": "0010_service_release",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794850655847,
+      "tag": "0011_owner_data_field",
+      "breakpoints": true
     }
   ]
 }

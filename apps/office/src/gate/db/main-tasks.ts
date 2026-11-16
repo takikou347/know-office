@@ -223,15 +223,19 @@ export const batches = sqliteTable(
   (t) => [uniqueIndex("batches_kind_week").on(t.kind, t.week)],
 );
 
-/** オーナーの情報。項目ごとに暗号にする */
-export const ownerData = sqliteTable("owner_data", {
-  id: id(),
-  extId: text("ext_id").notNull(),
-  field: text("field").notNull(),
-  ciphertext: text("ciphertext").notNull(),
-  iv: text("iv").notNull(),
-  updatedAt: time("updated_at").notNull(),
-});
+/** オーナーの情報。項目ごとに暗号にし、拡張と項目で 1 行だけにする */
+export const ownerData = sqliteTable(
+  "owner_data",
+  {
+    id: id(),
+    extId: text("ext_id").notNull(),
+    field: text("field").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    iv: text("iv").notNull(),
+    updatedAt: time("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("owner_data_field").on(t.extId, t.field)],
+);
 
 /** オーナーの情報を読んだ記録。追記専用 */
 export const ownerDataReads = sqliteTable("owner_data_reads", {

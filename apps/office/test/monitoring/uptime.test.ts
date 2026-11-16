@@ -89,6 +89,26 @@ describe("止まらなさ", () => {
     expect((await gate.request("/api/v1/records/uptime", { headers })).status).toBe(422);
   });
 
+  it("決めた時間を過ぎても答えない部分は、待たずに通らなかった事にする", async () => {
+    const staff = gate.env.STAFF;
+    const hanging = {
+      idFromName: (name: StaffId) => name,
+      get: (name: StaffId) => (name === "reviewer" ? { status: () => new Promise<never>(() => undefined) } : staff.get(staff.idFromName(name))),
+    };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const env = { ...gate.env, STAFF: hanging } as unknown as typeof gate.env;
+    // 時計は止めてあるので、待った長さは実の時間で測る
+    const started = performance.now();
+    await checkHealth(env, clock, 50);
+    expect(performance.now() - started).toBeLessThan(2000);
+    const parts = await d1.DB.prepare("SELECT part, ok FROM health_checks WHERE part LIKE 'staff:%' ORDER BY part").all();
+    expect(parts.results).toEqual([
+      { part: "staff:builder", ok: 1 },
+      { part: "staff:president", ok: 1 },
+      { part: "staff:reviewer", ok: 0 },
+    ]);
+  });
+
   it("確かめを書けなくても投げず、エラーログに残す", async () => {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     const env = { ...gate.env, DB: { prepare: () => ({ bind: () => ({ run: () => Promise.reject(new Error("D1 が答えない")), first: () => Promise.reject(new Error("D1 が答えない")) }) }), batch: () => Promise.reject(new Error("D1 が答えない")) } } as unknown as typeof gate.env;

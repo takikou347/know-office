@@ -15,8 +15,8 @@ export type ExtensionStore = {
  * ownerData の拡張のルートだけが受け、どのルートもパスキーの確認の後に動く。ツールは受けない
  */
 export type OwnerDataStore = {
-  /** 項目を読む。無ければ null。読めたら読んだ記録を残す */
-  get(field: string): Promise<string | null>;
+  /** 項目をまとめて読む。置いていない項目は持たない。全部を戻せた時だけ読んだ記録を残し、1 つでも戻せなければ何も残さずに投げる */
+  get(fields: readonly string[]): Promise<Record<string, string>>;
   /** 渡した項目をまとめて置き換える。全部を 1 回のバッチで書き、途中で落ちても一部だけを残さない */
   put(values: Readonly<Record<string, string>>): Promise<void>;
 };

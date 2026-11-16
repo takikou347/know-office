@@ -10,7 +10,7 @@ import type { ExtensionContext, ExtensionDefinition, ExtensionRoute } from "../e
 import { enabledExtensions, extensionStates, extensionStore, toggleExtension } from "../extensions/state.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
-import { openOwnerData, putOwnerData } from "../work/owner-data.ts";
+import { openOwnerFields, putOwnerData } from "../work/owner-data.ts";
 import { list, ok } from "../respond.ts";
 
 const jsonBody = <T>(schema: T) => ({ content: { "application/json": { schema } }, required: true });
@@ -49,7 +49,7 @@ function contextOf(c: Context<GateEnv>, ext: ExtensionDefinition): ExtensionCont
   const now = c.var.clock.now();
   const ownerData = ext.ownerData
     ? {
-        get: (field: string) => openOwnerData(c.env.DB, c.env.MASTER_KEY, { extId: ext.id, field, by: "owner", nodeId: null }, now),
+        get: (fields: readonly string[]) => openOwnerFields(c.env.DB, c.env.MASTER_KEY, { extId: ext.id, fields, by: "owner", nodeId: null }, now),
         put: (values: Readonly<Record<string, string>>) => putOwnerData(c.env.DB, c.env.MASTER_KEY, ext.id, values, now),
       }
     : null;

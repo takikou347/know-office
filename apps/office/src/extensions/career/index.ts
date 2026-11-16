@@ -22,9 +22,8 @@ function ownerDataOf(ctx: ExtensionContext): NonNullable<ExtensionContext["owner
  * @returns 職務経歴
  */
 async function readProfile(ctx: ExtensionContext): Promise<CareerProfile> {
-  const store = ownerDataOf(ctx);
-  const values = await Promise.all(CAREER_FIELDS.map(async (field) => [field, (await store.get(field)) ?? ""] as const));
-  return CareerProfile.parse(Object.fromEntries(values));
+  const values = await ownerDataOf(ctx).get(CAREER_FIELDS);
+  return CareerProfile.parse(Object.fromEntries(CAREER_FIELDS.map((field) => [field, values[field] ?? ""])));
 }
 
 /**
@@ -64,10 +63,8 @@ export default defineExtension({
       response: CareerShowcase,
       run: async (ctx, body: UpdateCareerShowcaseInput) => {
         // 選んだ項目だけを暗号を解いて置き場に写す。選ばない項目は書き出した物に入れない
-        const store = ownerDataOf(ctx);
-        const items: Record<string, string> = {};
-        for (const field of body.fields) items[field] = (await store.get(field)) ?? "";
-        const showcase: CareerShowcase = { items };
+        const values = await ownerDataOf(ctx).get(body.fields);
+        const showcase: CareerShowcase = { items: Object.fromEntries(body.fields.map((field) => [field, values[field] ?? ""])) };
         await ctx.store.put("showcase", showcase);
         return showcase;
       },
