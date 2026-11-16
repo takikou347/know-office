@@ -179,27 +179,46 @@ export class AuditLedger {
   }
 
   /**
-   * 書けた行のハッシュを覚える
+   * 書けた行のハッシュを覚える。先にメモリを書き直し、storage に書けなくても書けた行は失敗にせず、ログとエラーログに残す
+   * storage の last:<年> は D1 が読めない時だけ使うので、1 行前のまま残っても、D1 が読める時のつなぎは割れない
    * @param year 年
    * @param hash 最後の行のハッシュ
    */
   async #remember(year: number, hash: string): Promise<void> {
-    await this.#deps.storage.put({ [`${LAST}${String(year)}`]: hash });
     this.#last.set(year, hash);
+    try {
+      await this.#deps.storage.put({ [`${LAST}${String(year)}`]: hash });
+    } catch (error) {
+      await this.#deps.report("audit_remember_failed", error);
+    }
   }
 
   /**
-   * 年の最後のハッシュを、メモリ、DO の storage、D1 の順に読む。行が無ければその年の始まり
+   * 年の最後のハッシュを、メモリ、溜めた行の最後、D1、storage の last:<年> の順に読む。行が無ければその年の始まり
+   * storage の last:<年> は D1 に書けた後に書くので 1 行前のまま残る事があり、D1 が投げた時 (写しの間) だけ使う
    * @param year 年
    * @param db REC_<年>
    * @param startHash その年の最初の行の prev_hash
    * @returns 最後のハッシュ
+   * @throws D1 が投げ、storage にも最後のハッシュが無い時は D1 の失敗をそのまま投げる
    */
   async #lastHash(year: number, db: D1Database, startHash: string): Promise<string> {
-    const known = this.#last.get(year) ?? (await this.#deps.storage.get<string>(`${LAST}${String(year)}`));
-    if (known !== undefined) return known;
-    // storage に無いのは、前の版の記録 DO が書いた年だけ。D1 から 1 度読んで覚える
-    const found = (await lastAuditHash(db)) ?? startHash;
+    const inMemory = this.#last.get(year);
+    if (inMemory !== undefined) return inMemory;
+    // 溜めた行は D1 の行より後ろにあるので、あればその最後に続ける
+    const held = [...(await this.#deps.storage.list<HeldAudit>(`${HELD}${String(year)}:`)).values()].at(-1);
+    if (held) {
+      this.#last.set(year, held.hash);
+      return held.hash;
+    }
+    let found: string;
+    try {
+      found = (await lastAuditHash(db)) ?? startHash;
+    } catch (error) {
+      const stored = await this.#deps.storage.get<string>(`${LAST}${String(year)}`);
+      if (stored === undefined) throw error;
+      found = stored;
+    }
     await this.#remember(year, found);
     return found;
   }

@@ -244,4 +244,43 @@ describe("写しの間の監査ログ", () => {
     expect(await firstHash(2027)).toBe(last2026.lastHash);
     expect(await verifyChain(d1.REC_2027, await firstHash(2027))).toMatchObject({ ok: true });
   });
+
+  it("D1 に書けた後に storage の最後のハッシュが 1 行前のまま残っても、作り直した DO は D1 の最後の行につなぐ", async () => {
+    const storage = memoryStorage();
+    const warm = ledgerOf(storage, { main: d1.DB, rec: { 2026: d1.REC_2026 } });
+    await warm.ledger.append(entry(0));
+    const stale = storage.data.get("last:2026");
+    // storage の put だけが落ちる。D1 に書けた行は失敗にしない
+    const put = storage.put.bind(storage);
+    storage.put = () => Promise.reject(new Error("storage に書けない"));
+    const second = await warm.ledger.append(entry(1));
+    storage.put = put;
+    expect(second.held).toBe(false);
+    expect(warm.errors).toContain("audit_remember_failed");
+    expect(storage.data.get("last:2026")).toBe(stale);
+    // 書いた後、storage を書く前に DO が落ちた形も同じ
+    const third = await ledgerOf(storage, { main: d1.DB, rec: { 2026: d1.REC_2026 } }).ledger.append(entry(2));
+    storage.data.set("last:2026", second.hash);
+    const fourth = await ledgerOf(storage, { main: d1.DB, rec: { 2026: d1.REC_2026 } }).ledger.append(entry(3));
+    expect(await written(d1.REC_2026)).toBe(4);
+    expect(await verifyChain(d1.REC_2026, await firstHash(2026))).toEqual({ ok: true, brokenAt: null, lastHash: fourth.hash });
+    expect(third.held).toBe(false);
+  });
+
+  it("溜めた行がある冷えた DO は、溜めた行の最後のハッシュにそのまま続ける", async () => {
+    const storage = memoryStorage();
+    const rec = stoppable(d1.REC_2026);
+    const warm = ledgerOf(storage, { main: d1.DB, rec: { 2026: rec.db } });
+    await warm.ledger.append(entry(0));
+    rec.state.down = true;
+    await warm.ledger.append(entry(1));
+    // storage の最後のハッシュが失われても、溜めた行から読む
+    storage.data.delete("last:2026");
+    const cold = ledgerOf(storage, { main: d1.DB, rec: { 2026: rec.db } });
+    const next = await cold.ledger.append(entry(2));
+    expect(next.held).toBe(true);
+    rec.state.down = false;
+    expect(await cold.ledger.flush()).toBe(0);
+    expect(await verifyChain(d1.REC_2026, await firstHash(2026))).toEqual({ ok: true, brokenAt: null, lastHash: next.hash });
+  });
 });
