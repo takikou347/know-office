@@ -10,7 +10,7 @@ KNOW IDEA の社内の管理アプリ。AI 社員が自分でタスクを見つ�
 | `apps/workspace/` | ワークスペース。Node.js で動くコンテナの中身 |
 | `apps/office/openapi/v1.yaml` | API の正本 (OpenAPI 3.1)。[Swagger UI](https://takikou347.github.io/know-office/) で読める |
 
-確かめは `pnpm install`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm e2e`。`pnpm e2e` は画面を Chrome と Safari の 3 つの幅(360、820、1440)で開き、横にはみ出さない事とゲートウェイとつながる事を見る。初めての時は `pnpm --filter @know-office/office exec playwright install chromium webkit` でブラウザを入れる。
+確かめは `pnpm install`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm e2e`。`pnpm e2e` は画面を Chrome の幅 1,280 と 360 で開き、横にはみ出さない事とゲートウェイとつながる事を見る。初めての時は `pnpm --filter @know-office/office exec playwright install chromium` でブラウザを入れる。Safari はデプロイの前に Mac で `E2E_BROWSERS=safari pnpm e2e` を 1 度流す。
 
 手元で動かす時は `pnpm dev` で、http://localhost:5173 に画面とゲートウェイが Cloudflare と同じ仕組み(workerd)で立つ。ビルドの成果物、手元の Cloudflare の状態、e2e の結果は `pnpm clean` で消す。
 

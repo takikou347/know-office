@@ -2,7 +2,7 @@ import { expect, test } from "./helpers/test.ts";
 import { screens } from "../src/screen/routes.ts";
 import { REVIEW_PATH, stubReview } from "./helpers/review.ts";
 
-// どの画面も 3 つの幅で開き、横にはみ出さず、切り替えで今いる所が分かる
+// どの画面も設定の幅で開き、横にはみ出さず、切り替えで今いる所が分かる
 for (const s of screens) {
   test(`${s.label} (${s.path}) が開き、横にはみ出さない`, async ({ page }) => {
     const errors: string[] = [];
@@ -65,7 +65,7 @@ test("画面が手元の入口とつながる", async ({ page }) => {
   await expect(page.getByText("入口とつながりました")).toBeVisible();
 });
 
-// 一番幅の出る所も、3 つの幅で横にはみ出さない
+// 一番幅の出る所も、どの幅でも横にはみ出さない
 for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", REVIEW_PATH]) {
   test(`${path} が横にはみ出さない`, async ({ page }) => {
     await stubReview(page);

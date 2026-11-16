@@ -84,7 +84,7 @@ know-office SHALL 設定と記録を、office の画面とサービスごとの�
 
 ### Requirement: 端末
 
-know-office SHALL 幅 360 ピクセルのスマートフォンからパソコンまで、最新の Chrome と Safari で使える。押せる所は MUST 44 ピクセル以上とし、画面のコンポーネントは knowidea-ui を使う。
+know-office SHALL 幅 360 ピクセルのスマートフォンからパソコンまで、最新の Chrome と Safari で使える (Chrome は CI で、Safari はデプロイの前に Mac で確かめる)。押せる所は MUST 44 ピクセル以上とし、画面のコンポーネントは knowidea-ui を使う。
 
 #### Scenario: スマートフォンで開く
 

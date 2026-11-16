@@ -96,7 +96,8 @@ export default defineConfig({
   webServer: {
     command: `pnpm run dev --port ${port} --strictPort`,
     url: `http://localhost:${port}/api/v1/health`,
-    reuseExistingServer: !process.env["CI"],
+    // 作業ツリーのポートが重なった時に別のツリーのサーバーを使い回さず、起動の失敗で気づく
+    reuseExistingServer: false,
     timeout: 60_000,
   },
 });
