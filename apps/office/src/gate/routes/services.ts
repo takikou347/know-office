@@ -3,7 +3,7 @@ import { createRoute, z } from "@hono/zod-openapi";
 import { AdvanceInput, AppError, CreateIdeaInput, Deployment, RollbackInput, ServiceCard, ServiceDetail, ServiceStage } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { audit } from "../ledger/record.ts";
-import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { accepted, created, list, ok } from "../respond.ts";
 import { rollbackService } from "../services/rollback.ts";
@@ -19,6 +19,8 @@ const listServicesRoute = createRoute({
   path: "/api/v1/services",
   operationId: "listServices",
   tags: ["services"],
+  summary: "サービスの一覧",
+  "x-steps": ["`services` を段階で絞り込んで取得する"],
   request: { query: listQuery(router).extend({ stage: ServiceStage.optional().openapi({ param: { name: "stage", in: "query" } }) }) },
   responses: { 200: listResponse(ServiceCard), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -28,9 +30,11 @@ const createIdeaRoute = createRoute({
   path: "/api/v1/services",
   operationId: "createIdea",
   tags: ["services"],
+  summary: "アイデアを追加する",
+  "x-steps": ["`services` に段階 `idea` で追加し、`service_events` に追加する", "監査ログに `service.create` を記録する"],
   request: { body: jsonBody(CreateIdeaInput) },
   responses: {
-    201: { ...okResponse(ServiceCard, "作成した"), headers: { Location: { description: "作成したリソースの URL", schema: { type: "string" } } } },
+    201: createdResponse(ServiceCard),
     ...problems(400, 401, 403, 413, 415, 422, 429, 500),
   },
 });
@@ -40,6 +44,12 @@ const getServiceRoute = createRoute({
   path: "/api/v1/services/{serviceId}",
   operationId: "getService",
   tags: ["services"],
+  summary: "サービスの詳細",
+  "x-steps": [
+    "`services` と `service_events` を取得し、検討の材料を R2 の `study_key` から読む",
+    "種類ごとの様子を組み立てる。ライブラリは最新の `release` の版とそろい、最新の `deploy` (npm への公開の結果)、使っているサービスごとの最新の `uses` の版。Web アプリは最新の `deploy` と `rollback`、`service_metrics` の最新の利用者数と直前 24 時間の失敗率、`usage` の今月の費用。コンテンツは `deploy` の一覧と、直前 24 時間の読まれた数",
+  ],
+  "x-errors": ["404 `not_found`: サービスが存在しない"],
   request: { params: ServiceParam },
   responses: { 200: okResponse(ServiceDetail), ...problems(401, 403, 404, 429, 500) },
 });
@@ -49,6 +59,21 @@ const advanceServiceRoute = createRoute({
   path: "/api/v1/services/{serviceId}/advance",
   operationId: "advanceService",
   tags: ["services"],
+  summary: "段階を進める、見送る、終了する",
+  "x-steps": [
+    "サービスを取得し、現在の段階から移れる段階かを確認する。移れるのは `idea` から `study` か `dropped`、`study` から `prototype` か `dropped`、`prototype` から `service` か `dropped`、`service` から `operation` か `closed`、`operation` から `closed`",
+    "`prototype` に進める場合は担当の社員を `staffId` で、リポジトリを `repo` で決める。`repo` は `prototype` に進める時だけ受ける。`dropped` にする場合は理由を `dropped_reason` に残す",
+    "`repo` は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を `GET /installation/repositories` で確かめる",
+    "`study` に進める場合は、office の受け付けのプロジェクトの下に置く、似た物、作る量、セキュリティの要る所を調べる社長のタスクを組み立てる",
+    "読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない",
+    "監査ログに `service.advance` を記録する",
+  ],
+  "x-errors": [
+    "404 `not_found`: サービスが存在しない",
+    "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、または確かめた後に連携が変わった",
+    "422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い",
+    "502 `upstream_failed`: GitHub がエラーを返した",
+  ],
   request: { params: ServiceParam, body: jsonBody(AdvanceInput) },
   responses: { 200: okResponse(ServiceCard), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
 });
@@ -58,6 +83,20 @@ const rollbackServiceRoute = createRoute({
   path: "/api/v1/services/{serviceId}/rollback",
   operationId: "rollbackService",
   tags: ["services"],
+  summary: "前のバージョンにロールバックする",
+  description: "15 分以内のパスキーの確認が必要。",
+  "x-steps": [
+    "サービスを取得し、Web アプリで、リポジトリがある事を確かめる",
+    "`locks` の `service.rollback:<サービス ID>` を 10 分の長さで 1 文で取る。取れなければ断る。取った錠は切れるまで持ち、直前の戻しと同時の戻しを重ねない",
+    "そのリポジトリの既定のブランチを読み、`rollback.yml` を GitHub App で動かす (`actions` の書きに絞った鍵)。失敗したら錠を外し、何も残さない",
+    "`service_events` への `rollback` の追加と、通知 `service_rollback` を 1 回のバッチで書く。書けなければ、GitHub には届いているので、エラーログと通知 `service_rollback_unrecorded` に残す",
+    "監査ログに `service.rollback` を記録する",
+  ],
+  "x-errors": [
+    "404 `not_found`: サービスが存在しない",
+    "409 `conflict`: Web アプリではない、リポジトリが無い、または直前 10 分の間に戻したか戻している最中",
+    "502 `upstream_failed`: GitHub がエラーを返した",
+  ],
   "x-step-up": true,
   middleware: [stepUpGate] as const,
   request: { params: ServiceParam, body: jsonBody(RollbackInput) },

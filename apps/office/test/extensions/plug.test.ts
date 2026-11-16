@@ -121,7 +121,7 @@ describe("差し込み口", () => {
       id: "test-counter",
       title: "数える",
       ownerData: false,
-      routes: [{ method: "get", path: "/count", operationId: "getTestCount", summary: "数を読む", response: Count, run: async (ctx) => Count.parse((await ctx.store.get("count")) ?? { count: 0 }) }],
+      routes: [{ method: "get", path: "/count", operationId: "getTestCount", summary: "数を読む", steps: ["数を読む"], response: Count, run: async (ctx) => Count.parse((await ctx.store.get("count")) ?? { count: 0 }) }],
       tools: {
         count_up: {
           schema: z.object({}).strict(),

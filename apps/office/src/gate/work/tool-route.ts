@@ -12,13 +12,31 @@ import { findNode } from "./nodes.ts";
 import { bearer, type Caller, ticketTask } from "./ticket.ts";
 import { prepareTool } from "./tools.ts";
 
-const ToolParam = z.object({ toolName: z.string().max(TOOL_NAME_MAX).regex(TOOL_NAME).openapi({ param: { name: "toolName", in: "path" } }) }).strict();
+const ToolParam = z.object({ toolName: z.string().max(TOOL_NAME_MAX).regex(TOOL_NAME).openapi({ param: { name: "toolName", in: "path", description: "社員のツールの名前か、入れている拡張のツールの ext__<拡張 ID>__<ツール>" } }) }).strict();
 
 const toolRoute = createRoute({
   method: "post",
   path: "/ws/v1/tools/{toolName}",
   operationId: "callStaffTool",
   tags: ["workspace-gate"],
+  summary: "社員のツール。入力はツールごとの Zod スキーマに従う",
+  description: "toolInput の形式はツールごとに定義し、ゲートウェイが検証する。ワークスペースの MCP の受け手 staff が、社員の役で使えるツールを呼ぶたびに送る。",
+  "x-steps": [
+    "作業トークンを検証する",
+    "全体、社員、タスクのどれかが止まっていれば 409 `stopped`",
+    "作業トークンのタスクが社員 DO の担当中のタスクと一致することを確認する。どのツールも、前のタスクの作業トークンでは動かさない",
+    "社員の役割で使えるツールかを確認し、ツールごとの Zod スキーマで入力を検証する",
+    "`decide()` で可否を判断する。拒否した場合は `guard.observe` に `rule_denied` を渡して 403 で断る。`tool_calls` と `tool_call` の数えは、フックが呼ぶ `POST /ws/v1/decisions` が持つので重ねない",
+    "ゲートウェイがツールを実行し、ツールごとの監査ログを残す",
+  ],
+  "x-errors": [
+    "403 `rule_denied`: ルールの判断が拒否した",
+    "404 `not_found`: この社員の役割では使えないツール、入れていない拡張のツール",
+    "409 `stopped`: 社員かタスクが停止中",
+    "409 `conflict`: 作業トークンのタスクが担当中のタスクと異なる、読んだ後にタスクが変わった",
+    "422 `validation_failed`: ツールの名前かツールの入力の形が違う",
+  ],
+  security: [{ workToken: [] }],
   request: { params: ToolParam, body: { content: { "application/json": { schema: ToolCallInput } }, required: true } },
   responses: { 200: okResponse(ToolResult), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 500) },
 });

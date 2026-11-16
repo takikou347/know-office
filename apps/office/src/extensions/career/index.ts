@@ -40,12 +40,13 @@ export default defineExtension({
   title: "職務経歴",
   ownerData: true,
   routes: [
-    { method: "get", path: "/profile", operationId: "getCareerProfile", summary: "職務経歴を開く", response: CareerProfile, run: readProfile },
+    { method: "get", path: "/profile", operationId: "getCareerProfile", summary: "職務経歴を開く", steps: ["`owner_data` の `career` の項目ごとに `deriveKey(MASTER_KEY, \"owner-data\")` で暗号を解き、置いていない項目は空の文にする", "戻せた項目ごとに `owner_data_reads` に `by: owner` で 1 行足す"], response: CareerProfile, run: readProfile },
     {
       method: "put",
       path: "/profile",
       operationId: "updateCareerProfile",
       summary: "職務経歴を置き換える",
+      steps: ["項目ごとに暗号にし、全部の項目の前の行を消して足すのを 1 回のバッチで書く", "監査ログに `extension.write` を記録する"],
       body: UpdateCareerProfileInput,
       response: CareerProfile,
       run: async (ctx, body: UpdateCareerProfileInput) => {
@@ -53,12 +54,13 @@ export default defineExtension({
         return body;
       },
     },
-    { method: "get", path: "/showcase", operationId: "getCareerShowcase", summary: "人に見せるために書き出した項目を読む", response: CareerShowcase, run: (ctx) => readShowcase(ctx.store) },
+    { method: "get", path: "/showcase", operationId: "getCareerShowcase", summary: "人に見せるために書き出した項目を読む", steps: ["R2 の `ext/career/showcase.json` を読む。無ければ空を返す"], response: CareerShowcase, run: (ctx) => readShowcase(ctx.store) },
     {
       method: "put",
       path: "/showcase",
       operationId: "updateCareerShowcase",
       summary: "人に見せる項目を選んで書き出す",
+      steps: ["選んだ項目だけの暗号を解き (`owner_data_reads` に `by: owner` で残す)、R2 の `ext/career/showcase.json` を置き換える。選ばない項目は入れない", "監査ログに `extension.write` を記録する"],
       body: UpdateCareerShowcaseInput,
       response: CareerShowcase,
       run: async (ctx, body: UpdateCareerShowcaseInput) => {

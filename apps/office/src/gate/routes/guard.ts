@@ -1,15 +1,11 @@
-// 自動停止: 停止中の対象、止めた記録の一覧と 1 件、手で止める、判定、再開、止める前の確認、基準、効き目、蒸留の案 (ルートの一覧の 1.5、自動停止の 3.6、3.7、サービスと拡張の 3.6)
+// 自動停止: 停止中の対象、止めた記録の一覧と 1 件、手で止める、判定、再開、止める前の確認 (ルートの一覧の 1.5、自動停止の 3.6、サービスと拡張の 3.6)。基準と改善は guard-tuning.ts
 import type { D1Database } from "@cloudflare/workers-types";
 import { createRoute, z } from "@hono/zod-openapi";
 import {
   AppError,
   CreateStopInput,
-  DecisionInput,
-  GuardEffect,
   GuardScope,
   GuardState,
-  GuardThresholds,
-  Lesson,
   newId,
   Resumption,
   Stop,
@@ -19,19 +15,17 @@ import {
   StopTargetInput,
   StopUpdate,
   StopVerdict,
-  UpdateThresholdsInput,
   VerdictInput,
 } from "@know-office/core";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
-import { requireStepUp, stepUpGate } from "../auth/passkey.ts";
+import { requireStepUp } from "../auth/passkey.ts";
 import { stops, stopUpdates } from "../db/main.ts";
 import { applyStop, guardDo, openStop, openStops, previewStop, resumeStop, type StopRowData, stopStates } from "../guard/actions.ts";
-import { decideLesson, guardEffect, listLessons, updateThresholds } from "../guard/lessons.ts";
 import { loadThresholds } from "../guard/thresholds.ts";
 import { audit } from "../ledger/record.ts";
-import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, ok } from "../respond.ts";
 import { clockAt } from "../work/attendance.ts";
 
@@ -45,6 +39,8 @@ const getStateRoute = createRoute({
   path: "/api/v1/guard/state",
   operationId: "getGuardState",
   tags: ["guard"],
+  summary: "停止中の対象",
+  "x-steps": ["`stops` のうち `kind` が `stop` で、`stop_updates` に `resumed` が無い行を新しい順に集める"],
   responses: { 200: okResponse(GuardState), ...problems(401, 403, 429, 500) },
 });
 
@@ -53,6 +49,8 @@ const listStopsRoute = createRoute({
   path: "/api/v1/guard/stops",
   operationId: "listStops",
   tags: ["guard"],
+  summary: "停止の履歴と、停止には至らなかったニアミスの記録",
+  "x-steps": ["`stops` を条件で絞り込んで新しい順に取得し、`stop_updates` を結合する"],
   request: {
     query: listQuery(router).extend({
       kind: z
@@ -70,8 +68,16 @@ const createStopRoute = createRoute({
   path: "/api/v1/guard/stops",
   operationId: "createStop",
   tags: ["guard"],
+  summary: "手動で停止する",
+  "x-steps": [
+    "対象が存在し、まだ停止していないことを確認する",
+    "`GuardDO.claimStop` で止める権利を取る",
+    "`stops` に `by: \"owner\"` で追加し、通知を出し、監査ログに `guard.stop` を記録する",
+    "自動停止の設計書にある範囲ごとの停止処理を行う。途中で失敗したら、通知と監査ログに `guard.stop_failed` を残して 500 を返す",
+  ],
+  "x-errors": ["404 `not_found`: 対象が存在しない", "409 `conflict`: すでに停止している、または同時に来た別の停止が先に権利を取った"],
   request: { body: jsonBody(CreateStopInput) },
-  responses: { 201: okResponse(Stop, "作成した"), ...problems(400, 401, 403, 409, 413, 415, 422, 429, 500) },
+  responses: { 201: createdResponse(Stop), ...problems(400, 401, 403, 409, 413, 415, 422, 429, 500) },
 });
 
 const getStopRoute = createRoute({
@@ -79,6 +85,10 @@ const getStopRoute = createRoute({
   path: "/api/v1/guard/stops/{stopId}",
   operationId: "getStop",
   tags: ["guard"],
+  summary: "停止の記録 1 件",
+  description: "直前の 20 件の操作と経緯を含む。",
+  "x-steps": ["`stops` と `stop_updates` を取得する", "直前の 20 件の操作を、監査ログの `guard.stop` (ニアミスは `guard.near`) の detail から取得する"],
+  "x-errors": ["404 `not_found`: 停止の記録が存在しない"],
   request: { params: StopParam },
   responses: { 200: okResponse(StopDetail), ...problems(401, 403, 404, 429, 500) },
 });
@@ -88,8 +98,11 @@ const judgeStopRoute = createRoute({
   path: "/api/v1/guard/stops/{stopId}/verdict",
   operationId: "judgeStop",
   tags: ["guard"],
+  summary: "停止の判断を評価する",
+  "x-steps": ["停止の記録を取得する", "`stop_updates` に `verdict` を `by: \"owner\"` で追加する", "監査ログに `guard.verdict` を記録する"],
+  "x-errors": ["404 `not_found`: 停止の記録が存在しない"],
   request: { params: StopParam, body: jsonBody(VerdictInput) },
-  responses: { 201: okResponse(StopUpdate, "作成した"), ...problems(400, 401, 403, 404, 413, 415, 422, 429, 500) },
+  responses: { 201: createdResponse(StopUpdate), ...problems(400, 401, 403, 404, 413, 415, 422, 429, 500) },
 });
 
 const resumeStopRoute = createRoute({
@@ -97,6 +110,20 @@ const resumeStopRoute = createRoute({
   path: "/api/v1/guard/stops/{stopId}/resume",
   operationId: "resumeStop",
   tags: ["guard"],
+  summary: "停止を解除する",
+  description: "停止範囲がサービスまたは全体の場合のみ、15 分以内のパスキーの確認が必要。",
+  "x-steps": [
+    "停止の記録を取得する",
+    "停止範囲がサービスか全体なら `requireStepUp(c)` で確認を求める",
+    "全体の停止なら、鍵の再登録が済んでいることを確認する",
+    "`GuardDO.releaseStop` で再開する権利を取り、`GuardDO` と `StaffDO` の停止を解除する",
+    "`stop_updates` に `resumed` を追加し、監査ログに `guard.resume` を記録する",
+  ],
+  "x-errors": [
+    "404 `not_found`: 停止の記録が存在しない",
+    "401 `step_up_required`: パスキーの確認がない",
+    "409 `conflict`: 解除済み、同時に来た別の再開が先に権利を取った、停止には至らなかったニアミスの記録、または鍵の再登録が済んでいない",
+  ],
   "x-step-up": "conditional",
   request: { params: StopParam },
   responses: { 200: okResponse(Resumption), ...problems(401, 403, 404, 409, 429, 500) },
@@ -107,61 +134,11 @@ const previewStopRoute = createRoute({
   path: "/api/v1/guard/stop-previews",
   operationId: "previewStop",
   tags: ["guard"],
+  summary: "手動で停止する前に影響範囲を確認する",
+  "x-steps": ["停止範囲を決め、止まるタスクと社員を数える。データは変更しない"],
+  "x-errors": ["404 `not_found`: 対象が存在しない"],
   request: { body: jsonBody(StopTargetInput) },
   responses: { 200: okResponse(StopPreview), ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
-});
-
-const LessonParam = z.object({ lessonId: z.uuid().openapi({ param: { name: "lessonId", in: "path" }, description: "UUID v7" }) }).strict();
-const Day = (name: string) => z.iso.date().optional().openapi({ param: { name, in: "query" }, description: "日本時間の日付 YYYY-MM-DD" });
-
-const getThresholdsRoute = createRoute({
-  method: "get",
-  path: "/api/v1/guard/thresholds",
-  operationId: "getThresholds",
-  tags: ["guard"],
-  responses: { 200: okResponse(GuardThresholds), ...problems(401, 403, 429, 500) },
-});
-
-const updateThresholdsRoute = createRoute({
-  method: "put",
-  path: "/api/v1/guard/thresholds",
-  operationId: "updateThresholds",
-  tags: ["guard"],
-  "x-step-up": true,
-  // 基準を変えると止める判断が変わるので、強める時も弱める時もパスキーで確かめる
-  middleware: [stepUpGate] as const,
-  request: { body: jsonBody(UpdateThresholdsInput) },
-  responses: { 200: okResponse(GuardThresholds), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
-});
-
-const getEffectRoute = createRoute({
-  method: "get",
-  path: "/api/v1/guard/effect",
-  operationId: "getGuardEffect",
-  tags: ["guard"],
-  request: { query: z.object({ from: Day("from"), to: Day("to") }).strict() },
-  responses: { 200: okResponse(GuardEffect), ...problems(400, 401, 403, 422, 429, 500) },
-});
-
-const listLessonsRoute = createRoute({
-  method: "get",
-  path: "/api/v1/guard/lessons",
-  operationId: "listLessons",
-  tags: ["guard"],
-  request: {
-    // カーソルは案の ID なので、UUID の形だけを受ける
-    query: listQuery(router).extend({ cursor: z.uuid().optional().openapi({ param: { name: "cursor", in: "query" }, description: "前のレスポンスの meta.next" }) }),
-  },
-  responses: { 200: listResponse(Lesson), ...problems(400, 401, 403, 422, 429, 500) },
-});
-
-const decideLessonRoute = createRoute({
-  method: "post",
-  path: "/api/v1/guard/lessons/{lessonId}/decision",
-  operationId: "decideLesson",
-  tags: ["guard"],
-  request: { params: LessonParam, body: jsonBody(DecisionInput) },
-  responses: { 200: okResponse(Lesson), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
 
 const iso = (at: number) => new Date(at).toISOString();
@@ -279,29 +256,4 @@ export const guardRoutes = router
   .openapi(previewStopRoute, async (c) => {
     const { scope, target } = c.req.valid("json");
     return ok(c, await previewStop(c.env.DB, scope, target));
-  })
-  .openapi(getThresholdsRoute, async (c) => {
-    const { thresholds, version } = await loadThresholds(c.env.DB);
-    return ok(c, { version, values: thresholds });
-  })
-  .openapi(updateThresholdsRoute, async (c) => {
-    const input = c.req.valid("json");
-    const changed = await updateThresholds(c.env, input, c.var.clock.now());
-    // 5 分ごとの確かめが、settings の行とそれを入れた監査ログの行と GuardDO のハッシュを比べる。対象は足した行
-    await audit(c, "guard.thresholds", changed.id, { before: changed.before, after: changed.after, version: changed.version, hash: changed.hash, reason: input.reason, lessonId: input.lessonId });
-    await guardDo(c.env).setThresholdHash(changed.hash);
-    return ok(c, { version: changed.version, values: changed.values });
-  })
-  .openapi(getEffectRoute, async (c) => ok(c, await guardEffect(c.env.DB, c.req.valid("query"))))
-  .openapi(listLessonsRoute, async (c) => {
-    const { cursor, limit } = c.req.valid("query");
-    const { items, next } = await listLessons(c.env.DB, cursor, limit);
-    return list(c, items, next);
-  })
-  .openapi(decideLessonRoute, async (c) => {
-    const { lessonId } = c.req.valid("param");
-    const { decision, reason } = c.req.valid("json");
-    const { lesson } = await decideLesson(c.env, lessonId, decision, { by: "owner", now: c.var.clock.now(), traceId: c.var.traceId });
-    await audit(c, "lesson.decide", lessonId, { kind: lesson.kind, decision, status: lesson.status, reason });
-    return ok(c, lesson);
   });

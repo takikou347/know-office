@@ -9,7 +9,7 @@ import { stepUpGate } from "../auth/passkey.ts";
 import { attendance, dailyTotals } from "../db/main.ts";
 import type { GateEnv, Staff } from "../env.ts";
 import { audit } from "../ledger/record.ts";
-import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, ok } from "../respond.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { loadDay, type Totals, type WorkEntryRow } from "../work/attendance.ts";
@@ -23,6 +23,13 @@ const getDayAttendanceRoute = createRoute({
   path: "/api/v1/staff/{staffId}/attendance",
   operationId: "getDayAttendance",
   tags: ["staff"],
+  summary: "1 日分の勤怠",
+  description: "勤怠の集計行と、タスク単位の明細。",
+  "x-steps": [
+    "指定日の `attendance` を、訂正を反映して取得する",
+    "`work_entries` と `daily_totals` を取得する",
+    "進行中の区分を `StaffDO.status()` から補う",
+  ],
   request: {
     params: z.object({ staffId: StaffParam }).strict(),
     query: z.object({ day: z.iso.date().openapi({ param: { name: "day", in: "query" }, description: "日本時間の日付 YYYY-MM-DD" }) }).strict(),
@@ -35,6 +42,15 @@ const correctAttendanceRoute = createRoute({
   path: "/api/v1/attendance/{attendanceId}/corrections",
   operationId: "correctAttendance",
   tags: ["records"],
+  summary: "勤怠を訂正する",
+  description: "訂正のレコードを追加する。15 分以内のパスキーの確認が必要。",
+  "x-steps": [
+    "訂正元のレコードを取得する",
+    "訂正後の区分が他の区分と重ならないことを確認する",
+    "`corrects` に訂正元の ID を持つレコードを追加し、`daily_totals` を再計算する。両方を `db.batch()` でまとめて書き込む",
+    "監査ログに `attendance.correct` を記録する",
+  ],
+  "x-errors": ["404 `not_found`: 訂正元のレコードが存在しない", "409 `conflict`: 区分が重なる"],
   "x-step-up": true,
   middleware: [stepUpGate] as const,
   request: {
@@ -42,7 +58,7 @@ const correctAttendanceRoute = createRoute({
     body: { required: true, content: { "application/json": { schema: CorrectAttendanceInput } } },
   },
   responses: {
-    201: { ...okResponse(AttendanceRow, "作成した"), headers: { Location: { description: "作成したリソースの URL", schema: { type: "string" } } } },
+    201: createdResponse(AttendanceRow),
     ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500),
   },
 });
@@ -52,6 +68,10 @@ const listAttendanceRoute = createRoute({
   path: "/api/v1/records/attendance",
   operationId: "listAttendance",
   tags: ["records"],
+  summary: "勤怠の履歴",
+  description: "新しい日から、同じ日は社員 ID の順に返す。カーソルは前のページの最後の `<日>.<社員 ID>`。",
+  "x-steps": ["期間と社員で絞り込み、訂正を反映して作り直した `daily_totals` を取得する", "1 日のまとめにして返す"],
+  "x-errors": ["400 `malformed_request`: カーソルの形が違う", "422 `validation_failed`: `from` が `to` より後"],
   request: { query: listQuery(router).extend(AttendanceQuery.shape) },
   responses: { 200: listResponse(DaySummary), ...problems(400, 401, 403, 422, 429, 500) },
 });

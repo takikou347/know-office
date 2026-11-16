@@ -2697,6 +2697,7 @@ paths:
         required: false
         schema:
           type: string
+          minLength: 1
           description: '`office` またはサービスの ID'
       - name: assignee
         in: query
@@ -4018,11 +4019,13 @@ paths:
         required: true
         schema:
           type: string
+          pattern: ^[A-Za-z0-9_-]{1,100}$
       - name: state
         in: query
         required: true
         schema:
           type: string
+          pattern: ^[A-Za-z0-9_-]{1,200}\.[A-Za-z0-9_-]{43}$
       security:
       - accessJwt: []
       responses:
@@ -7455,42 +7458,6 @@ components:
       - bytes
       - ratio
       additionalProperties: false
-    StaffStatus:
-      type: object
-      properties:
-        id:
-          type: string
-          enum:
-          - president
-          - builder
-          - reviewer
-          description: 社員 ID。役割ごとに固定
-        state:
-          type: string
-          enum:
-          - 'off'
-          - working
-          - wrapping
-          - called
-          - stopped
-          - waiting
-        nodeId:
-          type:
-          - string
-          - 'null'
-        nodeTitle:
-          type:
-          - string
-          - 'null'
-        workedMsToday:
-          type: integer
-      required:
-      - id
-      - state
-      - nodeId
-      - nodeTitle
-      - workedMsToday
-      additionalProperties: false
     StaffOverview:
       type: object
       description: 社員の一覧の 1 人。今の状態に、組織図の役の名前とモデルを足した物
@@ -9899,7 +9866,6 @@ components:
         seq:
           type: integer
           minimum: 0
-          maximum: 9007199254740991
           description: session ごとの通し番号。0 から始め、前回の続きにする。返事が届かずに前回と同じ通し番号を送り直した時は、中身が同じなら 204 で受け直して何も足さず、違えば 409 で断る
         chunk:
           type: string
@@ -9947,7 +9913,6 @@ components:
         nextSeq:
           type: integer
           minimum: 0
-          maximum: 9007199254740991
           description: 次に送る部分の通し番号
       required:
       - sessionId
@@ -9963,8 +9928,10 @@ components:
           description: UUID v7
         ticket:
           type: string
+          minLength: 1
         model:
           type: string
+          minLength: 1
         effort:
           type: string
           enum:
@@ -9977,9 +9944,10 @@ components:
           type: string
         resume:
           type: string
+          minLength: 1
         tools:
           type: array
-          maxItems: 10
+          maxItems: 13
           description: 社員の役で使える社員のツール。ワークスペースはこの名前のツールだけを MCP の受け手 staff に出す
           items:
             type: string
@@ -9994,6 +9962,9 @@ components:
             - idea_add
             - ask_boss
             - ask_owner
+            - checkpoint
+            - report
+            - owner_info_read
         extensionTools:
           type: array
           maxItems: 32
@@ -10044,6 +10015,7 @@ components:
       properties:
         ticket:
           type: string
+          minLength: 1
       required:
       - ticket
       additionalProperties: false

@@ -39,9 +39,9 @@ export const Node = z
     taskKind: TaskKind.nullable(),
     assignee: z.string().nullable(),
     status: NodeStatus,
-    priority: z.number().int(),
-    progress: z.number().min(0).max(1),
-    version: z.number().int(),
+    priority: z.number().int().meta({ description: "小さいほど先に取る" }),
+    progress: z.number().min(0).max(1).meta({ description: "配下のタスクのうち済んだ割合。見送ったタスクは数えない。タスクは済めば 1" }),
+    version: z.number().int().meta({ description: "変えるたびに 1 増える。PATCH の version に渡す" }),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -92,10 +92,10 @@ export const CreateNodeInput = z
     scope: Scope,
     title: z.string().min(1).max(200),
     body: z.string().max(20_000).optional(),
-    taskKind: z.enum(["build", "content", "fix"]).optional(),
+    taskKind: z.enum(["build", "content", "fix"]).optional().meta({ description: "タスクだけが持ち、タスクには要る" }),
     assignee: StaffParam.optional(),
-    priority: z.number().int().min(0).max(1000).optional(),
-    repo: RepoName.optional(),
+    priority: z.number().int().min(0).max(1000).optional().meta({ description: "小さいほど先に取る。無ければ 100" }),
+    repo: RepoName.optional().meta({ description: "タスクだけが持つ。社員が直す GitHub のリポジトリ (`owner/name`)" }),
   })
   .strict()
   .meta({ id: "CreateNodeInput" });
@@ -127,7 +127,7 @@ export const OrgStaff = z
     role: z.string(),
     bossId: z.string().nullable(),
     model: z.string(),
-    prompt: z.string(),
+    prompt: z.string().meta({ description: "今の役目の説明文" }),
     promptVersion: z.number().int(),
   })
   .strict()
@@ -209,7 +209,7 @@ export const TOOL_NAME_MAX = 100;
 
 /** POST /ws/v1/tools/{toolName} の入力。toolInput の形はツールごとの Zod スキーマでゲートウェイが確かめる */
 export const ToolCallInput = z
-  .object({ toolInput: z.record(z.string(), z.unknown()) })
+  .object({ toolInput: z.record(z.string(), z.unknown()).meta({ description: "ツールごとの Zod スキーマに従う。定義は core の schemas/tools/<名前>.ts" }) })
   .strict()
   .meta({ id: "ToolCallInput" });
 

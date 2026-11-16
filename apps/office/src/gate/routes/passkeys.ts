@@ -13,7 +13,7 @@ import { cookieHeader, issueSession, STEP_UP_MS } from "../auth/session.ts";
 import { loginAttempts, passkeys, sessions } from "../db/main.ts";
 import type { GateEnv } from "../env.ts";
 import { audit } from "../ledger/record.ts";
-import { okResponse, problems } from "../openapi.ts";
+import { createdResponse, okResponse, problems } from "../openapi.ts";
 import { created, ok } from "../respond.ts";
 import { currentSession, sessionKey } from "./sessions.ts";
 
@@ -24,6 +24,8 @@ const createPasskeyOptionsRoute = createRoute({
   path: "/api/v1/passkeys/options",
   operationId: "createPasskeyOptions",
   tags: ["auth"],
+  summary: "WebAuthn のオプションを生成する",
+  "x-steps": ["challenge を生成し、現在のログインセッションに紐付けて `GuardDO` に 5 分間保存する", "登録用か確認用かに応じた WebAuthn のオプションを返す"],
   request: { body: jsonBody(PasskeyOptionsInput) },
   responses: { 200: okResponse(PasskeyOptions), ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
 });
@@ -33,9 +35,22 @@ const registerPasskeyRoute = createRoute({
   path: "/api/v1/passkeys",
   operationId: "registerPasskey",
   tags: ["auth"],
+  summary: "パスキーを登録する",
+  description: "登録済みのパスキーがある場合のみ、15 分以内のパスキーの確認が必要。",
+  "x-steps": [
+    "登録済みのパスキーがあれば `requireStepUp(c)` で確認を求める",
+    "challenge とレスポンスを検証する",
+    "`passkeys` に追加する",
+    "監査ログに `passkey.add` を記録する",
+  ],
+  "x-errors": [
+    "401 `step_up_required`: 2 本目以降の登録で、パスキーの確認がない",
+    "401 `unauthenticated`: レスポンスが一致しない",
+    "409 `conflict`: 同じ鍵がすでに登録されている",
+  ],
   "x-step-up": "conditional",
   request: { body: jsonBody(WebAuthnResponse) },
-  responses: { 201: okResponse(Passkey, "作成した"), ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
+  responses: { 201: createdResponse(Passkey), ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
 });
 
 const stepUpRoute = createRoute({
@@ -43,6 +58,16 @@ const stepUpRoute = createRoute({
   path: "/api/v1/me/step-up",
   operationId: "stepUp",
   tags: ["auth"],
+  summary: "パスキーで再認証する",
+  description: "以後 15 分間、パスキーの確認が必要なルートを利用できる。",
+  "x-steps": [
+    "`GuardDO` に保存した challenge をもとに、WebAuthn のレスポンスを検証する",
+    "`passkeys` の `counter` と `last_used_at` を更新する",
+    "現在のログインセッションを終了し、`expires_at` を引き継いだ新しいログインセッションを `step_up_until` 付きで作成する",
+    "`login_attempts` と監査ログに `session.step_up` を記録する",
+    "新しいクッキーを設定する",
+  ],
+  "x-errors": ["401 `unauthenticated`: レスポンスが一致しない、または challenge の期限切れ。失敗回数に数える"],
   request: { body: jsonBody(WebAuthnResponse) },
   responses: { 200: okResponse(StepUp), ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
 });

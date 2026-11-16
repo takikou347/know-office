@@ -59,10 +59,11 @@ export const DEFAULT_SCHEDULE: WorkSchedule = { start: "09:00", end: "17:00", da
 export const CheckpointInput = z
   .object({
     kind: z.enum(["test_pass", "commit", "pr", "note"]),
-    nodeId: z.uuid(),
+    nodeId: z.uuid().meta({ description: "UUID v7" }),
     note: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .meta({ id: "CheckpointInput" });
 
 /** チェックポイントの型 */
 export type CheckpointInput = z.infer<typeof CheckpointInput>;
@@ -98,7 +99,7 @@ export type StaffStatus = z.infer<typeof StaffStatus>;
 /** 社員の一覧の 1 人。今の状態に、組織図の役の名前とモデルを足した物 */
 export const StaffOverview = z
   .object({
-    id: StaffId,
+    id: StaffId.meta({ description: "社員 ID。役割ごとに固定" }),
     role: z.string(),
     model: z.string(),
     state: StaffState,
@@ -107,7 +108,7 @@ export const StaffOverview = z
     workedMsToday: z.number().int(),
   })
   .strict()
-  .meta({ id: "StaffOverview" });
+  .meta({ id: "StaffOverview", description: "社員の一覧の 1 人。今の状態に、組織図の役の名前とモデルを足した物" });
 
 /** 社員の一覧の 1 人の型 */
 export type StaffOverview = z.infer<typeof StaffOverview>;
@@ -134,7 +135,7 @@ export type CreateOrderInput = z.infer<typeof CreateOrderInput>;
 export const Order = z
   .object({
     id: z.uuid().openapi({ description: "UUID v7" }),
-    staffId: StaffId,
+    staffId: StaffId.meta({ description: "社員 ID。役割ごとに固定" }),
     day: z.iso.date().openapi({ description: "日本時間の日付 YYYY-MM-DD" }),
     kind: OrderKind,
     until: z.string().nullable(),
@@ -151,8 +152,8 @@ export type Order = z.infer<typeof Order>;
 /** 1 日の勤怠のまとめ。daily_totals の行を返す形にした物。時刻は RFC 3339 の協定世界時 */
 export const DaySummary = z
   .object({
-    staffId: StaffId,
-    day: z.iso.date(),
+    staffId: StaffId.meta({ description: "社員 ID。役割ごとに固定" }),
+    day: z.iso.date().meta({ description: "日本時間の日付 YYYY-MM-DD" }),
     clockIn: z.iso.datetime().nullable(),
     clockOut: z.iso.datetime().nullable(),
     workedMs: z.number().int(),
@@ -171,9 +172,9 @@ export type DaySummary = z.infer<typeof DaySummary>;
 /** その日に手を付けたタスク 1 件。activeMs は止められていた時間と待っていた時間を除いた掛かった時間 */
 export const WorkEntry = z
   .object({
-    id: z.uuid(),
-    nodeId: z.uuid(),
-    scope: z.string(),
+    id: z.uuid().meta({ description: "UUID v7" }),
+    nodeId: z.uuid().meta({ description: "UUID v7" }),
+    scope: z.string().meta({ description: "`office` またはサービスの ID" }),
     title: z.string(),
     startedAt: z.iso.datetime(),
     endedAt: z.iso.datetime(),
@@ -211,9 +212,9 @@ export type CorrectAttendanceInput = z.infer<typeof CorrectAttendanceInput>;
 /** 勤怠の 1 行。訂正の行は corrects に元の行の ID を持つ */
 export const AttendanceRow = z
   .object({
-    id: z.uuid(),
-    staffId: StaffId,
-    day: z.iso.date(),
+    id: z.uuid().meta({ description: "UUID v7" }),
+    staffId: StaffId.meta({ description: "社員 ID。役割ごとに固定" }),
+    day: z.iso.date().meta({ description: "日本時間の日付 YYYY-MM-DD" }),
     kind: AttendanceKind,
     startedAt: z.iso.datetime(),
     endedAt: z.iso.datetime(),

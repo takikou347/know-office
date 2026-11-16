@@ -38,7 +38,7 @@ export type OwnerVerdict = z.infer<typeof OwnerVerdict>;
 
 /** オーナーが承認か差し戻しを出す入力。baseSha は読んだ時の head_sha で、違えば 409 */
 export const ReviewVerdictInput = z
-  .object({ verdict: OwnerVerdict, body: z.string().max(20_000), baseSha: CommitSha })
+  .object({ verdict: OwnerVerdict, body: z.string().max(20_000), baseSha: CommitSha.meta({ description: "確かめた時の `head_sha`。現在と異なる場合は 409 conflict" }) })
   .strict()
   .meta({ id: "ReviewVerdictInput" });
 
@@ -56,7 +56,7 @@ export const NoteSide = z.enum(["old", "new"]);
 
 /** 行に指摘を書く入力 */
 export const CreateNoteInput = z
-  .object({ path: RepoPath, line: z.number().int().min(1).max(1_000_000), side: NoteSide, body: z.string().min(1).max(20_000) })
+  .object({ path: RepoPath.meta({ description: "リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422" }), line: z.number().int().min(1).max(1_000_000), side: NoteSide, body: z.string().min(1).max(20_000) })
   .strict()
   .meta({ id: "CreateNoteInput" });
 
@@ -74,7 +74,7 @@ export type ReviewNote = z.infer<typeof ReviewNote>;
 
 /** レビューの画面から 1 ファイルを書き換えてコミットする入力。baseSha は読んだ時の head_sha で、違えば 409 */
 export const CreateCommitInput = z
-  .object({ path: RepoPath, content: z.string().max(500_000), baseSha: CommitSha, message: z.string().min(1).max(1000) })
+  .object({ path: RepoPath.meta({ description: "リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422" }), content: z.string().max(500_000), baseSha: CommitSha.meta({ description: "確かめた時の `head_sha`。現在と異なる場合は 409 conflict" }), message: z.string().min(1).max(1000) })
   .strict()
   .meta({ id: "CreateCommitInput" });
 
@@ -129,7 +129,12 @@ export const ReviewHead = z
 export type ReviewHead = z.infer<typeof ReviewHead>;
 
 /** 1 ファイルの差分の問い。since は前に見た先で、あればそこからの差を返す */
-export const ReviewDiffQuery = z.object({ path: RepoPath, since: CommitSha.optional() }).strict();
+export const ReviewDiffQuery = z
+  .object({
+    path: RepoPath.meta({ description: "リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422" }),
+    since: CommitSha.optional().meta({ description: "前に見た `last_seen_sha`。指定するとそこから今の `head_sha` までの差分を返す" }),
+  })
+  .strict();
 
 /** 1 ファイルの差分。lines は行の頭に ` ` (変わらない)、`+` (足した)、`-` (消した) を付けた統一形式の行 */
 export const FileDiff = z
@@ -145,7 +150,7 @@ export const FileDiff = z
 export type FileDiff = z.infer<typeof FileDiff>;
 
 /** 前か後のファイルの中身の問い。base はレビューの元、head は今の先 */
-export const ReviewFileQuery = z.object({ path: RepoPath, ref: z.enum(["base", "head"]) }).strict();
+export const ReviewFileQuery = z.object({ path: RepoPath.meta({ description: "リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422" }), ref: z.enum(["base", "head"]) }).strict();
 
 /** 前か後のファイルの中身。ref は読んだ sha */
 export const FileContent = z.object({ path: z.string(), ref: z.string(), content: z.string() }).strict().meta({ id: "FileContent" });
@@ -154,7 +159,7 @@ export const FileContent = z.object({ path: z.string(), ref: z.string(), content
 export type FileContent = z.infer<typeof FileContent>;
 
 /** 読んだ所の印を置く入力。sha は読んだ時の head_sha で、違えば 409 */
-export const SeenInput = z.object({ sha: CommitSha }).strict().meta({ id: "SeenInput" });
+export const SeenInput = z.object({ sha: CommitSha.meta({ description: "読んだ時の `head_sha`。現在と異なる場合は 409 conflict" }) }).strict().meta({ id: "SeenInput" });
 
 /** 読んだ所の印を置く入力の型 */
 export type SeenInput = z.infer<typeof SeenInput>;

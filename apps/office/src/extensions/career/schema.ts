@@ -14,7 +14,7 @@ export const CAREER_FIELD_LABEL: Readonly<Record<CareerField, string>> = { summa
 const FieldValue = z.string().max(4000);
 
 /** 職務経歴。置いていない項目は空の文 */
-export const CareerProfile = z.object({ summary: FieldValue, history: FieldValue, skills: FieldValue }).strict().meta({ id: "CareerProfile" });
+export const CareerProfile = z.object({ summary: FieldValue, history: FieldValue, skills: FieldValue }).strict().meta({ id: "CareerProfile", description: "職務経歴。置いていない項目は空の文" });
 
 /** 職務経歴の型 */
 export type CareerProfile = z.infer<typeof CareerProfile>;
@@ -26,7 +26,7 @@ export const UpdateCareerProfileInput = z.object({ summary: FieldValue, history:
 export type UpdateCareerProfileInput = z.infer<typeof UpdateCareerProfileInput>;
 
 /** 人に見せるために書き出した項目と値。書き出していない項目は持たない */
-export const CareerShowcase = z.object({ items: z.record(z.string(), z.string()) }).strict().meta({ id: "CareerShowcase" });
+export const CareerShowcase = z.object({ items: z.record(z.string(), z.string()) }).strict().meta({ id: "CareerShowcase", description: "人に見せるために書き出した項目と値。書き出していない項目は持たない" });
 
 /** 書き出した物の型 */
 export type CareerShowcase = z.infer<typeof CareerShowcase>;
@@ -35,7 +35,7 @@ export type CareerShowcase = z.infer<typeof CareerShowcase>;
 export const UpdateCareerShowcaseInput = z
   .object({ fields: z.array(z.enum(CAREER_FIELDS)).max(CAREER_FIELDS.length).refine((fields) => new Set(fields).size === fields.length, { message: "同じ項目を重ねない" }) })
   .strict()
-  .meta({ id: "UpdateCareerShowcaseInput" });
+  .meta({ id: "UpdateCareerShowcaseInput", description: "人に見せる項目。同じ項目は 1 度だけ" });
 
 /** 人に見せる項目を選んで書き出す入力の型 */
 export type UpdateCareerShowcaseInput = z.infer<typeof UpdateCareerShowcaseInput>;

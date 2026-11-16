@@ -6,7 +6,7 @@ import { createRouter } from "../app.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { announce } from "../live/publish.ts";
-import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { createdResponse, listQuery, listResponse, problems } from "../openapi.ts";
 import { created, list } from "../respond.ts";
 import { recordsOf } from "../work/nodes.ts";
 
@@ -19,6 +19,10 @@ const listMessagesRoute = createRoute({
   path: "/api/v1/staff/{staffId}/messages",
   operationId: "listMessages",
   tags: ["conversation"],
+  summary: "社員とのメッセージ履歴",
+  description: "カーソルは前のページの最後のメッセージ ID (UUID v7) で、その時刻の年から前の年へ続けて読む。",
+  "x-steps": ["`messages` を新しい順に取得する", "長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す"],
+  "x-errors": ["400 `malformed_request`: カーソルがメッセージ ID の形でない"],
   request: { params: StaffParam, query: listQuery(router) },
   responses: { 200: listResponse(Message), ...problems(400, 401, 403, 404, 422, 429, 500) },
 });
@@ -28,9 +32,18 @@ const createMessageRoute = createRoute({
   path: "/api/v1/staff/{staffId}/messages",
   operationId: "createMessage",
   tags: ["conversation"],
+  summary: "社員にメッセージを送る",
+  description: "勤務時間外の場合は社員を呼び出す。字数はコードポイントで数える。",
+  "x-steps": [
+    "`messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く",
+    "タスク中ならワークスペースの `POST /v1/messages` に渡し、勤務時間外なら `StaffDO.call` で呼び出す",
+    "発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する",
+    "`LiveDO` に渡して画面に配信する",
+  ],
+  "x-errors": ["409 `stopped`: 社員が停止中"],
   request: { params: StaffParam, body: { required: true, content: { "application/json": { schema: CreateMessageInput } } } },
   responses: {
-    201: { ...okResponse(Message, "作成した"), headers: { Location: { description: "作成したリソースの URL", schema: { type: "string" } } } },
+    201: createdResponse(Message),
     ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500),
   },
 });

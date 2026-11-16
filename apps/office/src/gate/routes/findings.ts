@@ -15,6 +15,8 @@ const listFindingsRoute = createRoute({
   path: "/api/v1/findings",
   operationId: "listFindings",
   tags: ["records"],
+  summary: "自動検出した改善の Issue",
+  "x-steps": ["`findings` を状態で絞り込み、新しい順に取得する。原因の指紋ごとに 1 行で、週に 1 度の調べのバッチ処理が数え、Issue を作る"],
   request: {
     query: listQuery(router).extend({
       status: FindingStatus.optional().openapi({ param: { name: "status", in: "query" } }),

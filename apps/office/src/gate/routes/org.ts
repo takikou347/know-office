@@ -29,6 +29,9 @@ const listOrgRoute = createRoute({
   path: "/api/v1/org",
   operationId: "listOrg",
   tags: ["org"],
+  summary: "組織図",
+  "x-steps": ["`cursor` を社員 ID として読む", "`staff` と最新の `staff_prompts` を取得し、上の役から下の役の順に並べ、`cursor` の後から `limit` 件を返す"],
+  "x-errors": ["400 `malformed_request`: `cursor` が社員 ID でない"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(OrgStaff), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -38,6 +41,14 @@ const updatePromptRoute = createRoute({
   path: "/api/v1/staff/{staffId}/prompt",
   operationId: "updatePrompt",
   tags: ["org"],
+  summary: "役割の指示文を更新する",
+  description: "次のタスクから反映される。",
+  "x-steps": [
+    "`version` が現在と一致することを確認する",
+    "`staff_prompts` への追加と `staff.prompt_version` の更新を 1 回のバッチで行う。どちらも `version` が現在のままの時だけ書く",
+    "監査ログに `staff.prompt` を記録する。次のタスクから反映される",
+  ],
+  "x-errors": ["409 `conflict`: バージョンが異なる"],
   request: { params: StaffParam, body: jsonBody(UpdatePromptInput) },
   responses: { 200: okResponse(PromptVersion), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
@@ -47,6 +58,8 @@ const listApprovalsRoute = createRoute({
   path: "/api/v1/approvals",
   operationId: "listApprovals",
   tags: ["org"],
+  summary: "オーナーの承認待ちの一覧",
+  "x-steps": ["`approvals` の未決定の項目を古い順に取得する"],
   request: { query: listQuery(router).extend({ status: ApprovalStatus.optional().openapi({ param: { name: "status", in: "query" } }) }) },
   responses: { 200: listResponse(Approval), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -56,6 +69,22 @@ const decideApprovalRoute = createRoute({
   path: "/api/v1/approvals/{approvalId}/decision",
   operationId: "decideApproval",
   tags: ["org"],
+  summary: "承認または差し戻しを行う",
+  description: "外部連携と費用の増える事を承認する場合のみ、15 分以内のパスキーの確認が必要。",
+  "x-steps": [
+    "承認の項目を取得し、未決定であることを確認する",
+    "承認の時、読んだ行の種類が `external_integration` か `cost_increase` ならパスキーの確認を求める。差し戻しは求めない",
+    "承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は増えず、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る",
+    "`approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら `staff` を、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す",
+    "タスクに `approval_decided` の出来事を残し、担当の社員に知らせる。ここが失敗しても決定は残り、エラーログに残す",
+    "監査ログに `approval.decide` を記録する",
+  ],
+  "x-errors": [
+    "401 `step_up_required`: 外部連携か費用の増える事の承認で、パスキーの確認がない。承認は未決定のまま",
+    "404 `not_found`: 承認の項目が存在しない",
+    "409 `conflict`: すでに決定済み、ほかの画面で決める種類を承認しようとした (差し戻しは受ける)、閉じる案のサービスが閉じられる段階にない、または承認を読んだ後に閉じる案のサービスの段階が変わった。どれも承認は未決定のまま",
+    "422 `validation_failed`: 役割の変更の `payload` の形が違う。承認は未決定のまま",
+  ],
   // 外部連携と費用の増える事の承認だけ、読んだ行の種類で確かめる
   "x-step-up": "conditional",
   request: { params: ApprovalParam, body: jsonBody(DecisionInput) },

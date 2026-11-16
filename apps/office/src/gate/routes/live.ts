@@ -6,7 +6,7 @@ import { createRouter } from "../app.ts";
 import { currentSession } from "./sessions.ts";
 import type { GateEnv } from "../env.ts";
 import { liveOf } from "../live/publish.ts";
-import { okResponse, problems } from "../openapi.ts";
+import { createdResponse, problems } from "../openapi.ts";
 import { created } from "../respond.ts";
 
 const router = createRouter();
@@ -26,8 +26,12 @@ const createLiveTicketRoute = createRoute({
   path: "/api/v1/live/tickets",
   operationId: "createLiveTicket",
   tags: ["conversation"],
+  summary: "リアルタイム配信用の 60 秒間有効な作業トークン",
+  description: "作業トークンは 32 バイトの乱数の base64url (43 字) で、`LiveDO` には SHA-256 だけを置く。",
+  "x-steps": ["`LiveDO` で切れた作業トークンを捨て、使える物が 20 枚に届いていれば断る", "60 秒以内に 1 回だけ使える作業トークンを発行する"],
+  "x-errors": ["429 `rate_limited`: 使える作業トークンが 20 枚ある"],
   responses: {
-    201: { ...okResponse(LiveTicket, "作成した"), headers: { Location: { description: "作成したリソースの URL", schema: { type: "string" } } } },
+    201: createdResponse(LiveTicket),
     ...problems(401, 403, 429, 500),
   },
 });
@@ -37,6 +41,19 @@ const openLiveRoute = createRoute({
   path: "/api/v1/live",
   operationId: "openLive",
   tags: ["conversation"],
+  summary: "発言、状態、停止、通知をリアルタイムに配信する",
+  description: "Origin と作業トークンを検証する。配る出来事は社員の状態 (`id`、`state`、`nodeId`)、通知の印 (`id`)、タスクの木の 1 件が変わった印 (`id`。承認、レビューの判定、社員の操作、GitHub の通知で出来事を足した時)、発言 (本文は頭の 2,000 字まで)。画面からの送信は受けず、1008 で閉じる。接続は 1 時間で閉じ、11 本目を開くと最も古い物を閉じる。ログアウト、全体の停止で開いている接続を閉じる。",
+  "x-steps": [
+    "`Origin` が自分の URL と一致することを確認する。違えば作業トークンを使わずに断る",
+    "`Upgrade: websocket` があることを確認する",
+    "作業トークンを `LiveDO` で使用済みにする",
+    "101 を返し、ログインセッションの ID を添えて `LiveDO` の WebSocket に接続する",
+  ],
+  "x-errors": [
+    "400 `malformed_request`: `Upgrade: websocket` がない",
+    "401 `unauthenticated`: 作業トークンの形が違う、使用済み、または 60 秒を過ぎた",
+    "403 `origin_mismatch`: Origin がない、または異なる",
+  ],
   middleware: [liveOrigin] as const,
   request: { query: z.object({ ticket: z.string().openapi({ param: { name: "ticket", in: "query", required: true } }) }).strict() },
   responses: { 101: { description: "WebSocket に切り替えた" }, ...problems(400, 401, 403, 422, 429, 500) },

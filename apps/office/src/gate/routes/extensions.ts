@@ -71,6 +71,8 @@ function mount(router: OpenAPIHono<GateEnv>, ext: ExtensionDefinition, r: Extens
     operationId: r.operationId,
     summary: r.summary,
     tags: ["extensions"],
+    "x-steps": [`${ext.ownerData ? "パスキーの確認を確かめ、" : ""}拡張機能 \`${ext.id}\` が有効であることを確認する`, ...r.steps],
+    "x-errors": [...(ext.ownerData ? ["401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた"] : []), "404 `not_found`: 拡張機能が無効"],
     middleware,
     ...(ext.ownerData ? { "x-step-up": true } : {}),
   };
@@ -101,6 +103,8 @@ export function extensionRoutes(extensions: readonly ExtensionDefinition[]) {
     path: "/api/v1/extensions",
     operationId: "listExtensions",
     tags: ["extensions"],
+    summary: "拡張機能の一覧",
+    "x-steps": ["読み込んだ拡張機能を ID の順に並べ、`settings` の `extension.<拡張機能 ID>` の最新の値で有効化の状態を返す。行が無い拡張機能は無効とする"],
     request: { query: listQuery(router) },
     responses: { 200: listResponse(Extension), ...problems(400, 401, 403, 422, 429, 500) },
   });
@@ -109,6 +113,18 @@ export function extensionRoutes(extensions: readonly ExtensionDefinition[]) {
     path: "/api/v1/extensions/{extensionId}",
     operationId: "toggleExtension",
     tags: ["extensions"],
+    summary: "拡張機能を有効化、無効化する",
+    description: "有効にする場合のみパスキーの確認が必要。",
+    "x-steps": [
+      "有効にする時は、パスキーの確認があることを確認する。無ければ監査ログに `extension.toggle_refused` を記録して断る",
+      "拡張機能が存在することを確認する",
+      "`settings` に `extension.<拡張機能 ID>` の行を、最新のバージョンに 1 を足して追加し、監査ログに `extension.toggle` を記録する。無効にしても拡張機能のデータは消さない",
+    ],
+    "x-errors": [
+      "401 `step_up_required`: 有効にする時に、パスキーの確認がない",
+      "404 `not_found`: 拡張機能が存在しない",
+      "409 `conflict`: 同時に入れ切りされ、バージョンが異なる",
+    ],
     "x-step-up": "conditional",
     request: { params: ExtensionParam, body: jsonBody(ToggleExtensionInput) },
     responses: { 200: okResponse(Extension), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },

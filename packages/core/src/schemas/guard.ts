@@ -242,7 +242,7 @@ export const StopDetail = z
         recentOps: z.array(Entry),
         updates: z.array(Entry),
         rulesVersion: z.number().int(),
-        model: z.string().nullable(),
+        model: z.string().nullable().meta({ description: "使っていたモデル。社員にひもづかない範囲 (サービス、全体) は null" }),
         externalSources: z.array(z.string()),
       })
       .strict(),

@@ -10,7 +10,7 @@ import { dayOrders, staff } from "../db/main.ts";
 import type { Bindings, GateEnv, Staff } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { audit } from "../ledger/record.ts";
-import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, ok } from "../respond.ts";
 import { type DayOrderRow, loadSchedule } from "../work/attendance.ts";
 
@@ -24,6 +24,9 @@ const listStaffRoute = createRoute({
   path: "/api/v1/staff",
   operationId: "listStaff",
   tags: ["staff"],
+  summary: "社員の現在の状態",
+  description: "3 人の状態、担当中のタスク、今日の勤務時間に、組織図の役の名前とモデルを足す。",
+  "x-steps": ["3 人分の `StaffDO.status()` を並行して呼ぶ。1 人でも答えなければ 500 にする", "`staff` の役の名前とモデルを足す"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(StaffOverview), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -33,6 +36,9 @@ const listOrdersRoute = createRoute({
   path: "/api/v1/staff/{staffId}/orders",
   operationId: "listOrders",
   tags: ["staff"],
+  summary: "その日の指示",
+  description: "取り消した指示も、取り消した時刻を付けて返す。",
+  "x-steps": ["`day_orders` からその社員のその日の指示を出した順に読む", "取り消しの行を、取り消した指示の `cancelledAt` にする"],
   request: { params: z.object({ staffId: StaffParam }).strict(), query: z.object({ day: DayQuery }).strict() },
   responses: { 200: okResponse(z.array(Order)), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -42,10 +48,23 @@ const createOrderRoute = createRoute({
   path: "/api/v1/staff/{staffId}/orders",
   operationId: "createOrder",
   tags: ["staff"],
+  summary: "当日のみ有効な指示を出す",
+  description: "延長の場合のみ、15 分以内のパスキーの確認が必要。指示は延長、早退、休みで、延長だけが働く時間を増やす。",
+  "x-steps": [
+    "延長ならパスキーの確認を求める",
+    "日と `until` が過ぎていないこと、延長は終わりの時刻より後、早退は終わりの時刻より前であることを確認する",
+    "同じ日に同じ種類の有効な指示がない時だけ、`day_orders` に `source: \"button\"` で 1 文で追加する",
+    "`StaffDO.order(o)` で当日の予定を組み直す。届かなければエラーログに残し、社員 DO が次に起きた時に読み直す",
+    "監査ログに `order.create` を記録する",
+  ],
+  "x-errors": [
+    "401 `step_up_required`: 延長で、パスキーの確認がない",
+    "409 `conflict`: 同じ指示がすでにある、日か指定時刻を過ぎている、延長が終わりの時刻より前、または早退が終わりの時刻より後",
+  ],
   "x-step-up": "conditional",
   request: { params: z.object({ staffId: StaffParam }).strict(), body: { required: true, content: { "application/json": { schema: CreateOrderInput } } } },
   responses: {
-    201: { ...okResponse(Order, "作成した"), headers: { Location: { description: "作成したリソースの URL", schema: { type: "string" } } } },
+    201: createdResponse(Order),
     ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500),
   },
 });
@@ -55,6 +74,15 @@ const cancelOrderRoute = createRoute({
   path: "/api/v1/staff/{staffId}/orders/{orderId}",
   operationId: "cancelOrder",
   tags: ["staff"],
+  summary: "指示を取り消す",
+  description: "取り消しのレコードを追加し、取り消した指示を返す。",
+  "x-steps": [
+    "その社員の指示を取得する。取り消しの行は指示として扱わない",
+    "まだ取り消されていない時だけ、`cancels` を持つ取り消しのレコードを 1 文で追加する",
+    "`StaffDO.order(o)` で当日の予定を組み直す。届かなければエラーログに残し、社員 DO が次に起きた時に読み直す",
+    "監査ログに `order.cancel` を記録する",
+  ],
+  "x-errors": ["404 `not_found`: その社員の指示が存在しない", "409 `conflict`: すでに取り消されている"],
   request: { params: z.object({ staffId: StaffParam, orderId: z.uuid().openapi({ param: { name: "orderId", in: "path" }, description: "UUID v7" }) }).strict() },
   responses: { 200: okResponse(Order), ...problems(401, 403, 404, 409, 422, 429, 500) },
 });

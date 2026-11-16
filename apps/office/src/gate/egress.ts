@@ -1,6 +1,6 @@
 // ワークスペースの外向きの通信の受け手。コンテナから出る要求は宛先ごとにここへ回り、ゲートウェイが作業トークンを確かめる (社員が考えるの 1.2、3.1)
 import { createRoute } from "@hono/zod-openapi";
-import { AppError, CheckpointInput, type Clock, type Fetcher, fromBase64, HeartbeatInput, TranscriptPartInput } from "@know-office/core";
+import { AppError, CheckpointInput, type Clock, type Fetcher, fromBase64, HeartbeatInput, systemClock, TranscriptPartInput } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import { createApp } from "./app.ts";
 import { bodyShape } from "./body.ts";
@@ -10,7 +10,7 @@ import { INSTALLED } from "./extensions/installed.ts";
 import type { TokenCache } from "./github/app.ts";
 import { relayGit, relayGitHubApi } from "./github/git.ts";
 import { staffOf } from "./guard/actions.ts";
-import type { GuardDeps } from "./guard/deps.ts";
+import { type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { problems } from "./openapi.ts";
 import { noContent } from "./respond.ts";
 import { rethrowRpc } from "./rpc.ts";
@@ -45,15 +45,32 @@ export type EgressOptions = {
 const heartbeatRoute = createRoute({
   method: "post",
   path: "/ws/v1/heartbeat",
+  operationId: "sendHeartbeat",
+  tags: ["workspace-gate"],
+  summary: "30 秒ごとのハートビート",
+  description: "プロキシがワークスペースの持ち主の社員を特定するため、作業トークンは不要。",
+  "x-steps": [
+    "プロキシが送信元の社員を特定する",
+    "`StaffDO.heartbeat(at)` を呼ぶ",
+    "社員がタスクを持ち、その作業トークンの残りが 10 分を切っていれば、発行し直して `PUT /v1/ticket` で渡し、渡せた後に前の作業トークンを失効させる",
+  ],
+  security: [],
   request: { body: { content: { "application/json": { schema: HeartbeatInput } }, required: true } },
-  responses: { 204: { description: "成功" } },
+  responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
 });
 
 const checkpointRoute = createRoute({
   method: "post",
   path: "/ws/v1/checkpoints",
+  operationId: "sendCheckpoint",
+  tags: ["workspace-gate"],
+  summary: "チェックポイントへの到達を通知する",
+  description: "nodeId が社員 DO の担当中のタスクと一致する場合のみ受け付ける。",
+  "x-steps": ["`nodeId` が社員 DO の担当中のタスクと一致することを確認する", "`StaffDO.checkpoint(c)` を呼ぶ", "`node_events` に追加する"],
+  "x-errors": ["409 `conflict`: 担当中のタスクと異なる"],
+  security: [],
   request: { body: { content: { "application/json": { schema: CheckpointInput } }, required: true } },
-  responses: { 204: { description: "成功" } },
+  responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(400, 401, 403, 409, 413, 415, 422, 429, 500) },
 });
 
 const transcriptRoute = createRoute({
@@ -61,6 +78,14 @@ const transcriptRoute = createRoute({
   path: "/ws/v1/transcript-parts",
   operationId: "sendTranscriptPart",
   tags: ["workspace-gate"],
+  summary: "会話の記録の続きを送る",
+  "x-steps": [
+    "作業トークンを検証する",
+    "`seq` が前回の続きであることを確認する。前回と同じ `seq` で中身も同じなら 204 を返し、何も足さない",
+    "タスクごとの鍵で暗号化して R2 に保存し、`transcript_parts` に追加する",
+  ],
+  "x-errors": ["409 `conflict`: `seq` が連続していない、または前回と同じ `seq` で中身が違う"],
+  security: [{ workToken: [] }],
   request: { body: { content: { "application/json": { schema: TranscriptPartInput } }, required: true } },
   responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(400, 401, 403, 409, 413, 415, 422, 500) },
 });
@@ -157,6 +182,14 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     throw new AppError("not_found", `${c.req.path} は存在しない`);
   });
   return app;
+}
+
+/**
+ * API の文書に載せるため、ワークスペースの受け手のルートを付けた Hono を作る。要求は受けない
+ * @returns /ws/v1/ のルートを付けた Hono
+ */
+export function workspaceGateRoutes() {
+  return createWorkspaceGate({ staffId: "builder", workspaceId: "api-doc" }, { clock: systemClock, guard: UNCONNECTED_DEPS });
 }
 
 /**

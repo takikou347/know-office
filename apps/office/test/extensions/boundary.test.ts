@@ -30,7 +30,7 @@ describe("拡張の境目", () => {
   });
 
   it("形の違う ID、ツールの名前、パスは定義で断る", () => {
-    const route = { method: "get", operationId: "getTest", summary: "試す", response: z.object({}).strict(), run: () => Promise.resolve({}) } as const;
+    const route = { method: "get", operationId: "getTest", summary: "試す", steps: ["試す"], response: z.object({}).strict(), run: () => Promise.resolve({}) } as const;
     const tool = { schema: z.object({}).strict(), run: () => Promise.resolve({}) };
     for (const id of ["Test", "test_ext", "test--ext", "-test", "test-", "1test", ""]) expect(() => defineExtension(definition({ id }))).toThrow("拡張の ID の形が違う");
     for (const name of ["Read", "note__read", "note-read", "_note", "note_"]) expect(() => defineExtension(definition({ tools: { [name]: tool } }))).toThrow("ツールの名前の形が違う");

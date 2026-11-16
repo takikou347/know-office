@@ -16,6 +16,7 @@ import { extensionRoutes } from "./routes/extensions.ts";
 import { githubRoutes, hookRoutes } from "./routes/github.ts";
 import { findingRoutes } from "./routes/findings.ts";
 import { guardRoutes } from "./routes/guard.ts";
+import { guardTuningRoutes } from "./routes/guard-tuning.ts";
 import { guardKeyRoutes } from "./routes/keys.ts";
 import { nodeRoutes } from "./routes/nodes.ts";
 import { noticeRoutes } from "./routes/notices.ts";
@@ -41,7 +42,7 @@ import { system } from "./routes/system.ts";
  * @returns ゲートウェイ
  */
 export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps; extensions?: readonly ExtensionDefinition[]; github?: GitHubAccess; githubTokens?: TokenCache } = {}) {
-  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", guardKeyRoutes).route("/", attendanceRoutes)
+  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", guardTuningRoutes).route("/", guardKeyRoutes).route("/", attendanceRoutes)
     .route("/", nodeRoutes)
     .route("/", reviewRoutes)
     .route("/", reviewReadRoutes)

@@ -4,7 +4,7 @@ import { AppError, Commit, CreateCommitInput, CreateNoteInput, newId, ReviewNote
 import { createRouter } from "../app.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { audit } from "../ledger/record.ts";
-import { okResponse, problems } from "../openapi.ts";
+import { createdResponse, okResponse, problems } from "../openapi.ts";
 import { created, ok } from "../respond.ts";
 import { type Actor, appendNodeEvent, findNode } from "../work/nodes.ts";
 import { backToTodo, callMaker, findReview, mergeIfReady, repoRefusal } from "../work/review.ts";
@@ -13,7 +13,6 @@ const router = createRouter();
 
 const jsonBody = <T>(schema: T) => ({ content: { "application/json": { schema } }, required: true });
 const NodeParam = z.object({ nodeId: z.uuid().openapi({ param: { name: "nodeId", in: "path" }, description: "UUID v7" }) }).strict();
-const location = { Location: { description: "作成したリソースの URL", schema: { type: "string" as const } } };
 
 /** オーナーが写した物の本文の頭。GitHub の上では App の名前で出るので、誰の判断かを本文に書く */
 const OWNER_PREFIX = "オーナー: ";
@@ -31,6 +30,19 @@ const submitReviewVerdictRoute = createRoute({
   path: "/api/v1/reviews/{nodeId}/verdict",
   operationId: "submitReviewVerdict",
   tags: ["reviews"],
+  summary: "承認または差し戻し",
+  description: "GitHub に写せない時も判断は残し、写し直しを待つ。",
+  "x-steps": [
+    "`baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く",
+    "App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストのレビュー (承認は APPROVE、差し戻しは REQUEST_CHANGES、本文の頭に「オーナー」) として写す。App が出したプルリクエストで GitHub が 422 を返した時は、判断を本文の頭に書いた COMMENT のレビューにする。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す",
+    "承認の場合はマージの条件を確認して main を進め、差し戻しの場合はタスクを `todo` に戻す",
+    "監査ログに `review.verdict` を記録する",
+  ],
+  "x-errors": [
+    "404 `not_found`: レビューが存在しない",
+    "409 `conflict`: 確認した後に変更が追加された",
+    "502 `upstream_failed`: main を進める時に GitHub がエラーを返した",
+  ],
   request: { params: NodeParam, body: jsonBody(ReviewVerdictInput) },
   responses: { 200: okResponse(ReviewVerdict), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
 });
@@ -43,8 +55,16 @@ const createReviewNoteRoute = createRoute({
   path: "/api/v1/reviews/{nodeId}/notes",
   operationId: "createReviewNote",
   tags: ["reviews"],
+  summary: "行へのコメント",
+  description: "GitHub に写せない時も指摘は残し、写し直しを待つ。",
+  "x-steps": [
+    "`review_notes` への追加と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く",
+    "App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストの行のコメント (本文の頭に「オーナー」、前の行は LEFT、後の行は RIGHT) として写す。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す",
+    "作成した社員のタスクに `node_events` で追加し、タスクを `todo` に戻す",
+  ],
+  "x-errors": ["404 `not_found`: レビューが存在しない"],
   request: { params: NodeParam, body: jsonBody(CreateNoteInput) },
-  responses: { 201: { ...okResponse(ReviewNote, "作成した"), headers: location }, ...problems(400, 401, 403, 404, 413, 415, 422, 429, 500) },
+  responses: { 201: createdResponse(ReviewNote), ...problems(400, 401, 403, 404, 413, 415, 422, 429, 500) },
 });
 
 const createReviewCommitRoute = createRoute({
@@ -52,8 +72,22 @@ const createReviewCommitRoute = createRoute({
   path: "/api/v1/reviews/{nodeId}/commits",
   operationId: "createReviewCommit",
   tags: ["reviews"],
+  summary: "レビュー画面から修正をコミットする",
+  "x-steps": [
+    "`baseSha` が現在の `head_sha` と一致することを確認する",
+    "変更禁止のパスを変えていないかをルールで確認する",
+    "App の contents の書きに絞った鍵で、Git Data API でブランチにコミットを追加し、force なしでブランチの先を進める",
+    "`baseSha` のままの時だけ `head_sha` を新しいコミットにし、チェックの結果を空にする",
+    "監査ログに `review.commit` を記録する",
+  ],
+  "x-errors": [
+    "403 `rule_denied`: 変更禁止のパスを含む",
+    "404 `not_found`: レビューが存在しない",
+    "409 `conflict`: 確認した後に変更が追加された、または GitHub の側でブランチの先が進んだ",
+    "502 `upstream_failed`: GitHub がエラーを返した",
+  ],
   request: { params: NodeParam, body: jsonBody(CreateCommitInput) },
-  responses: { 201: { ...okResponse(Commit, "作成した"), headers: location }, ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
+  responses: { 201: createdResponse(Commit), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
 });
 
 /** レビューのルート */

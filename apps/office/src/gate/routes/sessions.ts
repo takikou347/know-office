@@ -12,7 +12,7 @@ import type { GateEnv } from "../env.ts";
 import { observe } from "../guard/observe.ts";
 import { announceNotice, closeLive } from "../live/publish.ts";
 import { audit } from "../ledger/record.ts";
-import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, noContent, ok } from "../respond.ts";
 
 const router = createRouter();
@@ -25,7 +25,16 @@ const createSessionRoute = createRoute({
   path: "/api/v1/sessions",
   operationId: "createSession",
   tags: ["auth"],
-  responses: { 201: okResponse(Session, "作成した"), ...problems(401, 403, 429, 500) },
+  summary: "ログインセッションを開始する",
+  description: "ログインの証明をもとに __Host-ko_session クッキーを発行する。Claude の会話とは別物。ログインセッションの検証を通らない唯一のルート。",
+  "x-steps": [
+    "32 バイトのトークンを生成し、その SHA-256 と接続元の情報を `sessions` に追加する",
+    "新しい国からのログインか深夜のログインなら通知を出し、`guard.observe` に `login` を渡す",
+    "監査ログに `session.create` を記録する",
+    "クッキーを設定し、201 を返す",
+  ],
+  security: [{ accessJwt: [] }],
+  responses: { 201: createdResponse(Session), ...problems(401, 403, 429, 500) },
 });
 
 const listSessionsRoute = createRoute({
@@ -33,6 +42,8 @@ const listSessionsRoute = createRoute({
   path: "/api/v1/sessions",
   operationId: "listSessions",
   tags: ["auth"],
+  summary: "ログインセッション一覧",
+  "x-steps": ["`sessions` から有効なログインセッションを作成順に取得する", "現在のログインセッションに `current` を付ける"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(Session), ...problems(401, 403, 429, 500) },
 });
@@ -42,7 +53,9 @@ const deleteOtherSessionsRoute = createRoute({
   path: "/api/v1/sessions",
   operationId: "deleteOtherSessions",
   tags: ["auth"],
-  responses: { 204: { description: "終了した" }, ...problems(401, 403, 429, 500) },
+  summary: "現在のログインセッション以外をすべて終了する",
+  "x-steps": ["現在のログインセッション以外の有効なログインセッションに `ended_at` を設定する", "監査ログに `session.end_others` を記録する"],
+  responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(401, 403, 429, 500) },
 });
 
 const deleteSessionRoute = createRoute({
@@ -50,8 +63,11 @@ const deleteSessionRoute = createRoute({
   path: "/api/v1/sessions/{sessionId}",
   operationId: "deleteSession",
   tags: ["auth"],
-  request: { params: z.object({ sessionId: z.uuid().openapi({ param: { name: "sessionId", in: "path" } }) }).strict() },
-  responses: { 204: { description: "終了した" }, ...problems(401, 403, 404, 429, 500) },
+  summary: "指定したログインセッションを終了する",
+  "x-steps": ["指定したログインセッションを取得する", "`ended_at` を設定する。現在のログインセッションの場合はクッキーも削除する", "監査ログに `session.end` を記録する"],
+  "x-errors": ["404 `not_found`: セッションが存在しないか、すでに終了している"],
+  request: { params: z.object({ sessionId: z.uuid().openapi({ param: { name: "sessionId", in: "path" }, description: "UUID v7" }) }).strict() },
+  responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(401, 403, 404, 429, 500) },
 });
 
 const getMeRoute = createRoute({
@@ -59,6 +75,8 @@ const getMeRoute = createRoute({
   path: "/api/v1/me",
   operationId: "getMe",
   tags: ["auth"],
+  summary: "ログイン中のユーザーとログインセッションの情報",
+  "x-steps": ["現在のログインセッションの情報と、パスキーの登録有無を返す"],
   responses: { 200: okResponse(Me), ...problems(401, 403, 429, 500) },
 });
 

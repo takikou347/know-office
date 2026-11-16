@@ -20,13 +20,13 @@ export type AuditInput = z.infer<typeof AuditInput>;
 /** 監査ログの 1 行の返す形。時刻は RFC 3339 の協定世界時 */
 export const AuditRow = z
   .object({
-    id: z.uuid(),
+    id: z.uuid().meta({ description: "UUID v7" }),
     at: z.iso.datetime(),
     actor: z.string(),
     action: z.string(),
     target: z.string().nullable(),
-    scope: z.string(),
-    detail: z.unknown(),
+    scope: z.string().meta({ description: "`office` またはサービスの ID" }),
+    detail: z.unknown().meta({ description: "操作ごとの中身。無ければ null" }),
     prevHash: z.string(),
     hash: z.string(),
     traceId: z.string().nullable(),

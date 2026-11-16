@@ -33,6 +33,10 @@ const listAuditLogsRoute = createRoute({
   path: "/api/v1/audit-logs",
   operationId: "listAuditLogs",
   tags: ["system"],
+  summary: "監査ログ一覧",
+  description: "15 分以内のパスキーの確認が必要。",
+  "x-steps": ["指定期間に対応するデータベースを `record_years` から選ぶ", "`audit_log` を新しい順に取得する", "監査ログを閲覧したことを監査ログに記録する"],
+  "x-errors": ["401 `step_up_required`: パスキーの確認がない", "422 `validation_failed`: `from` が `to` より後"],
   "x-step-up": true,
   middleware: [stepUpGate] as const,
   request: { query: listQuery(router).extend({ from: Day("from"), to: Day("to") }) },
@@ -44,6 +48,13 @@ const verifyAuditLogsRoute = createRoute({
   path: "/api/v1/audit-logs/verify",
   operationId: "verifyAuditLogs",
   tags: ["system"],
+  summary: "1 年分の監査ログのハッシュチェーンを検証する",
+  "x-steps": [
+    "`RecorderDO.verify(year)` を呼ぶ",
+    "ハッシュが一致しなければ、`guard.observe` に `chain_broken` を渡して全体を停止する",
+    "結果 `ok` と、最初に一致しなかった行を返す",
+  ],
+  "x-errors": ["404 `not_found`: 指定した年のデータベースがない", "429 `rate_limited`: 同じ送信元から 1 分に 2 回目"],
   request: { body: { content: { "application/json": { schema: VerifyAuditInput } }, required: true } },
   responses: { 200: okResponse(AuditVerification), ...problems(400, 401, 403, 404, 413, 415, 422, 429, 500) },
 });
@@ -53,6 +64,8 @@ const listStorageRoute = createRoute({
   path: "/api/v1/storage",
   operationId: "listStorage",
   tags: ["system"],
+  summary: "D1 データベースごとのストレージ使用量",
+  "x-steps": ["`RecorderDO.size()` を呼ぶ", "データベースごとの使用量と、上限 10GB に対する割合を返す"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(StorageUse), ...problems(401, 403, 429, 500) },
 });
@@ -66,6 +79,8 @@ const getRecordSummaryRoute = createRoute({
   path: "/api/v1/records/summary",
   operationId: "getRecordSummary",
   tags: ["records"],
+  summary: "記録の集計",
+  "x-steps": ["1 つの SQL で、`work_entries` と `usage` をスコープごとと全体で集計する"],
   request: { query: SummaryQuery },
   responses: { 200: okResponse(RecordSummary), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -75,6 +90,8 @@ const exportRecordSummaryRoute = createRoute({
   path: "/api/v1/records/summary/export",
   operationId: "exportRecordSummary",
   tags: ["records"],
+  summary: "記録の集計を CSV で出力する",
+  "x-steps": ["`GET /api/v1/records/summary` と同じ集計を CSV で返す"],
   request: { query: SummaryQuery },
   responses: { 200: { description: "CSV", content: { "text/csv": { schema: z.string() } } }, ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -85,6 +102,7 @@ const getUptimeRoute = createRoute({
   operationId: "getUptime",
   tags: ["records"],
   summary: "月間の稼働率",
+  "x-steps": ["日本時間の指定月の `health_checks` の件数と、通った件数を 1 つの SQL で数える", "通った割合を `ratio` で返す。確かめが 1 件も無い月は `null`"],
   request: { query: UptimeQuery },
   responses: { 200: okResponse(Uptime), ...problems(400, 401, 403, 422, 429, 500) },
 });

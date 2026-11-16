@@ -12,6 +12,11 @@ const getHealth = createRoute({
   path: "/api/v1/health",
   operationId: "getHealth",
   tags: ["system"],
+  summary: "ゲートウェイの稼働確認",
+  description: "D1 が止まっても答えるよう、ログインセッションの検証を通らない。デプロイの後の確かめのため、Access の証明はオーナーのほかに、`ACCESS_SMOKE_CLIENT_ID` の作業用の鍵の証明もこのルートだけ通す。",
+  "x-steps": ["`DB` に `SELECT 1` を実行する", "応答した部分 (ゲートウェイ、画面、ワークスペース) を返す"],
+  "x-errors": ["503 `unavailable`: D1 が応答しない"],
+  security: [{ accessJwt: [] }],
   responses: { 200: okResponse(Health), ...problems(401, 403, 429, 500, 503) },
 });
 
@@ -20,6 +25,8 @@ const getApiDocs = createRoute({
   path: "/api/v1/docs",
   operationId: "getApiDocs",
   tags: ["system"],
+  summary: "Swagger UI",
+  "x-steps": ["静的ファイルから Swagger UI の HTML を返す"],
   responses: { 200: { description: "Swagger UI の HTML", content: { "text/html": { schema: z.string() } } }, ...problems(401, 403, 429, 500) },
 });
 
@@ -28,6 +35,8 @@ const getOpenApi = createRoute({
   path: "/api/v1/openapi.yaml",
   operationId: "getOpenApi",
   tags: ["system"],
+  summary: "この OpenAPI ドキュメント",
+  "x-steps": ["静的ファイルから `v1.yaml` を返す"],
   responses: { 200: { description: "OpenAPI 3.1 のドキュメント", content: { "application/yaml": { schema: z.string() } } }, ...problems(401, 403, 429, 500) },
 });
 

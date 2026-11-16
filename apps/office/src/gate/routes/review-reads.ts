@@ -76,6 +76,14 @@ const getReviewRoute = createRoute({
   path: "/api/v1/reviews/{nodeId}",
   operationId: "getReview",
   tags: ["reviews"],
+  summary: "レビューの概要",
+  description: "レビュー担当の要約、チェック結果、変更ファイルのツリー。",
+  "x-steps": [
+    "`reviews` を取得する",
+    "プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない",
+    "`last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする",
+  ],
+  "x-errors": ["404 `not_found`: レビューが存在しない", "502 `upstream_failed`: GitHub がエラーを返した"],
   request: { params: NodeParam },
   responses: { 200: okResponse(ReviewHead), ...problems(401, 403, 404, 429, 500, 502) },
 });
@@ -85,6 +93,12 @@ const getReviewDiffRoute = createRoute({
   path: "/api/v1/reviews/{nodeId}/diff",
   operationId: "getReviewDiff",
   tags: ["reviews"],
+  summary: "1 ファイルの差分",
+  description: "since を指定すると、前回確認した時点からの差分を返す。",
+  "x-steps": [
+    "`since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す。compare が 300 件ちょうどなら 502。ワークスペースは起こさない",
+  ],
+  "x-errors": ["404 `not_found`: ファイルが存在しない", "502 `upstream_failed`: GitHub がエラーを返した"],
   request: { params: NodeParam, query: ReviewDiffQuery },
   responses: { 200: okResponse(FileDiff), ...problems(400, 401, 403, 404, 422, 429, 500, 502) },
 });
@@ -94,6 +108,9 @@ const getReviewFileRoute = createRoute({
   path: "/api/v1/reviews/{nodeId}/file",
   operationId: "getReviewFile",
   tags: ["reviews"],
+  summary: "変更前または変更後のファイル内容",
+  "x-steps": ["変更前または変更後のファイル内容を contents API から取得する"],
+  "x-errors": ["404 `not_found`: ファイルが存在しない", "502 `upstream_failed`: GitHub がエラーを返した"],
   request: { params: NodeParam, query: ReviewFileQuery },
   responses: { 200: okResponse(FileContent), ...problems(400, 401, 403, 404, 422, 429, 500, 502) },
 });
@@ -103,6 +120,9 @@ const markReviewSeenRoute = createRoute({
   path: "/api/v1/reviews/{nodeId}/seen",
   operationId: "markReviewSeen",
   tags: ["reviews"],
+  summary: "確認済みの位置を記録する",
+  "x-steps": ["`sha` が現在の `head_sha` と一致する時だけ、`reviews.last_seen_sha` を `sha` にする。1 文の条件付きの `UPDATE` で書く"],
+  "x-errors": ["404 `not_found`: レビューが存在しない", "409 `conflict`: 確認した後に変更が追加された"],
   request: { params: NodeParam, body: { content: { "application/json": { schema: SeenInput } }, required: true } },
   responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });

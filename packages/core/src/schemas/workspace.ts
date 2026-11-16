@@ -24,7 +24,7 @@ export const ExtensionToolSpec = z
     inputSchema: z.record(z.string(), z.unknown()),
   })
   .strict()
-  .meta({ id: "ExtensionToolSpec" });
+  .meta({ id: "ExtensionToolSpec", description: "入れた拡張のツール 1 つ。ワークスペースは inputSchema (JSON Schema) から入力の形を作る" });
 
 /** 入れた拡張のツール 1 つの型 */
 export type ExtensionToolSpec = z.infer<typeof ExtensionToolSpec>;
@@ -46,7 +46,7 @@ export function extensionToolShape(inputSchema: Record<string, unknown>): Record
 /** POST /v1/runs の入力。タスク 1 件分の SDK の呼び出し */
 export const RunInput = z
   .object({
-    nodeId: z.uuid(),
+    nodeId: z.uuid().meta({ description: "UUID v7" }),
     ticket: z.string().min(1),
     model: z.string().min(1),
     effort: z.enum(["low", "medium", "high"]),
@@ -54,9 +54,9 @@ export const RunInput = z
     prompt: z.string(),
     resume: z.string().min(1).optional(),
     // 社員の役で使える社員のツール。ワークスペースはこの名前のツールだけを MCP の受け手 staff に出す
-    tools: z.array(z.enum(STAFF_TOOL_NAMES)).max(STAFF_TOOL_NAMES.length),
+    tools: z.array(z.enum(STAFF_TOOL_NAMES)).max(STAFF_TOOL_NAMES.length).meta({ description: "社員の役で使える社員のツール。ワークスペースはこの名前のツールだけを MCP の受け手 staff に出す" }),
     // 入れている拡張のツール。ワークスペースは役のツールと同じ受け手 staff に足し、どれもゲートウェイの同じ口を呼ぶ
-    extensionTools: z.array(ExtensionToolSpec).max(EXTENSION_TOOLS_MAX).optional(),
+    extensionTools: z.array(ExtensionToolSpec).max(EXTENSION_TOOLS_MAX).optional().meta({ description: "入れている拡張のツール。ワークスペースは役のツールと同じ受け手 staff に足し、どれもゲートウェイの同じ口を呼ぶ" }),
   })
   .strict()
   .meta({ id: "RunInput" });
@@ -88,9 +88,9 @@ const SessionId = z.uuid();
 /** POST /ws/v1/transcript-parts の入力。会話の記録 (JSONL) の増えた分 */
 export const TranscriptPartInput = z
   .object({
-    sessionId: SessionId,
-    seq: z.int().nonnegative(),
-    chunk: Base64Text.min(1).max(Math.ceil(TRANSCRIPT_PART_BYTES / 3) * 4),
+    sessionId: SessionId.meta({ description: "SDK の会話の session" }),
+    seq: z.int().nonnegative().meta({ description: "session ごとの通し番号。0 から始め、前回の続きにする。返事が届かずに前回と同じ通し番号を送り直した時は、中身が同じなら 204 で受け直して何も足さず、違えば 409 で断る" }),
+    chunk: Base64Text.min(1).max(Math.ceil(TRANSCRIPT_PART_BYTES / 3) * 4).meta({ description: "会話の記録 (JSONL) の増えた分。元の長さは 512KiB まで" }),
   })
   .strict()
   .meta({ id: "TranscriptPartInput" });
@@ -101,9 +101,9 @@ export type TranscriptPartInput = z.infer<typeof TranscriptPartInput>;
 /** POST /v1/restore の入力。復号した会話の記録の全部と、次に送る部分の通し番号 */
 export const RestoreInput = z
   .object({
-    sessionId: SessionId,
-    transcript: Base64Text,
-    nextSeq: z.int().nonnegative(),
+    sessionId: SessionId.meta({ description: "続きから呼ぶ SDK の会話の session" }),
+    transcript: Base64Text.meta({ description: "復号した会話の記録 (JSONL) の全部" }),
+    nextSeq: z.int().nonnegative().meta({ description: "次に送る部分の通し番号" }),
   })
   .strict()
   .meta({ id: "RestoreInput" });
@@ -142,10 +142,10 @@ export const AGENT_ERROR_NAMES = z.enum(["sdk_auth_failed", "sdk_failed"]);
 export const AgentEvent = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("message"), body: z.string().max(20_000) }).strict(),
   z.object({ kind: z.literal("tool_result"), toolName: z.string().max(200), command: z.string().max(2000), exitCode: z.int(), failedChecks: z.array(z.string().max(100)).max(20) }).strict(),
-  z.object({ kind: z.literal("checkpoint"), nodeId: z.uuid(), checkpoint: z.enum(["test_pass", "commit", "pr", "note"]), note: z.string().max(2000).optional() }).strict(),
+  z.object({ kind: z.literal("checkpoint"), nodeId: z.uuid().meta({ description: "UUID v7" }), checkpoint: z.enum(["test_pass", "commit", "pr", "note"]), note: z.string().max(2000).optional() }).strict(),
   z.object({ kind: z.literal("error"), name: AGENT_ERROR_NAMES, message: z.string().max(200) }).strict(),
-  z.object({ kind: z.literal("result"), nodeId: z.uuid(), result: WorkResult }).strict(),
-]);
+  z.object({ kind: z.literal("result"), nodeId: z.uuid().meta({ description: "UUID v7" }), result: WorkResult }).strict(),
+]).openapi({ discriminator: { propertyName: "kind" } });
 
 /** ワークスペースから届く出来事の型 */
 export type AgentEvent = z.infer<typeof AgentEvent>;

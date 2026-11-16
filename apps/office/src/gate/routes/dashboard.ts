@@ -29,6 +29,13 @@ const getDashboardRoute = createRoute({
   path: "/api/v1/dashboard",
   operationId: "getDashboard",
   tags: ["records"],
+  summary: "ダッシュボード",
+  description: "今日のタスクは、担当の社員が手を付けている (`doing`)、レビューを待つ (`review`)、オーナーを待つ (`waiting_owner`) タスクを優先度と ID の順に 50 件まで。今月は日本時間の月の 1 日 0 時から。未読の通知は新しい順に 20 件まで。",
+  "x-steps": [
+    "3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする",
+    "`pending` の承認、今日のタスク、未読の通知を `DB` から読む",
+    "今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足す",
+  ],
   responses: { 200: okResponse(Dashboard), ...problems(401, 403, 429, 500) },
 });
 

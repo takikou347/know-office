@@ -3,10 +3,10 @@ import { z } from "./zod.ts";
 import { ERROR_CODES } from "../errors.ts";
 
 /** 成功の返事の meta。どの返事も traceId を持つ */
-export const Meta = z.object({ traceId: z.string() }).strict().meta({ id: "Meta" });
+export const Meta = z.object({ traceId: z.string().meta({ description: "リクエストごとのトレース ID。ログの trace_id と同じ値" }) }).strict().meta({ id: "Meta" });
 
 /** 一覧の返事の meta。next は次のページのカーソルで、無ければ null */
-export const ListMeta = z.object({ traceId: z.string(), next: z.string().nullable() }).strict().meta({ id: "ListMeta" });
+export const ListMeta = z.object({ traceId: z.string(), next: z.string().nullable().meta({ description: "次のページのカーソル。最後のページでは null" }) }).strict().meta({ id: "ListMeta" });
 
 /** 失敗の種類の Zod スキーマ */
 export const ErrorCode = z.enum(ERROR_CODES).meta({ id: "ErrorCode" });
@@ -17,17 +17,17 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
 /** 失敗の返事 (RFC 9457 の problem+json)。errors は 422 の時だけ持つ */
 export const Problem = z
   .object({
-    type: z.string(),
+    type: z.string().meta({ description: "urn:know-office:problem:<code>" }),
     title: z.string(),
     status: z.number().int(),
     detail: z.string().optional(),
-    instance: z.string().optional(),
+    instance: z.string().optional().meta({ description: "リクエストのパス" }),
     code: ErrorCode,
     traceId: z.string(),
-    errors: z.array(z.object({ pointer: z.string(), detail: z.string() }).strict()).optional(),
+    errors: z.array(z.object({ pointer: z.string().meta({ description: "JSON Pointer。クエリパラメーターは #/query/<名前>" }), detail: z.string() }).strict()).optional(),
   })
   .strict()
-  .meta({ id: "Problem" });
+  .meta({ id: "Problem", description: "RFC 9457 の Problem Details" });
 
 /** 失敗の返事の型 */
 export type Problem = z.infer<typeof Problem>;

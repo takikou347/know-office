@@ -5,7 +5,7 @@ import { ErrorCode, ListMeta, Meta, Problem } from "@know-office/core";
 import type { ZodType } from "zod";
 import type { GateEnv } from "./env.ts";
 
-/** ステータスごとの components/responses の名前と説明。v1.yaml と同じ */
+/** ステータスごとの components/responses の名前と説明 */
 export const STATUS_RESPONSES = {
   400: ["BadRequest", "リクエストを解釈できない。JSON として不正か、未知のクエリパラメーターがある"],
   401: ["Unauthorized", "ログインの証明、ログインセッション、作業トークンがない、または無効。パスキーの確認が期限切れ"],
@@ -20,6 +20,9 @@ export const STATUS_RESPONSES = {
   502: ["BadGateway", "GitHub または Anthropic がエラーを返した"],
   503: ["Unavailable", "ワークスペースが起動していない。Retry-After に再試行までの秒数"],
 } as const;
+
+/** Retry-After を返す失敗のステータス */
+const RETRY_AFTER_STATUSES: ReadonlySet<string> = new Set(["429", "503"]);
 
 /** 失敗として返すステータス */
 export type ProblemStatus = keyof typeof STATUS_RESPONSES;
@@ -46,6 +49,15 @@ export function okResponse<T extends ZodType>(data: T, description = "成功") {
 }
 
 /**
+ * 作った 1 件を返す成功の応答の形。Location に作った物の URL を返す
+ * @param data 返す物の Zod スキーマ
+ * @returns createRoute の responses の 1 項目
+ */
+export function createdResponse<T extends ZodType>(data: T) {
+  return { ...okResponse(data, "作成した"), headers: { Location: { description: "作成したリソースの URL", schema: { type: "string" as const } } } };
+}
+
+/**
  * 一覧を返す成功の応答の形
  * @param item 一覧の 1 件の Zod スキーマ
  * @returns createRoute の responses の 1 項目
@@ -60,8 +72,8 @@ export function listResponse<T extends ZodType>(item: T) {
  * @returns `.strict()` を付けた一覧のクエリの Zod スキーマ
  */
 export function listQuery(router: OpenAPIHono<GateEnv>) {
-  const cursor = router.openAPIRegistry.registerParameter("Cursor", z.string().optional().openapi({ param: { name: "cursor", in: "query" } }));
-  const limit = router.openAPIRegistry.registerParameter("Limit", z.coerce.number().int().min(1).max(100).default(50).openapi({ param: { name: "limit", in: "query" } }));
+  const cursor = router.openAPIRegistry.registerParameter("Cursor", z.string().optional().openapi({ description: "一覧の次のページのカーソル。前のレスポンスの meta.next", param: { name: "cursor", in: "query", description: "前のレスポンスの meta.next" } }));
+  const limit = router.openAPIRegistry.registerParameter("Limit", z.coerce.number().int().min(1).max(100).default(50).openapi({ description: "一覧の 1 ページの件数", param: { name: "limit", in: "query" } }));
   return z.object({ cursor, limit }).strict();
 }
 
@@ -71,9 +83,11 @@ export function listQuery(router: OpenAPIHono<GateEnv>) {
  */
 export function registerComponents(app: OpenAPIHono<GateEnv>): void {
   for (const schema of [Meta, ListMeta, ErrorCode, Problem]) app.openAPIRegistry.register(String(schema.meta()?.id), schema);
-  for (const [name, description] of Object.values(STATUS_RESPONSES)) {
+  for (const [status, [name, description]] of Object.entries(STATUS_RESPONSES)) {
     app.openAPIRegistry.registerComponent("responses", name, {
       description,
+      // 429 と 503 は Retry-After で再試行までの秒数を返す (API の決まりの 3.1)
+      ...(RETRY_AFTER_STATUSES.has(status) ? { headers: { "Retry-After": { description: "再試行までの秒数", schema: { type: "integer" } } } } : {}),
       content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
     });
   }

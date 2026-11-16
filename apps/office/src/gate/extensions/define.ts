@@ -35,10 +35,12 @@ export type ExtensionContext = {
 type RouteBase = {
   /** `/note` の形のパス */
   path: string;
-  /** v1.yaml と同じ operationId */
+  /** API の文書の operationId */
   operationId: string;
   /** 要約 */
   summary: string;
+  /** 処理の順。土台が頭に足す、入れているかとパスキーの確かめは書かない */
+  steps: readonly [string, ...string[]];
   /** 返す data の Zod スキーマ */
   response: ZodType;
 };

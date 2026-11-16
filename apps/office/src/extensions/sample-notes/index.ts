@@ -20,12 +20,13 @@ export default defineExtension({
   title: "メモ",
   ownerData: false,
   routes: [
-    { method: "get", path: "/note", operationId: "getSampleNote", summary: "見本の拡張機能のメモを読む", response: SampleNote, run: (ctx) => readNote(ctx.store) },
+    { method: "get", path: "/note", operationId: "getSampleNote", summary: "見本の拡張機能のメモを読む", steps: ["R2 の `ext/sample-notes/note.json` を読む。無ければ空のメモを返す"], response: SampleNote, run: (ctx) => readNote(ctx.store) },
     {
       method: "put",
       path: "/note",
       operationId: "updateSampleNote",
       summary: "見本の拡張機能のメモを置き換える",
+      steps: ["R2 の `ext/sample-notes/note.json` を置き換え、監査ログに `extension.write` を記録する"],
       body: UpdateSampleNoteInput,
       response: SampleNote,
       run: async (ctx, body: UpdateSampleNoteInput) => {

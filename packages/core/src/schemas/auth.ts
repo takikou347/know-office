@@ -4,7 +4,7 @@ import { z } from "./zod.ts";
 /** ログインセッション 1 件。current は今の要求のセッションか */
 export const Session = z
   .object({
-    id: z.uuid(),
+    id: z.uuid().meta({ description: "UUID v7" }),
     createdAt: z.iso.datetime(),
     expiresAt: z.iso.datetime(),
     endedAt: z.iso.datetime().nullable(),
@@ -23,7 +23,7 @@ export type Session = z.infer<typeof Session>;
 export const Me = z
   .object({
     email: z.email(),
-    sessionId: z.uuid(),
+    sessionId: z.uuid().meta({ description: "UUID v7" }),
     stepUpUntil: z.iso.datetime().nullable(),
     hasPasskey: z.boolean(),
   })
@@ -49,13 +49,13 @@ export const PasskeyOptionsInput = z
 export type PasskeyOptionsInput = z.infer<typeof PasskeyOptionsInput>;
 
 /** WebAuthn の PublicKeyCredentialCreationOptions か RequestOptions の JSON。中身は @simplewebauthn/server が作る */
-export const PasskeyOptions = z.record(z.string(), z.unknown()).meta({ id: "PasskeyOptions" });
+export const PasskeyOptions = z.record(z.string(), z.unknown()).meta({ id: "PasskeyOptions", description: "WebAuthn の PublicKeyCredentialCreationOptions または RequestOptions の JSON" });
 
 /** ブラウザーが返した WebAuthn の返事。中身は @simplewebauthn/server が確かめる */
-export const WebAuthnResponse = z.record(z.string(), z.unknown()).meta({ id: "WebAuthnResponse" });
+export const WebAuthnResponse = z.record(z.string(), z.unknown()).meta({ id: "WebAuthnResponse", description: "ブラウザーが返した WebAuthn のレスポンス。RegistrationResponseJSON または AuthenticationResponseJSON" });
 
 /** 登録したパスキー。鍵そのものは返さない */
-export const Passkey = z.object({ id: z.uuid(), createdAt: z.iso.datetime() }).strict().meta({ id: "Passkey" });
+export const Passkey = z.object({ id: z.uuid().meta({ description: "UUID v7" }), createdAt: z.iso.datetime() }).strict().meta({ id: "Passkey" });
 
 /** 登録したパスキーの型 */
 export type Passkey = z.infer<typeof Passkey>;

@@ -34,7 +34,7 @@ export const Message = z
   .object({
     id: z.uuid().openapi({ description: "UUID v7" }),
     at: z.iso.datetime(),
-    staffId: StaffId,
+    staffId: StaffId.meta({ description: "社員 ID。役割ごとに固定" }),
     nodeId: z.string().nullable(),
     sender: z.enum(["owner", "staff"]),
     body: z.string(),
