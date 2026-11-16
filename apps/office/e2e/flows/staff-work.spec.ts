@@ -91,11 +91,18 @@ async function clockInReviewer(page: Page): Promise<() => Promise<void>> {
   await useOwnerPasskey(page);
   const box = await scheduleCard(page);
   const was = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
+  const restore = () => setSchedule(page, was.start, was.end);
   await setSchedule(page, "00:00", "23:59");
-  // 同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して流し直す時は、開発の道で退勤した日の印を消して出勤させる
-  expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);
-  await expect.poll(() => reviewerState(page)).toBe("working");
-  return () => setSchedule(page, was.start, was.end);
+  try {
+    // 同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して流し直す時は、開発の道で退勤した日の印を消して出勤させる
+    expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);
+    await expect.poll(() => reviewerState(page)).toBe("working");
+  } catch (error) {
+    // 出勤できずに落ちても、広げた勤務の時刻を次の通しに残さない
+    await restore();
+    throw error;
+  }
+  return restore;
 }
 
 /**
@@ -103,9 +110,7 @@ async function clockInReviewer(page: Page): Promise<() => Promise<void>> {
  * @param page 画面を開いたページ
  */
 async function scriptFinish(page: Page): Promise<void> {
-  // 開発担当なども同じ時に見本のタスクで SDK を呼ぶので、レビュー担当の作業トークンの呼び出しにだけ返させる
-  const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { staffId: "reviewer", content: [{ type: "text", text: "通しのタスクを終えた" }] } });
-  expect(res.status()).toBe(204);
+  await scriptReply(page, [{ type: "text", text: "通しのタスクを終えた" }], "end_turn");
 }
 
 /**
@@ -173,6 +178,7 @@ async function finishedBy(page: Page, nodeId: string): Promise<void> {
  * @param stopReason 止まった理由
  */
 async function scriptReply(page: Page, content: Record<string, unknown>[], stopReason: "tool_use" | "end_turn"): Promise<void> {
+  // 開発担当なども同じ時に見本のタスクで SDK を呼ぶので、レビュー担当の作業トークンの呼び出しにだけ返させる
   const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { staffId: "reviewer", content, stop_reason: stopReason } });
   expect(res.status()).toBe(204);
 }
@@ -201,7 +207,6 @@ test("オーナーが画面で頼んだタスクを社員が取り、発言と�
     const title = `通しのタスク ${String(Date.now())}`;
     const nodeId = await addTask(page, title, "レビュー担当");
     await finishedBy(page, nodeId);
-
 
     // タスクの木で済になる
     await page.reload();
