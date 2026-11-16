@@ -142,6 +142,17 @@ void describe("自動のデプロイとプレビュー環境", () => {
     }
     assert.equal(config.previews.vars["ENVIRONMENT"], "preview");
     assert.equal(config.previews.vars["URGENT_SCAN"], "off");
+    assert.equal(config.previews.vars["IDEA_BATCH"], "off");
+  });
+
+  void it("公開の URL は Access を掛けた workers.dev とプルリクエストごとのプレビュー URL で、独自のドメインを持たない", () => {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- 下の比べで形の違いは落ちる
+    const config = readJsonc(join(root, "apps", "office", "wrangler.jsonc")) as Record<string, unknown>;
+    assert.equal(config["workers_dev"], true);
+    assert.equal(config["preview_urls"], true);
+    for (const key of ["routes", "route"]) assert.equal(config[key], undefined, key);
+    // 開く URL はアカウントで決まる workers.dev の物で、デプロイの時にオーナーが決めて変数 OFFICE_URL に置く
+    assert.match(all.get("production") ?? "", /^ {6}url: \$\{\{ vars\.OFFICE_URL \}\}$/m);
   });
 });
 

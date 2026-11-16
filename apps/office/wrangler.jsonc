@@ -6,9 +6,11 @@
   // 日曜の 18 時と 19 時 (協定世界時) は日本時間の月曜 3 時と 4 時で、蒸留と見つけて直す調べ (とアイデア出し) の週のバッチ処理を始める (サービスと拡張の 3.6、3.7)
   "triggers": { "crons": ["*/5 * * * *", "5 15 * * *", "0 18 * * 0", "0 19 * * 0"] },
   "compatibility_date": "2026-11-01",
-  // Cloudflare が自動で付ける、Access を通らない URL は切る
-  "workers_dev": false,
-  "preview_urls": false,
+  // 公開の URL は know-office.<アカウントのサブドメイン>.workers.dev で、プルリクエストごとのプレビュー URL も同じ Access の下に置く (ログインと記録の 3.7)。
+  // 独自のドメインは取らないので routes を持たない。サブドメインはデプロイの時にオーナーが決め、開く URL を GitHub の変数 OFFICE_URL に置く。
+  // Access を掛ける前に開いても、ゲートウェイは Access の証明の無い要求を 401 で断る
+  "workers_dev": true,
+  "preview_urls": true,
   // 開発環境は .dev.vars で development に替える。無い時は本物の宛先を使う。URGENT_SCAN (急ぐ故障の調べ) と IDEA_BATCH (週のアイデア出し) は Claude の費用が出るので、オーナーの はい の後に on にする
   "vars": { "ENVIRONMENT": "production", "URGENT_SCAN": "off", "IDEA_BATCH": "off" },
   // D1 の置き場。database_id は Cloudflare に作った時 (#144) に本物に替える。手元では名前だけで動く
