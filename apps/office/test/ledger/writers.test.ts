@@ -22,7 +22,7 @@ describe("監査ログ", () => {
     expect(filesMatching(/INSERT INTO audit_log/)).toEqual(["gate/ledger/audit.ts"]);
     // 書けない間に溜める ledger/held.ts を通し、記録 DO だけが呼ぶ
     expect(filesMatching(/import\s*\{[^}]*\b(?:appendAudit|writeAudit)\b/)).toEqual(["gate/ledger/held.ts"]);
-    expect(filesMatching(/import\s*\{[^}]*\b(?:appendOrHold|flushHeld)\b/)).toEqual(["gate/do/recorder.ts"]);
+    expect(filesMatching(/import\s*\{[^}]*\bAuditLedger\b/)).toEqual(["gate/do/recorder.ts"]);
   });
 });
 
