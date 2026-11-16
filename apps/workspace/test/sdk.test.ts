@@ -341,7 +341,7 @@ describe("ワークスペースの Claude Agent SDK", () => {
     const base = `http://127.0.0.1:${String(address.port)}`;
     const run = await localQuery(base, tempDir());
     await expect(sdkAgent(run, undefined, relayProbe(base))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
-  }, 10_000);
+  });
 
   it("本物の SDK が作業トークンを鍵にして Claude を呼び、session を知らせて終わる", async () => {
     const claude = await fakeClaude([[{ type: "text", text: "直した" }]]);

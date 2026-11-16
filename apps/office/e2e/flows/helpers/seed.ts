@@ -20,17 +20,25 @@ function busy(error: unknown): boolean {
 }
 
 /**
- * 手元の主の D1 (DB) に SQL を流す。開発の入口 (vite の cloudflare) と同じ .wrangler/state を使うので、流した行は次の要求から読める。開発の入口の書き込みと重なって SQLITE_BUSY で断られた時は、間を空けて 3 回まで流し、ほかの失敗はそのまま投げる
- * @param sql 流す SQL。値はテストが決めた物だけを入れ、外から来た文字を入れない
+ * 手元の D1 に pnpm のコマンドを流す。開発の入口の書き込みと重なって SQLITE_BUSY で断られた時は、間を空けて 3 回まで流し、ほかの失敗はそのまま投げる。流すコマンドは何度流しても同じ結果になる物だけにする
+ * @param args pnpm に渡す引数
  */
-export function seedMain(sql: string): void {
+export function runLocalD1(args: string[]): void {
   for (let tried = 1; ; tried += 1) {
     try {
-      execFileSync("pnpm", ["exec", "wrangler", "d1", "execute", "DB", "--local", `--command=${sql}`], { cwd: office, stdio: "pipe" });
+      execFileSync("pnpm", args, { cwd: office, stdio: "pipe" });
       return;
     } catch (error) {
       if (tried >= BUSY_TRIES || !busy(error)) throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, BUSY_WAIT_MS);
     }
   }
+}
+
+/**
+ * 手元の主の D1 (DB) に SQL を流す。開発の入口 (vite の cloudflare) と同じ .wrangler/state を使うので、流した行は次の要求から読める
+ * @param sql 流す SQL。値はテストが決めた物だけを入れ、外から来た文字を入れない
+ */
+export function seedMain(sql: string): void {
+  runLocalD1(["exec", "wrangler", "d1", "execute", "DB", "--local", `--command=${sql}`]);
 }
