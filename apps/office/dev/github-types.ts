@@ -89,7 +89,7 @@ export type FakeGitHub = {
   /** 受けたレビューと行のコメントの後に GitHub が送る通知。テストがゲートウェイへ送る */
   sent: { event: string; payload: unknown }[];
   /** 次にこの「メソッド パス」に返すステータス。1 度だけ効く */
-  failNext(route: string, status: number): void;
+  failNext(route: string, status: number, headers?: Record<string, string>): void;
   /** ブランチの先のコミット。「owner/name:ブランチ」から */
   heads: Map<string, string>;
   /** Git の木の中身。木の sha から。無い木は空の木として返す */

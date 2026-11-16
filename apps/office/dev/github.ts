@@ -1,7 +1,7 @@
 // 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、プルリクエストのレビューと行のコメント、Git の API のコミットを GitHub と同じ形で持つ
 import { generateKeyPairSync } from "node:crypto";
 import { Hono } from "hono";
-import { type FakeFailures, failureTaker, flowRoutes } from "./github-flows.ts";
+import { type FakeFailures, failureTaker, flowRoutes, requireUserAgent } from "./github-flows.ts";
 import { renewAppKey } from "./github-keys.ts";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
@@ -139,7 +139,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
 
   const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, sent, heads, trees, posted });
 
-  const app = new Hono()
+  const app = new Hono().use("*", requireUserAgent)
     .post("/__fake/routes", async (c) => {
       const { route, body } = FakeRoute.parse(await c.req.json());
       routes.set(route, body);
@@ -362,7 +362,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     uninstall: (installationId: number): void => void installations.delete(installationId),
     newPrivateKey: (appId: number): string => renewAppKey(apps.get(appId)),
     sent,
-    failNext: (route: string, status: number): void => void failures.set(route, { status, left: 1 }),
+    failNext: (route: string, status: number, headers?: Record<string, string>): void => void failures.set(route, { status, left: 1, ...(headers ? { headers } : {}) }),
     heads,
     trees,
     posted,

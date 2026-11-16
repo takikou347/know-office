@@ -143,6 +143,43 @@ export async function appJwt(app: Pick<GitHubApp, "appId" | "privateKey">, now: 
   return new SignJWT({}).setProtectedHeader({ alg: "RS256", typ: "JWT" }).setIssuer(String(app.appId)).setIssuedAt(at - APP_JWT_S.back).setExpirationTime(at + APP_JWT_S.ahead).sign(key);
 }
 
+/** GitHub に名乗る User-Agent。GitHub は User-Agent の無い要求を 403 で断る */
+export const GITHUB_USER_AGENT = "know-office";
+
+/** 上限の返事に待つ時刻が無い時に待つ秒。GitHub は 2 つ目の上限で、少なくとも 1 分待つよう求める */
+const RATE_LIMIT_FALLBACK_S = 60;
+/** 待つ秒の上限。GitHub の 1 時間ごとの上限が戻るまでより長くは待たない */
+const RATE_LIMIT_MAX_S = 3600;
+
+/**
+ * GitHub の返事が上限に当たった物なら、送り直してよいまでの秒を返す。
+ * 429 か、403 で retry-after か残りの数 0 が付いた物を上限とみなす。retry-after を先に使い、無ければ x-ratelimit-reset (UNIX 秒) を返事の date から引き、どちらも無ければ 1 分にする
+ * @param res GitHub の返事
+ * @returns 待つ秒 (1 から 3600)。上限の返事でなければ null
+ */
+export function githubRetryAfter(res: Response): number | null {
+  const remaining = res.headers.get("x-ratelimit-remaining");
+  const retryAfter = res.headers.get("retry-after");
+  const limited = res.status === 429 || (res.status === 403 && (retryAfter !== null || remaining === "0"));
+  if (!limited) return null;
+  const after = Number(retryAfter ?? Number.NaN);
+  const reset = Number(res.headers.get("x-ratelimit-reset") ?? Number.NaN);
+  const date = Date.parse(res.headers.get("date") ?? "");
+  let seconds = RATE_LIMIT_FALLBACK_S;
+  if (Number.isFinite(after) && after >= 0) seconds = after;
+  else if (Number.isFinite(reset) && Number.isFinite(date)) seconds = reset - date / 1000;
+  return Math.min(RATE_LIMIT_MAX_S, Math.max(1, Math.ceil(seconds)));
+}
+
+/**
+ * GitHub の上限に当たった事を、待つ秒を付けた 429 にする
+ * @param seconds 待つ秒
+ * @returns 投げるエラー
+ */
+export function githubRateLimited(seconds: number): AppError {
+  return new AppError("rate_limited", "GitHub の上限に届いた", { headers: { "Retry-After": String(seconds) } });
+}
+
 /**
  * GitHub の REST API を呼ぶ。決めた宛先の下だけに出す
  * @param env バインディング
@@ -151,10 +188,11 @@ export async function appJwt(app: Pick<GitHubApp, "appId" | "privateKey">, now: 
  * @param init 要求
  * @returns 返事
  * @throws upstream_failed 届かない時
+ * @throws rate_limited GitHub の上限に当たった時。待つ秒を Retry-After に付ける
  */
 export async function callGitHub(env: Bindings, fetcher: Fetcher, path: string, init: RequestInit): Promise<Response> {
   const root = `${endpoints(env).github.replace(/\/$/, "")}/`;
-  const headers = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...Object.fromEntries(new Headers(init.headers).entries()) };
+  const headers = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": GITHUB_USER_AGENT, ...Object.fromEntries(new Headers(init.headers).entries()) };
   let res: Response;
   try {
     // 追った先に鍵を送らないよう、リダイレクトは追わずに断る
@@ -163,6 +201,8 @@ export async function callGitHub(env: Bindings, fetcher: Fetcher, path: string, 
     throw new AppError("upstream_failed", "GitHub に届かない");
   }
   if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
+  const wait = githubRetryAfter(res);
+  if (wait !== null) throw githubRateLimited(wait);
   return res;
 }
 

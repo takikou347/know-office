@@ -1,5 +1,5 @@
 // 開発の時だけ使う。代わりの GitHub の、画面の通しから呼ぶ口。オーナーが GitHub の画面で秘密鍵を作り直す事と、GitHub の失敗を置いて返す事
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { renewAppKey } from "./github-keys.ts";
 import type { FakeApp } from "./github-types.ts";
@@ -8,7 +8,7 @@ import type { FakeApp } from "./github-types.ts";
 const FakeFailure = z.object({ route: z.string(), status: z.number().int().min(400).max(599), times: z.number().int().min(1).max(10).default(1) });
 
 /** 道ごとの、置いた失敗と残りの回数 */
-export type FakeFailures = Map<string, { status: number; left: number }>;
+export type FakeFailures = Map<string, { status: number; left: number; headers?: Record<string, string> }>;
 
 /**
  * 置いた失敗を 1 度返す関数を作る。画面の通しは、開発の画面が読み込みを 2 度走らせるので 2 度置ける
@@ -21,7 +21,7 @@ export function failureTaker(failures: FakeFailures): (route: string) => Respons
     if (failure === undefined) return null;
     if (failure.left > 1) failures.set(route, { ...failure, left: failure.left - 1 });
     else failures.delete(route);
-    return new Response(JSON.stringify({ message: "fake failure" }), { status: failure.status, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ message: "fake failure" }), { status: failure.status, headers: { ...failure.headers, "content-type": "application/json" } });
   };
 }
 
@@ -53,3 +53,16 @@ export function flowRoutes(apps: Map<number, FakeApp>, failures: FakeFailures): 
       })
   );
 }
+
+/**
+ * GitHub と同じく、User-Agent の無い API と git の要求を 403 で断る。テストの置き場 (/__fake) と人が開く画面 (/web) には当てない
+ * @param c 要求の文脈
+ * @param next 次の受け手
+ * @returns 断る時は 403 の返事
+ */
+export const requireUserAgent: MiddlewareHandler = async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  const exempt = path.startsWith("/__fake/") || path.startsWith("/web/");
+  if (exempt || c.req.header("user-agent")) return next();
+  return c.json({ message: "Request forbidden by administrative rules. Please make sure your request has a User-Agent header" }, 403);
+};

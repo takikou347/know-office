@@ -24,6 +24,7 @@ import {
 } from "@know-office/core";
 import type { output, ZodType } from "zod";
 import type { ChangedFile, Forge } from "../work/loop.ts";
+import { GITHUB_USER_AGENT, githubRateLimited, githubRetryAfter } from "./app.ts";
 
 /** 鍵に付ける権限。GitHub App の権限の名前と、読むか書くか */
 export type Permissions = Partial<Record<"contents" | "pull_requests" | "issues" | "checks" | "statuses" | "administration" | "metadata" | "actions", "read" | "write">>;
@@ -157,6 +158,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
    * @param body 本文
    * @returns GitHub の返事
    * @throws upstream_failed リポジトリの形が違う時、GitHub に届かない時
+   * @throws rate_limited GitHub の上限に当たった時
    */
   async function send(repo: string, permissions: Permissions, route: { method: string; path: string }, body?: unknown): Promise<Response> {
     const name = RepoName.safeParse(repo);
@@ -166,14 +168,18 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       method: route.method,
       // GitHub への呼び出しはリダイレクトを追わず、3xx は失敗として断る (タスクとレビューの 3.3)
       redirect: "manual",
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": GITHUB_USER_AGENT, ...(body === undefined ? {} : { "content-type": "application/json" }) },
     };
     if (body !== undefined) init.body = JSON.stringify(body);
+    let res: Response;
     try {
-      return await allowedFetch(fetcher, `${root}repos/${name.data}${route.path}`, [root], init);
+      res = await allowedFetch(fetcher, `${root}repos/${name.data}${route.path}`, [root], init);
     } catch {
       throw new AppError("upstream_failed", "GitHub に届かない");
     }
+    const wait = githubRetryAfter(res);
+    if (wait !== null) throw githubRateLimited(wait);
+    return res;
   }
 
   /**

@@ -1,5 +1,6 @@
 // サービスのリポジトリを、GitHub の触れるリポジトリから選ぶ。試作に進める時と設定で変える時に同じ確かめを通す (サービスと拡張の 3.1、3.3)
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { connect, wrapDb } from "../helpers/github.ts";
 import { api, idOf, rows, useWork, type WorkWorld } from "../helpers/work.ts";
 
@@ -49,6 +50,23 @@ describe("サービスのリポジトリを選ぶ", () => {
     const id = await studied(world);
     world.gate.github.failNext("GET /installation/repositories", 500);
     expect(await api(world, "POST", `/api/v1/services/${id}/advance`, toPrototype("example/know-office"), 502)).toMatchObject({ code: "upstream_failed" });
+    expect(await rows(world.d1.DB, "SELECT stage, repo FROM services WHERE id = ?", id)).toEqual([{ stage: "study", repo: null }]);
+  });
+
+  it("GitHub の上限に当たったら、待つ秒を付けて 429 で返し、段階は変わらない", async () => {
+    await connect(world);
+    const id = await studied(world);
+    world.gate.github.failNext("GET /installation/repositories", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1893456120", date: "Tue, 01 Jan 2030 00:00:00 GMT" });
+    const res = await world.gate.request(`/api/v1/services/${id}/advance`, {
+      method: "POST",
+      headers: { ...world.headers, "Content-Type": "application/json" },
+      body: JSON.stringify(toPrototype("example/know-office")),
+    });
+    expect({ status: res.status, retryAfter: res.headers.get("retry-after"), code: z.object({ code: z.string() }).loose().parse(await res.json()).code }).toEqual({
+      status: 429,
+      retryAfter: "120",
+      code: "rate_limited",
+    });
     expect(await rows(world.d1.DB, "SELECT stage, repo FROM services WHERE id = ?", id)).toEqual([{ stage: "study", repo: null }]);
   });
 

@@ -9,7 +9,7 @@ import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { findNode } from "../work/nodes.ts";
 import type { TicketClaims } from "../work/ticket.ts";
-import { callGitHub, githubToken, isRedirect, parseGitHub } from "./app.ts";
+import { callGitHub, GITHUB_USER_AGENT, githubToken, isRedirect, parseGitHub } from "./app.ts";
 import type { Permissions } from "./forge.ts";
 import { repoScope } from "./rules.ts";
 
@@ -21,6 +21,23 @@ const COMMAND_BYTES = 1024 * 1024;
 const GIT_PATH = /^\/([^/]+)\/([^/]+?)(?:\.git)?\/(info\/refs|git-upload-pack|git-receive-pack)$/;
 /** GitHub に引き継ぐ git の要求のヘッダー。作業トークンは引き継がない。本文は解いて送るので content-encoding も引き継がない */
 const GIT_HEADERS = ["content-type", "accept", "git-protocol"] as const;
+/** GitHub の返事から社員に返すヘッダー。上限の待つ時刻だけを足し、要求の ID などは返さない */
+const LIMIT_HEADERS = ["retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "x-ratelimit-used", "x-ratelimit-resource"] as const;
+
+/**
+ * 中継で社員に返すヘッダーを作る。中身の種類と、上限の待つ時刻だけを写す
+ * @param res GitHub の返事
+ * @param contentType 中身の種類が無い時の物
+ * @returns 返すヘッダー
+ */
+function relayedHeaders(res: Response, contentType: string): Headers {
+  const headers = new Headers({ "content-type": res.headers.get("content-type") ?? contentType });
+  for (const name of LIMIT_HEADERS) {
+    const value = res.headers.get(name);
+    if (value !== null) headers.set(name, value);
+  }
+  return headers;
+}
 /** 何も無い sha。ref を消す命令の後ろの値 */
 const ZERO_SHA = "0".repeat(40);
 /** push で変えてよい ref の形 */
@@ -245,7 +262,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   }
   const relay = commands?.relay ?? (body ? relayed(new Uint8Array(0), body.getReader()) : null);
   const root = `${endpoints(c.env).githubGit.replace(/\/$/, "")}/`;
-  const headers = new Headers({ authorization: `Basic ${btoa(`x-access-token:${token.reveal()}`)}` });
+  const headers = new Headers({ authorization: `Basic ${btoa(`x-access-token:${token.reveal()}`)}`, "user-agent": GITHUB_USER_AGENT });
   for (const name of GIT_HEADERS) {
     const value = c.req.header(name);
     if (value !== undefined) headers.set(name, value);
@@ -268,7 +285,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   await auditFrom(c.env, { at: c.var.clock.now(), actor: ticket.staffId, target: repo.data, scope: "office", traceId: c.var.traceId, ...entry });
   if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
   if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
-  return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/octet-stream" } });
+  return new Response(res.body, { status: res.status, headers: relayedHeaders(res, "application/octet-stream") });
 }
 
 /**
@@ -307,7 +324,7 @@ export async function relayGitHubApi(c: Context<GateEnv>, ticket: TicketClaims):
   let res: Response | null = null;
   try {
     res = await allowedFetch(c.var.fetch, `${root}repos/${repo.data}${match[2] ?? ""}${url.search}`, [root], {
-      headers: { authorization: `Bearer ${token.reveal()}`, accept: c.req.header("accept") ?? "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+      headers: { authorization: `Bearer ${token.reveal()}`, accept: c.req.header("accept") ?? "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": GITHUB_USER_AGENT },
       redirect: "manual",
     });
   } catch {
@@ -324,5 +341,5 @@ export async function relayGitHubApi(c: Context<GateEnv>, ticket: TicketClaims):
   });
   if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
   if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
-  return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
+  return new Response(res.body, { status: res.status, headers: relayedHeaders(res, "application/json") });
 }

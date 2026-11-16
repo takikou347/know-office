@@ -1,6 +1,6 @@
 // know-office の中のレビューを GitHub のプルリクエストに写す。書く時に順番待ちに入れ、すぐに送り、送れなければエラーログに残して 5 分ごとに送り直す (タスクとレビューの 3.6)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
-import { type Clock, MirrorCommentPayload, MirrorReviewPayload, newId } from "@know-office/core";
+import { AppError, type Clock, MirrorCommentPayload, MirrorReviewPayload, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import type { Forge } from "../work/loop.ts";
@@ -65,6 +65,13 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
   try {
     githubId = await post(forge, claimed);
   } catch (error) {
+    if (error instanceof AppError && error.code === "rate_limited") {
+      // GitHub の上限は送り方の誤りでないので回数に数えず、待つ時刻まで印を残して写し直しに取らせない
+      const until = clock.now() + Number(error.headers["Retry-After"] ?? "60") * 1000;
+      await env.DB.prepare("UPDATE github_mirrors SET claimed_until = ?, attempts = attempts - 1 WHERE id = ? AND sent_at IS NULL").bind(until, id).run();
+      await recordError(env, { source: "job", level: "warn", code: "github_mirror_rate_limited", error }, clock);
+      return "failed";
+    }
     await env.DB.prepare("UPDATE github_mirrors SET claimed_until = NULL WHERE id = ? AND sent_at IS NULL").bind(id).run();
     const gaveUp = claimed.attempts >= MIRROR_ATTEMPTS;
     await recordError(env, { source: "job", level: gaveUp ? "error" : "warn", code: gaveUp ? "github_mirror_gave_up" : "github_mirror_failed", error }, clock);
