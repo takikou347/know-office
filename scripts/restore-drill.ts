@@ -1,4 +1,5 @@
-// 毎月 1 回、プレビュー用の記録の D1 を D1 の時点の戻し (Time Travel) で 1 日前に戻し、1 日前より古い行の数が合うかを確かめ、元の時点に戻し直す。restore-drill.yml が回す (ログインと記録の 3.6)
+// 毎月 1 回、プレビュー用の記録の D1 を D1 の時点の戻し (Time Travel) で 1 日前に戻し、1 日前より古い行の数が合うかを確かめ、戻す前に控えた時点に戻し直す。restore-drill.yml が回す (ログインと記録の 3.6)
+// プレビューの記録の D1 は全部のプレビューで 1 つを使うので、戻している間にプレビューが書いた行は、戻し直すと失われる
 import { fileURLToPath } from "node:url";
 import { localWrangler, type Wrangler } from "./backup.ts";
 
@@ -67,7 +68,7 @@ function counts(wrangler: Wrangler, database: string, tables: string[], cutoff?:
 }
 
 /**
- * 1 日前に戻す練習をする。戻した後に 1 日前より古い行の数が合うか、全体の行が増えていないかを確かめ、確かめが落ちても元の時点へ戻し直す
+ * 1 日前に戻す練習をする。今の時点の bookmark を先に控え、戻した後に 1 日前より古い行の数が合うか、全体の行が増えていないかを確かめ、途中で何が落ちても控えた時点へ戻し直す
  * @param wrangler wrangler を流す関数
  * @param options 置き場と今の時刻
  * @param options.database 置き場
@@ -83,17 +84,19 @@ export function restoreDrill(wrangler: Wrangler, options: { database: string; no
   const cutoff = now - DAY;
   const olderBefore = counts(wrangler, database, tables, cutoff);
   const totalBefore = counts(wrangler, database, tables);
-  // https://developers.cloudflare.com/d1/reference/time-travel/ の info で時点の bookmark を取り、restore はその前の bookmark を返す
+  // https://developers.cloudflare.com/d1/reference/time-travel/ の info は、--timestamp が無ければ今の時点の bookmark を返す。
+  // restore の答えの previous_bookmark に頼らず、戻す前に控えておき、途中で何が落ちてもここへ戻し直す
+  const undo = stringField(json(wrangler(["d1", "time-travel", "info", database, "--json"])), "bookmark");
   const dayAgo = stringField(json(wrangler(["d1", "time-travel", "info", database, `--timestamp=${new Date(cutoff).toISOString()}`, "--json"])), "bookmark");
-  const undo = stringField(json(wrangler(["d1", "time-travel", "restore", database, `--bookmark=${dayAgo}`, "--json"])), "previous_bookmark");
   let result: DrillResult;
   try {
+    json(wrangler(["d1", "time-travel", "restore", database, `--bookmark=${dayAgo}`, "--json"]));
     const olderAfter = counts(wrangler, database, tables, cutoff);
     const totalAfter = counts(wrangler, database, tables);
     const mismatched = tables.filter((t) => olderAfter[t] !== olderBefore[t] || (totalAfter[t] ?? 0) > (totalBefore[t] ?? 0));
     result = mismatched.length === 0 ? { ok: true, detail: `${String(tables.length)} 表を 1 日前に戻せた` } : { ok: false, detail: `1 日前に戻した後の行の数が合わない: ${mismatched.join("、")}` };
   } finally {
-    // 練習の後は必ず元の時点に戻す。戻せなければ投げて落とす
+    // 練習の後は必ず控えた時点に戻す。戻せなければ投げて落とす
     wrangler(["d1", "time-travel", "restore", database, `--bookmark=${undo}`, "--json"]);
   }
   const totalBack = counts(wrangler, database, tables);
@@ -110,10 +113,11 @@ export function restoreDrill(wrangler: Wrangler, options: { database: string; no
 export function drillPlan(database: string): string[] {
   return [
     `d1 execute ${database} --remote --json --command=<表ごとの行の数>`,
+    `d1 time-travel info ${database} --json`,
     `d1 time-travel info ${database} --timestamp=<1 日前> --json`,
     `d1 time-travel restore ${database} --bookmark=<1 日前の bookmark> --json`,
     `d1 execute ${database} --remote --json --command=<表ごとの行の数>`,
-    `d1 time-travel restore ${database} --bookmark=<戻す前の bookmark> --json`,
+    `d1 time-travel restore ${database} --bookmark=<戻す前に控えた bookmark> --json`,
   ];
 }
 

@@ -20,7 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # CLOUDFLARE_DRILL_TOKEN の権限: D1 の編集 (Time Travel の戻しに要る) だけで、使うのはプレビューの記録の D1 の know-office-preview-rec だけ。R2 と本番の Workers の権限は付けない
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DRILL_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { databases, readConfig } from "./backup.ts";
 import { DRILL_DATABASE, drillPlan, restoreDrill } from "./restore-drill.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,7 +36,11 @@ function fakeD1(now: Tables, day: Tables) {
       });
       return JSON.stringify([{ results: rows, success: true }]);
     }
-    if (group === "d1" && verb === "time-travel" && sub === "info") return JSON.stringify({ bookmark: "b-day" });
+    if (group === "d1" && verb === "time-travel" && sub === "info") {
+      // --timestamp が無ければ今の時点の bookmark を返す
+      const at = args.some((a) => a.startsWith("--timestamp="));
+      return JSON.stringify({ bookmark: at || current === day ? "b-day" : "b-now" });
+    }
     if (group === "d1" && verb === "time-travel" && sub === "restore") {
       const to = args.find((a) => a.startsWith("--bookmark="))?.slice("--bookmark=".length);
       const previous = current === now ? "b-now" : "b-day";
@@ -58,6 +63,7 @@ void describe("記録を戻せる", () => {
     // 1 日前の時点を取り、戻し、確かめた後に元の時点へ戻し直す
     const travel = d1.calls.filter((c) => c[1] === "time-travel").map((c) => c.slice(2).join(" "));
     assert.deepEqual(travel, [
+      `info ${DRILL_DATABASE} --json`,
       `info ${DRILL_DATABASE} --timestamp=${new Date(NOW - DAY).toISOString()} --json`,
       `restore ${DRILL_DATABASE} --bookmark=b-day --json`,
       `restore ${DRILL_DATABASE} --bookmark=b-now --json`,
@@ -81,10 +87,35 @@ void describe("記録を戻せる", () => {
     assert.ok(d1.calls.every((c) => c[1] === "execute"));
   });
 
-  void it("wrangler の答えに戻す前の bookmark が無ければ、確かめずに落とす", () => {
+  void it("戻した後に wrangler の答えが壊れていても、戻す前に控えた bookmark へ戻し直す", () => {
+    const d1 = fakeD1({ audit_log: [...OLD, ...NEW] }, { audit_log: [...OLD] });
+    // 1 日前への restore は効いたが、答えが読めない
+    const broken = (args: string[]) => {
+      const out = d1.wrangler(args);
+      return args[2] === "restore" && args.includes("--bookmark=b-day") ? "not json" : out;
+    };
+    assert.throws(() => restoreDrill(broken, { database: DRILL_DATABASE, now: NOW }));
+    assert.deepEqual(d1.calls.at(-1), ["d1", "time-travel", "restore", DRILL_DATABASE, "--bookmark=b-now", "--json"]);
+    assert.equal(d1.current().audit_log?.length, 3);
+  });
+
+  void it("今の時点の bookmark を控えられなければ、戻さずに落とす", () => {
     const d1 = fakeD1({ audit_log: [...OLD] }, { audit_log: [...OLD] });
-    const broken = (args: string[]) => (args[2] === "restore" ? JSON.stringify({ message: "restored" }) : d1.wrangler(args));
-    assert.throws(() => restoreDrill(broken, { database: DRILL_DATABASE, now: NOW }), /previous_bookmark/);
+    const noBookmark = (args: string[]) => (args[2] === "info" && !args.some((a) => a.startsWith("--timestamp=")) ? JSON.stringify({}) : d1.wrangler(args));
+    assert.throws(() => restoreDrill(noBookmark, { database: DRILL_DATABASE, now: NOW }), /bookmark/);
+    assert.ok(d1.calls.every((c) => c[2] !== "restore"));
+  });
+
+  void it("練習に使う置き場は、wrangler.jsonc のプレビューの記録の D1 で、本番の置き場でない", () => {
+    const config = readConfig(join(root, "apps", "office", "wrangler.jsonc"));
+    // readConfig は本番の所だけを型に持つので、previews は同じ文を読み直して取る
+    const raw: unknown = JSON.parse(readFileSync(join(root, "apps", "office", "wrangler.jsonc"), "utf8").replaceAll(/^\s*\/\/.*$/gm, ""));
+    const previews: unknown = typeof raw === "object" && raw !== null ? Reflect.get(raw, "previews") : undefined;
+    const stores: unknown = typeof previews === "object" && previews !== null ? Reflect.get(previews, "d1_databases") : undefined;
+    assert.ok(Array.isArray(stores));
+    const records = new Set(stores.filter((d) => String(Reflect.get(d, "binding")).startsWith("REC_")).map((d) => String(Reflect.get(d, "database_name"))));
+    assert.deepEqual([...records], [DRILL_DATABASE]);
+    assert.ok(databases(config).every((d) => d.name !== DRILL_DATABASE));
   });
 });
 
@@ -95,12 +126,17 @@ void describe("restore-drill.yml", () => {
     assert.match(workflow, /^ {4}- cron: "0 20 1 \* \*"$/m);
     assert.match(workflow, /^permissions:\n {2}contents: read$/m);
     assert.doesNotMatch(workflow, /run:[^\n]*secrets\./);
-    assert.match(workflow, / {6}CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/);
+  });
+
+  void it("戻す練習専用の鍵を使い、その権限を書いておく", () => {
+    assert.match(workflow, / {6}CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_DRILL_TOKEN \}\}/);
+    assert.doesNotMatch(workflow, /secrets\.CLOUDFLARE_API_TOKEN/);
+    assert.match(workflow, /# CLOUDFLARE_DRILL_TOKEN の権限: [^\n]*know-office-preview-rec/);
   });
 
   void it("鍵が無い間は飛ばさず、手順を出す dry-run を流す", () => {
     assert.match(workflow, /node scripts\/restore-drill\.ts --dry-run/);
     assert.match(workflow, /node scripts\/restore-drill\.ts\n/);
-    assert.deepEqual(drillPlan(DRILL_DATABASE).length, 5);
+    assert.deepEqual(drillPlan(DRILL_DATABASE).length, 6);
   });
 });
