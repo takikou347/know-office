@@ -1,4 +1,4 @@
-// 作業トークンを vault の ticket_key で署名して発行し、確かめ、チェックポイントで発行し直す (社員が考えるの 2 章、3.3、3.4)
+// 作業トークンを vault の ticket_key で署名して発行し、確かめ、チェックポイントで発行し直す (社員が考えるの 3.1、3.3、3.4)
 import { AppError, type Clock, log, type StaffId, WorkTicketClaims } from "@know-office/core";
 import { compactVerify, SignJWT } from "jose";
 import { vaultKey } from "../auth/vault.ts";

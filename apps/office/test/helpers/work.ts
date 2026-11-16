@@ -1,4 +1,4 @@
-// タスクの繰り返しのテストの手伝い。D1、ゲートウェイ、GitHub の代わりを置き、木を作ってツールを呼ぶ (テスト設計の タスクとレビュー)
+// タスクの繰り返しのテストの手伝い。D1、ゲートウェイ、GitHub の代わりを置き、木を作ってツールを呼ぶ (テスト設計のタスクとレビュー)
 import type { D1Database } from "@cloudflare/workers-types";
 import type { StaffId, ToolResult } from "@know-office/core";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";

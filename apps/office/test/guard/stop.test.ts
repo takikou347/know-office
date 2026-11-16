@@ -1,4 +1,4 @@
-// 出来事を受けて止める動きを、社員の動きを並べたモックの出来事で確かめる (自動停止の 3.3、3.4、テスト設計の 自動停止)
+// 出来事を受けて止める動きを、社員の動きを並べたモックの出来事で確かめる (自動停止の 3.3、3.4、テスト設計の自動停止)
 import { AppError, DEFAULT_THRESHOLDS } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

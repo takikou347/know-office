@@ -1,4 +1,4 @@
-// 会話の記録を社員 DO がタスクごとの鍵で暗号にして R2 に置き、ワークスペースが落ちて作り直した後に戻して同じ session の続きを呼ぶ事を、本物の workerd で確かめる (社員が考えるの 3.7、テスト設計の 社員が考える)
+// 会話の記録を社員 DO がタスクごとの鍵で暗号にして R2 に置き、ワークスペースが落ちて作り直した後に戻して同じ session の続きを呼ぶ事を、本物の workerd で確かめる (社員が考えるの 3.7、テスト設計の社員が考える)
 import { deriveKey, fromBase64, ORG_RULES, ROLE_TOOLS, toBase64 } from "@know-office/core";
 import { decodeJwt } from "jose";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

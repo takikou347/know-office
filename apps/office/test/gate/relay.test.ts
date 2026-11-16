@@ -1,4 +1,4 @@
-// Claude のプロキシを、作業トークンから代わりの Claude API、使った量の記録、勤怠の待ちまで確かめる (社員が考えるの 3.4、テスト設計の 社員が考える)
+// Claude のプロキシを、作業トークンから代わりの Claude API、使った量の記録、勤怠の待ちまで確かめる (社員が考えるの 3.4、テスト設計の社員が考える)
 import type { Fetcher, StaffId } from "@know-office/core";
 import { describe, expect, it, vi } from "vitest";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
