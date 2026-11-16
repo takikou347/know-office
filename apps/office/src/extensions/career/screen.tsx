@@ -22,11 +22,15 @@ function ShowcaseForm({ api }: ShowcaseFormProps) {
   const [shown, setShown] = useState<CareerShowcase | null>(null);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let live = true;
     void api.get("/showcase", CareerShowcase).then((current) => {
-      if (!live || !current) return;
+      if (!live) return;
+      // 選ぶ欄は前に書き出した物を読み終えてから出す。読む前に選ぶと、読んだ値で選んだ物を上書きしてしまう
+      setLoaded(true);
+      if (!current) return;
       setShown(current);
       setFields(CAREER_FIELDS.filter((f) => f in current.items));
     });
@@ -44,6 +48,7 @@ function ShowcaseForm({ api }: ShowcaseFormProps) {
     if (result) setShown(result);
   };
 
+  if (!loaded) return <p role="status">書き出した物を読んでいます</p>;
   return (
     <form onSubmit={(e) => void send(e)} aria-label="人に見せる項目">
       <Stack gap={3}>
