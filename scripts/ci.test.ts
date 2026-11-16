@@ -51,7 +51,7 @@ void describe("弱点のチェック", () => {
     // 動く入口への自動の攻撃は、画面の通しのジョブで 1 度だけ流す
     assert.ok(steps.some((job) => /^ {6}- run: pnpm e2e$/m.test(job)), "pnpm e2e を走らせるジョブが無い");
     // 攻撃はセッションを作るので、D1 のマイグレーション (records) の後に流す
-    assert.match(playwright, /\{ name: "attack", testMatch: \/attack\\\.spec\\\.ts\/, dependencies: \["records"\] \}/);
+    assert.match(playwright, /\{ name: "attack", testMatch: \/attack\\\.spec\\\.ts\/, dependencies: \["records", \.\.\.screenProjects\.map\(\(p\) => p\.name\)\] \}/);
     assert.ok(existsSync(join(root, "apps", "office", "e2e", "attack.spec.ts")));
   });
 });

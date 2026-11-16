@@ -140,7 +140,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @know-office/office exec playwright install --with-deps chromium webkit
+      - run: pnpm --filter @know-office/office exec playwright install --with-deps chromium
       # 画面の通しと一緒に、動く入口への自動の攻撃のチェック (e2e/attack.spec.ts) も流す
       - run: pnpm e2e
       # 落ちた時に出ていた画面の中身を記録にも出す。ファイルを取りに行けない所からでも原因を読める

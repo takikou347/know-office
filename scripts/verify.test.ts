@@ -1,16 +1,17 @@
 // verify.ts の、手順を順に走らせて結果を短くまとめる所を確かめる
 // node:test の describe と it は Promise を返すが、node:test が待つので void で示す
 import { strict as assert } from "node:assert";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
-import { runSteps, stepsFor, summarize, type Step } from "./verify.ts";
+import { e2ePortFor, runSteps, stepsFor, summarize, type Step } from "./verify.ts";
 
 void describe("push の前のチェックを短い出力で走らせる", () => {
   void it("通った手順は名前だけを 1 行で出す", () => {
     assert.equal(summarize({ name: "lint", code: 0, output: "長い出力\n".repeat(50) }), "ok   lint");
+  });
+
+  void it("かかった秒があれば名前の後に丸めて出す", () => {
+    assert.equal(summarize({ name: "e2e", code: 0, output: "", seconds: 612.4 }), "ok   e2e (612s)");
+    assert.equal(summarize({ name: "test", code: 1, output: "", seconds: 3.6 }), "FAIL test (4s) (exit 1)");
   });
 
   void it("落ちた手順は出力の最後の 40 行だけを出す", () => {
@@ -53,21 +54,18 @@ void describe("走らせる手順を並べる", () => {
     assert.match(step?.cmd ?? "", /\/none に無い。KNOWIDEA_DIR で置き場を渡す" && exit 1$/);
   });
 
-  void it("決まったポートを使う test と e2e は、同じ機械のほかの作業ツリーと同じ錠で順番に走らせる", () => {
-    const steps = stepsFor("/repo/know-office", ["--e2e"], { KNOWIDEA_DIR: "/none" }, "/tmp");
-    const locked = steps.filter((step) => step.cmd.includes("flock"));
-    assert.deepEqual(locked.map((step) => step.name), ["test", "e2e"]);
-    for (const step of locked) {
-      assert.match(step.cmd, /^if command -v flock >\/dev\/null; then flock "\/tmp\/know-office-ports.lock" pnpm (test|e2e); else pnpm \1; fi$/);
-    }
+  void it("e2e は作業ツリーごとに違う入口の番号で走らせ、錠で待たない", () => {
+    const one = stepsFor("/repo/a/know-office", ["--e2e"], { KNOWIDEA_DIR: "/none" });
+    assert.equal(one.some((step) => step.cmd.includes("flock")), false);
+    assert.equal(one.at(-1)?.cmd, `E2E_PORT=${e2ePortFor("/repo/a/know-office")} pnpm e2e`);
+    assert.notEqual(e2ePortFor("/repo/a/know-office"), e2ePortFor("/repo/b/know-office"));
   });
 
-  void it("錠の有る無しどちらでも、手順の終わりのコードをそのまま返す", () => {
-    const lockDir = mkdtempSync(join(tmpdir(), "verify-lock-"));
-    const step = stepsFor("/repo/know-office", [], { KNOWIDEA_DIR: "/none" }, lockDir).find((s) => s.name === "test");
-    const cmd = (step?.cmd ?? "").replaceAll("pnpm test", "/bin/sh -c 'exit 3'");
-    assert.equal(spawnSync(cmd, { shell: true }).status, 3);
-    const noFlock = spawnSync(cmd, { shell: true, env: { PATH: "/nonexistent" } });
-    assert.equal(noFlock.status, 3);
+  void it("入口の番号は 5200 から 5798 の偶数で、代わりの物の次の番号と重ならない", () => {
+    for (const root of ["/", "/home/claude/know-office", "/home/claude/know-office/.claude/worktrees/x"]) {
+      const port = e2ePortFor(root);
+      assert.equal(port % 2, 0);
+      assert.ok(port >= 5200 && port <= 5798);
+    }
   });
 });

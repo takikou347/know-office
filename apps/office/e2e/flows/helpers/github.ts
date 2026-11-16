@@ -2,9 +2,10 @@
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { seedMain } from "./seed.ts";
+import { FAKES } from "../../helpers/fakes.ts";
 
 /** 手元の代わりの GitHub */
-export const FAKE_GITHUB = "http://127.0.0.1:5199/github";
+export const FAKE_GITHUB = `${FAKES}/github`;
 
 const Connect = z.object({ data: z.object({ action: z.url(), manifest: z.record(z.string(), z.unknown()).nullable() }).loose() }).loose();
 

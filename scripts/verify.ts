@@ -1,7 +1,7 @@
 // push の前のチェックを全部走らせ、通った手順は 1 行、落ちた手順は出力の最後だけを出す。Claude の読む量を減らすため
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,22 +10,23 @@ const TAIL = 40;
 /** 走らせる手順。名前のほかは走らせ方による */
 export type Step = { name: string };
 
-/** 1 つの手順を走らせた結果 */
-export type StepResult = { code: number; output: string };
+/** 1 つの手順を走らせた結果。seconds はかかった秒 */
+export type StepResult = { code: number; output: string; seconds?: number };
 
 /** シェルで走らせる手順 */
 export type ShellStep = Step & { cmd: string; cwd: string };
 
 /**
- * 1 つの手順の結果を短い文にする
- * @param result 手順の名前、終わりのコード、出力
+ * 1 つの手順の結果を短い文にする。かかった秒があれば名前の後に付け、遅い手順を見つけられるようにする
+ * @param result 手順の名前、終わりのコード、出力、かかった秒
  * @returns 通った時は 1 行、落ちた時は見出しと出力の最後の 40 行
  */
 export function summarize(result: Step & StepResult): string {
+  const took = result.seconds === undefined ? "" : ` (${Math.round(result.seconds)}s)`;
   if (result.code === 0) {
-    return `ok   ${result.name}`;
+    return `ok   ${result.name}${took}`;
   }
-  const head = `FAIL ${result.name} (exit ${result.code})`;
+  const head = `FAIL ${result.name}${took} (exit ${result.code})`;
   const output = result.output.trimEnd();
   return output === "" ? head : [head, ...output.split("\n").slice(-TAIL)].join("\n");
 }
@@ -47,11 +48,23 @@ export function runSteps<S extends Step>(steps: S[], exec: (step: S) => StepResu
 /**
  * 手順をシェルで走らせ、標準出力と標準エラーをまとめて返す
  * @param step 名前、命令、走らせる場所
- * @returns 終わりのコードと出力
+ * @returns 終わりのコード、出力、かかった秒
  */
 function shell(step: ShellStep): StepResult {
+  const started = performance.now();
   const run = spawnSync(step.cmd, { cwd: step.cwd, shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  return { code: run.status ?? 1, output: `${run.stdout}${run.stderr}` };
+  return { code: run.status ?? 1, output: `${run.stdout}${run.stderr}`, seconds: (performance.now() - started) / 1000 };
+}
+
+/**
+ * 作業ツリーごとに e2e の入口の待ち受けの番号を決める。代わりの物は次の番号を使う (playwright.config.ts)。
+ * 別の作業ツリーと同時に流しても、ポートと開発サーバーを取り合わない
+ * @param root know-office の置き場
+ * @returns 5200 から 5798 の偶数
+ */
+export function e2ePortFor(root: string): number {
+  const hash = createHash("sha256").update(root).digest().readUInt32BE(0);
+  return 5200 + 2 * (hash % 300);
 }
 
 /**
@@ -59,27 +72,15 @@ function shell(step: ShellStep): StepResult {
  * @param root know-office の置き場
  * @param argv 命令の引数。`--e2e` で画面のテストを足す
  * @param env 環境変数。`KNOWIDEA_DIR` で knowidea の置き場を渡す。無ければ隣の knowidea
- * @param lockDir ポートの錠を置く所。同じ機械の作業ツリーで同じ所を使う
  * @returns 走らせる手順
  */
-export function stepsFor(
-  root: string,
-  argv: readonly string[],
-  env: Readonly<Record<string, string | undefined>>,
-  lockDir: string = tmpdir(),
-): ShellStep[] {
-  // test は代わりの外部 (5199)、e2e は画面 (5174) の決まったポートを使う。並べて作る別の作業ツリーと
-  // 同時に走るとポートを取り合い、別の作業ツリーの dev サーバーを使い回して違うコードを確かめてしまうので、
-  // 機械に 1 つの錠で順番に走らせる。flock の無い機械 (macOS) ではそのまま走らせる。
-  // 錠の道は二重引用符で包むだけなので、`$` や `` ` `` を含まない置き場 (tmpdir) を前提にする
-  const lock = JSON.stringify(join(lockDir, "know-office-ports.lock"));
-  const locked = (cmd: string) => `if command -v flock >/dev/null; then flock ${lock} ${cmd}; else ${cmd}; fi`;
+export function stepsFor(root: string, argv: readonly string[], env: Readonly<Record<string, string | undefined>>): ShellStep[] {
   const knowidea = resolve(env.KNOWIDEA_DIR ?? join(root, "..", "knowidea"));
   const check = join(knowidea, "tools", "check.py");
   const steps: ShellStep[] = [
     { name: "lint", cmd: "pnpm lint", cwd: root },
     { name: "typecheck", cmd: "pnpm typecheck", cwd: root },
-    { name: "test", cmd: locked("pnpm test"), cwd: root },
+    { name: "test", cmd: "pnpm test", cwd: root },
     { name: "build", cmd: "pnpm build", cwd: root },
     { name: "openspec", cmd: "npx -y @fission-ai/openspec@1.16.0 validate --all --strict", cwd: root },
     existsSync(check)
@@ -92,7 +93,7 @@ export function stepsFor(
     },
   ];
   if (argv.includes("--e2e")) {
-    steps.push({ name: "e2e", cmd: locked("pnpm e2e"), cwd: root });
+    steps.push({ name: "e2e", cmd: `E2E_PORT=${e2ePortFor(root)} pnpm e2e`, cwd: root });
   }
   return steps;
 }

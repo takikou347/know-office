@@ -1,14 +1,15 @@
 import { expect, test } from "./helpers/test.ts";
 import { addVirtualAuthenticator } from "./helpers/passkey.ts";
+import { FAKES } from "./helpers/fakes.ts";
 
 // 開発環境の代わりの物が、画面から使える形で立っている事を確かめる。ログインと記録の 3.9
 test.describe("開発環境の代わりの物", () => {
   test("開発の時は代わりの Access、Claude API、GitHub が立っている", async ({ request }) => {
-    const certs = await request.get("http://127.0.0.1:5199/access/cdn-cgi/access/certs");
+    const certs = await request.get(`${FAKES}/access/cdn-cgi/access/certs`);
     expect(await certs.json()).toMatchObject({ keys: [expect.objectContaining({ alg: "RS256" })] });
-    const claude = await request.get("http://127.0.0.1:5199/anthropic/__fake/requests");
+    const claude = await request.get(`${FAKES}/anthropic/__fake/requests`);
     expect(claude.ok()).toBe(true);
-    const github = await request.get("http://127.0.0.1:5199/github/__fake/requests");
+    const github = await request.get(`${FAKES}/github/__fake/requests`);
     expect(github.ok()).toBe(true);
   });
 

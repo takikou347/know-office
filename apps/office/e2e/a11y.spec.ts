@@ -145,11 +145,6 @@ test.describe("使いやすさ", () => {
     const h1 = (name: string) => page.getByRole("heading", { level: 1, name });
     const main = page.getByRole("main");
     await stubReview(page);
-    // 同じ入口に並んで流れる攻撃の通しが断った要求の通知を出し、帯が途中で出て形が変わるので、通知は空で返す。帯と focus は下の 2 つの通しで確かめる
-    await page.route(
-      (url) => url.pathname === "/api/v1/notices",
-      (route) => route.fulfill({ json: { data: [], meta: { ...META, next: null } } }),
-    );
     await page.goto("/");
     await expect(h1("ダッシュボード")).toBeVisible();
     // ダッシュボードは入口から読んだ物を承認を待つ物の上に足すので、読み終えて形が落ち着いてから Tab で進む

@@ -18,8 +18,8 @@ paths:
 - 置き場: 共通 `packages/core/test/<物>.test.ts`、ゲートウェイと DO `apps/office/test/<まとまり>/<物>.test.ts`、画面の通し `apps/office/e2e/<画面か流れ>.spec.ts`、ワークスペース `apps/workspace/test/<物>.test.ts`、型の食い違い `<物>.types.ts` に `@ts-expect-error`、リポジトリの道具 `scripts/<物>.test.ts` (`node:test`)
 - モックは境目だけ。D1 は `test/helpers/d1.ts` (wrangler の手元の本物の D1)、DO は `test/helpers/worker.ts` (本物の workerd に起こしたテストの入口)、時刻は `Clock` のモック、Claude と GitHub は記録した返事を返すモック
 - テストは互いに独立させ、1 つ 5 秒以内
-- 画面の通しは Chrome と Safari、幅 360、1,024、1,280 で、axe の critical と serious を 0 にする
-- 走らせる時は 1 ファイルずつ (`pnpm --filter <パッケージ> exec vitest run <ファイル>`)。全部は push の前の `pnpm verify` で
+- 画面の通しは Chrome の幅 1,280 で全部、幅 360 で形の変わる画面 (a11y、screens、review、office) を流し、axe の critical と serious を 0 にする。Safari はデプロイの前に Mac で `E2E_BROWSERS=safari` を付けて 1 度流す
+- 走らせる時は 1 ファイルずつ (`pnpm --filter <パッケージ> exec vitest run <ファイル>`、e2e は `pnpm --filter @know-office/office exec playwright test <ファイル>`)。全部は push の前の `pnpm verify` で 1 回だけ
 - 「済み」は、要件のシナリオが入口 (画面の操作、Cron、通知、社員のツール) から画面に出るまで、代わりの Claude と GitHub と Access の上でつながって動く事。単体のテストが通るだけでは済みにしない。つながりは `apps/office/e2e/flows/<利用場面>.spec.ts` で確かめ、ここではゲートウェイの返事を差し替えない (`page.route`、`context.route`、HAR、`addInitScript` での `fetch` の差し替えのどれも)
 - 画面は `src/screen/mock.ts` を読まない。v1.yaml のルートは全部作る。残っている物は `test/screen/no-mock.test.ts` の `STILL_MOCK` と `test/gate/openapi.test.ts` の `UNBUILT` に Issue の番号と並べ、作ったら消す。足さない。`mock.ts` を再 export する中継のファイルを作らない
 - 代わりの Claude と GitHub は、本物が断る物 (違う鍵、User-Agent の無い要求、上限) を同じように断る。本物の返事を記録した見本があれば、同じ Zod の形に両方を通す
