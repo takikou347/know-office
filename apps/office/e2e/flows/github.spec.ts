@@ -1,5 +1,5 @@
 // GitHub 連携の通し。オーナーが設定の画面のボタンで App を作って入れ、連携したリポジトリを読み、ルールセットを掛け直す。全体を止めた後は鍵を入れ直して再開する。ゲートウェイの返事は差し替えず、GitHub は開発の代わりの物に記録した返事を置く (タスクとレビューの 3.2 と 3.4)
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Request } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
@@ -23,6 +23,15 @@ const SERVICES = [
 function unlink(): void {
   seedMain(`UPDATE vault SET revoked_at = ${String(Date.now())} WHERE name IN ('github_app', 'github_installation') AND revoked_at IS NULL`);
   for (const s of SERVICES) seedMain(`UPDATE services SET repo = '${s.repo}' WHERE id = '${s.id}'`);
+}
+
+/**
+ * 連携したリポジトリを読む要求かを返す
+ * @param r 画面が送った要求
+ * @returns リポジトリを読む要求なら true
+ */
+function isRepos(r: Request): boolean {
+  return new URL(r.url()).pathname === "/api/v1/github/repos";
 }
 
 /**
@@ -81,14 +90,24 @@ async function resumeOffice(page: Page, slug: string | null): Promise<void> {
  */
 async function linkFromScreen(page: Page): Promise<string> {
   let slug: string | null = null;
+  // 開発の画面はリポジトリを 2 度読み、連携済みと出た時にまだ読んでいる事がある。読み終える前に失敗を置くと、残った読みが失敗を使い切る
+  let reading = 0;
+  const done = (r: Request) => {
+    if (isRepos(r)) reading--;
+  };
   page.on("request", (r) => {
     slug ??= /\/web\/apps\/([^/]+)\/installations\/new/.exec(r.url())?.[1] ?? null;
+    if (isRepos(r)) reading++;
   });
+  page.on("requestfinished", done);
+  page.on("requestfailed", done);
   await page.goto("/settings");
   await expect(githubCard(page).getByText("連携していない")).toBeVisible();
   await githubCard(page).getByRole("button", { name: "連携する" }).click();
   await page.waitForURL("**/settings");
   await expect(githubCard(page).getByText("連携済み")).toBeVisible();
+  await expect(githubCard(page).getByRole("list", { name: "連携したリポジトリ" })).toBeVisible();
+  await expect.poll(() => reading).toBe(0);
   expect(slug).not.toBeNull();
   return slug ?? "";
 }
