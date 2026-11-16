@@ -3,8 +3,9 @@ import { expect, test as teardown } from "../helpers/test.ts";
 
 teardown("通しが出した通知を既読にする", async ({ page }) => {
   await page.goto("/settings");
-  // 入口の返事が画面に出るまで待つ。それより前はログインセッションがまだ無い
-  await expect(page.getByRole("main").getByText("登録済み")).toBeVisible();
+  // 入口の返事が画面に出るまで待つ。それより前はログインセッションがまだ無い。
+  // 前の通しが落ちてパスキーの登録が流れなかった時も片付けるので、登録の有る無しのどちらでもよい
+  await expect(page.getByRole("main").getByText(/^(?:登録済み|まだ登録していない)$/)).toBeVisible();
   const headers = { Origin: new URL(page.url()).origin };
   const res = await page.request.get("/api/v1/notices?limit=100");
   expect(res.status()).toBe(200);
