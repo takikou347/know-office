@@ -25,7 +25,7 @@ export async function rebuildYesterday(env: Bindings, clock: Clock): Promise<voi
 }
 
 /**
- * record_years の全部の年のハッシュチェーンを記録 DO で頭から確かめ、合わない年があれば確かな不正として全体を止める
+ * record_years の全部の年のハッシュチェーンを記録 DO で頭から確かめ、確かめ直しても合わない年があれば確かな不正として全体を止める
  * 記録 DO の verify は確かめ始めた時の最後の行までを読み、行は 1 文で前のハッシュと一緒に書くので、書いている途中の行を合わないと見ない
  * 記録 DO に届かない年は止めずにエラーログに残し、ほかの年を確かめ続ける。次の日にまた確かめる
  * @param env バインディング
@@ -35,12 +35,17 @@ export async function rebuildYesterday(env: Bindings, clock: Clock): Promise<voi
 export async function verifyChains(env: Bindings, clock: Clock, deps: GuardDeps): Promise<void> {
   const { results } = await env.DB.prepare("SELECT year FROM record_years ORDER BY year").all<{ year: number }>();
   const recorder = env.RECORDER.get(env.RECORDER.idFromName("recorder"));
-  for (const { year } of results) {
-    const check = await recorder.verify(year).catch(async (error: unknown) => {
+  const verify = (year: number) =>
+    recorder.verify(year).catch(async (error: unknown) => {
       await recordError(env, { source: "job", level: "error", code: "chain_verify_failed", error }, clock);
       return null;
     });
-    if (check && !check.ok) await observe(env, { type: "chain_broken", year }, clock.now(), deps);
+  for (const { year } of results) {
+    const check = await verify(year);
+    if (!check || check.ok) continue;
+    // 猶予: 全体を止める前にもう 1 度頭から確かめ、2 度とも合わない時だけ止める。読み違いや途中の書き込みで誤って止めない
+    const again = await verify(year);
+    if (again && !again.ok) await observe(env, { type: "chain_broken", year }, clock.now(), deps);
   }
 }
 

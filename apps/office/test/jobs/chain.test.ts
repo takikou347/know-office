@@ -1,7 +1,7 @@
 // 毎日の定期ジョブが、全部の年の監査ログのつなぎを確かめ、書き換わっていれば確かな不正として全体を止める (ログインと記録の 3.4)
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { verifyChains } from "../../src/gate/jobs/daily.ts";
-import { appendAudit, GENESIS_HASH } from "../../src/gate/ledger/audit.ts";
+import { appendAudit, type ChainCheck, GENESIS_HASH, verifyChain } from "../../src/gate/ledger/audit.ts";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
 import { createTestGate, type TestGate } from "../helpers/gate.ts";
@@ -63,5 +63,71 @@ describe("記録のつなぎの見張り", () => {
     await verifyChains(gate.env, clock, gate.deps);
     expect(await stopped()).toEqual({ stops: [{ scope: "office", signal: "certain_fraud" }], notices: [{ kind: "guard_stop" }] });
     expect((await d1.REC_2027.prepare("SELECT code FROM error_events").all()).results).toEqual([{ code: "chain_verify_failed" }]);
+  });
+
+  it("確かめている途中で記録 DO が行を足しても、合わないと見ずに止めない", async () => {
+    // 1 行ずつ読み、読むたびに記録 DO の代わりに今の年へ 1 行足す
+    const startLast = (await d1.REC_2027.prepare("SELECT hash FROM audit_log ORDER BY rowid DESC LIMIT 1").first<{ hash: string }>())?.hash ?? "";
+    let prev = startLast;
+    let added = 0;
+    const appending = new Proxy(d1.REC_2027, {
+      get(target, prop): unknown {
+        if (prop !== "prepare") return Reflect.get(target, prop) as unknown;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes("ORDER BY rowid LIMIT")) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              all: async () => {
+                const read = await statement.bind(...values).all();
+                const at = NEW_YEAR + (3 + added) * HOUR;
+                prev = (await appendAudit(d1.REC_2027, prev, { at, actor: "system", action: "test.during", target: String(at), scope: "office" }, clock)).hash;
+                added += 1;
+                return read;
+              },
+            }),
+          };
+        };
+      },
+    });
+    const first = (await d1.DB.prepare("SELECT first_hash FROM record_years WHERE year = 2027").first<{ first_hash: string }>())?.first_hash ?? GENESIS_HASH;
+    const recorder = gate.env.RECORDER.get(gate.env.RECORDER.idFromName("recorder"));
+    const checks: ChainCheck[] = [];
+    const during = {
+      ...recorder,
+      verify: async (year: number) => {
+        if (year !== 2027) return recorder.verify(year);
+        const check = await verifyChain(appending, first, 1);
+        checks.push(check);
+        return check;
+      },
+    };
+    Object.assign(gate.env, { RECORDER: { idFromName: () => "recorder", get: () => during } });
+    await verifyChains(gate.env, clock, gate.deps);
+    expect(added).toBeGreaterThan(0);
+    // 始めた時の最後の行で止め、後から足された行を読まない
+    expect(checks).toEqual([{ ok: true, brokenAt: null, lastHash: startLast }]);
+    expect(await stopped()).toEqual({ stops: [], notices: [] });
+  });
+
+  it("1 度合わなくても、確かめ直して合えば止めない", async () => {
+    const calls: number[] = [];
+    const answers: ChainCheck[] = [{ ok: false, brokenAt: "x", lastHash: GENESIS_HASH }, { ok: true, brokenAt: null, lastHash: GENESIS_HASH }];
+    const real = gate.env.RECORDER.get(gate.env.RECORDER.idFromName("recorder"));
+    const flaky = { ...real, verify: (year: number) => (calls.push(year), Promise.resolve(year === 2027 ? (answers.shift() ?? answers[0]) : { ok: true, brokenAt: null, lastHash: GENESIS_HASH })) };
+    Object.assign(gate.env, { RECORDER: { idFromName: () => "recorder", get: () => flaky } });
+    await verifyChains(gate.env, clock, gate.deps);
+    expect(calls).toEqual([2026, 2027, 2027]);
+    expect(await stopped()).toEqual({ stops: [], notices: [] });
+  });
+
+  it("確かめ直しても合わなければ止める", async () => {
+    const calls: number[] = [];
+    const real = gate.env.RECORDER.get(gate.env.RECORDER.idFromName("recorder"));
+    const broken = { ...real, verify: (year: number) => (calls.push(year), Promise.resolve({ ok: year !== 2027, brokenAt: year === 2027 ? "x" : null, lastHash: GENESIS_HASH })) };
+    Object.assign(gate.env, { RECORDER: { idFromName: () => "recorder", get: () => broken } });
+    await verifyChains(gate.env, clock, gate.deps);
+    expect(calls).toEqual([2026, 2027, 2027]);
+    expect(await stopped()).toEqual({ stops: [{ scope: "office", signal: "certain_fraud" }], notices: [{ kind: "guard_stop" }] });
   });
 });
