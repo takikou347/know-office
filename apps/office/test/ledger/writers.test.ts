@@ -20,7 +20,9 @@ function filesMatching(pattern: RegExp): string[] {
 describe("監査ログ", () => {
   it("監査ログを書く SQL は ledger/audit.ts だけにあり、それを呼ぶのは記録 DO だけ", () => {
     expect(filesMatching(/INSERT INTO audit_log/)).toEqual(["gate/ledger/audit.ts"]);
-    expect(filesMatching(/import\s*\{[^}]*\bappendAudit\b/)).toEqual(["gate/do/recorder.ts"]);
+    // 書けない間に溜める ledger/held.ts を通し、記録 DO だけが呼ぶ
+    expect(filesMatching(/import\s*\{[^}]*\b(?:appendAudit|writeAudit)\b/)).toEqual(["gate/ledger/held.ts"]);
+    expect(filesMatching(/import\s*\{[^}]*\b(?:appendOrHold|flushHeld)\b/)).toEqual(["gate/do/recorder.ts"]);
   });
 });
 

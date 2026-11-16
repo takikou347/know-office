@@ -1,4 +1,5 @@
-# 毎日 4 時 (日本時間) に、全部の D1 を wrangler d1 export で書き出し、R2 の FILES の backups/<置き場>/<日>.sql に置く (ログインと記録の 3.6)。
+# 毎日 4 時 (日本時間) に、本番の D1 を wrangler d1 export で書き出して R2 の FILES の backups/<置き場>/<日>.sql に置き、30 日より古い写しを消す (ログインと記録の 3.6)。
+# 書き出しの間はその D1 への要求が止まるので、使われない 4 時に流す。過去の年の記録は月の 1 日だけ書き出す
 # Cloudflare の鍵が無い間は飛ばさず、流す手順だけを出す。手順は scripts/backup.test.ts が wrangler.jsonc から作った物で確かめる
 name: Backup
 
@@ -20,7 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # CLOUDFLARE_BACKUP_TOKEN の権限: アカウントの D1 の読み取り (書き出しの API が求めれば D1 の編集) と、R2 の know-office-files の読み書き (写しを置いて消す)。ほかの権限は付けない
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_BACKUP_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4

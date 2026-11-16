@@ -1,16 +1,36 @@
-// 記録 DO。監査ログを 1 件ずつ順に書き、年ごとの置き場を切り替える (ログインと記録の 3.4、3.5)
+// 記録 DO。監査ログを 1 件ずつ順に書き、年ごとの置き場を切り替える。写しの間など D1 に書けない時は行を溜めて後で書く (ログインと記録の 3.4、3.5、3.6)
 import { DurableObject } from "cloudflare:workers";
 import { AppError, AuditInput, systemClock, jstYear } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { type Bindings, RECORD_BINDINGS, type Recorder } from "../env.ts";
-import { appendAudit, type ChainCheck, GENESIS_HASH, lastAuditHash, verifyChain } from "../ledger/audit.ts";
+import { type ChainCheck, GENESIS_HASH, lastAuditHash, verifyChain } from "../ledger/audit.ts";
+import { appendOrHold, flushHeld, type HeldAudit, type HeldStore } from "../ledger/held.ts";
 
 type YearRow = { year: number; binding: string; state: "writing" | "readonly"; first_hash: string | null; last_hash: string | null };
 
+/** 溜めた行を書き直すまでの間 */
+const FLUSH_RETRY_MS = 5 * 60_000;
+
+/** 溜めた行の storage のキーの頭 */
+const HELD_PREFIX = "held:";
+
+/**
+ * 溜めた行の storage のキー。年と 0 で埋めた順の番号で、辞書の順が書く順になる
+ * @param row 年と順の番号
+ * @param row.year 年
+ * @param row.seq 順の番号
+ * @returns キー
+ */
+function heldKey(row: { year: number; seq: number }): string {
+  return `${HELD_PREFIX}${String(row.year)}:${String(row.seq).padStart(12, "0")}`;
+}
+
 /** 記録 DO。ゲートウェイと社員 DO だけが RPC で呼ぶ */
 export class RecorderDO extends DurableObject<Bindings> implements Recorder {
-  // 年ごとの最後のハッシュ。起き直した時だけ D1 から読み直す
+  // 年ごとの最後のハッシュ。起き直した時だけ溜めた行か D1 から読み直す
   #last = new Map<number, string>();
+  // 書いている年の最初の行の prev_hash。書いている年は readonly にならないので、本番の DB が写しで止まっている間も読み直さない
+  #open = new Map<number, string>();
 
   /**
    * 監査ログに 1 行足す。並んだ呼び出しも 1 件ずつ順に書く
@@ -27,11 +47,50 @@ export class RecorderDO extends DurableObject<Bindings> implements Recorder {
     return await this.ctx.blockConcurrencyWhile(async () => {
       const year = jstYear(parsed.data.at);
       const { db, startHash } = await this.#openYear(year);
-      const prev = this.#last.get(year) ?? (await lastAuditHash(db)) ?? startHash;
-      const written = await appendAudit(db, prev, parsed.data, systemClock);
+      const store = this.#store();
+      const prev = this.#last.get(year) ?? (await store.list(year)).at(-1)?.hash ?? (await lastAuditHash(db)) ?? startHash;
+      const written = await appendOrHold(db, store, year, prev, parsed.data, systemClock);
       this.#last.set(year, written.hash);
-      return written;
+      // 溜めた時は、書けるようになった頃に書き直す
+      if (written.held && (await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + FLUSH_RETRY_MS);
+      return { id: written.id, hash: written.hash };
     });
+  }
+
+  /**
+   * 溜めた行を年ごとに順に書く。残れば後でまた呼ぶ
+   */
+  override async alarm(): Promise<void> {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      const store = this.#store();
+      const years = new Set((await this.#held()).map((r) => r.year));
+      let remaining = 0;
+      for (const year of years) remaining += await flushHeld(this.#binding(year), store, year).catch(() => 1);
+      if (remaining > 0) await this.ctx.storage.setAlarm(Date.now() + FLUSH_RETRY_MS);
+    });
+  }
+
+  /**
+   * 溜めた行を全部読む
+   * @returns 溜めた行。年と順の番号の順
+   */
+  async #held(): Promise<HeldAudit[]> {
+    const map = await this.ctx.storage.list<HeldAudit>({ prefix: HELD_PREFIX });
+    return [...map.values()];
+  }
+
+  /**
+   * DO の storage を、溜める所にする。キーは年と 0 で埋めた順の番号で、辞書の順が書く順になる
+   * @returns 溜める所
+   */
+  #store(): HeldStore {
+    return {
+      list: async (year) => [...(await this.ctx.storage.list<HeldAudit>({ prefix: `${HELD_PREFIX}${String(year)}:` })).values()],
+      put: (row) => this.ctx.storage.put(heldKey(row), row),
+      remove: async (row) => {
+        await this.ctx.storage.delete(heldKey(row));
+      },
+    };
   }
 
   /**
@@ -84,10 +143,15 @@ export class RecorderDO extends DurableObject<Bindings> implements Recorder {
    */
   async #openYear(year: number): Promise<{ db: D1Database; startHash: string }> {
     const db = this.#binding(year);
+    const opened = this.#open.get(year);
+    if (opened !== undefined) return { db, startHash: opened };
     const row = await this.env.DB.prepare("SELECT * FROM record_years WHERE year = ?").bind(year).first<YearRow>();
     // readonly の年に足すと、その年の最後のハッシュが次の年の first_hash と合わなくなる
     if (row?.state === "readonly") throw new AppError("conflict", `${String(year)} 年の記録は readonly で書けない`);
-    if (row) return { db, startHash: row.first_hash ?? GENESIS_HASH };
+    if (row) {
+      this.#open.set(year, row.first_hash ?? GENESIS_HASH);
+      return { db, startHash: row.first_hash ?? GENESIS_HASH };
+    }
     // 初めての年: 前の年の最後のハッシュを読み、新しい年の行を足すのと前の年を readonly にするのを 1 つの batch で行う
     const before = await this.env.DB.prepare("SELECT * FROM record_years WHERE year < ? ORDER BY year DESC LIMIT 1").bind(year).first<YearRow>();
     const previousLast = before ? ((await lastAuditHash(this.#binding(before.year))) ?? before.first_hash ?? GENESIS_HASH) : GENESIS_HASH;
@@ -98,6 +162,9 @@ export class RecorderDO extends DurableObject<Bindings> implements Recorder {
       statements.push(this.env.DB.prepare("UPDATE record_years SET state = 'readonly', last_hash = ? WHERE year = ?").bind(previousLast, before.year));
     }
     await this.env.DB.batch(statements);
+    // 前の年は readonly になったので、書いている年として持たない
+    if (before) this.#open.delete(before.year);
+    this.#open.set(year, previousLast);
     return { db, startHash: previousLast };
   }
 

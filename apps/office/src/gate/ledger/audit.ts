@@ -17,15 +17,29 @@ export function auditHash(prevHash: string, row: HashedFields): Promise<string> 
   return sha256Hex(prevHash + canonicalJson(row));
 }
 
+/** ハッシュまで計算した、書く前の 1 行 */
+export type AuditRow = {
+  id: string;
+  at: number;
+  actor: string;
+  action: string;
+  target: string | null;
+  scope: string;
+  /** canonicalJson にした中身 */
+  detail: string;
+  prevHash: string;
+  hash: string;
+  traceId: string | null;
+};
+
 /**
- * 監査ログに 1 行足す。記録 DO の中で順に呼ぶ
- * @param db 書く年の REC_<年>
+ * 頼まれた 1 件から、前の行のハッシュにつないだ 1 行を作る。まだ書かない
  * @param prevHash 前の行のハッシュ
  * @param input 頼まれた 1 件
  * @param clock ID を作る時刻
- * @returns 足した行の id と hash
+ * @returns 書く 1 行
  */
-export async function appendAudit(db: D1Database, prevHash: string, input: AuditInput, clock: Clock): Promise<{ id: string; hash: string }> {
+export async function prepareAudit(prevHash: string, input: AuditInput, clock: Clock): Promise<AuditRow> {
   const row: HashedFields = {
     id: newId(clock),
     at: input.at,
@@ -36,11 +50,33 @@ export async function appendAudit(db: D1Database, prevHash: string, input: Audit
     detail: input.detail ?? null,
   };
   const hash = await auditHash(prevHash, row);
+  return { ...row, detail: canonicalJson(row.detail), prevHash, hash, traceId: input.traceId ?? null };
+}
+
+/**
+ * 作った 1 行を書く。同じ id の行が先に書けていれば何もしない。書けたのに落ちたと返った行を書き直しても 2 度書かない
+ * @param db 書く年の REC_<年>
+ * @param row 書く 1 行
+ */
+export async function writeAudit(db: D1Database, row: AuditRow): Promise<void> {
   await db
-    .prepare("INSERT INTO audit_log (id, at, actor, action, target, scope, detail, prev_hash, hash, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(row.id, row.at, row.actor, row.action, row.target, row.scope, canonicalJson(row.detail), prevHash, hash, input.traceId ?? null)
+    .prepare("INSERT INTO audit_log (id, at, actor, action, target, scope, detail, prev_hash, hash, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
+    .bind(row.id, row.at, row.actor, row.action, row.target, row.scope, row.detail, row.prevHash, row.hash, row.traceId)
     .run();
-  return { id: row.id, hash };
+}
+
+/**
+ * 監査ログに 1 行足す。記録 DO の中で順に呼ぶ
+ * @param db 書く年の REC_<年>
+ * @param prevHash 前の行のハッシュ
+ * @param input 頼まれた 1 件
+ * @param clock ID を作る時刻
+ * @returns 足した行の id と hash
+ */
+export async function appendAudit(db: D1Database, prevHash: string, input: AuditInput, clock: Clock): Promise<{ id: string; hash: string }> {
+  const row = await prepareAudit(prevHash, input, clock);
+  await writeAudit(db, row);
+  return { id: row.id, hash: row.hash };
 }
 
 /**
