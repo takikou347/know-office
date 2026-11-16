@@ -30,6 +30,25 @@ describe("勤務の時間", () => {
   });
 });
 
+describe("退勤した日の印を消す (開発の通しだけ)", () => {
+  useD1();
+
+  it("同じ日に退勤した社員は、勤務の時刻を延ばしてもその日に出勤しないが、印を消すとその場で出勤する", async () => {
+    const s = hire();
+    await s.book.wake(jst(8));
+    s.at = jst(8);
+    await run(s, jst(17, 30));
+    expect((await s.book.status(jst(17, 30))).state).toBe("off");
+    const insert = "INSERT INTO settings (id, key, scope, value, version, changed_by, created_at) VALUES (?, 'workday.schedule', 'office', ?, 2, 'owner', 0)";
+    await testDb().prepare(insert).bind("0190f4a8-0000-7000-8000-0000000000c3", JSON.stringify({ start: "00:00", end: "23:59", days: [0, 1, 2, 3, 4, 5, 6] })).run();
+    await s.book.wake(jst(18));
+    expect((await s.book.status(jst(18))).state).toBe("off");
+    await s.book.forgetDay(jst(18));
+    expect((await s.book.status(jst(18))).state).toBe("working");
+    expect(s.workspace).toEqual(["start", "stop", "start"]);
+  });
+});
+
 describe("チェックポイントで退勤する", () => {
   useD1();
 

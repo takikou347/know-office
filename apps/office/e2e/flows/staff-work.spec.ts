@@ -76,7 +76,7 @@ async function reviewerState(page: Page): Promise<string | undefined> {
 
 /**
  * レビュー担当を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
- * 前に流した時のワークスペースが落ちて待っていれば、止めて再開して作り直させる。勤務の時間の外なら、勤務の時刻を一日に広げて出勤させる
+ * 前に流した時のワークスペースが落ちて待っていれば、止めて再開して作り直させる。勤務の中でなければ、勤務の時刻を一日に広げて出勤させる
  * @param page 画面を開いたページ
  * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
  */
@@ -92,15 +92,10 @@ async function clockInReviewer(page: Page): Promise<() => Promise<void>> {
   const box = await scheduleCard(page);
   const was = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
   await setSchedule(page, "00:00", "23:59");
-  const restore = () => setSchedule(page, was.start, was.end);
-  try {
-    // 勤務の時刻を変えると社員 DO の alarm を掛け直し、始まりを過ぎた社員はその場で出勤する
-    await expect.poll(() => reviewerState(page), { message: "同じ日に退勤した社員は、その日にもう出勤しない" }).toBe("working");
-  } catch (error) {
-    await restore();
-    throw error;
-  }
-  return restore;
+  // 同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して流し直す時は、開発の道で退勤した日の印を消して出勤させる
+  expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);
+  await expect.poll(() => reviewerState(page)).toBe("working");
+  return () => setSchedule(page, was.start, was.end);
 }
 
 /**

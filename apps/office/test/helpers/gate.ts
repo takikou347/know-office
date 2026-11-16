@@ -22,7 +22,7 @@ import type { TestD1 } from "./d1.ts";
 import { accessKeyPair, githubAppKey } from "./keys.ts";
 import { fakeLive, type TestLive } from "./live.ts";
 import { overRpc } from "./rpc.ts";
-import { type RunMarks, staffRunFakes, workspaceFake } from "./staff-runs.ts";
+import { type RunMarks, staffRunFakes, workspaceFake, type WorkspaceSeen } from "./staff-runs.ts";
 
 const FAKES = "http://localhost:5199";
 /** テストのゲートウェイの origin。app.request は http://localhost に要求を出す */
@@ -95,16 +95,7 @@ export type TestStaff = {
 };
 
 /** ワークスペースの DO の代わり */
-export type TestWorkspace = {
-  /** 受けた作業トークン */
-  tickets: string[];
-  /** 受けた runs の入力 */
-  runs: unknown[];
-  /** true なら届かない */
-  down: boolean;
-  /** 起こした時に渡した鍵。起こしていなければ無い */
-  key?: string;
-};
+export type TestWorkspace = WorkspaceSeen;
 
 /**
  * alarm も持つ、手元の入れ物を作る

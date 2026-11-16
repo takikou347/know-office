@@ -90,6 +90,19 @@ export class StaffBook {
   }
 
   /**
+   * 始まりの時刻を処理し終えた日の印を消し、予定を読み直して出来事を処理する。開発の通しが同じ日に流し直す時だけ使う
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  async forgetDay(now: number): Promise<void> {
+    const s = await this.#load();
+    s.m.handledDay = null;
+    await this.#refresh(s, now);
+    await this.#process(s, now);
+    await this.#save(s, now);
+  }
+
+  /**
    * 今の状態を返す。記憶を変えない
    * @param now 今の時刻
    * @returns 状態、今のタスク、今日の働いた時間

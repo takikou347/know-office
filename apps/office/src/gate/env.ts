@@ -64,6 +64,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   wake(now: number): Promise<null>;
   /** 今の状態を返す */
   status(now: number): Promise<StaffStatus>;
+  /** 始まりの時刻を処理し終えた日の印を消して出来事を処理する。開発の通しが同じ日に流し直す時だけ使う */
+  forgetDay(now: number): Promise<null>;
   /** ワークスペースのハートビートを受ける */
   heartbeat(at: number): Promise<null>;
   /** チェックポイントを受ける */

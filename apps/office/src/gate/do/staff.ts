@@ -46,6 +46,15 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
+   * 始まりの時刻を処理し終えた日の印を消して出来事を処理する。開発の道 (/__dev/staff/<社員 ID>/forget-day) だけが呼ぶ
+   * @param now 今の時刻
+   * @returns 無し
+   */
+  forgetDay(now: number): Promise<null> {
+    return this.#run((book) => book.forgetDay(now), now);
+  }
+
+  /**
    * 今の状態を返す
    * @param now 今の時刻
    * @returns 状態、今のタスク、今日の働いた時間

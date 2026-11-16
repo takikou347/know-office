@@ -1,4 +1,4 @@
-// テストのゲートウェイの社員 DO とワークスペースの DO の代わりのうち、呼び出しの始め方 (arm、runState、markRun、run) を持つ所 (社員が考えるの 3.2)
+// テストのゲートウェイの社員 DO とワークスペースの DO の代わりのうち、呼び出しの始め方 (arm、runState、markRun、run) と、開発の通しの forgetDay と鍵の確かめを持つ所 (社員が考えるの 3.2)
 import { AppError, type StaffId } from "@know-office/core";
 import type { Bindings } from "../../src/gate/env.ts";
 import type { StaffBook } from "../../src/gate/work/staff-book.ts";
@@ -8,7 +8,7 @@ import { continueRun } from "../../src/gate/work/transcript.ts";
 export type RunMarks = Map<string, { started: boolean; failures: number }>;
 
 /**
- * 社員 1 人の arm、runState、markRun の代わりを作る。本物は呼び出しを待たずに始めるが、テストは結果を確かめるので待つ
+ * 社員 1 人の arm、runState、markRun、forgetDay の代わりを作る。本物は呼び出しを待たずに始めるが、テストは結果を確かめるので待つ
  * @param env バインディング
  * @param id 社員 ID
  * @param book 社員の勤務の本
@@ -17,6 +17,10 @@ export type RunMarks = Map<string, { started: boolean; failures: number }>;
  */
 export function staffRunFakes(env: Bindings, id: StaffId, book: StaffBook, marks: RunMarks) {
   return {
+    forgetDay: async (now: number) => {
+      await book.forgetDay(now);
+      return null;
+    },
     arm: async (now: number) => {
       await book.wake(now);
       const { state, nodeId } = await book.status(now);
@@ -38,7 +42,16 @@ export function staffRunFakes(env: Bindings, id: StaffId, book: StaffBook, marks
 }
 
 /** ワークスペースの DO の代わりが受けた物 */
-type WorkspaceSeen = { tickets: string[]; runs: unknown[]; down: boolean; key?: string };
+export type WorkspaceSeen = {
+  /** 受けた作業トークン */
+  tickets: string[];
+  /** 受けた runs の入力 */
+  runs: unknown[];
+  /** true なら届かない */
+  down: boolean;
+  /** 起こした時に渡した鍵。起こしていなければ無い */
+  key?: string;
+};
 
 /**
  * ワークスペースの DO の代わりを作る。down の間は届かない
