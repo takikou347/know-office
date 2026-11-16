@@ -11,7 +11,7 @@ AI 社員を管理するアプリ。組織の決まりは takikou347/knowidea �
 
 ## 直し方
 
-- main で直さず、ブランチで直して PR にし、作った者と別のモデルのレビュー担当(.claude/agents の reviewer か reviewer-alt)が承認を出したら、そのブランチを main へ fast-forward で push して入れる。main が進んでいたら rebase し、チェックを通し直す。GitHub の画面や API では入れない
+- main で直さず、ブランチで直して PR にし、作った者と別のモデルのレビュー担当(.claude/agents の reviewer か reviewer-alt)が承認を出したら、main へ fast-forward で push して入れる。GitHub の画面や API では入れない。手順は knowidea のスキル `land` と `review`、並列の時は `parallel`
 - push の前に `pnpm verify` を通す。lint、typecheck、test (テスト設計 4-guard のシナリオとテストの名前の照合を含む。knowidea の無い CI では飛ばす)、build、knowidea の check.py をまとめて走らせ、落ちた所だけを出す。画面を変えたら `pnpm verify --e2e`
 - 要件の残りとこの後のタスクは GitHub Issues に 1 つ 1 件で置く。ラベルは knowidea のスキル `issue` の 6 個だけ
 
