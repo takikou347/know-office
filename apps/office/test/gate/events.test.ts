@@ -88,7 +88,10 @@ describe("働いた事がゲートウェイに届く", () => {
       const { token } = staffId === "builder" ? work : await issueTicket(world.gate.env, staffId, work.nodeId, world.clock.now());
       expect((await send(world, { staffId, nodeId: work.nodeId, token }, [{ kind: "error", name: "sdk_auth_failed", message: "Claude API が 401 で断った" }])).status).toBe(204);
     }
-    expect(await rows(world.gate.env.DB, "SELECT kind FROM notices WHERE kind = 'sdk_auth_failed'")).toEqual([{ kind: "sdk_auth_failed" }]);
+    const notices = await rows(world.gate.env.DB, "SELECT id, kind FROM notices WHERE kind = 'sdk_auth_failed'");
+    expect(notices.map((n) => n["kind"])).toEqual(["sdk_auth_failed"]);
+    // 足した 1 件だけを画面に配る
+    expect(world.gate.live.published.filter((e) => JSON.stringify(e).includes('"notice"'))).toEqual([{ type: "notice", notice: { id: notices[0]?.["id"] } }]);
   });
 
   it("終わりでタスクを done にし、作業トークンを失効させ、次のタスクを取る", async () => {

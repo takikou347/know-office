@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { nodes, notices, staff, staffPrompts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
+import { announceNotice } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 import { appendNodeEvent, findNode, type NodeRow, revertNode } from "./nodes.ts";
 import { issueTicket, revokeTaskTickets } from "./ticket.ts";
@@ -26,19 +27,22 @@ const EFFORT_BY_KIND: Partial<Record<string, RunInput["effort"]>> = { build: "me
 const RUNNABLE = new Set(["working", "called", "waiting"]);
 
 /**
- * 通知を、同じ種類と題の読んでいない物が無い時だけ 1 文で足す。同じ時の 2 回でも 1 件になる
- * @param db 今の状態の D1
+ * 通知を、同じ種類と題の読んでいない物が無い時だけ 1 文で足し、足した時は画面に配る。同じ時の 2 回でも 1 件になる
+ * @param env バインディング
  * @param notice 種類、題、本文
  * @param notice.kind 種類
  * @param notice.title 題。重ねない鍵も兼ねる
  * @param notice.body 本文
  * @param now 今の時刻
  */
-export async function noticeOnce(db: D1Database, notice: { kind: string; title: string; body: string }, now: number): Promise<void> {
-  await db
+export async function noticeOnce(env: Bindings, notice: { kind: string; title: string; body: string }, now: number): Promise<void> {
+  const id = newId(clockAt(now));
+  const res = await env.DB
     .prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', ?, ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = ? AND title = ? AND read_at IS NULL)")
-    .bind(newId(clockAt(now)), now, notice.kind, notice.title, notice.body, notice.kind, notice.title)
+    .bind(id, now, notice.kind, notice.title, notice.body, notice.kind, notice.title)
     .run();
+  // 足した時だけ画面に配る。画面は印を受けて通知を読み直す
+  if (res.meta.changes === 1) await announceNotice(env, id, clockAt(now));
 }
 
 /**
@@ -115,7 +119,7 @@ export async function runFailed(env: Bindings, staffId: StaffId, nodeId: string,
   await appendNodeEvent(env, { nodeId, staffId, kind: "run_failed", detail: { reason, failures } }, { by: "system", now });
   if (stuck && moved) {
     const row = await findNode(env.DB, nodeId);
-    await noticeOnce(env.DB, { kind: RUN_FAILED_NOTICE, title: `${staffId} が「${row.title.slice(0, 80)}」を ${String(failures)} 回続けて進められなかった`, body: "タスクはオーナーの答えを待つ。直したら、タスクの状態を todo に戻すと社員がもう一度取る" }, now);
+    await noticeOnce(env, { kind: RUN_FAILED_NOTICE, title: `${staffId} が「${row.title.slice(0, 80)}」を ${String(failures)} 回続けて進められなかった`, body: "タスクはオーナーの答えを待つ。直したら、タスクの状態を todo に戻すと社員がもう一度取る" }, now);
     // 次に取った時は、また 3 回まで試す
     await target.markRun(nodeId, "done");
   }

@@ -51,7 +51,7 @@ async function apply(ctx: EventContext, event: AgentEvent): Promise<void> {
       await recordError(env, { source: "workspace", level: "error", code: event.name, error: new Error(event.message), traceId }, ctx.clock);
       // 鍵の失敗は社員ごとでなく 1 件だけ知らせる。読むまでどの社員も呼び出しを始めない
       if (event.name === "sdk_auth_failed")
-        await noticeOnce(env.DB, { kind: AUTH_FAILED_NOTICE, title: "Claude の鍵が断られた", body: "社員は Claude を呼べない。設定で鍵を確かめ、この通知を読むと社員が続きを始める" }, now);
+        await noticeOnce(env, { kind: AUTH_FAILED_NOTICE, title: "Claude の鍵が断られた", body: "社員は Claude を呼べない。設定で鍵を確かめ、この通知を読むと社員が続きを始める" }, now);
       return;
     case "result":
       await settle(ctx, event.nodeId, event.result);
