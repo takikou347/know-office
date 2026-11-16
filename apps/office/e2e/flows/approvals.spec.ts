@@ -1,4 +1,4 @@
-// オーナーの承認の通し。社員が求めた承認を承認を決める画面 (/approvals) で決め、決めた結果がほかの画面にも出る。ゲートウェイの返事は差し替えない (タスクとレビューの 3.1)
+// オーナーの承認の通し。社員が求めた承認を、ダッシュボードから入った承認を決める画面 (/approvals) で決め、決めた結果がほかの画面にも出る。ゲートウェイの返事は差し替えない (タスクとレビューの 3.1)
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
@@ -32,13 +32,16 @@ function clean(): void {
 }
 
 /**
- * 承認を決める画面を開き、承認を待つ物の 1 件を探す
+ * ダッシュボードの「承認を待つ物」の「すべて見る」から承認を決める画面に入り、1 件を探す
  * @param page 開くページ
  * @param title 承認の見出し
  * @returns その 1 件
  */
 async function approvalItem(page: Page, title: string) {
-  await page.goto("/approvals");
+  await page.goto("/");
+  await part(page, "承認を待つ物").getByRole("link", { name: "すべて見る" }).click();
+  await expect(page).toHaveURL(/\/approvals$/);
+  await expect(page.getByRole("heading", { level: 1, name: "承認" })).toBeVisible();
   const item = part(page, "承認を待つ物").getByRole("listitem").filter({ hasText: title });
   await expect(item).toBeVisible();
   return item;
@@ -147,7 +150,9 @@ test.describe("オーナーに上げる事", () => {
   test("1 件の道を開くとその承認だけを出し、理由が空なら送れない", async ({ page }) => {
     const id = request("external_integration", "Linear", { reason: "課題を Linear に移す" });
     request("cost_increase", "R2 の容量", { reason: "記録が増えた" });
-    await page.goto(`/approvals/${id}`);
+    await page.goto("/");
+    await part(page, "承認を待つ物").getByRole("link", { name: /外部連携: Linear/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/approvals/${id}$`));
     const list = part(page, "承認を待つ物").getByRole("listitem");
     await expect(list).toHaveCount(1);
     await expect(list).toContainText("外部連携: Linear");

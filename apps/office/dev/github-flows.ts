@@ -1,4 +1,4 @@
-// 代わりの GitHub の、画面の通しから呼ぶ口。オーナーが GitHub の画面で秘密鍵を作り直す事と、GitHub の失敗を置く事
+// 開発の時だけ使う。代わりの GitHub の、画面の通しから呼ぶ口。オーナーが GitHub の画面で秘密鍵を作り直す事と、GitHub の失敗を置く事
 import { Hono } from "hono";
 import { z } from "zod";
 import { renewAppKey } from "./github-keys.ts";

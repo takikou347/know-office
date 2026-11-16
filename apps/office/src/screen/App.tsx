@@ -3,7 +3,7 @@ import { AppBar, AppShell } from "knowidea-ui";
 import { withScreens } from "./extensions.ts";
 import { type Navigate, Page, type ToggleExtension } from "./pages.tsx";
 import { LiveNoticeBar, NoticeHold, NoticeProvider } from "./parts/notices.tsx";
-import { bottomCurrentOf, bottomItems, morePath, screenOf, sideItemsWith } from "./routes.ts";
+import { bottomCurrentOf, bottomItems, headingOf, morePath, screenOf, sideItemsWith } from "./routes.ts";
 
 export interface AppProps {
   health?: Health;
@@ -33,7 +33,7 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
           brand={{ name: "know-office" }}
           header={
             <>
-              <AppBar title={more ? "その他" : screen.label} position="sticky" />
+              <AppBar title={headingOf(pathname, shown)} position="sticky" />
               <LiveNoticeBar />
             </>
           }

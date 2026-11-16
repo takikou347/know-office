@@ -21,6 +21,7 @@ function notice(id: number, readAt: string | null = null): Notice {
     body: `本文 ${String(id)}`,
     scope: "office",
     readAt,
+    link: null,
   };
 }
 
@@ -42,6 +43,13 @@ describe("画面の通知", () => {
     const html = renderToString(<NoticeList notices={[notice(1)]} state="ok" />);
     expect(html).toContain("通知 1");
     expect(html).toContain("9:00");
+  });
+
+  it("開く先のある通知は、帯と一覧からその画面へ移れる", () => {
+    const asked = { ...notice(1), kind: "approval_requested", link: "/approvals/0190f4a8-0000-7000-8000-000000000009" };
+    expect(renderToString(<NoticeBar notices={[asked]} onRead={() => {}} />)).toContain('href="/approvals/0190f4a8-0000-7000-8000-000000000009"');
+    expect(renderToString(<NoticeList notices={[asked]} state="ok" />)).toContain('href="/approvals/0190f4a8-0000-7000-8000-000000000009"');
+    expect(renderToString(<NoticeList notices={[notice(2)]} state="ok" />)).not.toContain("href=");
   });
 });
 

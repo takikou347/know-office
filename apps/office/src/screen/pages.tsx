@@ -13,7 +13,7 @@ import { SettingsPage } from "./pages/settings/SettingsPage.tsx";
 import { StaffPage } from "./pages/staff/StaffPage.tsx";
 import type { Navigate, ToggleExtension } from "./parts/navigate.ts";
 import { Section } from "./parts/section.tsx";
-import { type ExtensionScreenId, type ScreenId, isExtensionScreen } from "./routes.ts";
+import { APPROVALS_PATH, type ExtensionScreenId, type ScreenId, isExtensionScreen } from "./routes.ts";
 
 export type { Navigate, ToggleExtension } from "./parts/navigate.ts";
 
@@ -33,8 +33,8 @@ export function Page({ screen, pathname, query, health, navigate, extensions, to
   if (isExtensionScreen(screen)) return <ExtensionPage id={screen.slice("ext:".length)} />;
   switch (screen) {
     case "dashboard":
-      // 承認を決める画面はダッシュボードの承認を待つ物から移る先で、切り替えには出さない
-      if (pathname === "/approvals" || pathname.startsWith("/approvals/")) return <ApprovalsPage pathname={pathname} />;
+      // 承認を決める画面は、ダッシュボードの「承認を待つ物」と通知 approval_requested から移る先で、切り替えには出さない。題は headingOf が「承認」にする
+      if (pathname === APPROVALS_PATH || pathname.startsWith(`${APPROVALS_PATH}/`)) return <ApprovalsPage pathname={pathname} />;
       return <DashboardPage health={health} />;
     case "staff":
       return <StaffPage pathname={pathname} query={query} navigate={navigate} />;

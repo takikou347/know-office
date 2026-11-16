@@ -9,7 +9,7 @@ import { appExists, appManifest, callGitHub, checkInstallation, consumeState, DR
 import { guardDo } from "../guard/actions.ts";
 import { receiveHook } from "../github/hooks.ts";
 import { claimLock, releaseLock } from "../db/locks.ts";
-import { loadGitHubRules, protectEach, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
+import { loadGitHubRules, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { list, noContent, ok, redirect } from "../respond.ts";
@@ -207,10 +207,10 @@ export const githubRoutes = router
     // 同じ時の掛け直しが 2 つとも「無い」と読んで 2 つ作らないよう、1 つずつにする
     if (!(await claimLock(c.env.DB, { name: APPLY_LOCK, holder, now: c.var.clock.now(), ttlMs: APPLY_LOCK_MS }))) throw new AppError("conflict", "ほかの掛け直しが動いている");
     try {
-      const result = await protectEach(c.env, c.var.forge);
-      await audit(c, "github.rules_apply", RULES_KEY, { applied: result.applied, ...(result.failed ? { failed: result.failed.repo } : {}) });
-      if (result.failed) throw result.failed.error;
-      return ok(c, { applied: result.applied });
+      // PUT github/rules と同じく、記録を残してから GitHub を呼ぶ。記録が落ちれば何も掛けずに 500 で、掛かったのに残らない事を作らない
+      const rules = await loadGitHubRules(c.env.DB);
+      await audit(c, "github.rules_apply", RULES_KEY, { repos: rules.repos, version: rules.version });
+      return ok(c, { applied: await protectRepos(c.env, c.var.forge) });
     } finally {
       await releaseLock(c.env.DB, APPLY_LOCK, holder);
     }

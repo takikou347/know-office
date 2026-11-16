@@ -164,9 +164,9 @@ test("レビューで可を出すと、出した事が分かる", async ({ page 
   await expect(page.getByText("可を出しました")).toBeVisible();
 });
 
-test("ダッシュボードに、可を待つ物、今日の仕事、今月の費用、お知らせが出る", async ({ page }) => {
+test("ダッシュボードに、承認を待つ物、今日の仕事、今月の費用、お知らせが出る", async ({ page }) => {
   await page.goto("/");
-  for (const name of ["社員の様子", "可を待つ物", "今日の仕事", "お知らせ"]) {
+  for (const name of ["社員の様子", "承認を待つ物", "今日の仕事", "お知らせ"]) {
     await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
   }
   await expect(page.getByText("今月の費用")).toBeVisible();

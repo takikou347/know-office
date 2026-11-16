@@ -138,6 +138,20 @@ export function bottomCurrentOf(pathname: string, extensions: readonly Extension
  * @returns 「画面の名前 - know-office」の題
  */
 export function titleOf(pathname: string, extensions: readonly ExtensionNav[] = []): string {
-  const label = pathname === morePath ? "その他" : screenOf(pathname, extensions).label;
-  return `${label} - know-office`;
+  return `${headingOf(pathname, extensions)} - know-office`;
+}
+
+/** 承認を決める画面の道。切り替えには出さず、ダッシュボードから移る */
+export const APPROVALS_PATH = "/approvals";
+
+/**
+ * 上の帯とブラウザの題に出す名前を決める。承認を決める画面は切り替えの印をダッシュボードに残し、題だけを「承認」にする
+ * @param pathname URL のパス
+ * @param extensions 拡張
+ * @returns 題
+ */
+export function headingOf(pathname: string, extensions: readonly ExtensionNav[] = []): string {
+  if (pathname === morePath) return "その他";
+  if (pathname === APPROVALS_PATH || pathname.startsWith(`${APPROVALS_PATH}/`)) return "承認";
+  return screenOf(pathname, extensions).label;
 }

@@ -7,6 +7,7 @@ import { ApiContext } from "../../api.ts";
 import { jstDateTime } from "../../format.ts";
 import { type Failed, FailedAlert, failureOf, send } from "../../parts/load.tsx";
 import { Part, Section } from "../../parts/section.tsx";
+import { stillPending } from "./pending.ts";
 import { approvalDetails, approvalTitle, decideHref, KIND_NOTE, KIND_PLACE, PLACE_LINK, requesterName, STEP_UP_KINDS } from "./kinds.ts";
 
 /** 1 度に読む件数 */
@@ -219,12 +220,15 @@ function DecideDialog({ approval, title, decision, onClose, onDecided, onStale }
     setBusy(true);
     setFailure(undefined);
     const sent = await send(api, () => api.api.v1.approvals[":approvalId"].decision.$post({ param: { approvalId: approval.id }, json: { decision, reason: reason.trim() } }), { required: needsPasskey });
-    setBusy(false);
     if (!sent.ok) {
-      if (sent.failure.code === "conflict") onStale();
+      // 409 は先に決まった時のほか、この画面で決めない種類や対象が変わった時にも返る。並びから消えた時だけ先に決まったと出す
+      const stale = sent.failure.code === "conflict" && !(await stillPending(api, approval.id));
+      setBusy(false);
+      if (stale) onStale();
       else setFailure(sent.failure);
       return;
     }
+    setBusy(false);
     onDecided(`「${title}」を${DONE_LABEL[decision]}`);
   };
 
@@ -251,6 +255,7 @@ function DecideDialog({ approval, title, decision, onClose, onDecided, onStale }
         {needsPasskey ? <p>送る前にパスキーで確かめます。</p> : null}
         <TextField label="理由" required value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} />
         {failure ? <FailedAlert title={`${label}事ができませんでした`} failure={failure} /> : null}
+        {failure?.detail ? <p>{failure.detail}</p> : null}
       </Stack>
     </Dialog>
   );

@@ -29,6 +29,7 @@ const Notice = z
     body: z.string(),
     scope: z.string(),
     readAt: z.iso.datetime().nullable(),
+    link: z.string().nullable(),
   })
   .strict();
 const NoticeList = z.object({ data: z.array(Notice), meta: z.object({ next: z.string().nullable() }).loose() }).strict();

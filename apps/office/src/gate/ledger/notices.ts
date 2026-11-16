@@ -28,6 +28,7 @@ function toNotice(row: typeof notices.$inferSelect): Notice {
     body: row.body ?? "",
     scope: row.scope,
     readAt: row.readAt === null ? null : new Date(row.readAt).toISOString(),
+    link: row.link,
   };
 }
 

@@ -19,7 +19,7 @@ describe("画面", () => {
   it("道に合わせて画面の題を出し、知らない道はダッシュボードにする", () => {
     expect(renderToString(<App url="/guard" />)).toContain("止めた記録");
     expect(renderToString(<App url="/more" />)).toContain("その他の画面");
-    expect(renderToString(<App url="/nowhere" />)).toContain("可を待つ物");
+    expect(renderToString(<App url="/nowhere" />)).toContain("承認を待つ物");
   });
 
   it("社員と仕事は、道の問いで開くタブを決め、知らない値は会話にする", () => {

@@ -2,41 +2,10 @@
 import { newId } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { finishTask } from "../../src/gate/work/loop.ts";
-import { wrapDb } from "../helpers/github.ts";
-import { api, clockIn, idOf, MINUTE, purposeAndGoal, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
+import { Answer, ApprovalRow, asked, failBatches, finishCurrent, startedDetails, statusOf, stepUp } from "../helpers/approvals.ts";
+import { api, clockIn, idOf, purposeAndGoal, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork();
-
-const ApprovalRow = z.object({ id: z.string(), kind: z.string(), status: z.string(), reason: z.string().nullable() }).loose();
-
-/**
- * パスキーで確かめた事にする。確認の流れそのものは passkey.test.ts で確かめる
- * @param w テストの物
- */
-async function stepUp(w: WorkWorld): Promise<void> {
-  await w.d1.DB.prepare("UPDATE sessions SET step_up_until = ?").bind(w.clock.now() + 15 * MINUTE).run();
-}
-
-/**
- * 開発担当のタスクを 1 つ作って取らせ、ask_owner で承認を求めさせる
- * @param w テストの物
- * @param kind 外部連携か費用の増える事
- * @returns 承認 ID とタスク ID
- */
-async function asked(w: WorkWorld, kind: "external_integration" | "cost_increase"): Promise<{ approvalId: string; nodeId: string }> {
-  // 勤務の前にオーナーがタスクを足すと呼び出しになり、タスクを離れると退勤するので、先に出勤させる
-  await clockIn(w, "builder");
-  const { goal } = await purposeAndGoal(w);
-  const project = idOf(await api(w, "POST", "/api/v1/nodes", { kind: "project", parentId: goal, scope: "office", title: "通知" }, 201));
-  const nodeId = idOf(await api(w, "POST", "/api/v1/nodes", { kind: "task", parentId: project, scope: "office", title: "通知を外へ送る", taskKind: "build", assignee: "builder", priority: 1 }, 201));
-  // 答えを待つ間に進める 2 つ目のタスク
-  await api(w, "POST", "/api/v1/nodes", { kind: "task", parentId: project, scope: "office", title: "通知の文を直す", taskKind: "build", assignee: "builder", priority: 2 }, 201);
-  await staffOf(w, "builder").pull(w.clock.now());
-  expect(await tool(w, "builder", "ask_owner", { kind, target: kind === "external_integration" ? "Slack" : "Workers の有料プラン", reason: "要件に要る" })).toMatchObject({ isError: false });
-  const [approval] = z.array(ApprovalRow).parse(await api(w, "GET", "/api/v1/approvals"));
-  return { approvalId: String(approval?.id), nodeId };
-}
 
 /**
  * 承認をパスキー無しで断り、確かめた後に通す事を確かめる
@@ -70,8 +39,6 @@ async function pending(w: WorkWorld, kind: string): Promise<string> {
   return id;
 }
 
-const statusOf = async (w: WorkWorld, table: "approvals" | "nodes", id: string) => (await rows(w.d1.DB, `SELECT status FROM ${table} WHERE id = ?`, id))[0]?.["status"];
-
 describe("承認を求める", () => {
   it("社員が承認を求めると、オーナーに通知が出る", async () => {
     const { approvalId } = await asked(world, "external_integration");
@@ -79,6 +46,9 @@ describe("承認を求める", () => {
       { level: "info", kind: "approval_requested", title: "承認を待っています: 外部連携", body: "開発担当: Slack" },
     ]);
     expect(await statusOf(world, "approvals", approvalId)).toBe("pending");
+    // 通知から承認を決める画面の 1 件へ移れる
+    const notices = z.array(z.object({ kind: z.string(), link: z.string().nullable() }).loose()).parse(await api(world, "GET", "/api/v1/notices"));
+    expect(notices.filter((n) => n.kind === "approval_requested").map((n) => n.link)).toEqual([`/approvals/${approvalId}`]);
   });
 });
 
@@ -100,7 +70,7 @@ describe("社員の追加", () => {
     // 戻ったタスクで同じ事を求めても、新しい承認は立たず承認済みを返す
     expect(await statusOf(world, "nodes", String(plan?.["id"]))).toBe("doing");
     const again = await tool(world, "president", "staff_request", { kind: "staff_add", role: "デザイン担当", bossId: "president", reason: "画面の直しが溜まっている" });
-    expect(Answer.parse(JSON.parse(again.content))).toEqual({ approvalId: String(approval?.id), status: "approved", reason: "足してよい" });
+    expect(Answer.parse(JSON.parse(again.content))).toEqual({ approvalId: String(approval?.id), status: "approved", reason: "足してよい", note: "社員は 3 人に決まっていて、承認しても増えない" });
     expect(await rows(world.d1.DB, "SELECT COUNT(*) AS n FROM approvals")).toEqual([{ n: 1 }]);
   });
 });
@@ -191,37 +161,6 @@ describe("ほかの所で決める種類", () => {
     });
   }
 });
-
-/**
- * 開発担当の今のタスクを終える
- * @param w テストの物
- */
-async function finishCurrent(w: WorkWorld): Promise<void> {
-  const { nodeId } = await w.gate.staff.builder.book.status(w.clock.now());
-  await finishTask(w.gate.env, "builder", String(nodeId), w.clock.now());
-}
-
-const Answer = z.object({ approvalId: z.string(), status: z.string(), reason: z.string().nullable().optional() }).strict();
-
-/**
- * タスクの出来事のうち、始めた時の中身を新しい順に読む
- * @param w テストの物
- * @param nodeId タスク ID
- * @returns started の中身
- */
-async function startedDetails(w: WorkWorld, nodeId: string): Promise<unknown[]> {
-  const detail = z.object({ events: z.array(z.object({ kind: z.string(), detail: z.unknown() })) }).loose().parse(await api(w, "GET", `/api/v1/nodes/${nodeId}`));
-  return detail.events.filter((e) => e.kind === "started").map((e) => e.detail);
-}
-
-/**
- * バッチの最後に必ず落ちる文を足し、バッチ全体を落とす。D1 のバッチは 1 つが落ちると全部を戻す
- * @param w テストの物
- * @returns 元に戻す関数
- */
-function failBatches(w: WorkWorld): () => void {
-  return wrapDb(w, { batch: (real, statements) => real([...statements, w.d1.DB.prepare("INSERT INTO no_such_table VALUES (1)")]) });
-}
 
 describe("オーナーに上げる事", () => {
   it("承認されたら社員が進める", async () => {

@@ -185,6 +185,8 @@ export const notices = sqliteTable("notices", {
   body: text("body"),
   scope: text("scope").notNull(),
   readAt: time("read_at"),
+  /** 画面の中の開く先。無ければ null */
+  link: text("link"),
 });
 
 /** アプリが見つけた直す所 */

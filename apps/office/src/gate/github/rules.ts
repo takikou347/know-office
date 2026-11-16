@@ -94,18 +94,16 @@ export async function repoScope(db: D1Database, repo: string): Promise<{ repos: 
   return { repos: rules.repos, rules: office };
 }
 
-/** ルールセットを掛け直した結果。途中で失敗した時は、それまでに掛けたリポジトリと失敗した物を持つ */
-export type Protected = { applied: string[]; failed: { repo: string; error: unknown } | null };
-
 /**
- * 公開のリポジトリに、main に入れる条件と同じルールセットを掛け、途中で失敗したら止めて結果を返す。つないでいない間は掛ける先が無いので何もしない
+ * 公開のリポジトリに、main に入れる条件と同じルールセットを掛け直す。つないでいない間は掛ける先が無いので何もしない
  * @param env バインディング
  * @param forge GitHub を呼ぶ口
  * @param serviceId 1 つのサービスのリポジトリだけを掛け直す時のサービス ID。無ければサービスと触れるリポジトリのすべて
- * @returns 掛けたリポジトリと、失敗したリポジトリ
+ * @returns 掛けたリポジトリ
+ * @throws upstream_failed GitHub が失敗を返した時、返事の形が違う時
  */
-export async function protectEach(env: Bindings, forge: Forge, serviceId?: string): Promise<Protected> {
-  if (!(await forge.connected())) return { applied: [], failed: null };
+export async function protectRepos(env: Bindings, forge: Forge, serviceId?: string): Promise<string[]> {
+  if (!(await forge.connected())) return [];
   const orm = drizzle(env.DB);
   const rules = await loadGitHubRules(env.DB);
   const owned = await orm
@@ -117,28 +115,10 @@ export async function protectEach(env: Bindings, forge: Forge, serviceId?: strin
   for (const repo of repos) {
     // 触れるリポジトリの外は App で触れないので掛けない
     if (rules.repos !== null && !rules.repos.includes(repo)) continue;
-    try {
-      const scope = await repoScope(env.DB, repo);
-      if ((await forge.protectMain(repo, scope.rules.mergeWhen)) === "applied") applied.push(repo);
-    } catch (error) {
-      return { applied, failed: { repo, error } };
-    }
+    const scope = await repoScope(env.DB, repo);
+    if ((await forge.protectMain(repo, scope.rules.mergeWhen)) === "applied") applied.push(repo);
   }
-  return { applied, failed: null };
-}
-
-/**
- * 公開のリポジトリに、main に入れる条件と同じルールセットを掛け直す。つないでいない間は掛ける先が無いので何もしない
- * @param env バインディング
- * @param forge GitHub を呼ぶ口
- * @param serviceId 1 つのサービスのリポジトリだけを掛け直す時のサービス ID。無ければサービスと触れるリポジトリのすべて
- * @returns 掛けたリポジトリ
- * @throws upstream_failed GitHub が失敗を返した時、返事の形が違う時
- */
-export async function protectRepos(env: Bindings, forge: Forge, serviceId?: string): Promise<string[]> {
-  const result = await protectEach(env, forge, serviceId);
-  if (result.failed) throw result.failed.error;
-  return result.applied;
+  return applied;
 }
 
 /** office の初期値の `service.mergeWhen` のキー。変えた時はルールセットを掛け直す */

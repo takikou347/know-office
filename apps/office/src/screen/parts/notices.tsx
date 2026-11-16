@@ -1,6 +1,6 @@
 // 画面の通知。入口から 1 分ごとに読み、上部の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5)
 import { type Notice, type NoticeLevel, systemClock } from "@know-office/core";
-import { Alert, List, type Tone } from "knowidea-ui";
+import { Alert, Link, List, type Tone } from "knowidea-ui";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { type Api, ApiContext } from "../api.ts";
 import { jstTime } from "../format.ts";
@@ -174,7 +174,7 @@ export interface NoticeBarProps {
 }
 
 /**
- * 上部の帯。いちばん新しい未読の通知と、ほかの未読の数を出す。未読が無ければ出さない
+ * 上部の帯。いちばん新しい未読の通知と、ほかの未読の数を出す。開く先があれば「開く」で移る。未読が無ければ出さない
  * @param props 通知と、読んだを押した時
  * @returns 帯
  */
@@ -184,7 +184,7 @@ export function NoticeBar({ notices, onRead }: NoticeBarProps) {
   if (!top) return null;
   const others = unread.length - 1;
   return (
-    <Alert tone={TONES[top.level]} title={top.title} live onClose={() => onRead(top.id)} closeLabel="読んだ">
+    <Alert tone={TONES[top.level]} title={top.title} live onClose={() => onRead(top.id)} closeLabel="読んだ" {...(top.link ? { action: <Link href={top.link}>開く</Link> } : {})}>
       {top.body}
       {others > 0 ? ` ほかに未読が ${String(others)} 件` : null}
     </Alert>
@@ -210,7 +210,7 @@ function listState(state: NoticesState["state"], count: number): "loading" | "re
 }
 
 /**
- * ダッシュボードの通知の一覧。読んだ通知も出し、時刻は日本時間で出す
+ * ダッシュボードの通知の一覧。読んだ通知も出し、時刻は日本時間で出す。開く先のある行はその画面へ移る
  * @param props 通知と、読めたか
  * @returns 一覧
  */
@@ -219,7 +219,7 @@ export function NoticeList({ notices, state }: NoticeListProps) {
     <List
       label="お知らせ"
       state={listState(state, notices.length)}
-      items={notices.map((n) => ({ id: n.id, title: n.title, meta: `${jstTime(n.at)}${n.readAt === null ? "、未読" : ""}${n.body ? `、${n.body}` : ""}` }))}
+      items={notices.map((n) => ({ id: n.id, title: n.title, ...(n.link ? { href: n.link } : {}), meta: `${jstTime(n.at)}${n.readAt === null ? "、未読" : ""}${n.body ? `、${n.body}` : ""}` }))}
       emptyText="お知らせは無い"
       errorText="お知らせを読めませんでした"
       loadingText="お知らせを読んでいます"

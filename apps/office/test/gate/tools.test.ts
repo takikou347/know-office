@@ -120,7 +120,7 @@ describe("組織図", () => {
     expect(res.status).toBe(200);
     const { data } = Answer.parse(await res.json());
     expect(data.isError).toBe(false);
-    expect(z.object({ approvalId: z.uuid(), status: z.literal("pending") }).strict().safeParse(JSON.parse(data.content)).success).toBe(true);
+    expect(z.object({ approvalId: z.uuid(), status: z.literal("pending"), note: z.string() }).strict().safeParse(JSON.parse(data.content)).success).toBe(true);
     expect(await approvals(world.d1.DB)).toEqual([{ kind: "staff_add", requested_by: "president" }]);
     expect(await statusOf(world.d1.DB, work.nodeId)).toBe("waiting_owner");
     expect(await rows(world.d1.DB, "SELECT id FROM staff ORDER BY id")).toHaveLength(3);

@@ -23,8 +23,6 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z, type ZodType } from "zod";
 import { approvals, nodes, notices, reviews, staff } from "../db/main.ts";
-
-const Moved = z.array(z.object({ id: z.string() }));
 import type { Bindings } from "../env.ts";
 import type { ExtensionDefinition, ExtensionTool } from "../extensions/define.ts";
 import { INSTALLED } from "../extensions/installed.ts";
@@ -88,8 +86,17 @@ async function currentTask(env: Bindings, call: ToolCall): Promise<NodeRow> {
   return findNode(env.DB, nodeId);
 }
 
-/** 承認を求めたツールの答え。承認済みと差し戻しは新しい承認を立てずに答えを返す */
-type Asked = { approvalId: string; status: "pending" | "approved" | "rejected"; reason?: string | null };
+/** 承認を求めたツールの答え。承認済みと差し戻しは新しい承認を立てずに答えを返す。note は承認した後に起きる事 */
+type Asked = { approvalId: string; status: "pending" | "approved" | "rejected"; reason?: string | null; note?: string };
+
+/** タスクの移しが返す行 */
+const Moved = z.array(z.object({ id: z.string() }));
+
+/** 承認の中身のうち、社員の書いた理由 */
+const AskedReason = z.object({ reason: z.string() }).loose();
+
+/** 種類ごとの、承認した後に起きる事。社員の追加は承認しても増えない */
+const ASK_NOTE: Partial<Record<string, string>> = { staff_add: "社員は 3 人に決まっていて、承認しても増えない" };
 
 /**
  * オーナーの承認を求め、今のタスクを waiting_owner にして離れる。同じタスク、種類、対象の承認がもうあれば、新しく立てずにその答えを返す
@@ -107,14 +114,18 @@ async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff
   const orm = drizzle(env.DB);
   const sameNode = sql`json_extract(${approvals.payload}, '$.nodeId') = ${task.id}`;
   const [before] = await orm
-    .select({ id: approvals.id, status: approvals.status, reason: approvals.reason })
+    .select({ id: approvals.id, status: approvals.status, reason: approvals.reason, payload: approvals.payload })
     .from(approvals)
     .where(and(eq(approvals.kind, approval.kind), eq(approvals.target, approval.target), sameNode))
     .orderBy(desc(approvals.requestedAt), desc(approvals.id))
     .limit(1);
-  // 答えの出た承認は輪にしない。承認済みなら進め、差し戻しなら理由を読んで直す
-  if (before?.status === "approved" || before?.status === "rejected") return { approvalId: before.id, status: before.status, reason: before.reason };
-  const id = before?.id ?? newId(clockAt(call.now));
+  const note = ASK_NOTE[approval.kind];
+  const extra = note === undefined ? {} : { note };
+  // 答えの出た承認は輪にしない。承認済みなら進め、差し戻しなら理由を読んで直す。直して理由を変えた時だけ、差し戻しの後に新しく出し直す
+  const resent = before?.status === "rejected" && AskedReason.safeParse(before.payload).data?.reason !== approval.payload["reason"];
+  if ((before?.status === "approved" || before?.status === "rejected") && !resent) return { approvalId: before.id, status: before.status, reason: before.reason, ...extra };
+  const reuse = before?.status === "pending" ? before : undefined;
+  const id = reuse?.id ?? newId(clockAt(call.now));
   // 直前の移しがこのバッチで 1 行を変えた時だけ足す。同じ版を読んだ 2 つ目は、1 つ目が移した後の行を見ても足さない
   const moved = sql`changes() = 1`;
   const statements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
@@ -125,7 +136,7 @@ async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff
       .where(and(eq(nodes.id, task.id), eq(nodes.version, task.version), eq(nodes.status, "doing"), eq(nodes.assignee, call.staffId)))
       .returning({ id: nodes.id }),
   ];
-  if (!before) {
+  if (!reuse) {
     // タスクを待たせられた時だけ承認と通知を書く。3 つを 1 回で書き、途中で落ちても片方だけ残さない
     const payload = JSON.stringify({ ...approval.payload, nodeId: task.id });
     statements.push(
@@ -135,17 +146,17 @@ async function waitOwner(env: Bindings, call: ToolCall, approval: { kind: "staff
       orm
         .insert(notices)
         .select(
-          sql`SELECT ${newId(clockAt(call.now))}, ${call.now}, 'info', 'approval_requested', ${`承認を待っています: ${APPROVAL_KIND_LABEL[approval.kind]}`}, (SELECT ${staff.role} FROM ${staff} WHERE ${staff.id} = ${call.staffId}) || ': ' || ${approval.target}, ${task.scope}, NULL WHERE EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${id})`,
+          sql`SELECT ${newId(clockAt(call.now))}, ${call.now}, 'info', 'approval_requested', ${`承認を待っています: ${APPROVAL_KIND_LABEL[approval.kind]}`}, (SELECT ${staff.role} FROM ${staff} WHERE ${staff.id} = ${call.staffId}) || ': ' || ${approval.target}, ${task.scope}, NULL, ${`/approvals/${id}`} WHERE EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${id})`,
         ),
     );
   }
   const results: readonly unknown[] = await orm.batch(statements);
   if (Moved.parse(results[0]).length === 0) throw new AppError("conflict", "タスクが変わった");
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "waiting_owner", detail: { approvalId: id, kind: approval.kind } }, actorOf(call));
-  if (!before) await auditFrom(env, { at: call.now, actor: call.staffId, action: "approval.request", target: id, scope: task.scope, detail: { kind: approval.kind, target: approval.target }, traceId: call.traceId });
+  if (!reuse) await auditFrom(env, { at: call.now, actor: call.staffId, action: "approval.request", target: id, scope: task.scope, detail: { kind: approval.kind, target: approval.target }, traceId: call.traceId });
   // 答えを待つ間は次のタスクを進める
   await leaveTask(env, call.staffId, "handed_back", call.now);
-  return { approvalId: id, status: "pending" };
+  return { approvalId: id, status: "pending", ...extra };
 }
 
 /**

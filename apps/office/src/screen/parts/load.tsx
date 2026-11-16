@@ -5,10 +5,10 @@ import { z } from "zod";
 import { type Api, ApiContext } from "../api.ts";
 import { type StepUpOptions, withStepUp } from "./step-up.ts";
 
-const Failure = z.object({ code: z.string(), traceId: z.string() }).loose();
+const Failure = z.object({ code: z.string(), traceId: z.string(), detail: z.string().optional() }).loose();
 
-/** 読めなかった時と送れなかった時の理由。不具合を伝えられるよう traceId を添える */
-export type Failed = { code: string; traceId: string | null };
+/** 読めなかった時と送れなかった時の理由。不具合を伝えられるよう traceId を添える。detail は入口が返した説明で、出す所だけが使う */
+export type Failed = { code: string; traceId: string | null; detail?: string };
 
 /** 入口から読む物の今。読んでいる、読めた、読めなかった */
 export type Loaded<T> = { state: "loading" } | { state: "ok"; data: T } | ({ state: "failed" } & Failed);
@@ -23,7 +23,8 @@ export type Reply = { ok: boolean; status: number; json(): Promise<unknown> };
  */
 export async function failureOf(res: Reply): Promise<Failed> {
   const body = Failure.safeParse(await res.json().catch(() => null));
-  return body.success ? { code: body.data.code, traceId: body.data.traceId } : { code: String(res.status), traceId: null };
+  if (!body.success) return { code: String(res.status), traceId: null };
+  return { code: body.data.code, traceId: body.data.traceId, ...(body.data.detail === undefined ? {} : { detail: body.data.detail }) };
 }
 
 /**

@@ -67,7 +67,7 @@ describe("ルールセットを掛け直す", () => {
     expect(writes(world)).toEqual([`POST /repos/${UI}/rulesets`]);
     // 設定は変えず、掛け直した事だけを残す
     expect(await rows(world.d1.DB, "SELECT COUNT(*) AS n FROM settings")).toEqual([{ n: 0 }]);
-    expect(world.gate.audits.filter((a) => a.action === "github.rules_apply")).toEqual([expect.objectContaining({ target: "github.rules", detail: { applied: [UI] } })]);
+    expect(world.gate.audits.filter((a) => a.action === "github.rules_apply")).toEqual([expect.objectContaining({ target: "github.rules", detail: { repos: null, version: 0 } })]);
   });
 
   it("GitHub が失敗したら 502 で、もう 1 度押すとルールセットは 1 つだけになる", async () => {
@@ -77,7 +77,8 @@ describe("ルールセットを掛け直す", () => {
     world.gate.github.set(`POST /repos/${UI}/rulesets`, undefined);
     await api(world, "POST", "/api/v1/github/rules/apply", undefined, 502);
     // 失敗も掛け直そうとした事として残す
-    expect(world.gate.audits.filter((a) => a.action === "github.rules_apply").map((a) => a.detail)).toEqual([{ applied: [], failed: UI }]);
+    // GitHub を呼ぶ前に残すので、失敗しても掛け直そうとした事は残る
+    expect(world.gate.audits.filter((a) => a.action === "github.rules_apply").map((a) => a.detail)).toEqual([{ repos: null, version: 0 }]);
     // 1 度目で作れていた時は、2 度目は同じ名前のルールセットを置き換える
     world.gate.github.set(`GET /repos/${UI}/rulesets`, [{ id: 42, name: "know-office" }]);
     world.gate.github.set(`PUT /repos/${UI}/rulesets/42`, { id: 42, name: "know-office" });
@@ -96,7 +97,7 @@ describe("ルールセットを掛け直す", () => {
     world.gate.github.set(`POST /repos/${other}/rulesets`, undefined);
     await api(world, "POST", "/api/v1/github/rules/apply", undefined, 502);
     expect(writes(world)).toEqual([`POST /repos/${UI}/rulesets`, `POST /repos/${other}/rulesets`]);
-    expect(world.gate.audits.filter((a) => a.action === "github.rules_apply").map((a) => a.detail)).toEqual([{ applied: [UI], failed: other }]);
+    expect(world.gate.audits.filter((a) => a.action === "github.rules_apply")).toHaveLength(1);
 
     // 1 つ目は GitHub の側に残っているので、押し直すと作り足さずに置き換える
     world.gate.github.set(`GET /repos/${UI}/rulesets`, [{ id: 7, name: "know-office" }]);
@@ -118,6 +119,36 @@ describe("ルールセットを掛け直す", () => {
     world.gate.github.set(`GET /repos/${UI}/rulesets`, [{ id: 7, name: "know-office" }]);
     world.gate.github.set(`PUT /repos/${UI}/rulesets/7`, { id: 7, name: "know-office" });
     expect(await api(world, "POST", "/api/v1/github/rules/apply")).toEqual({ applied: [UI] });
+  });
+
+  it("外されなかった錠は 5 分ちょうどの手前まで 409 で、5 分で取り直せる", async () => {
+    await service(world, UI);
+    repoOnGitHub(world, UI, { private: false });
+    // 前の掛け直しが錠を取ったまま落ちた
+    await world.d1.DB.prepare("INSERT INTO locks (name, holder, until) VALUES ('github.rules_apply', 'gone', ?)").bind(world.clock.now() + 5 * MINUTE).run();
+    world.clock.advance(5 * MINUTE - 1);
+    await stepUp(world);
+    expect(await api(world, "POST", "/api/v1/github/rules/apply", undefined, 409)).toMatchObject({ code: "conflict" });
+    expect(writes(world)).toEqual([]);
+    world.clock.advance(1);
+    expect(await api(world, "POST", "/api/v1/github/rules/apply")).toEqual({ applied: [UI] });
+  });
+
+  it("監査ログに書けなければ GitHub を呼ばずに 500 にし、錠を外す", async () => {
+    await service(world, UI);
+    repoOnGitHub(world, UI, { private: false });
+    await stepUp(world);
+    const real = world.gate.env.RECORDER;
+    // 記録 DO の代わりは append だけを持つ
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    world.gate.env.RECORDER = { idFromName: () => "recorder", get: () => ({ append: () => Promise.reject(new Error("記録 DO に届かない")) }) } as unknown as typeof real;
+    try {
+      expect(await api(world, "POST", "/api/v1/github/rules/apply", undefined, 500)).toMatchObject({ code: "internal" });
+    } finally {
+      world.gate.env.RECORDER = real;
+    }
+    expect(writes(world)).toEqual([]);
+    expect(await rows(world.d1.DB, "SELECT name FROM locks")).toEqual([]);
   });
 
   it("パスキーの確認が無ければ 401 で、GitHub を呼ばない", async () => {

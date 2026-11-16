@@ -7,6 +7,9 @@ export const NoticeLevel = z.enum(["info", "warn", "stop"]);
 /** 通知の重さの型 */
 export type NoticeLevel = z.infer<typeof NoticeLevel>;
 
+/** 通知から開く画面の中の道。外への道と javascript: を入れない */
+export const NoticeLink = z.string().max(200).regex(/^\/[a-z0-9/-]*$/);
+
 /** 通知 1 件。本文の無い通知は空の文で返す */
 export const Notice = z
   .object({
@@ -18,6 +21,7 @@ export const Notice = z
     body: z.string(),
     scope: z.string().openapi({ description: "`office` またはサービスの ID" }),
     readAt: z.iso.datetime().nullable(),
+    link: NoticeLink.nullable().openapi({ description: "画面の中の開く先 (例 `/approvals/<承認 ID>`)。無ければ null" }),
   })
   .strict()
   .meta({ id: "Notice" });

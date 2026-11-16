@@ -1,11 +1,13 @@
-// ダッシュボード。社員の様子、可を待つ物、今日の仕事、今月の費用、お知らせを 1 つに並べる。社員とタスクと費用は仮のデータ
+// ダッシュボード。社員の様子、承認を待つ物、今日の仕事、今月の費用、お知らせを 1 つに並べる。承認を待つ物は入口から読み、社員とタスクと費用は仮のデータ
 import type { Health } from "@know-office/core";
 import { Card, Grid, List, Stat } from "knowidea-ui";
 import { monthCost, staff } from "../../mock.ts";
 import { LiveNoticeList } from "../../parts/notices.tsx";
 import { Part, Section } from "../../parts/section.tsx";
 import { StaffStatus } from "../../parts/staff-status.tsx";
-import { reviewHref, roleOf } from "../../parts/tasks.ts";
+import { roleOf } from "../../parts/tasks.ts";
+import { usePendingApprovals } from "../approvals/pending.ts";
+import { WaitingList, WaitingStat } from "../approvals/Waiting.tsx";
 import { useWorkTasks } from "../office/feed.ts";
 
 export interface DashboardPageProps {
@@ -16,14 +18,14 @@ export interface DashboardPageProps {
 export function DashboardPage({ health }: DashboardPageProps) {
   const working = staff.filter((s) => s.state === "working").length;
   const tasks = useWorkTasks();
-  const waiting = tasks.filter((t) => t.state === "可待ち");
+  const pending = usePendingApprovals();
   const today = tasks.filter((t) => t.state === "今");
   return (
     <Section>
       <p>{health ? "入口とつながりました" : "入口を確かめています"}</p>
       <Grid minItemWidth={200}>
         <Stat label="働いている社員" icon="users" value={working} unit="人" sub={`全体 ${staff.length}`} />
-        <Stat label="可を待つ物" icon="flag" value={waiting.length} unit="件" />
+        <WaitingStat pending={pending} />
         <Stat label="今月の費用" icon="chart-bar" value={monthCost.used} unit="ドル" sub={`見込み ${monthCost.budget} ドル`} />
       </Grid>
       <Part title="社員の様子">
@@ -35,12 +37,8 @@ export function DashboardPage({ health }: DashboardPageProps) {
           ))}
         </Grid>
       </Part>
-      <Part title="可を待つ物">
-        <List
-          label="可を待つ物"
-          items={waiting.map((t) => ({ id: t.id, title: t.title, href: reviewHref(t), meta: `${roleOf(t.staffId)}、${t.service}` }))}
-          emptyText="可を待つ物は無い"
-        />
+      <Part title="承認を待つ物">
+        <WaitingList pending={pending} />
       </Part>
       <Part title="今日の仕事">
         <List

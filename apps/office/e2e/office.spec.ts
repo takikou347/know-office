@@ -98,9 +98,10 @@ test.describe("速さ", () => {
 
 test.describe("オフィスの部屋", () => {
   test("出来事を動きで見せる", async ({ page }) => {
-    const waiting = page.getByRole("list", { name: "可を待つ物" }).getByRole("link", { name: /CodeEditor のページを足す/ });
-    await page.goto("/");
-    await expect(waiting).toBeVisible();
+    // 可を待つタスクは、作る役の仕事の山に「可待ち」で出る。ダッシュボードの承認を待つ物はオーナーの承認だけを出す
+    const waiting = page.getByRole("list", { name: "作る役の仕事" }).getByRole("listitem").filter({ hasText: "CodeEditor のページを足す" });
+    await page.goto("/staff/builder?tab=tasks");
+    await expect(waiting).toContainText("可待ち");
     await page.goto("/office");
     const room = roomOf(page);
     await expect(room.getByRole("link", { name: "社長 働いている" })).toBeVisible();
@@ -111,9 +112,9 @@ test.describe("オフィスの部屋", () => {
     // 可を出すと、タスクの一覧も同じ置き場から読むので変わり、オフィスでは承認の出来事になる
     await page.goto("/staff/builder/tasks/t2");
     await page.getByRole("button", { name: "可", exact: true }).click();
-    await openInApp(page, "ダッシュボード");
-    await expect(page.getByRole("list", { name: "可を待つ物" })).toBeVisible();
-    await expect(waiting).toHaveCount(0);
+    await page.getByRole("link", { name: "仕事の山に戻る" }).click();
+    await expect(waiting).toBeVisible();
+    await expect(waiting).not.toContainText("可待ち");
     await openInApp(page, "オフィス");
     await expect(roomOf(page).getByRole("status")).toHaveText("直近の出来事: 見る役が「CodeEditor のページを足す」を承認した");
 

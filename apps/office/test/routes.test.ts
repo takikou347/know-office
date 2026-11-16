@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bottomCurrentOf, bottomItems, moreScreens, screenOf, screens, sideItems, titleOf } from "../src/screen/routes.ts";
+import { bottomCurrentOf, bottomItems, headingOf, moreScreens, screenOf, screens, sideItems, titleOf } from "../src/screen/routes.ts";
 
 describe("画面の一覧", () => {
   it("8 つの画面を持ち、最初はダッシュボード", () => {
@@ -44,5 +44,17 @@ describe("画面の一覧", () => {
   it("ブラウザの題は画面の名前にする", () => {
     expect(titleOf("/records")).toBe("記録 - know-office");
     expect(titleOf("/more")).toBe("その他 - know-office");
+  });
+
+  it("承認を決める画面は、一覧も 1 件も題を「承認」にし、切り替えの印はダッシュボードのまま", () => {
+    const id = "0190f4a8-0000-7000-8000-000000000001";
+    for (const path of ["/approvals", `/approvals/${id}`]) {
+      expect(headingOf(path)).toBe("承認");
+      expect(titleOf(path)).toBe("承認 - know-office");
+      expect(screenOf(path).id).toBe("dashboard");
+    }
+    expect(headingOf("/")).toBe("ダッシュボード");
+    expect(headingOf("/more")).toBe("その他");
+    expect(headingOf("/approvalsx")).toBe("ダッシュボード");
   });
 });
