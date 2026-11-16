@@ -1,10 +1,11 @@
 // GitHub のルール。触れるリポジトリを読み書きし、リポジトリに効く設定を組み立て、公開のリポジトリにルールセットを掛け直す (タスクとレビューの 3.4)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, type GitHubRules, GitHubRulesValue, INHERITED_SETTINGS, newId, type ServiceRules } from "@know-office/core";
+import { AppError, docsMergeNeeds, type GitHubRules, GitHubRulesValue, INHERITED_SETTINGS, newId, type ServiceRules } from "@know-office/core";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { services, settings } from "../db/main.ts";
+import { isDocsRepo } from "../devloop/docs-repo.ts";
 import type { Bindings } from "../env.ts";
 import { DEFAULT_PREFIX, loadOfficeDefaults, serviceRules } from "../services/settings.ts";
 import { clockAt } from "../work/attendance.ts";
@@ -80,18 +81,21 @@ function strictest(all: readonly ServiceRules[]): ServiceRules {
 
 /**
  * リポジトリへの操作の判断に使う、触れるリポジトリとそのリポジトリに効く設定を、判断のたびに読む
- * そのリポジトリのサービスがあればその設定、無ければ office の初期値を使う
+ * そのリポジトリのサービスがあればその設定、設計書のリポジトリなら office の初期値のできる操作と触れない所に設計書の main に入れる条件、どれでもなければ office の初期値を使う
  * @param db 今の状態の D1
  * @param repo リポジトリ
- * @returns 触れるリポジトリと設定
+ * @returns 触れるリポジトリ、設定、設計書のリポジトリか
  * @throws internal 置いた値の形が違う時
  */
-export async function repoScope(db: D1Database, repo: string): Promise<{ repos: readonly string[] | null; rules: ServiceRules }> {
+export async function repoScope(db: D1Database, repo: string): Promise<{ repos: readonly string[] | null; rules: ServiceRules; docs: boolean }> {
   const [rules, owners] = await Promise.all([loadGitHubRules(db), drizzle(db).select({ id: services.id }).from(services).where(eq(services.repo, repo))]);
-  if (owners.length > 0) return { repos: rules.repos, rules: strictest(await Promise.all(owners.map((s) => serviceRules(db, s.id)))) };
+  // サービスが持つリポジトリは、設計書のリポジトリに選べない (PUT と試作に進める時が断る)。食い違って持たれていたら普通のルールにする
+  if (owners.length > 0) return { repos: rules.repos, rules: strictest(await Promise.all(owners.map((s) => serviceRules(db, s.id)))), docs: false };
   const defaults = await loadOfficeDefaults(db);
   const office = OFFICE_RULES.parse(Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, v.value])));
-  return { repos: rules.repos, rules: office };
+  // 設計書のリポジトリの main に入れる条件は、office とサービスの設定を読まず、core の docsMergeNeeds で決める。できる操作と触れない所は設定で守る
+  if (await isDocsRepo(db, repo)) return { repos: rules.repos, rules: { ...office, mergeWhen: docsMergeNeeds(false) }, docs: true };
+  return { repos: rules.repos, rules: office, docs: false };
 }
 
 /**

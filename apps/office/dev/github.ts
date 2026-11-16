@@ -46,6 +46,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const pick: FakeGitHub["pick"] = [
     { fullName: "example/knowidea-ui", private: false },
     { fullName: "example/know-office", private: false },
+    // 設計書のリポジトリに選ぶ非公開のリポジトリ
+    { fullName: "example/knowidea-docs", private: true },
   ];
   let serial = 0;
   const next = () => (serial += 1);

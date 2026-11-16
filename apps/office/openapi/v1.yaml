@@ -30,6 +30,8 @@ tags:
     description: "GitHub 連携: App、Webhook、ルール"
   - name: services
     description: "サービス: アイデアから運用まで"
+  - name: devloop
+    description: "開発の回し方: 設計書のリポジトリ"
   - name: settings
     description: "設定: office とサービス"
   - name: notices
@@ -2739,6 +2741,43 @@ components:
           description: ルールセットを掛けたリポジトリ。非公開のリポジトリはゲートウェイの判断で守るので入らない
       required:
         - applied
+      additionalProperties: false
+    DocsRepo:
+      type: object
+      properties:
+        repo:
+          type:
+            - string
+            - "null"
+          maxLength: 140
+          pattern: ^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.{1,2}$)[\w.-]{1,100}$
+          description: 設計書のリポジトリ。まだ選んでいなければ null
+        version:
+          type: integer
+          description: 設定の版。変える時に送り返す
+      required:
+        - repo
+        - version
+      additionalProperties: false
+    UpdateDocsRepoInput:
+      type: object
+      properties:
+        repo:
+          type: string
+          maxLength: 140
+          pattern: ^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.{1,2}$)[\w.-]{1,100}$
+          description: GitHub App で触れる非公開のリポジトリ。サービスのリポジトリは選べない
+        version:
+          type: integer
+          description: 取得した時点のバージョン。現在と異なる場合は 409 conflict
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      required:
+        - repo
+        - version
+        - reason
       additionalProperties: false
     Finding:
       type: object
@@ -8739,6 +8778,116 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+      security: *a1
+  /api/v1/devloop/docs-repo:
+    get:
+      operationId: getDocsRepo
+      tags:
+        - devloop
+      summary: 設計書のリポジトリ
+      x-steps:
+        - "`settings` から `devloop.docs_repo` の最新の値を取得する。まだ選んでいなければ `repo` は `null`、`version` は 0"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/DocsRepo"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      description: |-
+        処理の流れ:
+
+        1. `settings` から `devloop.docs_repo` の最新の値を取得する。まだ選んでいなければ `repo` は `null`、`version` は 0
+      security: *a1
+    put:
+      operationId: updateDocsRepo
+      tags:
+        - devloop
+      summary: 設計書のリポジトリを選ぶ
+      description: |-
+        15 分以内のパスキーの確認が必要。試作に進めた案の設計書は、ここで選んだ非公開のリポジトリの `services/<名前>/` に置く。設計書のリポジトリの main に入れる条件は設定で弱められない。
+
+        処理の流れ:
+
+        1. パスキーの確認を求める
+        2. GitHub と連携していて、GitHub App で触れるリポジトリの中にあり、非公開で、サービスのリポジトリでない事を確かめる
+        3. `version` が現在と一致し、確かめた時の連携とサービスのリポジトリのままの時だけ、`settings` に `devloop.docs_repo` を追加する
+        4. 監査ログに `devloop.docs_repo` を記録する
+
+        このルート固有のエラー:
+
+        - 409 `conflict`: GitHub と連携していない、バージョンが異なる、または確かめた後に連携かサービスのリポジトリが変わった
+        - 422 `validation_failed`: 触れるリポジトリに無い、公開のリポジトリ、またはサービスのリポジトリ
+        - 502 `upstream_failed`: GitHub がエラーを返した
+      x-steps:
+        - パスキーの確認を求める
+        - GitHub と連携していて、GitHub App で触れるリポジトリの中にあり、非公開で、サービスのリポジトリでない事を確かめる
+        - "`version` が現在と一致し、確かめた時の連携とサービスのリポジトリのままの時だけ、`settings` に `devloop.docs_repo` を追加する"
+        - 監査ログに `devloop.docs_repo` を記録する
+      x-errors:
+        - "409 `conflict`: GitHub と連携していない、バージョンが異なる、または確かめた後に連携かサービスのリポジトリが変わった"
+        - "422 `validation_failed`: 触れるリポジトリに無い、公開のリポジトリ、またはサービスのリポジトリ"
+        - "502 `upstream_failed`: GitHub がエラーを返した"
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDocsRepoInput"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/DocsRepo"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":

@@ -47,6 +47,10 @@ export type Forge = {
   dispatchWorkflow(repo: string, workflow: string, inputs: Record<string, string>): Promise<string>;
   /** 既定のブランチの先のコミット */
   defaultHead(repo: string): Promise<string>;
+  /** ブランチの先のコミット。設計書の PR を確かめる時に、変えたファイルと中身を同じコミットで読むために固定する */
+  branchHead(repo: string, branch: string): Promise<string>;
+  /** コミット ref の木のうち、prefix の下のファイルの道 (リポジトリの頭から) を返す。GitHub が木を切った時と、500 件を超えた時は null */
+  listFiles(repo: string, ref: string, prefix: string): Promise<string[] | null>;
 };
 
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
@@ -67,6 +71,8 @@ export const UNCONNECTED_FORGE: Forge = {
   readFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   dispatchWorkflow: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   defaultHead: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  branchHead: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  listFiles: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
 };
 
 /** 社員 DO の中で次のタスクを取るのに使う、勤務の本の口 */

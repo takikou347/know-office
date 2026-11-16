@@ -39,6 +39,8 @@ import { auditFrom } from "../ledger/record.ts";
 import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
+import { repoScope } from "../github/rules.ts";
+import { verifyDocsPr } from "../devloop/docs-pr.ts";
 import { announceNotice } from "../live/publish.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { readOwnerData } from "./owner-data.ts";
@@ -290,6 +292,8 @@ async function askBossTool(env: Bindings, _forge: Forge, call: ToolCall, input: 
  * @param input PrOpenTool
  * @returns プルリクエストの番号とブランチ
  * @throws conflict 今のタスクが無いか、直すリポジトリが無い時、レビュー担当が作った社員と同じモデルの時、出す間にタスクの担当か状態が変わった時
+ * @throws validation_failed 設計書のリポジトリで、設計書の形が違う時
+ * @throws upstream_failed 設計書の木を読み切れない時
  */
 async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpenTool): Promise<{ number: number; branch: string }> {
   const task = await currentTask(env, call);
@@ -297,12 +301,21 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
   // レビューを割り振れないなら、GitHub に出す前に断る
   await checkPair(env.DB, call.staffId, REVIEWER);
   const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
-  const refusal = await repoRefusal(env, forge, { action: "pull_request", repo: task.repo, branch });
+  // 設計書のリポジトリは、ブランチの先を 1 つのコミットに固定し、変えた道と形の確かめを同じコミットで読む
+  const docs = (await repoScope(env.DB, task.repo)).docs;
+  const head = docs ? await forge.branchHead(task.repo, branch) : branch;
+  const refusal = await repoRefusal(env, forge, { action: "pull_request", repo: task.repo, branch: head });
   if (refusal !== null) {
     // ルールの外の操作として数える。触れない所に当たった時は、そのファイルへの書き込みとして数える
     const op = refusal.path === undefined ? { operation: "office.tool" as const, target: `${task.repo} pull_request` } : { operation: "file.write" as const, target: `${task.repo}/${refusal.path}` };
     await observe(env, { type: "rule_denied", staffId: call.staffId, nodeId: task.id, operation: op.operation, target: recordedText(op.target) }, call.now, call.guard ?? UNCONNECTED_DEPS, call.traceId);
     throw new AppError("rule_denied", refusal.reason);
+  }
+  if (docs) {
+    // 形の外れた設計書は、GitHub に PR を出す前に断る
+    const shape = await verifyDocsPr(forge, task.repo, head);
+    if (shape.kind === "refused") throw new AppError("validation_failed", shape.reason, { errors: shape.errors });
+    if (shape.kind === "waiting") throw new AppError("upstream_failed", shape.reason);
   }
   const pr = await forge.openPull({ repo: task.repo, branch, title: input.title, body: input.body });
   // 出す間にオーナーが名前などを直すとバージョンが進むので、読み直して、まだこの社員の作業中の時だけ移す

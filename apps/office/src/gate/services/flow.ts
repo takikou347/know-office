@@ -21,6 +21,7 @@ import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
 import { notifyStaff } from "../work/loop.ts";
 import type { TokenDeps } from "../github/app.ts";
+import { requireDocsRepo } from "../devloop/docs-repo.ts";
 import { chooseRepo } from "./repo.ts";
 import { serviceStatus } from "./status.ts";
 import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated } from "../work/nodes.ts";
@@ -131,6 +132,38 @@ async function studyTask(env: Bindings, row: ServiceRow, actor: Actor): Promise<
 }
 
 /**
+ * 同じ名前 (`owner/name` の name。大文字小文字を分けない) のリポジトリを持つ別のサービスが無い事の SQL の条件を作る。設計書の置き場 `services/<名前>/` が重なるので、あれば 409 にする
+ * @param db 今の状態の D1
+ * @param serviceId 進めるサービス
+ * @param repo 選ぶリポジトリ
+ * @returns SQL の条件
+ * @throws conflict 今あれば
+ */
+async function sameNameCondition(db: D1Database, serviceId: string, repo: string): Promise<SQL> {
+  const name = (repo.split("/")[1] ?? repo).toLowerCase();
+  const none = sql`NOT EXISTS (SELECT 1 FROM ${services} WHERE ${services.id} <> ${serviceId} AND lower(substr(${services.repo}, instr(${services.repo}, '/') + 1)) = ${name})`;
+  const [found] = await drizzle(db).select({ id: services.id }).from(services).where(sql`${services.id} <> ${serviceId} AND lower(substr(${services.repo}, instr(${services.repo}, '/') + 1)) = ${name}`).limit(1);
+  if (found !== undefined) throw new AppError("conflict", "同じ名前のリポジトリを持つ別のサービスがある。設計書の置き場が重なる");
+  return none;
+}
+
+/**
+ * 試作に進める案の、設計書を書くタスクの行を組み立てる。開発担当が設計書のリポジトリの `services/<名前>/` に書く。書くのは段階の更新と同じ batch
+ * @param env バインディング
+ * @param row 試作に進めるサービスの行
+ * @param repo サービスのリポジトリ
+ * @param docsRepo 設計書のリポジトリ
+ * @param actor 移す人
+ * @returns nodes の行
+ */
+async function designTask(env: Bindings, row: ServiceRow, repo: string, docsRepo: string, actor: Actor): Promise<NodeRow> {
+  const project = await intakeProject(env, row.id, actor);
+  const dir = `services/${repo.split("/")[1] ?? repo}/`;
+  const body = [`サービス ID: ${row.id}`, `設計書のリポジトリ: ${docsRepo}`, `書く置き場: ${dir}`, "形はそのリポジトリの services/WRITING.md に従う", "書いたら pr_open で PR を出す。最初の設計書はオーナーが読んで承認した物だけが main に入る"].join("\n");
+  return newNodeRow(env, { kind: "task", parentId: project.id, scope: row.id, title: `設計書: ${row.name}`, body, taskKind: "build", assignee: "builder", repo: docsRepo, source: `design:${row.id}` }, actor);
+}
+
+/**
  * 段階を移す。移れる先だけを受け、読んだ段階のままの時だけ書く
  * @param env バインディング
  * @param serviceId サービス ID
@@ -139,7 +172,7 @@ async function studyTask(env: Bindings, row: ServiceRow, actor: Actor): Promise<
  * @param github リポジトリを確かめる GitHub の鍵の出し手
  * @returns 移した後の行
  * @throws not_found サービスが無い時
- * @throws conflict 今の段階から移れない時、読んだ後に段階か GitHub との連携が変わった時、GitHub とつないでいないのにリポジトリを選んだ時
+ * @throws conflict 今の段階から移れない時、読んだ後に段階か GitHub との連携か設計書のリポジトリが変わった時、GitHub とつないでいないのにリポジトリを選んだ時、設計書のリポジトリが無いか使えない時、リポジトリが設計書のリポジトリと同じか、同じ名前のリポジトリを持つ別のサービスがある時
  * @throws validation_failed prototype に進めるのに担当の社員かリポジトリが無い時、ほかの段階にリポジトリを送った時、触れるリポジトリに無い時
  * @throws upstream_failed 触れるリポジトリを GitHub から読めない時
  */
@@ -163,9 +196,14 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
   if (input.to === "dropped") change.droppedReason = input.reason;
   const orm = drizzle(env.DB);
   // リポジトリは確かめた時の連携のままの時だけ書く。連携が変われば、段階も変えない
+  // 試作に進める時は、設計書のリポジトリが使える事を先に確かめる。使えなければ段階も変えない
+  const docs = prototype ? await requireDocsRepo(env, github) : null;
   const linked = prototype && input.repo !== undefined ? await chooseRepo(env, github, input.repo, "#/repo") : undefined;
-  const task = input.to === "study" ? await studyTask(env, row, actor) : null;
-  const still = linked ? (and(stillAt(serviceId, row.stage), linked) ?? linked) : stillAt(serviceId, row.stage);
+  const sameName = prototype && input.repo !== undefined ? await sameNameCondition(env.DB, serviceId, input.repo) : undefined;
+  const task = input.to === "study" ? await studyTask(env, row, actor) : docs !== null && input.repo !== undefined ? await designTask(env, row, input.repo, docs.repo, actor) : null;
+  // 設計書のリポジトリの版、連携、同じ名前のサービスが無い事も、書く時に重ねる
+  const conditions = [stillAt(serviceId, row.stage), linked, docs?.still, sameName].filter((c): c is SQL => c !== undefined);
+  const still = and(...conditions) ?? stillAt(serviceId, row.stage);
   // 出来事と調べるタスクを先に足す。後の更新で段階が変わるので、どれも読んだ段階のままの時だけ書く。1 つでも失敗すれば全部を書かない
   const statements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
     insertWhen(env.DB, serviceEvents, stageEvent({ serviceId, to: input.to, by: actor.by, detail: { reason: input.reason } }, actor.now), still),
@@ -173,14 +211,15 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
     orm
       .update(services)
       .set(change)
-      .where(and(eq(services.id, serviceId), eq(services.stage, row.stage), linked))
+      .where(and(eq(services.id, serviceId), eq(services.stage, row.stage), linked, docs?.still, sameName))
       .returning({ id: services.id }),
   ];
   const results: unknown[] = await orm.batch(statements);
   if (Moved.parse(results.at(-1)).length === 0) throw new AppError("conflict", "段階か GitHub との連携が変わった");
   if (task) {
     await recordCreated(env, task, actor);
-    await notifyStaff(env, "president", actor.now, false);
+    // 調べるタスクは社長、設計書を書くタスクは開発担当を呼ぶ
+    await notifyStaff(env, task.assignee ?? "president", actor.now, false);
   }
   return { ...row, ...change };
 }

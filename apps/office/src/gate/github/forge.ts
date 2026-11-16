@@ -41,6 +41,9 @@ export type GitHubAccess = {
 /** compare API が 1 回で返すファイルの上限。届いたら残りがあるとみる */
 const COMPARE_FILES = 300;
 
+/** listFiles が返す件数の上限。超えたら null */
+const LIST_FILES_MAX = 500;
+
 /** プルリクエストのファイルの一覧のページの上限。GitHub は 3,000 件までしか返さない */
 const PULL_FILE_PAGES = 30;
 
@@ -338,6 +341,18 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       const res = await send(repo, { actions: "write" }, { method: "POST", path: `/actions/workflows/${workflow}/dispatches` }, { ref: info.default_branch, inputs });
       if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
       return info.default_branch;
+    },
+    branchHead: async (repo, branch) => {
+      const ref = await call(repo, readContents, { method: "GET", path: `/git/ref/heads/${branchPath(branch)}` }, GitHubRef);
+      return commitSha(ref.object.sha);
+    },
+    listFiles: async (repo, ref, prefix) => {
+      // GET /repos/{o}/{r}/git/trees/{tree_sha}?recursive=1 は、木が 100,000 件か 7MB を超えると truncated を true にして切る (GitHub の REST API の Git trees)
+      const tree = await call(repo, readContents, { method: "GET", path: `/git/trees/${commitSha(ref)}?recursive=1` }, GitHubGitTree);
+      if (tree.truncated) return null;
+      const found = tree.tree.filter((e) => e.type === "blob" && e.path.startsWith(prefix)).map((e) => e.path);
+      // 設計書 1 つの木としては多すぎる。読み切れない物として扱う
+      return found.length > LIST_FILES_MAX ? null : found;
     },
     defaultHead: async (repo) => {
       const info = await call(repo, read, { method: "GET", path: "" }, GitHubRepo);

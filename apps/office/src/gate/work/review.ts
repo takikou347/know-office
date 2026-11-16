@@ -1,9 +1,10 @@
 // レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
-import { AppError, CommitSha, decideRepo, StaffId, missingConditions, ownerGuardedPath, type RepoAction, type ServiceRules } from "@know-office/core";
+import { AppError, CommitSha, decideRepo, docsMergeNeeds, StaffId, missingConditions, ownerGuardedPath, type ReleaseCondition, type RepoAction, type ServiceRules } from "@know-office/core";
 import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { nodes, reviews, services } from "../db/main.ts";
+import { isFirstDocs, verifyDocsPr } from "../devloop/docs-pr.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
@@ -42,21 +43,21 @@ export async function repoRefusal(env: Bindings, forge: Forge, req: { action: Re
  * @param req.repo リポジトリ
  * @param req.branch 変えたブランチかコミット
  * @param req.paths 変わるファイル。分かっている時に渡す
- * @returns 断る理由と、通した時の変わるファイルとそのリポジトリの設定
+ * @returns 断る理由と、通した時の変わるファイル、そのリポジトリの設定、設計書のリポジトリか
  * @throws upstream_failed 変えたファイルを GitHub から読めない時
  */
 async function checkRepo(
   env: Bindings,
   forge: Forge,
   req: { action: RepoAction; repo: string; branch: string; paths?: readonly string[] },
-): Promise<{ refusal: { reason: string; path?: string } | null; paths: readonly string[]; rules: ServiceRules }> {
+): Promise<{ refusal: { reason: string; path?: string } | null; paths: readonly string[]; rules: ServiceRules; docs: boolean }> {
   const scope = await repoScope(env.DB, req.repo);
   const first = decideRepo({ action: req.action, repo: req.repo, paths: [] }, scope);
-  if (!first.allow) return { refusal: { reason: first.reason }, paths: [], rules: scope.rules };
+  if (!first.allow) return { refusal: { reason: first.reason }, paths: [], rules: scope.rules, docs: scope.docs };
   const paths = req.paths ?? (await forge.changedPaths(req.repo, req.branch));
   const decision = decideRepo({ action: req.action, repo: req.repo, paths }, scope);
-  if (decision.allow) return { refusal: null, paths: paths ?? [], rules: scope.rules };
-  return { refusal: decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path }, paths: [], rules: scope.rules };
+  if (decision.allow) return { refusal: null, paths: paths ?? [], rules: scope.rules, docs: scope.docs };
+  return { refusal: decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path }, paths: [], rules: scope.rules, docs: scope.docs };
 }
 
 /** main に入れられるかの答え。入れられる時は、確かめたコミットまで入れる。failed は要るチェックが落ちた事 */
@@ -94,8 +95,18 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
   if (!row || !sha.success) return { kind: "refused", reason: "確かめたコミットが分からない" };
   const checked = await checkRepo(env, forge, { action: "merge", repo: review.repo, branch: sha.data });
   if (checked.refusal !== null) return { kind: "refused", reason: checked.refusal.reason };
-  const guarded = ownerGuardedPath(checked.paths) !== undefined && (await selfRepo(env.DB, review.repo));
-  const when = guarded && !checked.rules.mergeWhen.includes("owner") ? [...checked.rules.mergeWhen, "owner" as const] : checked.rules.mergeWhen;
+  let when: readonly ReleaseCondition[];
+  if (checked.docs) {
+    // 設計書のリポジトリは、確かめたコミットの形をここでも確かめる。PR を出した後に押された物を、形の外れたまま入れない
+    const shape = await verifyDocsPr(forge, review.repo, sha.data, checked.paths);
+    if (shape.kind === "refused") return { kind: "refused", reason: shape.reason };
+    if (shape.kind === "waiting") return { kind: "waiting", reason: shape.reason };
+    // 最初の設計書だけオーナーの承認も要る。office とサービスの設定は読まない
+    when = docsMergeNeeds(await isFirstDocs(forge, review.repo, shape.name));
+  } else {
+    const guarded = ownerGuardedPath(checked.paths) !== undefined && (await selfRepo(env.DB, review.repo));
+    when = guarded && !checked.rules.mergeWhen.includes("owner") ? [...checked.rules.mergeWhen, "owner" as const] : checked.rules.mergeWhen;
+  }
   const approvals = { reviewer: review.reviewer ?? row.reviewerVerdict === "approve", owner: row.ownerVerdict === "approve" };
   const others = missingConditions(when, { checks: true, ...approvals });
   if (others.length > 0) return { kind: "waiting", reason: others.join(",") };

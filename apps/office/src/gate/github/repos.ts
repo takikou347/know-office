@@ -1,5 +1,6 @@
 // GitHub App のインストールで選んだ、触れるリポジトリを読む。連携の画面の一覧とサービスのリポジトリの確かめが同じ読み方を使う (タスクとレビューの 3.2、サービスと拡張の 3.3)
 import { AppError, GitHubInstallationRepos, type Repo } from "@know-office/core";
+import { type SQL, sql } from "drizzle-orm";
 import type { Bindings } from "../env.ts";
 import { callGitHub, githubToken, parseGitHub, type TokenDeps } from "./app.ts";
 
@@ -35,10 +36,32 @@ export async function installationRepos(env: Bindings, deps: TokenDeps, page: nu
  * @throws upstream_failed GitHub が失敗を返した時、10 ページで読み切れない時
  */
 export async function hasInstallationRepo(env: Bindings, deps: TokenDeps, repo: string): Promise<boolean> {
+  return (await findInstallationRepo(env, deps, repo)) !== null;
+}
+
+/**
+ * インストールで選んだリポジトリの中から、名前の大文字小文字を分けずに 1 つ探す
+ * @param env バインディング
+ * @param deps fetch、時刻、ためる所
+ * @param repo 探すリポジトリ
+ * @returns GitHub の名前と公開か非公開か。無ければ null
+ * @throws upstream_failed GitHub が失敗を返した時、10 ページで読み切れない時
+ */
+export async function findInstallationRepo(env: Bindings, deps: TokenDeps, repo: string): Promise<Repo | null> {
   for (let page = 1; page <= SEARCH_PAGES; page += 1) {
     const { repos, total } = await installationRepos(env, deps, page, PAGE_MAX);
-    if (repos.some((r) => r.fullName.toLowerCase() === repo.toLowerCase())) return true;
-    if (page * PAGE_MAX >= total) return false;
+    const found = repos.find((r) => r.fullName.toLowerCase() === repo.toLowerCase());
+    if (found) return found;
+    if (page * PAGE_MAX >= total) return null;
   }
   throw new AppError("upstream_failed", "触れるリポジトリが多すぎて読み切れない");
+}
+
+/**
+ * 確かめた時のインストールのままである事の SQL の条件を作る。確かめた後に連携が変われば、条件が合わず書かない
+ * @param version 確かめた時のインストールの版
+ * @returns SQL の条件
+ */
+export function installedAs(version: number): SQL {
+  return sql`EXISTS (SELECT 1 FROM vault WHERE name = 'github_installation' AND version = ${version} AND revoked_at IS NULL)`;
 }

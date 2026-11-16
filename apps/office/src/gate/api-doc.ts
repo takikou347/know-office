@@ -30,6 +30,7 @@ const TAGS = [
   ["reviews", "レビュー: 差分、コメント、承認"],
   ["github", "GitHub 連携: App、Webhook、ルール"],
   ["services", "サービス: アイデアから運用まで"],
+  ["devloop", "開発の回し方: 設計書のリポジトリ"],
   ["settings", "設定: office とサービス"],
   ["notices", "通知"],
   ["extensions", "拡張機能"],

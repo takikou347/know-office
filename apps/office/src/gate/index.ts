@@ -9,6 +9,7 @@ import type { GuardDeps } from "./guard/deps.ts";
 import { registerComponents } from "./openapi.ts";
 import { attendanceRoutes } from "./routes/attendance.ts";
 import { dashboardRoutes } from "./routes/dashboard.ts";
+import { devloopRoutes } from "./routes/devloop.ts";
 import { liveRoutes } from "./routes/live.ts";
 import { messageRoutes } from "./routes/messages.ts";
 import { staffRoutes } from "./routes/staff.ts";
@@ -57,6 +58,7 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
     .route("/", dashboardRoutes)
     .route("/", extensionRoutes(options.extensions ?? INSTALLED))
     .route("/", githubRoutes)
+    .route("/", devloopRoutes)
     .route("/", hookRoutes)
     .route("/", findingRoutes);
   registerComponents(app);

@@ -1,10 +1,13 @@
 // サービスのリポジトリを、GitHub の触れるリポジトリから選ぶ。試作に進める時と設定で変える時に同じ確かめを通す (サービスと拡張の 3.1、3.3)
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { connect, wrapDb } from "../helpers/github.ts";
+import { connect, seedDocsRepo, wrapDb } from "../helpers/github.ts";
 import { api, idOf, rows, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork({ github: true });
+
+// 試作に進める時は設計書のリポジトリが要るので、選んだ事にする
+beforeEach(() => seedDocsRepo(world));
 
 const VIDEO = { title: "動画の切り抜き", kind: "web_app", aim: "長い動画から見どころを切り出す", users: "動画を出す人", costEstimateMicroUsd: 20_000_000, revenueEstimateMicroUsd: 50_000_000 };
 

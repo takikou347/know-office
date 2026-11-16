@@ -551,5 +551,7 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
     readFile: async (repo, ref, path) => (await load()).readFile(repo, ref, path),
     dispatchWorkflow: async (repo, workflow, inputs) => (await load()).dispatchWorkflow(repo, workflow, inputs),
     defaultHead: async (repo) => (await load()).defaultHead(repo),
+    branchHead: async (repo, branch) => (await load()).branchHead(repo, branch),
+    listFiles: async (repo, ref, prefix) => (await load()).listFiles(repo, ref, prefix),
   };
 }

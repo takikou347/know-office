@@ -21,6 +21,18 @@ export type Connected = {
   webhookSecret: string;
 };
 
+/** テストで設計書のリポジトリにする、非公開のリポジトリ。代わりの GitHub が初めから入れる */
+export const DOCS_REPO = "example/knowidea-docs";
+
+/**
+ * 設計書のリポジトリを選んだ事にする。設定を直に置く。マイグレーションが置いた 2 つのサービスは、テストのリポジトリと名前が重ならないようリポジトリを外す。連携する前に呼ぶ。選ぶ操作そのものは test/devloop/design.test.ts で確かめる
+ * @param w テストの物
+ */
+export async function seedDocsRepo(w: WorkWorld): Promise<void> {
+  await w.d1.DB.prepare("UPDATE services SET repo = NULL").run();
+  await w.d1.DB.prepare("INSERT INTO settings (id, key, scope, value, version, changed_by, reason, created_at) VALUES (?, 'devloop.docs_repo', 'office', ?, 1, 'owner', 'テスト', 1)").bind(crypto.randomUUID(), JSON.stringify({ repo: DOCS_REPO })).run();
+}
+
 /**
  * パスキーで確かめた事にする。確認の流れそのものは passkey.test.ts で確かめる
  * @param w テストの物

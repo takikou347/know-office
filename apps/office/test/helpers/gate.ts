@@ -52,8 +52,8 @@ export type TestGate = {
   claude: FakeClaude;
   /** ゲートウェイが外へ出す fetch。代わりの Access、Claude API、GitHub に回す */
   fetch: Fetcher;
-  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル。compares は「元...先」ごとに返すファイルで、あればそちらを返す。contents は「sha:道」ごとのファイルの中身。pullFiles はプルリクエストの番号ごとの変えたファイルで、無ければ files を返す */
-  github: FakeGitHub & { files: CompareFile[]; compares: Map<string, CompareFile[]>; contents: Map<string, string>; pullFiles: Map<number, CompareFile[]> };
+  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル。compares は「元...先」ごとに返すファイルで、あればそちらを返す。contents は「sha:道」ごとのファイルの中身。pullFiles はプルリクエストの番号ごとの変えたファイルで、無ければ files を返す。branchHeads はブランチの名前ごとの先 */
+  github: FakeGitHub & { files: CompareFile[]; compares: Map<string, CompareFile[]>; contents: Map<string, string>; pullFiles: Map<number, CompareFile[]>; branchHeads: Map<string, string> };
   /** vault の App の鍵から作った 1 時間の鍵をためる所。テストごとに別にする */
   githubCache: TokenCache;
   /** GitHub の鍵を出した先と権限 */
@@ -183,7 +183,9 @@ function githubPath(github: TestGate["github"], path: string): string {
     const content = github.contents.get(`${ref}:${decodeURIComponent(name)}`);
     github.set(`GET ${route}`, content === undefined ? undefined : { type: "file", encoding: "base64", content: Buffer.from(content).toString("base64") });
   }
-  if (/^\/repos\/[^/]+\/[^/]+\/git\/ref\/heads\//.test(path)) github.set(`GET ${path}`, { ref: "refs/heads/x", object: { sha: "b".repeat(40) } });
+  // ブランチの先は、置いた物があればそれを、無ければ b だけの sha を返す
+  const head = /^\/repos\/[^/]+\/[^/]+\/git\/ref\/heads\/(.+)$/.exec(path);
+  if (head) github.set(`GET ${path}`, { ref: "refs/heads/x", object: { sha: github.branchHeads.get(decodeURIComponent(head[1] ?? "")) ?? "b".repeat(40) } });
   return path;
 }
 
@@ -200,7 +202,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock, keyPair: accessKeyPair });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
-  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map() });
+  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map(), branchHeads: new Map() });
   const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];
   const githubAccess: GitHubAccess = {

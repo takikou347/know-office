@@ -1,11 +1,14 @@
 // アイデアから運用までの流れ。案を足し、社長が調べ、オーナーが段階ごとに決め、サービスから元の案をたどる (サービスと拡張の 3.1)
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { connect } from "../helpers/github.ts";
+import { connect, seedDocsRepo } from "../helpers/github.ts";
 import { api, clockIn, idOf, MINUTE, purposeAndGoal, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
 
 // 作ると決める時にリポジトリを選ぶので、代わりの GitHub につなぐ
 const world = useWork({ github: true });
+
+// 試作に進める時は設計書のリポジトリが要るので、選んだ事にする
+beforeEach(() => seedDocsRepo(world));
 
 // 差し替えたバインディングを、テストごとに元へ戻す
 const restores: (() => void)[] = [];
