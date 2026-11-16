@@ -13,8 +13,8 @@ export const ScriptedMessage = z.object({
 /** 積む返事の型 */
 export type ScriptedMessage = z.infer<typeof ScriptedMessage>;
 
-/** 積んだ失敗。上限 (429) と混み合い (529) を Anthropic の形で返す */
-type ScriptedError = { error: { status: 429 | 529 | 500; type: string } };
+/** 積んだ失敗。鍵の失敗 (401)、上限 (429)、混み合い (529) を Anthropic の形で返す */
+type ScriptedError = { error: { status: 401 | 429 | 529 | 500; type: string } };
 
 const MessagesRequest = z.looseObject({ model: z.string().optional(), stream: z.boolean().optional() });
 
@@ -42,7 +42,7 @@ export type FakeClaude = {
   /** 返事を積む */
   push(message: ScriptedMessage): void;
   /** 失敗を積む */
-  pushError(status: 429 | 529 | 500, type: string): void;
+  pushError(status: 401 | 429 | 529 | 500, type: string): void;
   /** 受けたバッチ処理 */
   batches: FakeBatch[];
   /** バッチ処理を終えさせる。answer は custom_id ごとの答えを返す */

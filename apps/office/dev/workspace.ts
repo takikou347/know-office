@@ -1,7 +1,7 @@
-// 開発環境の代わりのワークスペースの置き場。ゲートウェイの DevContainer が起こさせ、Node のサーバーへの要求をここから回す (ログインと記録の 3.9、社員が考えるの 3.1)
+// 開発環境の代わりのワークスペースの置き場。ゲートウェイの DevContainer が起こさせ、起動確認と軽い要求には自分で答え、タスクの開始と記録の戻しから Node のサーバーを起こして回す (ログインと記録の 3.9、社員が考えるの 3.1)
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { StaffId } from "@know-office/core";
+import { health, StaffId } from "@know-office/core";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -57,12 +57,18 @@ async function loadWorkspace(): Promise<StartDevWorkspace> {
  * @returns Hono、受けたタスクの開始、止める口
  */
 export function createDevWorkspaces(anthropicUrl: string, start?: StartDevWorkspace): DevWorkspaces {
-  const running = new Map<StaffId, DevWorkspace>();
+  // 起こした社員の鍵と、起こした Node のサーバー。サーバーと SDK は最初の /v1/runs か /v1/restore まで読み込まない
+  const booted = new Map<StaffId, { key: string; server?: Promise<DevWorkspace> }>();
   const runs: ReceivedRun[] = [];
   const stop = async (staffId: StaffId) => {
-    const held = running.get(staffId);
-    running.delete(staffId);
-    await held?.close();
+    const held = booted.get(staffId);
+    booted.delete(staffId);
+    const server = await held?.server?.catch(() => undefined);
+    await server?.close();
+  };
+  const serverOf = (held: { key: string; server?: Promise<DevWorkspace> }) => {
+    held.server ??= (start ? Promise.resolve(start) : loadWorkspace()).then((begin) => begin({ key: held.key, anthropicUrl }));
+    return held.server;
   };
   const app = new Hono()
     .get("/__fake/runs", (c) => c.json(runs))
@@ -71,7 +77,7 @@ export function createDevWorkspaces(anthropicUrl: string, start?: StartDevWorksp
       const body = Boot.safeParse(await c.req.json().catch(() => null));
       if (!staffId.success || !body.success) return c.body(null, 400);
       await stop(staffId.data);
-      running.set(staffId.data, await (start ?? (await loadWorkspace()))({ key: body.data.key, anthropicUrl }));
+      booted.set(staffId.data, { key: body.data.key });
       return c.body(null, 204);
     })
     .post("/:staffId/stop", async (c) => {
@@ -82,16 +88,26 @@ export function createDevWorkspaces(anthropicUrl: string, start?: StartDevWorksp
     })
     .all("/:staffId/v1/*", async (c) => {
       const staffId = StaffId.safeParse(c.req.param("staffId"));
-      const held = staffId.success ? running.get(staffId.data) : undefined;
+      const held = staffId.success ? booted.get(staffId.data) : undefined;
       if (!staffId.success || !held || !Methods.has(c.req.method)) return c.body(null, 502);
       // 付けた先 (/workspace) によらず、社員 ID の後の /v1/ から先を回す
       const pathname = new URL(c.req.url).pathname;
       const path = pathname.slice(pathname.indexOf(`/${staffId.data}/v1/`) + `/${staffId.data}`.length);
+      const route = `${c.req.method} ${path}`;
+      if (!held.server) {
+        // 起動確認は鍵無しで答える。ほかは本物と同じく鍵を確かめ、走っていない時の答えを返す
+        if (route === "GET /v1/health") return c.json({ data: health("workspace"), meta: { traceId: "0".repeat(32) } });
+        if (c.req.header("authorization") !== `Bearer ${held.key}`) return c.body(null, 401);
+        if (route === "POST /v1/abort" || route === "PUT /v1/ticket") return c.body(null, 204);
+        if (route === "POST /v1/messages") return c.body(null, 409);
+        if (route !== "POST /v1/runs" && route !== "POST /v1/restore") return c.body(null, 404);
+      }
+      const server = await serverOf(held);
       const body = c.req.method === "GET" ? undefined : await c.req.text();
       const headers: Record<string, string> = { "content-type": "application/json" };
       const auth = c.req.header("authorization");
       if (auth !== undefined) headers["authorization"] = auth;
-      const res = await fetch(`http://127.0.0.1:${String(held.port)}${path}`, { method: c.req.method, headers, ...(body === undefined ? {} : { body }) });
+      const res = await fetch(`http://127.0.0.1:${String(server.port)}${path}`, { method: c.req.method, headers, ...(body === undefined ? {} : { body }) });
       if (path === "/v1/runs" && res.status === 202) {
         const run = RunBody.safeParse(JSON.parse(body ?? "null"));
         if (run.success) runs.push({ staffId: staffId.data, nodeId: run.data.nodeId });
@@ -102,7 +118,7 @@ export function createDevWorkspaces(anthropicUrl: string, start?: StartDevWorksp
     app,
     runs,
     close: async () => {
-      await Promise.all([...running.keys()].map(stop));
+      await Promise.all([...booted.keys()].map(stop));
     },
   };
 }

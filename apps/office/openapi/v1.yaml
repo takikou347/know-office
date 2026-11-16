@@ -5969,10 +5969,13 @@ paths:
 
         1. プロキシが送信元の社員を特定する
 
-        2. `StaffDO.heartbeat(at)` を呼ぶ'
+        2. `StaffDO.heartbeat(at)` を呼ぶ
+
+        3. 社員がタスクを持ち、その作業トークンの残りが 10 分を切っていれば、発行し直して `PUT /v1/ticket` で渡し、渡せた後に前の作業トークンを失効させる'
       x-steps:
       - プロキシが送信元の社員を特定する
       - '`StaffDO.heartbeat(at)` を呼ぶ'
+      - 社員がタスクを持ち、その作業トークンの残りが 10 分を切っていれば、発行し直して `PUT /v1/ticket` で渡し、渡せた後に前の作業トークンを失効させる
       requestBody:
         required: true
         content:

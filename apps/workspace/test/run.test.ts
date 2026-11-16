@@ -281,6 +281,29 @@ describe("働いた事をゲートウェイに届ける", () => {
     await runner.abort("wrap_up");
   });
 
+  it("SDK が終えた直後に止めても、終わりは送る", async () => {
+    const { reporterOf, sent } = reporter();
+    // 終えた後の記録の送りの間に止めが届く
+    const gate: { open?: () => void } = {};
+    const transcripts = { flush: () => new Promise<void>((resolve) => (gate.open = resolve)), restore: () => Promise.resolve() };
+    const runner = new Runner(
+      (call) => {
+        call.onSession("session-1");
+        return Promise.resolve("直した");
+      },
+      () => {},
+      undefined,
+      transcripts,
+      reporterOf,
+    );
+    runner.start(RUN);
+    await settle();
+    const aborted = runner.abort("wrap_up");
+    gate.open?.();
+    await aborted;
+    expect(sent.map((s) => s.events.at(-1))).toEqual([{ kind: "result", nodeId: NODE, result: "done" }]);
+  });
+
   it("オーナーの発言は、記録を送ってから今の呼び出しを止め、発言を指示に続きから 1 回だけ呼び、止めた呼び出しの終わりは送らない", async () => {
     const { agent, calls, finish } = fakeAgent();
     const { reporterOf, sent } = reporter();

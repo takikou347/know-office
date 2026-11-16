@@ -24,7 +24,7 @@ const eventsRoute = createRoute({
 });
 
 /** 1 つの要求で出来事を渡す先 */
-type Context = { env: Bindings; staffId: StaffId; nodeId: string; now: number; traceId: string; clock: Clock; guard: GuardDeps };
+type EventContext = { env: Bindings; staffId: StaffId; nodeId: string; now: number; traceId: string; clock: Clock; guard: GuardDeps };
 
 /**
  * 出来事を 1 つ渡す。並びの順に渡し、断った所で止める
@@ -32,7 +32,7 @@ type Context = { env: Bindings; staffId: StaffId; nodeId: string; now: number; t
  * @param event 出来事
  * @throws conflict 作業トークンのタスクと違うタスクの出来事、今のタスクと違うチェックポイント、同時に終えた時
  */
-async function apply(ctx: Context, event: AgentEvent): Promise<void> {
+async function apply(ctx: EventContext, event: AgentEvent): Promise<void> {
   const { env, staffId, nodeId, now, traceId } = ctx;
   switch (event.kind) {
     case "message":
@@ -66,7 +66,7 @@ async function apply(ctx: Context, event: AgentEvent): Promise<void> {
  * @param result 結果
  * @throws conflict 作業トークンのタスクと違う時、同時に終えた時
  */
-async function settle(ctx: Context, target: string, result: WorkResult): Promise<void> {
+async function settle(ctx: EventContext, target: string, result: WorkResult): Promise<void> {
   const { env, staffId, nodeId, now } = ctx;
   if (target !== nodeId) throw new AppError("conflict", "作業トークンのタスクと違う");
   const staff = staffOf(env, staffId);
@@ -98,7 +98,7 @@ export function eventRoutes(app: OpenAPIHono<GateEnv>, caller: Caller): void {
     const now = c.var.clock.now();
     // 社員とタスクは作業トークンから決める。本文からは決めない
     const { staffId, nodeId } = await ticketTask(c.env, bearer(c.req.header("authorization")), caller, now);
-    const ctx: Context = { env: c.env, staffId, nodeId, now, traceId: c.var.traceId, clock: c.var.clock, guard: c.var.guard };
+    const ctx: EventContext = { env: c.env, staffId, nodeId, now, traceId: c.var.traceId, clock: c.var.clock, guard: c.var.guard };
     for (const event of events) await apply(ctx, event);
     return noContent(c);
   });

@@ -8,11 +8,24 @@ import { createWorkspaceServer } from "./server.ts";
 /** 手元の代わりの Claude API の宛先。これでない宛先には SDK を向けない */
 const LOCAL_ANTHROPIC = /^http:\/\/(localhost|127\.0\.0\.1):\d+\/anthropic$/;
 
+/** 手元に残す出来事の並びの数。開発の代わりはゲートウェイに送らないので、増え続けないよう古い物から捨てる */
+export const DEV_EVENTS_MAX = 500;
+
+/**
+ * 送るはずだった出来事を手元に足し、最後の DEV_EVENTS_MAX 回分だけを残す
+ * @param kept 残している物
+ * @param sent 送るはずだった出来事
+ */
+export function rememberEvents<T>(kept: T[][], sent: T[]): void {
+  kept.push(sent);
+  if (kept.length > DEV_EVENTS_MAX) kept.splice(0, kept.length - DEV_EVENTS_MAX);
+}
+
 /** 起こした代わりのワークスペース */
 export type DevWorkspace = {
   /** Node のサーバーの番号 */
   port: number;
-  /** ゲートウェイへ送るはずだった出来事。代わりのワークスペースはゲートウェイの受け手を通らないので、ここに残す */
+  /** ゲートウェイへ送るはずだった出来事。代わりのワークスペースはゲートウェイの受け手を通らないので、最後の 500 回分をここに残す */
   events: AgentEvent[][];
   /** 走っている呼び出しを止めてサーバーを閉じる */
   close(): Promise<void>;
@@ -35,7 +48,7 @@ export async function startDevWorkspace(options: { key: string; anthropicUrl: st
     (error) => log("warn", "dev_run_failed", { error: error instanceof Error ? error.name : "unknown" }),
     undefined,
     undefined,
-    { report: (_ticket, sent) => Promise.resolve(void events.push(sent)) },
+    { report: (_ticket, sent) => Promise.resolve(rememberEvents(events, sent)) },
     options.anthropicUrl,
   );
   const server = createWorkspaceServer(runner, options.key);

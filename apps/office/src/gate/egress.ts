@@ -17,7 +17,7 @@ import { rethrowRpc } from "./rpc.ts";
 import { decisionRoutes } from "./work/decisions.ts";
 import { eventRoutes } from "./work/events.ts";
 import { toolRoutes } from "./work/tool-route.ts";
-import { relayClaude } from "./work/relay.ts";
+import { RELAY_HEADER, relayClaude } from "./work/relay.ts";
 import { authenticateTicket, bearer, type Caller, renewTicket, ticketTask } from "./work/ticket.ts";
 
 export type { Caller } from "./work/ticket.ts";
@@ -124,7 +124,12 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
   // 本文の形はゲートウェイのルートだけで確かめる。Claude への本文は 1MB を超えうるので、プロキシが確かめる
   app.use("/ws/*", bodyShape);
   app.openapi(heartbeatRoute, async (c) => {
-    await staffOf(c.env, caller.staffId).heartbeat(c.var.clock.now()).catch(rethrowRpc);
+    const now = c.var.clock.now();
+    const staff = staffOf(c.env, caller.staffId);
+    await staff.heartbeat(now).catch(rethrowRpc);
+    // チェックポイントの無い長い呼び出しでも作業トークンが切れないよう、残りが 10 分を切ったらここでも差し替えて PUT /v1/ticket で渡す
+    const { nodeId } = await staff.status(now);
+    if (nodeId !== null) await renewTicket(c.env, caller.staffId, nodeId, now);
     return noContent(c);
   });
   app.openapi(checkpointRoute, async (c) => {
@@ -174,5 +179,10 @@ export async function routeEgress(request: Request, env: Bindings, caller: Calle
       headers: { "Content-Type": "application/problem+json" },
     });
   }
-  return createWorkspaceGate(caller, options).fetch(request, env);
+  const res = await createWorkspaceGate(caller, options).fetch(request, env);
+  if (url.hostname !== "api.anthropic.com" || res.headers.get(RELAY_HEADER) === "forwarded") return res;
+  // Claude API に届く前にプロキシが断った返事 (作業トークン、止まり、モデル、形) に印を付ける。ワークスペースはこれを鍵の失敗に数えない
+  const marked = new Response(res.body, res);
+  marked.headers.set(RELAY_HEADER, "refused");
+  return marked;
 }

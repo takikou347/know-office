@@ -40,6 +40,53 @@ export class SdkFailure extends Error {
   }
 }
 
+/** 鍵の失敗らしい時の確かめの答え。refused はゲートウェイの Claude のプロキシが断った、upstream は Claude API 自身が断った、unknown は分からない */
+export type RelayAnswer = "refused" | "upstream" | "unknown";
+
+/** 作業トークンとモデルで、鍵の失敗が Claude API 自身の物かを確かめる関数 */
+export type RelayProbe = (ticket: string, model: string) => Promise<RelayAnswer>;
+
+/** 確かめの待ち (10 秒) */
+const PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * count_tokens を作業トークンで 1 回呼び、断ったのがゲートウェイのプロキシか Claude API かを、返事の x-know-relay で分ける確かめを作る
+ * SDK は返事のヘッダーを出さないので、SDK とは別に呼ぶ。count_tokens は費用が掛からない (Anthropic の Token counting の文書: "Token counting is free to use but subject to requests per minute rate limits")
+ * @param base Claude API の宛先。コンテナは api.anthropic.com のままで、外向きの通信の受け手がプロキシに回す
+ * @param fetcher 外への fetch。テストは代わりを渡す
+ * @returns 確かめる関数
+ */
+export function relayProbe(base = "https://api.anthropic.com", fetcher: typeof fetch = (url, init) => fetch(url, init)): RelayProbe {
+  return async (ticket, model) => {
+    try {
+      const res = await fetcher(`${base}/v1/messages/count_tokens`, {
+        method: "POST",
+        headers: { "x-api-key": ticket, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "確かめ" }] }),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      if (res.headers.get("x-know-relay") === "refused") return "refused";
+      return res.status === 401 || res.status === 403 ? "upstream" : "unknown";
+    } catch {
+      return "unknown";
+    }
+  };
+}
+
+/**
+ * 鍵の失敗らしい時に、Claude API 自身が断った時だけ sdk_auth_failed にする。プロキシの断り (作業トークンの期限、止まり、モデル) と分からない時は sdk_failed にし、ほかの社員を止めない
+ * @param probe 確かめる関数
+ * @param options 呼び出しの options
+ * @param status 失敗のステータス
+ * @returns 投げる失敗
+ */
+async function authFailure(probe: RelayProbe, options: AgentOptions, status: number | null): Promise<SdkFailure> {
+  const answer = await probe(options.env.ANTHROPIC_API_KEY, options.model);
+  const shown = status === null ? "失敗" : String(status);
+  if (answer === "upstream") return new SdkFailure("sdk_auth_failed", `Claude API が ${shown} で断った`);
+  return new SdkFailure("sdk_failed", answer === "refused" ? `ゲートウェイのプロキシが ${shown} で断った` : `Claude API が ${shown} で終えた`);
+}
+
 /** SDK の query() と同じ形の関数。テストは手元の代わりの Claude API に向けた物を渡す */
 export type QueryFn = (params: { prompt: string; options: Options }) => AsyncIterable<SdkEvent>;
 
@@ -74,10 +121,12 @@ export function sdkOptions(options: AgentOptions, spawn?: Options["spawnClaudeCo
  * SDK を 1 回呼んで終わるまで待つ Agent を作る
  * @param run SDK の query()。省くと本物を使う
  * @param spawn 子のプロセスを起こす関数。省くと SDK の既定
+ * @param probe 鍵の失敗らしい時の確かめ。省くと SDK と同じ宛先の count_tokens を呼ぶ
  * @returns Agent
  */
-export function sdkAgent(run: QueryFn = query, spawn?: Options["spawnClaudeCodeProcess"]): Agent {
+export function sdkAgent(run: QueryFn = query, spawn?: Options["spawnClaudeCodeProcess"], probe?: RelayProbe): Agent {
   return async (call) => {
+    const check = probe ?? relayProbe(call.options.env.ANTHROPIC_BASE_URL);
     let sessionId: string | undefined;
     let authFailed = false;
     let text: string | undefined;
@@ -91,7 +140,7 @@ export function sdkAgent(run: QueryFn = query, spawn?: Options["spawnClaudeCodeP
       if (message.type === "assistant" && message.error === "authentication_failed") authFailed = true;
       // SDK は鍵の失敗 (401) も数分かけて待ち直す (SDK 0.3.325 の SDKAPIRetryMessage)。鍵は待っても直らないので、1 回目で止めてゲートウェイに伝える
       if (message.type === "system" && message.subtype === "api_retry" && (message.error === "authentication_failed" || message.error_status === 401 || message.error_status === 403)) {
-        const failure = new SdkFailure("sdk_auth_failed", `Claude API が ${String(message.error_status ?? 401)} で断った`);
+        const failure = await authFailure(check, call.options, message.error_status ?? null);
         call.options.abortController.abort(failure);
         throw failure;
       }
@@ -100,8 +149,8 @@ export function sdkAgent(run: QueryFn = query, spawn?: Options["spawnClaudeCodeP
       // SDK 0.3.325 の SDKResultSuccess: is_error が true なら API の失敗で終えた。api_error_status にその時のステータスが入る
       if (message.is_error === true) {
         const status = message.api_error_status ?? null;
-        const auth = authFailed || status === 401 || status === 403;
-        throw new SdkFailure(auth ? "sdk_auth_failed" : "sdk_failed", `Claude API が ${status === null ? "失敗" : String(status)} で終えた`);
+        if (authFailed || status === 401 || status === 403) throw await authFailure(check, call.options, status);
+        throw new SdkFailure("sdk_failed", `Claude API が ${status === null ? "失敗" : String(status)} で終えた`);
       }
       text = message.result;
     }

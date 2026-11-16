@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
 import { agentOptions, type AgentCall, staffHome } from "../src/agent.ts";
 import { preToolUse } from "../src/hooks.ts";
-import { type QueryFn, sdkAgent, sdkOptions } from "../src/sdk.ts";
+import { type QueryFn, type RelayProbe, relayProbe, sdkAgent, sdkOptions } from "../src/sdk.ts";
 import { STAFF_GID, STAFF_UID, staffSpawner } from "../src/spawn.ts";
 import { staffServer } from "../src/staff-tools.ts";
 import { sessionFile, TranscriptShipper } from "../src/transcript.ts";
@@ -55,15 +55,37 @@ const finished: QueryFn = async function* () {
 };
 
 /**
- * API の失敗で終える SDK の代わりを作る。success でも is_error が付く
- * @param status API のステータス
+ * 鍵の失敗で待ち直しを始める SDK の代わりを作る
+ * @param status 失敗のステータス
  * @returns SDK の代わり
+ */
+function retried(status: number): QueryFn {
+  return async function* () {
+    yield { type: "system", subtype: "api_retry", error: "authentication_failed", error_status: status, session_id: "session-1" };
+  };
+}
+
+/**
+ * success でも API の失敗で終える SDK の代わりを作る
+ * @param status 失敗のステータス
+ * @returns query の代わり
  */
 function ended(status: number): QueryFn {
   return async function* () {
     yield { type: "result", subtype: "success", is_error: true, api_error_status: status, result: "Invalid API key sk-ant-abc", session_id: "session-1" };
   };
 }
+
+/**
+ * ゲートウェイのプロキシが断ったと答える確かめ
+ * @returns refused
+ */
+const refused: RelayProbe = () => Promise.resolve("refused");
+/**
+ * 確かめられなかったと答える確かめ
+ * @returns unknown
+ */
+const unknown: RelayProbe = () => Promise.resolve("unknown");
 
 /** 開いた物。テストの後に閉じて消す */
 const opened: { servers: Server[]; dirs: string[] } = { servers: [], dirs: [] };
@@ -282,12 +304,26 @@ describe("ワークスペースの Claude Agent SDK", () => {
     expect(await sdkAgent(finished)(task(gate(true, []), []))).toBe("直した");
   });
 
-  it("success でも API の失敗で終えた時は投げ、401 と 403 は鍵の失敗にする", async () => {
-    await expect(sdkAgent(ended(401))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
-    await expect(sdkAgent(ended(403))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
-    await expect(sdkAgent(ended(500))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_failed" });
+  it("success でも API の失敗で終えた時は投げ、Claude API 自身の 401 と 403 だけを鍵の失敗にする", async () => {
+    const asked: string[] = [];
+    const upstream: RelayProbe = (ticket, model) => {
+      asked.push(`${ticket} ${model}`);
+      return Promise.resolve("upstream");
+    };
+    await expect(sdkAgent(ended(401), undefined, upstream)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
+    await expect(sdkAgent(ended(403), undefined, upstream)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
+    await expect(sdkAgent(ended(500), undefined, upstream)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_failed" });
+    // 確かめは作業トークンと呼び出しのモデルで行い、500 では確かめない
+    expect(asked).toEqual(["ticket-1 claude-sonnet-5-5", "ticket-1 claude-sonnet-5-5"]);
     // SDK の文は鍵を含みうるので、投げる文に入れない
-    await expect(sdkAgent(ended(401))(task(gate(true, []), []))).rejects.not.toThrow(/sk-ant/);
+    await expect(sdkAgent(ended(401), undefined, upstream)(task(gate(true, []), []))).rejects.not.toThrow(/sk-ant/);
+  });
+
+  it("relay が 401 を返しても sdk_auth_failed にならない", async () => {
+    await expect(sdkAgent(ended(401), undefined, refused)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_failed" });
+    await expect(sdkAgent(retried(401), undefined, refused)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_failed" });
+    // 確かめられない時も、ほかの社員まで止める鍵の失敗にしない
+    await expect(sdkAgent(retried(401), undefined, unknown)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_failed" });
   });
 
   it("本物の SDK に Claude が 401 を返すと、待ち直さずに鍵の失敗で投げる", async () => {
@@ -302,8 +338,9 @@ describe("ワークスペースの Claude Agent SDK", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (address === null || typeof address === "string") throw new Error("番号が分からない");
-    const run = await localQuery(`http://127.0.0.1:${String(address.port)}`, tempDir());
-    await expect(sdkAgent(run)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
+    const base = `http://127.0.0.1:${String(address.port)}`;
+    const run = await localQuery(base, tempDir());
+    await expect(sdkAgent(run, undefined, relayProbe(base))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
   }, 10_000);
 
   it("本物の SDK が作業トークンを鍵にして Claude を呼び、session を知らせて終わる", async () => {

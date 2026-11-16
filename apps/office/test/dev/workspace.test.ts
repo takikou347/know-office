@@ -35,9 +35,9 @@ describe("開発の代わりのワークスペースの置き場", () => {
     const { start, seen, booted, closed } = stubStart();
     const ws = createDevWorkspaces("http://127.0.0.1:5199/anthropic", start);
     expect((await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) })).status).toBe(204);
-    expect(booted).toEqual([{ key: KEY, anthropicUrl: "http://127.0.0.1:5199/anthropic" }]);
     const res = await ws.app.request("/builder/v1/runs", { method: "POST", headers: { authorization: `Bearer ${KEY}` }, body: JSON.stringify({ nodeId: NODE }) });
     expect(res.status).toBe(202);
+    expect(booted).toEqual([{ key: KEY, anthropicUrl: "http://127.0.0.1:5199/anthropic" }]);
     expect(seen).toEqual([`POST /v1/runs Bearer ${KEY}`]);
     expect(await (await ws.app.request("/__fake/runs")).json()).toEqual([{ staffId: "builder", nodeId: NODE }]);
     expect((await ws.app.request("/builder/stop", { method: "POST" })).status).toBe(204);
@@ -51,8 +51,38 @@ describe("開発の代わりのワークスペースの置き場", () => {
     const ws = createDevWorkspaces("http://127.0.0.1:5199/anthropic", start);
     const app = new Hono().route("/workspace", ws.app);
     expect((await app.request("/workspace/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) })).status).toBe(204);
-    expect((await app.request("/workspace/builder/v1/health")).status).toBe(204);
-    expect(seen).toEqual(["GET /v1/health "]);
+    expect((await app.request("/workspace/builder/v1/runs", { method: "POST", headers: { authorization: `Bearer ${KEY}` }, body: JSON.stringify({ nodeId: NODE }) })).status).toBe(202);
+    expect(seen).toEqual([`POST /v1/runs Bearer ${KEY}`]);
+    await ws.close();
+  });
+
+  it("起こしただけでは Node のサーバーと SDK を読み込まず、起動確認と軽い要求に自分で答える", async () => {
+    const { start, booted, seen } = stubStart();
+    const ws = createDevWorkspaces("http://127.0.0.1:5199/anthropic", start);
+    expect((await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) })).status).toBe(204);
+    const health = await ws.app.request("/builder/v1/health");
+    expect(health.status).toBe(200);
+    expect(await health.json()).toMatchObject({ data: { ok: true, part: "workspace" } });
+    const auth = { authorization: `Bearer ${KEY}` };
+    expect((await ws.app.request("/builder/v1/abort", { method: "POST", headers: auth, body: JSON.stringify({ reason: "wrap_up" }) })).status).toBe(204);
+    expect((await ws.app.request("/builder/v1/ticket", { method: "PUT", headers: auth, body: JSON.stringify({ ticket: "t" }) })).status).toBe(204);
+    expect((await ws.app.request("/builder/v1/messages", { method: "POST", headers: auth, body: JSON.stringify({ body: "x" }) })).status).toBe(409);
+    // 鍵の無い要求は本物と同じく断る
+    expect((await ws.app.request("/builder/v1/abort", { method: "POST", body: JSON.stringify({ reason: "x" }) })).status).toBe(401);
+    expect(booted).toEqual([]);
+    expect(seen).toEqual([]);
+    await ws.close();
+  });
+
+  it("最初の /v1/runs か /v1/restore で 1 度だけ起こし、後は回す", async () => {
+    const { start, booted, seen } = stubStart();
+    const ws = createDevWorkspaces("http://127.0.0.1:5199/anthropic", start);
+    await ws.app.request("/reviewer/boot", { method: "POST", body: JSON.stringify({ key: KEY }) });
+    const auth = { authorization: `Bearer ${KEY}` };
+    expect((await ws.app.request("/reviewer/v1/restore", { method: "POST", headers: auth, body: "{}" })).status).toBe(204);
+    expect((await ws.app.request("/reviewer/v1/runs", { method: "POST", headers: auth, body: JSON.stringify({ nodeId: NODE }) })).status).toBe(202);
+    expect(booted).toHaveLength(1);
+    expect(seen).toEqual([`POST /v1/restore Bearer ${KEY}`, `POST /v1/runs Bearer ${KEY}`]);
     await ws.close();
   });
 

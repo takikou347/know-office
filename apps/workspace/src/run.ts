@@ -271,9 +271,8 @@ export class Runner {
           continue;
         }
         await this.#flush(current);
-        if (current.aborting) return;
-        // 終わる間際に届いた発言は捨てず、続きを呼ぶ
-        if (current.messages.length > 0) {
+        // SDK が終えた後に止めが届いても、終わりは決まっているので done を送る。終わる間際に届いた発言は、止めていなければ捨てずに続きを呼ぶ
+        if (!current.aborting && current.messages.length > 0) {
           current.controller = new AbortController();
           prompt = this.#nextPrompt(current);
           continue;

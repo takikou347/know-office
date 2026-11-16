@@ -141,6 +141,23 @@ describe("働いた事がゲートウェイに届く", () => {
     expect(await rows(world.d1.REC_2026, "SELECT id FROM messages WHERE node_id = ?", work.nodeId)).toEqual([]);
   });
 
+  it("1 時間を過ぎた run の終わりも届く", async () => {
+    const work = await builderAtWork(world);
+    const caller: Caller = { staffId: "builder", workspaceId: workspaceIdOf(world.gate.env, "builder") };
+    // ワークスペースは 30 秒ごとにハートビートを送る。テストは 1 分ごとに送って 65 分進める
+    for (let minute = 1; minute <= 65; minute += 1) {
+      world.clock.advance(60_000);
+      const beat = new Request("http://gate.internal/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(world.clock.now()).toISOString() }) });
+      expect((await routeEgress(beat, world.gate.env, caller, { clock: world.clock, guard: world.gate.deps })).status).toBe(204);
+    }
+    // 残りが 10 分を切った所でハートビートの道で差し替え、ワークスペースに渡した
+    const renewed = world.gate.workspaces.builder.tickets;
+    expect(renewed).toHaveLength(1);
+    expect((await send(world, work, [{ kind: "message", body: "前の作業トークン" }])).status).toBe(401);
+    expect((await send(world, work, [{ kind: "result", nodeId: work.nodeId, result: "done" }], renewed[0])).status).toBe(204);
+    expect(await statusOf(world, work.nodeId)).toBe("done");
+  });
+
   it("51 件と空の並びは 422、作業トークンが無ければ 401 で断る", async () => {
     const work = await builderAtWork(world);
     const many = Array.from({ length: 51 }, () => ({ kind: "message", body: "x" }));

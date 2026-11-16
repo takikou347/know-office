@@ -99,7 +99,8 @@ function boxDeps(waits: number[] = [], keys: FakeKeys = fakeKeys(), downs: numbe
  */
 function send(url: string, init: RequestInit = {}): Promise<Response> {
   const caller: Caller = { staffId: "builder", workspaceId: workspaceIdOf(w.gate.env, "builder") };
-  return routeEgress(new Request(url, init), w.gate.env, caller, { clock: w.clock, guard: w.gate.deps });
+  // 外への fetch はテストの代わりの物に回し、手元で動いている開発の代わりの物に出ない
+  return routeEgress(new Request(url, init), w.gate.env, caller, { clock: w.clock, guard: w.gate.deps, fetch: w.gate.fetch });
 }
 
 describe("鍵はゲートウェイだけが持つ", () => {
@@ -130,6 +131,21 @@ describe("鍵はゲートウェイだけが持つ", () => {
     const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9));
     const res = await send("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": token }, body: "{}" });
     expect(res.status).not.toBe(401);
+  });
+
+  it("Claude のプロキシが自分で断った返事は x-know-relay: refused、Claude API の返事は forwarded を付けて返す", async () => {
+    w.clock.advance(jst(9, 1) - w.clock.now());
+    const refused = await send("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": "sk-ant-not-a-ticket" }, body: "{}" });
+    expect([refused.status, refused.headers.get("x-know-relay")]).toEqual([401, "refused"]);
+    await startWork(w, "builder");
+    const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9, 1));
+    // 開発担当の役で許していないモデルは、プロキシが 403 で断る
+    const model = await send("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": token, "content-type": "application/json" }, body: JSON.stringify({ model: "claude-opus-5-5", max_tokens: 1, messages: [] }) });
+    expect([model.status, model.headers.get("x-know-relay")]).toEqual([403, "refused"]);
+    // Claude API 自身の 401 は、プロキシの断りと分けて返す。返事のヘッダーで印を偽れない
+    w.gate.claude.pushError(401, "authentication_error");
+    const upstream = await send("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": token, "content-type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 1, messages: [] }) });
+    expect([upstream.status, upstream.headers.get("x-know-relay")]).toEqual([401, "forwarded"]);
   });
 
   it("ワークスペースから直に外へ出る", async () => {
