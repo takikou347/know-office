@@ -292,10 +292,16 @@ test("オーナーが画面でタスクを取り消し、頼む先を後から�
 
   const dropped = `取り消すタスク ${String(Date.now())}`;
   const droppedId = await addTask(page, dropped, "まだ頼まない");
+  // 止めたタスクも取り消せ、取り消した後に止めを再開しても待ちに戻らない
+  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "task", target: droppedId, reason: "取り消す前に止める" } });
+  expect(stopped.status()).toBe(201);
+  const { stopId } = z.object({ data: z.object({ stopId: z.string() }) }).parse(await stopped.json()).data;
+  await page.reload();
   await main.getByRole("button", { name: `${dropped}を変える` }).click();
   await page.getByRole("dialog", { name: `${dropped}を変える` }).getByRole("button", { name: "タスクを取り消す" }).click();
   await expect(page.getByRole("dialog", { name: `${dropped}を変える` })).toBeHidden();
   await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${dropped}` }).last().getByText("見送り")).toBeVisible();
+  expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
   expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${droppedId}`)).json()).data.status).toBe("dropped");
 
   // 頼む先の無いタスクは誰も取らず、頼む先を付けるとその社員が取る
@@ -336,7 +342,7 @@ test("ほかで先に頼む先が変わっていたら、木の上に知らせ�
 const CARRY_TITLE = "続けるタスク";
 
 /**
- * 前の通しが落ちて残した、続けるタスクを見送りにする。止めたままのタスクは再開し、社員が持っていれば終わりの返事で終えさせて離れさせてから、残りを見送りにする。社員が持ったまま見送りにすると、社員は離れない
+ * 前の通しが落ちて残した、続けるタスクを見送りにする。止めたままのタスクは再開し、社員が持っていれば終わりの返事で終えさせて離れさせてから、残りを見送りにする
  * @param page 画面を開いたページ
  */
 async function dropLeftovers(page: Page): Promise<void> {

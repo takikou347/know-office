@@ -116,7 +116,7 @@ const resumeStopRoute = createRoute({
     "停止の記録を取得する",
     "停止範囲がサービスか全体なら `requireStepUp(c)` で確認を求める",
     "全体の停止なら、鍵の再登録が済んでいることを確認する",
-    "`GuardDO.releaseStop` で再開する権利を取り、`GuardDO` と `StaffDO` の停止を解除する",
+    "`GuardDO.releaseStop` で再開する権利を取り、`GuardDO` と `StaffDO` の停止を解除する。タスクは `stopped` のままの時だけ `todo` に戻し、止めている間に見送ったタスクは戻さない",
     "`stop_updates` に `resumed` を追加し、監査ログに `guard.resume` を記録する",
   ],
   "x-errors": [

@@ -222,7 +222,7 @@ async function enforce(env: Bindings, input: StopInput & { stopId: string }, sta
       const [node] = await orm.select().from(nodes).where(eq(nodes.id, input.target)).limit(1);
       // タスクは上司に戻す。上司がいなければ持っていた社員のまま
       const [boss] = staffId ? await orm.select({ bossId: staff.bossId }).from(staff).where(eq(staff.id, staffId)).limit(1) : [];
-      if (node) await orm.update(nodes).set({ status: "stopped", assignee: boss?.bossId ?? node.assignee, updatedAt: now }).where(eq(nodes.id, node.id));
+      if (node) await orm.update(nodes).set({ status: "stopped", assignee: boss?.bossId ?? node.assignee, version: sql`${nodes.version} + 1`, updatedAt: now }).where(eq(nodes.id, node.id));
       if (staffId) await staffOf(env, staffId).dropTask(input.target, now);
       return;
     }
@@ -348,10 +348,11 @@ export async function resumeStop(env: Bindings, stop: StopRowData, by: "reviewer
       case "task": {
         const progress = NodeProgress.safeParse(stop.nodeProgress);
         const staffId = progress.success ? progress.data.staffId : null;
+        // 止めた間に見送りにしたタスクは戻さない。読んだ後の別の文で確かめず、止めたままの時だけ 1 文で戻す
         await orm
           .update(nodes)
-          .set({ status: "todo", ...(staffId ? { assignee: staffId } : {}), updatedAt: now })
-          .where(eq(nodes.id, stop.target));
+          .set({ status: "todo", ...(staffId ? { assignee: staffId } : {}), version: sql`${nodes.version} + 1`, updatedAt: now })
+          .where(and(eq(nodes.id, stop.target), eq(nodes.status, "stopped")));
         if (staffId) await staffOf(env, staffId).resumeTask(stop.target);
         break;
       }

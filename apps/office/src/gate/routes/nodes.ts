@@ -85,6 +85,7 @@ const updateNodeRoute = createRoute({
     "親を付け替える時は階層の順に合うことを、担当の割り当てで作成者とレビュー担当が同じモデルにならないことを確認する",
     "`nodes` を更新し、`node_events` に追加する。作業中のタスクの担当と状態は変えない",
     "監査ログに `node.update` を記録する。担当を付けたか `todo` に戻した場合は、勤務時間外なら `StaffDO.call` で呼び出し、勤務中で手が空いていれば次のタスクを取らせる",
+    "見送りにした場合は、変える前の担当の社員がそのタスクを持っていれば `StaffDO.dropTask` で離れさせ、今の呼び出しを止めさせる。届かなければエラーログに `staff_drop_failed` を残し、見送りは戻さない",
   ],
   "x-errors": ["404 `not_found`: タスクが存在しない", "409 `conflict`: バージョンが異なる、同じモデルの組み合わせ、または作業中のタスクの担当か状態を変えようとした"],
   request: { params: NodeParam, body: jsonBody(UpdateNodeInput) },

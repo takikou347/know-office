@@ -1,5 +1,8 @@
 // オーナーが画面から作るタスク。題、本文、種類、頼む先と一緒に、直すリポジトリを付けられる (API の nodes)
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { recordsOf } from "../../src/gate/work/nodes.ts";
+import { stepUp } from "../helpers/approvals.ts";
 import { advance, api, at, clockIn, idOf, purposeAndGoal, REPO, rows, useWork } from "../helpers/work.ts";
 
 const world = useWork();
@@ -72,5 +75,80 @@ describe("オーナーが画面からタスクを作る", () => {
     await book.drop(first, world.clock.now());
     expect(await book.status(world.clock.now())).toEqual(before);
     expect(await rows(world.gate.env.DB, "SELECT node_id, result FROM work_entries")).toEqual([{ node_id: first, result: "stopped" }]);
+  });
+});
+
+describe("持っているタスクを見送りにする", () => {
+  it("止めたタスクを見送りにしてから止めを再開しても、社員はそのタスクを取り直さない", async () => {
+    const parentId = await project();
+    await clockIn(world, "builder");
+    const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId, scope: "office", title: "勤怠の表", taskKind: "build", assignee: "builder" }, 201));
+    const book = world.gate.staff.builder.book;
+    expect(await book.status(world.clock.now())).toMatchObject({ state: "working", nodeId: task });
+    const stop = await api(world, "POST", "/api/v1/guard/stops", { scope: "task", target: task, reason: "見直す" }, 201);
+    const [node] = await rows(world.gate.env.DB, "SELECT status, version FROM nodes WHERE id = ?", task);
+    await api(world, "PATCH", `/api/v1/nodes/${task}`, { version: node?.["version"], status: "dropped" }, 200);
+    // 同じ見送りが 2 度届いても、2 度目は読んだ版が古いので書かない
+    await api(world, "PATCH", `/api/v1/nodes/${task}`, { version: node?.["version"], status: "dropped" }, 409);
+    await stepUp(world);
+    await api(world, "POST", `/api/v1/guard/stops/${z.object({ stopId: z.string() }).parse(stop).stopId}/resume`, {}, 200);
+    expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "dropped" }]);
+    expect(await book.status(world.clock.now())).toMatchObject({ nodeId: null });
+  });
+
+  it("社員が持ったまま待ちに戻ったタスクを見送りにすると、社員はそのタスクを離れて呼び出しを止める", async () => {
+    const parentId = await project();
+    await clockIn(world, "builder");
+    const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId, scope: "office", title: "勤怠の表", taskKind: "build", assignee: "builder" }, 201));
+    const book = world.gate.staff.builder.book;
+    expect(await book.status(world.clock.now())).toMatchObject({ state: "working", nodeId: task });
+    // 呼び出しの失敗でタスクを todo に戻した後、社員が離れる前の間
+    await world.gate.env.DB.prepare("UPDATE nodes SET status = 'todo', version = version + 1 WHERE id = ?").bind(task).run();
+    const [node] = await rows(world.gate.env.DB, "SELECT version FROM nodes WHERE id = ?", task);
+    await api(world, "PATCH", `/api/v1/nodes/${task}`, { version: node?.["version"], status: "dropped" }, 200);
+    expect(await book.status(world.clock.now())).toMatchObject({ nodeId: null });
+    expect(await rows(world.gate.env.DB, "SELECT node_id, result FROM work_entries")).toEqual([{ node_id: task, result: "stopped" }]);
+  });
+
+  it("頼む先を変えながら見送りにしても、前に持っていた社員がタスクを離れる", async () => {
+    const parentId = await project();
+    await clockIn(world, "builder");
+    const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId, scope: "office", title: "勤怠の表", taskKind: "build", assignee: "builder" }, 201));
+    const book = world.gate.staff.builder.book;
+    await world.gate.env.DB.prepare("UPDATE nodes SET status = 'todo', version = version + 1 WHERE id = ?").bind(task).run();
+    const [node] = await rows(world.gate.env.DB, "SELECT version FROM nodes WHERE id = ?", task);
+    await api(world, "PATCH", `/api/v1/nodes/${task}`, { version: node?.["version"], assignee: "president", status: "dropped" }, 200);
+    expect(await book.status(world.clock.now())).toMatchObject({ nodeId: null });
+  });
+
+  it("社員に離れさせる知らせが届かなくても、見送りは残してエラーログに残す", async () => {
+    const parentId = await project();
+    const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId, scope: "office", title: "勤怠の表", taskKind: "build" }, 201));
+    await world.gate.env.DB.prepare("UPDATE nodes SET assignee = 'builder' WHERE id = ?").bind(task).run();
+    const [node] = await rows(world.gate.env.DB, "SELECT version FROM nodes WHERE id = ?", task);
+    const staffNs = world.gate.env.STAFF;
+    const broken = { idFromName: staffNs.idFromName.bind(staffNs), get: () => ({ dropTask: () => Promise.reject(new Error("届かない")) }) };
+    Object.assign(world.gate.env, { STAFF: broken });
+    try {
+      await api(world, "PATCH", `/api/v1/nodes/${task}`, { version: node?.["version"], status: "dropped" }, 200);
+    } finally {
+      Object.assign(world.gate.env, { STAFF: staffNs });
+    }
+    expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "dropped" }]);
+    expect(await rows(recordsOf(world.gate.env, world.clock.now()), "SELECT code FROM error_events")).toEqual([{ code: "staff_drop_failed" }]);
+  });
+
+  it("止めた後と再開した後は版が進み、止める前に読んだ版では見送りにできない", async () => {
+    const parentId = await project();
+    const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId, scope: "office", title: "勤怠の表", taskKind: "build" }, 201));
+    const version = async () => (await rows(world.gate.env.DB, "SELECT version FROM nodes WHERE id = ?", task))[0]?.["version"];
+    const before = await version();
+    const stop = await api(world, "POST", "/api/v1/guard/stops", { scope: "task", target: task, reason: "見直す" }, 201);
+    await api(world, "PATCH", `/api/v1/nodes/${task}`, { version: before, status: "dropped" }, 409);
+    const stopped = await version();
+    await stepUp(world);
+    await api(world, "POST", `/api/v1/guard/stops/${z.object({ stopId: z.string() }).parse(stop).stopId}/resume`, {}, 200);
+    await api(world, "PATCH", `/api/v1/nodes/${task}`, { version: stopped, status: "dropped" }, 409);
+    expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "todo" }]);
   });
 });

@@ -1,12 +1,13 @@
 // 目的からタスクまでの木。作る、変える、読む、受け付ける、出来事を残す (タスクとレビューの 3.1、データの 2 章)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, jstYear, keyedId, newId, type Node, type NodeEvent, type NodeKind, type NodeStatus, type NodeTree, type StaffId, type TaskKind } from "@know-office/core";
+import { AppError, jstYear, keyedId, newId, type Node, type NodeEvent, type NodeKind, type NodeStatus, type NodeTree, StaffId, type TaskKind } from "@know-office/core";
 import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { nodes, staff } from "../db/main.ts";
 import { nodeEvents } from "../db/records.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
+import { recordError } from "../ledger/errors.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { announce } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
@@ -248,7 +249,19 @@ export async function updateNode(env: Bindings, id: string, version: number, cha
   const fields = Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined));
   await appendNodeEvent(env, { nodeId: id, staffId: staffOrNull(actor.by), kind: "updated", detail: fields }, actor);
   await auditFrom(env, { at: actor.now, actor: actor.by, action: "node.update", target: id, scope: row.scope, detail: fields, traceId: actor.traceId });
+  if (change.status === "dropped") await leaveDropped(env, row, actor.now);
   return next;
+}
+
+/**
+ * 見送りにしたタスクを、変える前の担当に離れさせる。todo に戻した後に離れる前の間も社員は持っており、持っていなければ社員 DO は何もしない。届かなくても見送りは書いたので断らずエラーログに残す
+ * @param env バインディング
+ * @param before 変える前の行
+ * @param now 見送りにした時刻
+ */
+async function leaveDropped(env: Bindings, before: NodeRow, now: number): Promise<void> {
+  const holder = StaffId.safeParse(before.assignee);
+  if (holder.success) await env.STAFF.get(env.STAFF.idFromName(holder.data)).dropTask(before.id, now).catch((error: unknown) => recordError(env, { source: "gate", level: "error", code: "staff_drop_failed", error }, clockAt(now)));
 }
 
 /**
