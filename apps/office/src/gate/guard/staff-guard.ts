@@ -1,4 +1,4 @@
-// 社員 1 人のシグナルの数と、有効な作業トークンの一覧。StaffDO が持ち、テストは同じ物を手元の入れ物で使う (自動停止の 2 章、3.4)
+// 社員 1 人のシグナルの数と、有効な作業トークンの一覧。StaffDO が持ち、テストは同じ物を手元の入れ物で使う (自動停止の 2 章、3.3)
 import type { D1Database } from "@cloudflare/workers-types";
 import {
   AppError,
@@ -28,7 +28,7 @@ import type { Observed, RecentOp } from "./deps.ts";
 export const RECENT_OPS = 20;
 /** 作業トークンの長さ */
 export const TICKET_MS = 60 * 60_000;
-/** チェックポイントで残りがこれを切っていれば、新しい作業トークンを渡す (社員が考えるの 3.2) */
+/** チェックポイントで残りがこれを切っていれば、新しい作業トークンを渡す (社員が考えるの 3.3) */
 export const RENEW_BEFORE_MS = 10 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 

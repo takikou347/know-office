@@ -86,7 +86,7 @@ export function registerComponents(app: OpenAPIHono<GateEnv>): void {
   for (const [status, [name, description]] of Object.entries(STATUS_RESPONSES)) {
     app.openAPIRegistry.registerComponent("responses", name, {
       description,
-      // 429 と 503 は Retry-After で再試行までの秒数を返す (API の決まりの 3.1)
+      // 429 と 503 は Retry-After で再試行までの秒数を返す (API の決まりの 4.3)
       ...(RETRY_AFTER_STATUSES.has(status) ? { headers: { "Retry-After": { description: "再試行までの秒数", schema: { type: "integer" } } } } : {}),
       content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
     });

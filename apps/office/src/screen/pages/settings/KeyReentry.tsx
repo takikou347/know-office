@@ -1,4 +1,4 @@
-// 設定の画面の、全体を止めた後の鍵の入れ直し。GitHub App と Claude の新しい鍵の作り方を 1 ページで案内し、入れたら古い鍵を消すように示す (自動停止の 3.5)
+// 設定の画面の、全体を止めた後の鍵の入れ直し。GitHub App と Claude の新しい鍵の作り方を 1 ページで案内し、入れたら古い鍵を消すように示す (自動停止の 3.4)
 import { GuardKeys, type KeyKind, ReplaceClaudeKeyInput, ReplaceGitHubAppKeyInput } from "@know-office/core";
 import { Alert, Button, Card, Stack, Status, TextField } from "knowidea-ui";
 import { useContext, useEffect, useState } from "react";

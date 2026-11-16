@@ -1,4 +1,4 @@
-// 自動停止が外へ頼む口と、DO が返す数えた答えの形 (自動停止の 3.4、3.6)
+// 自動停止が外へ頼む口と、DO が返す数えた答えの形 (自動停止の 3.3、3.5)
 import { type Judgment, newId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import { notices } from "../db/main.ts";

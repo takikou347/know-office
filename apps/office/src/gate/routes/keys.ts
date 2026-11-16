@@ -1,4 +1,4 @@
-// 自動停止: 全体を止めた後に入れ直す鍵を読み、GitHub App の鍵と Claude の API の鍵を入れ直す (ルートの一覧の 1.5、自動停止の 3.5)
+// 自動停止: 全体を止めた後に入れ直す鍵を読み、GitHub App の鍵と Claude の API の鍵を入れ直す (API の guard、自動停止の 3.4)
 import { createRoute } from "@hono/zod-openapi";
 import { GuardKeys, ReplaceClaudeKeyInput, ReplaceGitHubAppKeyInput } from "@know-office/core";
 import { createRouter } from "../app.ts";

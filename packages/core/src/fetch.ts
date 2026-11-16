@@ -1,4 +1,4 @@
-// 外への fetch の出口。決めた宛先だけを、時間を切って呼ぶ (API の決まりの 3.6 の 6)
+// 外への fetch の出口。決めた宛先だけを、時間を切って呼ぶ (API の決まりの 4.5 の 6)
 
 /** fetch と同じ形の関数。テストは代わりの物を渡す */
 export type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;

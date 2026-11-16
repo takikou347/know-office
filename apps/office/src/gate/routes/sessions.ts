@@ -1,4 +1,4 @@
-// 認証: ログインセッションの開始、一覧、終了と、ログイン中の人 (ログインと記録の 3.2、ルートの一覧の 1.2)
+// 認証: ログインセッションの開始、一覧、終了と、ログイン中の人 (ログインと記録の 3.2、API の auth)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, jstClock, Me, newId, Session } from "@know-office/core";
 import { and, asc, eq, gt, isNull, ne } from "drizzle-orm";
@@ -102,7 +102,7 @@ export async function sessionKey(c: Context<GateEnv>): Promise<CryptoKey> {
 }
 
 /**
- * ログインを自動停止の数え方に渡し、新しい国か深夜のログインなら、オーナーに通知を出す。ログインと記録の 3.2、自動停止の 1.2
+ * ログインを自動停止の数え方に渡し、新しい国か深夜のログインなら、オーナーに通知を出す。ログインと記録の 3.2、自動停止の 2 章
  * @param c 要求の文脈
  * @param row 作ったログインセッション
  */

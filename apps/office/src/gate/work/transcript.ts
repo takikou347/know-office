@@ -1,4 +1,4 @@
-// 会話の記録をタスクごとの鍵の AES-GCM で暗号にして R2 に置き、ワークスペースが落ちて作り直した後に復号して戻し、同じ session の続きを呼ぶ (社員が考えるの 3.6)
+// 会話の記録をタスクごとの鍵の AES-GCM で暗号にして R2 に置き、ワークスペースが落ちて作り直した後に復号して戻し、同じ session の続きを呼ぶ (社員が考えるの 3.7)
 import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
 import { AppError, deriveKey, fromBase64, log, newId, RESTORE_TRANSCRIPT_BYTES, type RestoreInput, RunInput, type StaffId, toBase64, TranscriptPartInput } from "@know-office/core";
 import { and, asc, desc, eq } from "drizzle-orm";

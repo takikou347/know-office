@@ -1,4 +1,4 @@
-// 外への fetch が決めた宛先だけに出る事を確かめる。API の決まりの 3.6 の 6
+// 外への fetch が決めた宛先だけに出る事を確かめる。API の決まりの 4.5 の 6
 import { describe, expect, it } from "vitest";
 import { allowedFetch, type Fetcher } from "../src/index.ts";
 

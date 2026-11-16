@@ -1,4 +1,4 @@
-// ワークスペースが送る出来事を受ける口 (POST /ws/v1/events)。発言を会話に、ツールの結果を自動停止に、チェックポイントを社員 DO に、エラーをエラーログに、終わりをタスクに渡す (社員が考えるの 3.2、3.7)
+// ワークスペースが送る出来事を受ける口 (POST /ws/v1/events)。発言を会話に、ツールの結果を自動停止に、チェックポイントを社員 DO に、エラーをエラーログに、終わりをタスクに渡す (社員が考えるの 3.3、3.8)
 import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
 import { AgentEventsInput, AppError, type AgentEvent, type Clock, type StaffId, type WorkResult } from "@know-office/core";
 import type { Bindings, GateEnv } from "../env.ts";

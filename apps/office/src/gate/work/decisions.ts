@@ -1,4 +1,4 @@
-// ワークスペースのフックが聞くルールの判断 (POST /ws/v1/decisions)。core の decide() で決め、tool_calls と自動停止に渡す (社員が考えるの 3.4)
+// ワークスペースのフックが聞くルールの判断 (POST /ws/v1/decisions)。core の decide() で決め、tool_calls と自動停止に渡す (社員が考えるの 3.5)
 import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
 import {
   DecideInput,

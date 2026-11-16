@@ -1,4 +1,4 @@
-// 勤怠のルートと 0 時 5 分のジョブ。1 日の勤怠を本物の記録から返し、訂正を 409 まで problem+json で返す (社員と勤怠の 3.6 と 3.7、ルートの一覧の 1.3 と 1.4)
+// 勤怠のルートと 0 時 5 分のジョブ。1 日の勤怠を本物の記録から返し、訂正を 409 まで problem+json で返す (社員と勤怠の 3.6 と 3.7、API の staff と records)
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Problem } from "@know-office/core";

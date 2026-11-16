@@ -1,4 +1,4 @@
-# 画面のファイルに付けるセキュリティヘッダー。API の src/gate/headers.ts と同じ中身 (04-detail.md の 3.4)
+# 画面のファイルに付けるセキュリティヘッダー。API の src/gate/headers.ts と同じ中身 (詳細設計の目次の 3.4)
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://github.com
   Strict-Transport-Security: max-age=63072000; includeSubDomains

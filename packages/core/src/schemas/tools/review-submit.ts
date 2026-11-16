@@ -1,4 +1,4 @@
-// レビュー担当のツール review_submit の入力。今のレビューのタスクに承認か差し戻しを出す (タスクとレビューの 1.2、3.1 の 4)
+// レビュー担当のツール review_submit の入力。今のレビューのタスクに承認か差し戻しを出す (タスクとレビューの 2 章、3.1 の 4)
 import { CommitSha } from "../review.ts";
 import { z } from "../zod.ts";
 

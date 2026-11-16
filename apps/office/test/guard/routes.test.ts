@@ -1,4 +1,4 @@
-// 手で止める、止めた記録を読む、判定する、再開するルート (自動停止の 3.6、3.7、ルートの一覧の 1.5)
+// 手で止める、止めた記録を読む、判定する、再開するルート (自動停止の 3.5、3.6、API の guard)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { observe } from "../../src/gate/guard/observe.ts";

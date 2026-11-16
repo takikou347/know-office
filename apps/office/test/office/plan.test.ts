@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SEATS, restSpotOf } from "../../src/screen/pages/office/layout.ts";
 import { type Actors, type Step, planMotions } from "../../src/screen/pages/office/plan.ts";
 
-// 出来事から、どの社員がどこからどこへ、何を持って動くかを決める。画面の 3.4
+// 出来事から、どの社員がどこからどこへ、何を持って動くかを決める。画面の全体の 3.2
 
 const actors: Actors = {
   president: { at: SEATS.president.seat, canMove: true },

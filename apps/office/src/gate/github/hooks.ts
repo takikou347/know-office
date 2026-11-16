@@ -110,7 +110,7 @@ export async function receiveHook(c: Context<GateEnv>): Promise<void> {
   const link = await loadLink(c.env);
   if (!link.app) throw new AppError("unauthenticated", "GitHub とまだつないでいない");
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(link.app.webhookSecret.reveal()), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-  // HMAC の verify は時間が一定の比べ方をする。API の決まりの 3.6 の 3
+  // HMAC の verify は時間が一定の比べ方をする。API の決まりの 4.5 の 3
   if (!(await crypto.subtle.verify("HMAC", key, hexBytes(signature.data.slice("sha256=".length)), raw))) throw new AppError("unauthenticated", "署名が合わない");
   const now = c.var.clock.now();
   const delivery = DeliveryId.safeParse(c.req.header("X-GitHub-Delivery"));

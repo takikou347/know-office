@@ -1,4 +1,4 @@
-// 見つけて直す調べが読む、期間にかかる年ごとの記録の D1 を選ぶ (データの 1 章)
+// 見つけて直す調べが読む、期間にかかる年ごとの記録の D1 を選ぶ (データの 2 章)
 import { jstYear } from "@know-office/core";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 

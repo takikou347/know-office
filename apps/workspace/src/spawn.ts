@@ -1,4 +1,4 @@
-// SDK の子のプロセス (Claude Code と社員のコマンド) を、サーバーと違う利用者の staff に落として起こす (社員が考えるの 3.1)
+// SDK の子のプロセス (Claude Code と社員のコマンド) を、サーバーと違う利用者の staff に落として起こす (社員が考えるの 3.2)
 import { spawn } from "node:child_process";
 import type { SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { AppError } from "@know-office/core";

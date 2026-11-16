@@ -1,4 +1,4 @@
-// ワークスペースが SDK の会話の記録 (JSONL) の増えた分をゲートウェイに送り、落ちた後は戻した記録の続きから送る事を確かめる (社員が考えるの 3.2、3.6)
+// ワークスペースが SDK の会話の記録 (JSONL) の増えた分をゲートウェイに送り、落ちた後は戻した記録の続きから送る事を確かめる (社員が考えるの 3.3、3.7)
 import { execFileSync } from "node:child_process";
 import { appendFileSync, chownSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,4 +1,4 @@
-// 社長のツール node_assign の入力。タスクを社員に割り振る (タスクとレビューの 1.2)
+// 社長のツール node_assign の入力。タスクを社員に割り振る (タスクとレビューの 2 章)
 import { StaffId } from "../workday.ts";
 import { z } from "../zod.ts";
 

@@ -1,4 +1,4 @@
-// 蒸留の案を決める、基準を変える、自動停止の効き目を出す。案は社員のツールからは入れられず、オーナーの承認か、パスキーで確かめた基準の変更でだけ入る (サービスと拡張の 3.6、ルートの一覧の 1.5)
+// 蒸留の案を決める、基準を変える、自動停止の効き目を出す。案は社員のツールからは入れられず、オーナーの承認か、パスキーで確かめた基準の変更でだけ入る (サービスと拡張の 3.6、API の guard)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, type GuardEffect, jstDayStart, Lesson, LessonKind, LessonStatus, newId, StaffId, Thresholds, type UpdateThresholdsInput } from "@know-office/core";
 import { and, desc, eq, lt, sql } from "drizzle-orm";

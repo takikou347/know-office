@@ -3,7 +3,7 @@ import { part } from "./helpers/screen.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { runLocalD1, seedMain } from "./helpers/seed.ts";
 
-// ダッシュボードと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。承認待ちとタスクは種に置き、応答を差し替えない (ルートの一覧の 1.4 と 1.12)
+// ダッシュボードと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。承認待ちとタスクは種に置き、応答を差し替えない (API の records と settings)
 
 const NODE = "019a7b00-0000-7000-8000-0000000000ea";
 const APPROVAL = "019a7b00-0000-7000-8000-0000000000eb";

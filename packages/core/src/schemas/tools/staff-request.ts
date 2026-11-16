@@ -1,4 +1,4 @@
-// 社長のツール staff_request の入力。社員の追加と役の変更をオーナーに求める (タスクとレビューの 1.2)
+// 社長のツール staff_request の入力。社員の追加と役の変更をオーナーに求める (タスクとレビューの 2 章)
 import { StaffId } from "../workday.ts";
 import { z } from "../zod.ts";
 

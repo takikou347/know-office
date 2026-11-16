@@ -1,4 +1,4 @@
-// 全体とサービスのシグナルの数と、全体を止めた後の外の鍵の印。GuardDO が持ち、テストは同じ物を手元の入れ物で使う (自動停止の 2 章、3.5)
+// 全体とサービスのシグナルの数と、全体を止めた後の外の鍵の印。GuardDO が持ち、テストは同じ物を手元の入れ物で使う (自動停止の 2 章、3.4)
 import { AppError, countOffice, isStaffEvent, emptyOfficeCounts, GuardEvent, type GuardKeys, KeyKind, OfficeCounts, Thresholds } from "@know-office/core";
 import { z } from "zod";
 import type { GuardStorage } from "../auth/guard-book.ts";

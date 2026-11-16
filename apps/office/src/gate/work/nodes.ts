@@ -1,4 +1,4 @@
-// 目的からタスクまでの木。作る、変える、読む、受け付ける、出来事を残す (タスクとレビューの 3.1、データの 2.5)
+// 目的からタスクまでの木。作る、変える、読む、受け付ける、出来事を残す (タスクとレビューの 3.1、データの 2 章)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, jstYear, keyedId, newId, type Node, type NodeEvent, type NodeKind, type NodeStatus, type NodeTree, type StaffId, type TaskKind } from "@know-office/core";
 import { and, asc, eq, gt, ne, sql } from "drizzle-orm";

@@ -1,4 +1,4 @@
-// 蒸留の案を入れる事と、入れた対策の効き目を見る事。案は週のバッチで入り、基準の直しはパスキーで確かめたオーナーだけが入れる (サービスと拡張の 3.6、ルートの一覧の 1.5)
+// 蒸留の案を入れる事と、入れた対策の効き目を見る事。案は週のバッチで入り、基準の直しはパスキーで確かめたオーナーだけが入れる (サービスと拡張の 3.6、API の guard)
 import { DEFAULT_THRESHOLDS, newId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vitest";

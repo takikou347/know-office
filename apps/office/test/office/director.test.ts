@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { type ActorState, GIVE_MS, MARK_MS, WALK_SPEED, createDirector } from "../../src/screen/pages/office/director.ts";
 
-// 動きの列を時刻に合わせて進める。three.js を使わずに、社員の位置、運ぶ物、印を決める。画面の 3.4
+// 動きの列を時刻に合わせて進める。three.js を使わずに、社員の位置、運ぶ物、印を決める。画面の全体の 3.2
 
 /**
  * 席に座っている社員を作る

@@ -1,4 +1,4 @@
-# ワークスペースのイメージ。know-office の全体を置き場にして作る (社員が考えるの 3.1)
+# ワークスペースのイメージ。know-office の全体を置き場にして作る (社員が考えるの 3.2)
 # Node 22.23.5。版は digest で固定する
 FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 

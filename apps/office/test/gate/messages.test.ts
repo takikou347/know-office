@@ -1,4 +1,4 @@
-// 社員とのメッセージのルート。オーナーの発言を記録に足し、長い本文は R2 に置き、配信 DO に渡す (社員と自動の 3.7、ルートの一覧の 1.6)
+// 社員とのメッセージのルート。オーナーの発言を記録に足し、長い本文は R2 に置き、配信 DO に渡す (社員と自動の 3.7、API の conversation)
 import { Problem } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

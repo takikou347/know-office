@@ -1,4 +1,4 @@
-// 通知: 一覧と既読 (サービスと拡張の 3.5、ルートの一覧の 1.13)
+// 通知: 一覧と既読 (サービスと拡張の 3.5、API の notices)
 import { createRoute, z } from "@hono/zod-openapi";
 import { Notice } from "@know-office/core";
 import { createRouter } from "../app.ts";

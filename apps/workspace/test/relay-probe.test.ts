@@ -1,4 +1,4 @@
-// 鍵の失敗らしい時の確かめが、作業トークンで count_tokens を呼び、ゲートウェイのプロキシの印で断った先を分ける事を確かめる (社員が考えるの 3.2)
+// 鍵の失敗らしい時の確かめが、作業トークンで count_tokens を呼び、ゲートウェイのプロキシの印で断った先を分ける事を確かめる (社員が考えるの 3.3)
 import { describe, expect, it } from "vitest";
 import { relayProbe } from "../src/sdk.ts";
 

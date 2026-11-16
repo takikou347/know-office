@@ -1,4 +1,4 @@
-// ワークスペースの Node のサーバー (apps/workspace/src/server.ts) が受けるルートの形。社員 DO が呼び、API の文書に載せる (社員が考えるの 1.3)
+// ワークスペースの Node のサーバー (apps/workspace/src/server.ts) が受けるルートの形。社員 DO が呼び、API の文書に載せる (社員が考えるの 2 章)
 import { createRoute } from "@hono/zod-openapi";
 import { Health, ReasonInput, RestoreInput, RunInput, TicketInput, WorkspaceMessageInput } from "@know-office/core";
 import type { ZodType } from "zod";

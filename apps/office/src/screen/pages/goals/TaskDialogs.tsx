@@ -1,4 +1,4 @@
-// 目的と組織図の画面で、プロジェクトの下にタスクを足して社員に頼み、頼む先を変え、取り消す (タスクとレビューの 3.1、ルートの一覧の 1.7)
+// 目的と組織図の画面で、プロジェクトの下にタスクを足して社員に頼み、頼む先を変え、取り消す (タスクとレビューの 3.1、API の nodes)
 import type { NodeTree, OrgStaff } from "@know-office/core";
 import { RepoName, StaffId } from "@know-office/core";
 import { Button, Dialog, DialogClose, RadioGroup, Stack, TextField } from "knowidea-ui";

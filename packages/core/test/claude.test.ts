@@ -1,4 +1,4 @@
-// Claude のモデルの単価、役ごとのモデル、鍵の入れ物を確かめる (社員が考えるの 3.3)
+// Claude のモデルの単価、役ごとのモデル、鍵の入れ物を確かめる (社員が考えるの 3.4)
 import { describe, expect, it } from "vitest";
 import { allowedModels, batchCostMicroUsd, costMicroUsd, Secret } from "../src/index.ts";
 

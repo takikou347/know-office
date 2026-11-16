@@ -1,4 +1,4 @@
-// Claude Agent SDK に渡す呼び出しの形と、設定を読ませずにフックを関数で渡す options を作る (社員が考えるの 3.1、3.2)
+// Claude Agent SDK に渡す呼び出しの形と、設定を読ませずにフックを関数で渡す options を作る (社員が考えるの 3.2、3.3)
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { CONTAINER_CA, HAIKU, type RunInput } from "@know-office/core";
 import type { PreToolUseOutput } from "./hooks.ts";

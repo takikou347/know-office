@@ -1,4 +1,4 @@
-// 組織: 組織図、役目の説明文、オーナーの承認 (ルートの一覧の 1.8、タスクとレビューの 3.1)
+// 組織: 組織図、役目の説明文、オーナーの承認 (API の org、タスクとレビューの 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, Approval, ApprovalStatus, DecisionInput, newId, OrgStaff, PromptVersion, StaffId, UpdatePromptInput } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";

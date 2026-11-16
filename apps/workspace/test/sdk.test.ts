@@ -1,4 +1,4 @@
-// ワークスペースが Claude Agent SDK を、設定を読ませず、作業トークンを鍵に、フックを関数で渡して呼ぶ事を確かめる (社員が考えるの 3.1、3.2)
+// ワークスペースが Claude Agent SDK を、設定を読ませず、作業トークンを鍵に、フックを関数で渡して呼ぶ事を確かめる (社員が考えるの 3.2、3.3)
 import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";

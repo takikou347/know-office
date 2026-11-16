@@ -1,4 +1,4 @@
-// ワークスペースが会話の記録の続きを送る POST /ws/v1/transcript-parts が、作業トークンのタスクの記録として社員 DO に渡り、続きでない通し番号を断る事を確かめる (社員が考えるの 3.2、3.6)
+// ワークスペースが会話の記録の続きを送る POST /ws/v1/transcript-parts が、作業トークンのタスクの記録として社員 DO に渡り、続きでない通し番号を断る事を確かめる (社員が考えるの 3.3、3.7)
 import { toBase64 } from "@know-office/core";
 import { describe, expect, it, vi } from "vitest";
 import { routeEgress, type Caller } from "../../src/gate/egress.ts";

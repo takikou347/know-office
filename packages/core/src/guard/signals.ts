@@ -1,4 +1,4 @@
-// シグナルの数え方。出来事を数に足し、基準と比べて、止めるか近かったかを返す。数の入れ物は DO が記憶に置く (自動停止の 2 章、3.1、3.2)
+// シグナルの数え方。出来事を数に足し、基準と比べて、止めるか近かったかを返す。数の入れ物は DO が記憶に置く (自動停止の 2 章、3.1)
 import type { GuardEvent, GuardScope, GuardSignal, Judgment, Thresholds } from "../schemas/guard.ts";
 import { z } from "../schemas/zod.ts";
 

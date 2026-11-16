@@ -2,7 +2,7 @@ import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Scene, Texture } from "
 import { describe, expect, it } from "vitest";
 import { disposeScene } from "../../src/screen/pages/office/cleanup.ts";
 
-// 部屋を閉じる時の後始末。形、材質、模様を捨てる。画面の 3.4
+// 部屋を閉じる時の後始末。形、材質、模様を捨てる。画面の全体の 3.2
 
 /**
  * three.js の物が捨てられた事を数える

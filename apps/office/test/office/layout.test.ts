@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FURNITURE, GRID, SEATS, isBlocked, restSpotOf, routeBetween, stationOf, tileOf } from "../../src/screen/pages/office/layout.ts";
 
-// オフィスの部屋の席と道の配置。画面の 3.4
+// オフィスの部屋の席と道の配置。画面の全体の 3.2
 
 const STAFF = ["president", "builder", "reviewer"] as const;
 

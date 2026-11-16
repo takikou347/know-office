@@ -6,7 +6,7 @@ paths:
 
 # 画面の書き方
 
-正本は knowidea の `../knowidea/services/know-office/docs/04-detail.md` と、作る画面の機能ごとの文書。
+正本はこの rules。作る物は knowidea の `../knowidea/services/know-office/docs/04-detail/8-screens.md` (画面の全体) と、作る画面の機能ごとの文書。
 
 - 部品は knowidea-ui (`knowidea-ui`、`knowidea-css`、`knowidea-icons`、`knowidea-tokens`) を使う。足りない物は knowidea-ui に足し、バージョンを上げてから入れる。色と余白は直に書かずトークンを使う
 - 画面ごとに `pages/<画面>/`、共通は `parts/`

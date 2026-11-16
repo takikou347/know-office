@@ -87,7 +87,7 @@ export async function readSession(db: D1Database, key: CryptoKey, cookie: string
   if (!token || !encoded) throw new AppError("unauthenticated", "ログインセッションが無い");
   const signature = fromBase64url(encoded);
   if (!signature) throw new AppError("unauthenticated", "ログインセッションの署名の形が違う");
-  // HMAC の verify は時間が一定の比べ方をする。API の決まりの 3.6 の 3
+  // HMAC の verify は時間が一定の比べ方をする。API の決まりの 4.5 の 3
   const valid = await crypto.subtle.verify("HMAC", key, signature, encoder.encode(token)).catch(() => false);
   if (!valid) throw new AppError("unauthenticated", "ログインセッションの署名が合わない");
   const orm = drizzle(db);

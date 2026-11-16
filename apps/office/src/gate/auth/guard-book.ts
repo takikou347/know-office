@@ -1,4 +1,4 @@
-// ロックアウト、レート制限、パスキーの challenge の数え方。GuardDO が持ち、テストは同じ物を手元の入れ物で使う (ログインと記録の 1.2、3.1 の 4)
+// ロックアウト、レート制限、パスキーの challenge の数え方。GuardDO が持ち、テストは同じ物を手元の入れ物で使う (ログインと記録の 2 章、3.1 の 4)
 import { log } from "@know-office/core";
 import { z } from "zod";
 
@@ -25,7 +25,7 @@ export type Challenge = z.infer<typeof Challenge>;
 const StoredChallenge = Challenge.extend({ expiresAt: z.number() });
 
 const MINUTE = 60_000;
-/** 1 分に通す数。API の決まりの 1.2 の 3 と 3.6 の 2。workspace はハートビート (30 秒ごと) とチェックポイントの合わせた数。verify は 1 年分を頭から読み直すので 1 回 */
+/** 1 分に通す数。API の決まりの 4.2 の 3 と 4.5 の 2。workspace はハートビート (30 秒ごと) とチェックポイントの合わせた数。verify は 1 年分を頭から読み直すので 1 回 */
 export const RATE_LIMITS: Record<RateBucket, number> = { api: 300, auth: 10, workspace: 60, verify: 1, hook: 60 };
 /** この間に LOCK_AFTER 回失敗するとロックアウトする */
 const FAIL_WINDOW_MS = 10 * MINUTE;
@@ -36,9 +36,9 @@ const CHALLENGE_MS = 5 * MINUTE;
 /** 通知を出す先。GuardDO は D1 の notices に書く */
 export type Notify = (ip: string, at: number) => Promise<void>;
 
-/** 401、403、429 を数える窓の長さ (5 分)。API の決まりの 3.6 の 8 */
+/** 401、403、429 を数える窓の長さ (5 分)。API の決まりの 4.5 の 8 */
 export const DENIED_WINDOW_MS = 5 * MINUTE;
-/** 窓の中の 401、403、429 がこの回数を超えたら知らせる。API の決まりの 3.6 の 8 */
+/** 窓の中の 401、403、429 がこの回数を超えたら知らせる。API の決まりの 4.5 の 8 */
 export const DENIED_LIMIT = 50;
 
 /** 断った数が 5 分に 50 回を超えた時に知らせる先。数は超えた時の窓の数 */

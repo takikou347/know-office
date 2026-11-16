@@ -1,4 +1,4 @@
-// ルールの判断が Bash の命令を見る所。中身を読めない形、main への push、force、置き場の外の道を断る (社員が考えるの 3.4)
+// ルールの判断が Bash の命令を見る所。中身を読めない形、main への push、force、置き場の外の道を断る (社員が考えるの 3.5)
 import { inside, protectedParent, protectedPath } from "./path.ts";
 
 // 中身を判断できない形。$( とバッククォートは命令を、${ は道を隠す。{a,b} と {1..3} は語を増やす

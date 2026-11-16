@@ -1,4 +1,4 @@
-// 毎日 4 時の写し (wrangler d1 export) の間は D1 への要求が止まるので、記録 DO が監査ログの行を DO の storage に溜め、書けるようになったら順に書き、つなぎを割らない。DO が起き直した直後も同じ (ログインと記録の 3.6)
+// 毎日 4 時の写し (wrangler d1 export) の間は D1 への要求が止まるので、記録 DO が監査ログの行を DO の storage に溜め、書けるようになったら順に書き、つなぎを割らない。DO が起き直した直後も同じ (ログインと記録の 3.5)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

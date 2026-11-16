@@ -1,4 +1,4 @@
-// 範囲ごとに止める動き、止めた記録と近かった記録、再開、止める前に見せる数 (自動停止の 3.2、3.4、3.5、3.6、3.7)
+// 範囲ごとに止める動き、止めた記録と近かった記録、再開、止める前に見せる数 (自動停止の 3.1、3.3、3.4、3.5、3.6)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, type GuardScope, type Judgment, newId, StaffId, type StopPreview } from "@know-office/core";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";

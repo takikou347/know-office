@@ -1,7 +1,7 @@
 import { expect, test } from "./helpers/test.ts";
 import { addVirtualAuthenticator } from "./helpers/passkey.ts";
 
-// 設定の画面の、全体を止めた後の鍵の入れ直し。新しい鍵の作り方を 1 ページで案内し、パスキーで確かめてから入れ、古い鍵を消すように示す (自動停止の 3.5)
+// 設定の画面の、全体を止めた後の鍵の入れ直し。新しい鍵の作り方を 1 ページで案内し、パスキーで確かめてから入れ、古い鍵を消すように示す (自動停止の 3.4)
 // ゲートウェイの返事は境目のモックで返し、画面が送る要求の中身を確かめる。ルートそのものは test/guard/rekey.test.ts で確かめる
 const META = { traceId: "0".repeat(32) };
 const PEM = `-----BEGIN RSA PRIVATE KEY-----\n${"A".repeat(64)}\n-----END RSA PRIVATE KEY-----`;

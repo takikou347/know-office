@@ -1,4 +1,4 @@
-// 社員のツールの MCP の受け手 staff。社員の役のツールと入れている拡張のツールだけを出し、どれもゲートウェイの POST /ws/v1/tools/{toolName} を呼ぶだけ (社員が考えるの 3.5、サービスと拡張の 3.8)
+// 社員のツールの MCP の受け手 staff。社員の役のツールと入れている拡張のツールだけを出し、どれもゲートウェイの POST /ws/v1/tools/{toolName} を呼ぶだけ (社員が考えるの 3.6、サービスと拡張の 3.8)
 import { createSdkMcpServer, type McpSdkServerConfigWithInstance, type SdkMcpToolDefinition, tool } from "@anthropic-ai/claude-agent-sdk";
 import { allowedFetch, EXTENSION_TOOL_NAME, type ExtensionToolSpec, extensionToolShape, type Fetcher, STAFF_TOOL_CATALOG, type StaffToolName, ToolCallAnswer } from "@know-office/core";
 import { GATE_ORIGIN } from "./hooks.ts";

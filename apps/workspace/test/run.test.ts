@@ -1,4 +1,4 @@
-// タスク 1 件の SDK の呼び出しと、作業トークンを差し替えた時の続きからの呼び直しを確かめる (社員が考えるの 3.2)
+// タスク 1 件の SDK の呼び出しと、作業トークンを差し替えた時の続きからの呼び直しを確かめる (社員が考えるの 3.3)
 import type { AgentEvent, RunInput } from "@know-office/core";
 import { describe, expect, it, vi } from "vitest";
 import type { Agent, AgentCall } from "../src/agent.ts";

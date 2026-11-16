@@ -1,4 +1,4 @@
-// 拡張の一覧と入れ切り (ルートの一覧の 1.14) と、入れた拡張のルートを /api/v1/ext/<ID> の下に付ける (サービスと拡張の 3.8)
+// 拡張の一覧と入れ切り (API の extensions) と、入れた拡張のルートを /api/v1/ext/<ID> の下に付ける (サービスと拡張の 3.8)
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import { AppError, EXTENSION_ID, Extension, ToggleExtensionInput } from "@know-office/core";
 import type { Context } from "hono";

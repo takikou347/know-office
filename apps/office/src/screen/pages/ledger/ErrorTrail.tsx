@@ -1,4 +1,4 @@
-// 記録の画面のエラーログと、traceId で 1 つの要求をたどる所。一覧は /errors から読み、たどる時はパスキーで確かめてから /traces/{traceId} を読む (ログインと記録の 3.8)
+// 記録の画面のエラーログと、traceId で 1 つの要求をたどる所。一覧は /errors から読み、たどる時はパスキーで確かめてから /traces/{traceId} を読む (ログインと記録の 3.6)
 import { ErrorEvent, Trace } from "@know-office/core";
 import { Button, Link, Stack, Table } from "knowidea-ui";
 import { useContext, useState } from "react";

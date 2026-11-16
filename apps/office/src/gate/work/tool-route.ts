@@ -1,4 +1,4 @@
-// 社員のツールを呼ぶ口 (POST /ws/v1/tools/{toolName})。作業トークン、止まり、今のタスク、役、入力、ルールの判断を確かめてからゲートウェイが動かす (社員が考えるの 3.5、タスクとレビューの 1.2)
+// 社員のツールを呼ぶ口 (POST /ws/v1/tools/{toolName})。作業トークン、止まり、今のタスク、役、入力、ルールの判断を確かめてからゲートウェイが動かす (社員が考えるの 3.6、タスクとレビューの 2 章)
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import { AppError, decide, recordedText, TOOL_NAME, TOOL_NAME_MAX, ToolCallInput, ToolResult, toOperation } from "@know-office/core";
 import type { GateEnv } from "../env.ts";

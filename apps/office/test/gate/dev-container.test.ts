@@ -1,4 +1,4 @@
-// 開発環境のコンテナの代わりが、development で手元の代わりの物がある時だけ使われ、Node のワークスペースへ要求を回す事を確かめる (ログインと記録の 3.9、社員が考えるの 3.1)
+// 開発環境のコンテナの代わりが、development で手元の代わりの物がある時だけ使われ、Node のワークスペースへ要求を回す事を確かめる (ログインと記録の 3.9、社員が考えるの 3.2)
 import { describe, expect, it } from "vitest";
 import { containerFor, DevContainer } from "../../src/gate/work/dev-container.ts";
 import { type ContainerLike, WorkspaceBox } from "../../src/gate/work/workspace-box.ts";

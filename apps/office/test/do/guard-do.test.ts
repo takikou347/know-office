@@ -1,4 +1,4 @@
-// 社員 DO と全体のセキュリティ DO の数え方と作業トークンを、本物の workerd の RPC で確かめる (自動停止の 2 章、3.4)
+// 社員 DO と全体のセキュリティ DO の数え方と作業トークンを、本物の workerd の RPC で確かめる (自動停止の 2 章、3.3)
 import { DEFAULT_THRESHOLDS } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

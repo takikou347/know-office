@@ -1,4 +1,4 @@
-// 社員: 一覧と、その日だけの指示 (社員と勤怠の 3.4、ルートの一覧の 1.3)
+// 社員: 一覧と、その日だけの指示 (社員と勤怠の 3.4、API の staff)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, type Clock, CreateOrderInput, jstClock, jstDay, jstDayStart, log, newId, Order, StaffId, StaffOverview } from "@know-office/core";
 import { and, asc, eq } from "drizzle-orm";

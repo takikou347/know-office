@@ -1,4 +1,4 @@
-// 開発の代わりのワークスペースが送る出来事を、development の時だけゲートウェイの受け手に回す事を確かめる (ログインと記録の 3.9、社員が考えるの 3.2)
+// 開発の代わりのワークスペースが送る出来事を、development の時だけゲートウェイの受け手に回す事を確かめる (ログインと記録の 3.9、社員が考えるの 3.3)
 import { describe, expect, it } from "vitest";
 import { entryFetch } from "../../src/gate/entry.ts";
 import type { Bindings } from "../../src/gate/env.ts";

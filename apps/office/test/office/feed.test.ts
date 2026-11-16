@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Task } from "../../src/screen/mock.ts";
 import { createWorkFeed } from "../../src/screen/pages/office/feed.ts";
 
-// 画面が持つ今のデータ (社員とタスク) の置き場。タスクの一覧と詳細もここから読み、オフィスはここの変わりから出来事を起こす。画面の 3.4
+// 画面が持つ今のデータ (社員とタスク) の置き場。タスクの一覧と詳細もここから読み、オフィスはここの変わりから出来事を起こす。画面の全体の 3.2
 
 const t2: Task = { id: "t2", staffId: "builder", title: "CodeEditor のページを足す", service: "knowidea-ui", state: "可待ち", diff: "diff --git a/x b/x" };
 

@@ -1,4 +1,4 @@
-// 1 行の JSON のログ。Workers Logs に残る。鍵や作業トークンは伏せる (ログインと記録の 3.8)
+// 1 行の JSON のログ。Workers Logs に残る。鍵や作業トークンは伏せる (ログインと記録の 3.6)
 const SECRET_KEY = /authorization|cookie|token|secret|key|password/i;
 // 文の中に混じった鍵らしい物。上から順に置き換える。値だけを伏せ、何を伏せたかは名前で分かるようにする
 const SECRET_TEXT: [RegExp, string][] = [

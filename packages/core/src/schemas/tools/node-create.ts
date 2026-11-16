@@ -1,4 +1,4 @@
-// 社長のツール node_create の入力。目標の下にプロジェクトを、プロジェクトの下にタスクを作る (タスクとレビューの 1.2)
+// 社長のツール node_create の入力。目標の下にプロジェクトを、プロジェクトの下にタスクを作る (タスクとレビューの 2 章)
 import { StaffId } from "../workday.ts";
 import { z } from "../zod.ts";
 

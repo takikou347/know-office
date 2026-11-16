@@ -1,4 +1,4 @@
-// 記録 DO の中で監査ログを書く記録係。年の置き場を開き、前の行のハッシュにつないで書く。D1 に書けない間 (毎日 4 時の写しの wrangler d1 export は、その D1 への要求を止める) は行を DO の storage に溜め、書けるようになったら順に書く (ログインと記録の 3.4、3.5、3.6)
+// 記録 DO の中で監査ログを書く記録係。年の置き場を開き、前の行のハッシュにつないで書く。D1 に書けない間 (毎日 4 時の写しの wrangler d1 export は、その D1 への要求を止める) は行を DO の storage に溜め、書けるようになったら順に書く (ログインと記録の 3.4、3.5)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, type AuditInput, type Clock, jstYear } from "@know-office/core";
 import { type AuditRow, GENESIS_HASH, lastAuditHash, prepareAudit, writeAudit } from "./audit.ts";

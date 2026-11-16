@@ -1,4 +1,4 @@
-// ログインセッションとパスキーの返す形と入力。名前は API の文書 (v1.yaml) の components/schemas の名前になる (ログインと記録の 1.1)
+// ログインセッションとパスキーの返す形と入力。名前は API の文書 (v1.yaml) の components/schemas の名前になる (ログインと記録の 2 章)
 import { z } from "./zod.ts";
 
 /** ログインセッション 1 件。current は今の要求のセッションか */

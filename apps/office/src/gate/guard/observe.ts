@@ -1,4 +1,4 @@
-// ゲートウェイの中のセキュリティに関わる出来事を受け、持ち主の DO で数え、止めるか近かったかを残す (自動停止の 1.2、3.4)
+// ゲートウェイの中のセキュリティに関わる出来事を受け、持ち主の DO で数え、止めるか近かったかを残す (自動停止の 2 章、3.3)
 import { AppError, DEFAULT_THRESHOLDS, GuardEvent, isStaffEvent, type Judgment, StaffId, taskOverrun } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";

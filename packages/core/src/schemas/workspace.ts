@@ -1,4 +1,4 @@
-// ワークスペースとゲートウェイ、社員 DO の間でやり取りする形と、作業トークンの中身 (社員が考えるの 1.2、1.3、2 章)
+// ワークスペースとゲートウェイ、社員 DO の間でやり取りする形と、作業トークンの中身 (社員が考えるの 2 章)
 import { fromBase64 } from "../encoding.ts";
 import { STAFF_TOOL_NAMES } from "../rules/staff-tools.ts";
 import { StaffId, WorkResult } from "./workday.ts";

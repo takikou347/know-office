@@ -1,4 +1,4 @@
-// オーナーの情報を項目ごとに暗号にして置き、社員のツール owner_info_read が許した 1 項目だけを、オーナーの情報を扱う拡張のルートがパスキーの確認の後に戻し、読んだ記録を残す (社員が考えるの 3.4、3.5、サービスと拡張の 3.8)
+// オーナーの情報を項目ごとに暗号にして置き、社員のツール owner_info_read が許した 1 項目だけを、オーナーの情報を扱う拡張のルートがパスキーの確認の後に戻し、読んだ記録を残す (社員が考えるの 3.5、3.6、サービスと拡張の 3.8)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, deriveKey, fromBase64, newId, type StaffId, toBase64 } from "@know-office/core";
 import { and, eq, inArray } from "drizzle-orm";

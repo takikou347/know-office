@@ -1,4 +1,4 @@
-// 開発環境のワークスペースのコンテナの代わり。手元に Containers が無い時、代わりの物の置き場に立てた Node のワークスペースへ要求を回す (ログインと記録の 3.9、社員が考えるの 3.1)
+// 開発環境のワークスペースのコンテナの代わり。手元に Containers が無い時、代わりの物の置き場に立てた Node のワークスペースへ要求を回す (ログインと記録の 3.9、社員が考えるの 3.2)
 import { AppError, StaffId, WORKSPACE_KEY_ENV } from "@know-office/core";
 import { devWorkspaceBase, type EndpointEnv } from "../endpoints.ts";
 import { type EgressOptions, OPEN_PATHS, routeEgress } from "../egress.ts";

@@ -1,4 +1,4 @@
-// セキュリティと設定の画面の、出す文と送り方。基準の値の単位、止めた相手の名前、端末の名前、送れなかった理由の分け方 (自動停止の 3.8、ログインと記録の 3.2)
+// セキュリティと設定の画面の、出す文と送り方。基準の値の単位、止めた相手の名前、端末の名前、送れなかった理由の分け方 (自動停止の 3.6、ログインと記録の 3.2)
 import { DEFAULT_THRESHOLDS } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { createApi } from "../../src/screen/api.ts";

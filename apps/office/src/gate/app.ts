@@ -53,7 +53,7 @@ export function toFieldErrors(error: ZodError, target: string): FieldError[] {
  */
 export const defaultHook: Hook<unknown, GateEnv, string, unknown> = (result) => {
   if (result.success) return;
-  // 知らないクエリパラメーターは入力の誤りでなく要求の誤りとして 400 にする。API の決まりの 3.1
+  // 知らないクエリパラメーターは入力の誤りでなく要求の誤りとして 400 にする。API の決まりの 4.3
   if (result.target === "query" && result.error.issues.some((issue) => issue.code === "unrecognized_keys")) {
     throw new AppError("malformed_request", "未知のクエリパラメーターがある");
   }
@@ -98,16 +98,16 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
     await next();
   });
   app.use("*", trace);
-  // 401、403、429 を 5 分ごとに数えて知らせる (API の決まりの 3.6 の 8)。429 とロックアウトの 403 は入口の admit が数える
+  // 401、403、429 を 5 分ごとに数えて知らせる (API の決まりの 4.5 の 8)。429 とロックアウトの 403 は入口の admit が数える
   app.use("*", countDenied);
-  // 順は API の決まりの 1.2。ここで落ちた要求はルートの処理に届かない
+  // 順は API の決まりの 4.2。ここで落ちた要求はルートの処理に届かない
   app.use("/api/*", securityHeaders);
   app.use("/api/*", admission);
   app.use("/api/*", accessProof);
   app.use("/api/*", loginSession);
   app.use("/api/*", sameOrigin);
   app.use("/api/*", bodyShape);
-  // GitHub の通知は Access とログインセッションを通らず、署名で確かめる (API の決まりの 3.6)
+  // GitHub の通知は Access とログインセッションを通らず、署名で確かめる (API の決まりの 4.5)
   app.use("/hooks/*", securityHeaders);
   app.use("/hooks/*", hookAdmission);
   app.notFound((c) => {

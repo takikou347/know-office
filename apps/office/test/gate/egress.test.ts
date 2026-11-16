@@ -1,4 +1,4 @@
-// ワークスペースの外向きの通信が、ゲートウェイの受け手だけに出る事を確かめる (社員が考えるの 1.2、3.1、4 章)
+// ワークスペースの外向きの通信が、ゲートウェイの受け手だけに出る事を確かめる (社員が考えるの 2 章、3.2、テスト設計の 社員が考える)
 import { describe, expect, it } from "vitest";
 import { routeEgress, WORKSPACE_EGRESS, type Caller } from "../../src/gate/egress.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";

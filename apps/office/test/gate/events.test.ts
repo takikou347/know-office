@@ -1,4 +1,4 @@
-// ワークスペースが送る出来事 (POST /ws/v1/events) が、発言、ツールの結果、チェックポイント、エラー、終わりとしてゲートウェイに届く事を確かめる (社員が考えるの 3.2、3.7)
+// ワークスペースが送る出来事 (POST /ws/v1/events) が、発言、ツールの結果、チェックポイント、エラー、終わりとしてゲートウェイに届く事を確かめる (社員が考えるの 3.3、3.8)
 import type { StaffId } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";

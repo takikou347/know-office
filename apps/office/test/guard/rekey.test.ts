@@ -1,4 +1,4 @@
-// 全体を止めた後の鍵。止まっている間はプロキシが外へ出さず、オーナーが GitHub App と Claude の鍵を入れ直すと全体を再開できる (自動停止の 3.4、3.5)
+// 全体を止めた後の鍵。止まっている間はプロキシが外へ出さず、オーナーが GitHub App と Claude の鍵を入れ直すと全体を再開できる (自動停止の 3.3、3.4)
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";

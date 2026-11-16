@@ -1,4 +1,4 @@
-// オーナーが画面から作るタスク。題、本文、種類、頼む先と一緒に、直すリポジトリを付けられる (ルートの一覧の 1.7)
+// オーナーが画面から作るタスク。題、本文、種類、頼む先と一緒に、直すリポジトリを付けられる (API の nodes)
 import { describe, expect, it } from "vitest";
 import { advance, api, at, clockIn, idOf, purposeAndGoal, REPO, rows, useWork } from "../helpers/work.ts";
 

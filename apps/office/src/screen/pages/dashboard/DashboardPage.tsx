@@ -1,4 +1,4 @@
-// ダッシュボード。社員の様子、今日のタスク、今月の費用を入口の /dashboard から 1 回で読み、配信の印で読み直す。承認を待つ物は承認の一覧から読み、お知らせと並べる (ルートの一覧の 1.12)
+// ダッシュボード。社員の様子、今日のタスク、今月の費用を入口の /dashboard から 1 回で読み、配信の印で読み直す。承認を待つ物は承認の一覧から読み、お知らせと並べる (API の settings)
 import { Dashboard, type Health } from "@know-office/core";
 import { Card, Grid, List, Stat } from "knowidea-ui";
 import { useLiveTick } from "../../parts/live.tsx";

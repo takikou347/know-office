@@ -1,4 +1,4 @@
-// ログインの入口のミドルウェア。ロックアウトとレート制限、Access の証明、ログインセッション、Origin の順に確かめる (API の決まりの 1.2)
+// ログインの入口のミドルウェア。ロックアウトとレート制限、Access の証明、ログインセッション、Origin の順に確かめる (API の決まりの 4.2)
 import { AppError, log, newId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
@@ -12,7 +12,7 @@ import type { RateBucket } from "./guard-book.ts";
 import { readSession, SESSION_COOKIE, signingKey } from "./session.ts";
 import { vaultKey } from "./vault.ts";
 
-/** ログインセッションの開始とパスキーのパス。1 分 10 回に絞る (API の決まりの 3.6 の 2) */
+/** ログインセッションの開始とパスキーのパス。1 分 10 回に絞る (API の決まりの 4.5 の 2) */
 const AUTH_PATHS = /^\/api\/v1\/(sessions$|me\/step-up$|passkeys(\/options)?$)/;
 
 /** 1 年分の監査ログを頭から読み直すルート。1 分 1 回に絞る */
@@ -54,7 +54,7 @@ export const admission = createMiddleware<GateEnv>(async (c, next) => {
   c.set("ip", ip);
   const bucket: RateBucket = c.req.method === "POST" && AUTH_PATHS.test(c.req.path) ? "auth" : "api";
   const { locked, retryAfter } = await guardOf(c).admit(ip, bucket, c.var.clock.now());
-  // ロックアウトは誰か分かる前に確かめるので、誰か分からなくても 403 を返す。API の決まりの 3.2。数は admit の中で数えた
+  // ロックアウトは誰か分かる前に確かめるので、誰か分からなくても 403 を返す。API の決まりの 4.3。数は admit の中で数えた
   c.set("deniedCounted", locked || retryAfter !== null);
   if (locked) throw new AppError("locked_out", "失敗が続いたため、この送信元はしばらく使えない");
   if (retryAfter !== null) throw new AppError("rate_limited", "要求が多すぎる", { headers: { "Retry-After": String(retryAfter) } });

@@ -1,4 +1,4 @@
-// テストのゲートウェイの社員 DO とワークスペースの DO の代わりのうち、呼び出しの始め方 (arm、runState、markRun、run) と、開発の通しの forgetDay と鍵の確かめを持つ所 (社員が考えるの 3.2)
+// テストのゲートウェイの社員 DO とワークスペースの DO の代わりのうち、呼び出しの始め方 (arm、runState、markRun、run) と、開発の通しの forgetDay と鍵の確かめを持つ所 (社員が考えるの 3.3)
 import { AppError, type StaffId } from "@know-office/core";
 import type { Bindings } from "../../src/gate/env.ts";
 import type { StaffBook } from "../../src/gate/work/staff-book.ts";

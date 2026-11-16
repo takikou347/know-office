@@ -1,4 +1,4 @@
-// レビュー: オーナーの承認と差し戻し、行の指摘、その場の直しを受け、GitHub のプルリクエストに写す (ルートの一覧の 1.9、タスクとレビューの 3.6)
+// レビュー: オーナーの承認と差し戻し、行の指摘、その場の直しを受け、GitHub のプルリクエストに写す (API の reviews、タスクとレビューの 3.6)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, Commit, CreateCommitInput, CreateNoteInput, newId, ReviewNote, ReviewVerdict, ReviewVerdictInput } from "@know-office/core";
 import { createRouter } from "../app.ts";

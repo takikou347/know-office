@@ -1,4 +1,4 @@
-// 勤怠: 1 日の勤怠と、勤怠の訂正 (社員と勤怠の 3.6 と 3.7、ルートの一覧の 1.3 と 1.4)
+// 勤怠: 1 日の勤怠と、勤怠の訂正 (社員と勤怠の 3.6 と 3.7、API の staff と records)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, AttendanceQuery, AttendanceRow, CorrectAttendanceInput, DayAttendance, DaySummary, StaffId, type WorkEntry } from "@know-office/core";
 import { and, asc, desc, eq, gt, gte, lt, lte, or, type SQL } from "drizzle-orm";

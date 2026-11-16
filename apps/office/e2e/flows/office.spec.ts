@@ -3,7 +3,7 @@ import { connectGitHub, fakeGitHubRoute, forgetGitHub } from "./helpers/github.t
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { seedMain } from "./helpers/seed.ts";
 
-// オフィスの部屋が、本物のゲートウェイのレビューの判断を出来事として見せる。GitHub は手元の代わりにつなぎ、プルリクエストの変更だけを置く (画面の 3.4)
+// オフィスの部屋が、本物のゲートウェイのレビューの判断を出来事として見せる。GitHub は手元の代わりにつなぎ、プルリクエストの変更だけを置く (画面の全体の 3.2)
 // TODO(#87): 出来事をサーバーで作って配信で送るようになったら、画面の中の橋でなく配信で届いた出来事を見る
 
 const NODE = "019a7b00-0000-7000-8000-0000000000e7";

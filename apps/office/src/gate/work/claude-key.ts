@@ -1,4 +1,4 @@
-// Claude の API の鍵を読む。オーナーが入れ直した鍵が vault にあればそれだけを使い、無ければ環境変数の鍵を使う (自動停止の 3.5)
+// Claude の API の鍵を読む。オーナーが入れ直した鍵が vault にあればそれだけを使い、無ければ環境変数の鍵を使う (自動停止の 3.4)
 import { AppError, ReplaceClaudeKeyInput, Secret } from "@know-office/core";
 import { readStored } from "../auth/vault.ts";
 import type { Bindings } from "../env.ts";

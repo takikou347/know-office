@@ -1,4 +1,4 @@
-// 社員 DO の勤務の時刻と勤怠を、時計を進めて確かめる。社員と勤怠の 4 章。D1 は手元の本物
+// 社員 DO の勤務の時刻と勤怠を、時計を進めて確かめる。テスト設計の 社員と勤怠。D1 は手元の本物
 import { describe, expect, it } from "vitest";
 import { addOrder, CALL_TASK, DAY, hire, HOUR, jst, MINUTE, rows, run, segments, startDay, TASK, testDb, totals, useD1 } from "../helpers/staff.ts";
 

@@ -1,4 +1,4 @@
-// ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替え、オーナーの発言、中断、会話の記録の復元を受ける (社員が考えるの 1.3、3.6、3.7)
+// ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替え、オーナーの発言、中断、会話の記録の復元を受ける (社員が考えるの 2 章、3.7、3.8)
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { AppError, health, log, PROBLEMS, ReasonInput, RESTORE_BODY_BYTES, RestoreInput, RunInput, TicketInput, WORKSPACE_KEY_ENV, WorkspaceMessageInput } from "@know-office/core";

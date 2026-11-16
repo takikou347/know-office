@@ -1,4 +1,4 @@
-// 記録 DO。監査ログを 1 件ずつ順に書き、年ごとの置き場を切り替える。写しの間など D1 に書けない時は行を溜めて後で書く (ログインと記録の 3.4、3.5、3.6)
+// 記録 DO。監査ログを 1 件ずつ順に書き、年ごとの置き場を切り替える。写しの間など D1 に書けない時は行を溜めて後で書く (ログインと記録の 3.4、3.5)
 import { DurableObject } from "cloudflare:workers";
 import { AppError, AuditInput, type Clock, log, systemClock, jstYear } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";

@@ -1,4 +1,4 @@
-// MASTER_KEY から用途ごとの鍵を作る事を確かめる。04-detail.md の 3.5
+// MASTER_KEY から用途ごとの鍵を作る事を確かめる。詳細設計の目次の 3.3
 import { describe, expect, it } from "vitest";
 import { deriveKey } from "../src/index.ts";
 

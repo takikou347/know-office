@@ -1,4 +1,4 @@
-// サービスの返す形と入力。アイデアから運用までの流れ (サービスと拡張の 3.1、データの 2.6)
+// サービスの返す形と入力。アイデアから運用までの流れ (サービスと拡張の 3.1、データの 2 章)
 import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";
 import { z } from "./zod.ts";

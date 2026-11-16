@@ -1,4 +1,4 @@
-// 作業トークンを vault の ticket_key で署名して発行し、確かめ、チェックポイントで発行し直す (社員が考えるの 2 章、3.2、3.3)
+// 作業トークンを vault の ticket_key で署名して発行し、確かめ、チェックポイントで発行し直す (社員が考えるの 2 章、3.3、3.4)
 import { AppError, type Clock, log, type StaffId, WorkTicketClaims } from "@know-office/core";
 import { compactVerify, SignJWT } from "jose";
 import { vaultKey } from "../auth/vault.ts";
@@ -10,7 +10,7 @@ import { newTraceId } from "../trace.ts";
 
 /** 作業トークンの JWT の typ。ほかの用途の JWT と取り違えない */
 export const TICKET_TYP = "ko-ticket+jwt";
-/** 作業トークンの署名のアルゴリズム。これ以外は断る (API の決まりの 3.6 の 3) */
+/** 作業トークンの署名のアルゴリズム。これ以外は断る (API の決まりの 4.5 の 3) */
 export const TICKET_ALG = "HS256";
 
 /** 作業トークンを確かめて分かった事。時刻は協定世界時のミリ秒 */

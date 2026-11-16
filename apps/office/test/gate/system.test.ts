@@ -1,4 +1,4 @@
-// 稼働確認、API ドキュメント、全ルートに共通のヘッダーとミドルウェアを確かめる。API の決まりの 1.2、3.5、3.6
+// 稼働確認、API ドキュメント、全ルートに共通のヘッダーとミドルウェアを確かめる。API の決まりの 4.1、4.2、4.5
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// 作ったワークスペースのイメージで、社員がフックと実行物を書き換えられず、サーバーの鍵とメモリと 8080 番に触れない事を Docker で確かめる (社員が考えるの 3.1、4 章)
+// 作ったワークスペースのイメージで、社員がフックと実行物を書き換えられず、サーバーの鍵とメモリと 8080 番に触れない事を Docker で確かめる (社員が考えるの 3.2、テスト設計の 社員が考える)
 // Docker が要るので pnpm test では流さず、イメージを作った後に pnpm --filter @know-office/workspace test:image で流す。CI は check.yml の image で流す
 import { execFileSync, spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

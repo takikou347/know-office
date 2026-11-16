@@ -1,4 +1,4 @@
-// 同じ時に 1 つだけ動かす操作の錠。取る時は 1 文の条件付きの書きで、切れた錠だけを取り直す (データの 2.5)
+// 同じ時に 1 つだけ動かす操作の錠。取る時は 1 文の条件付きの書きで、切れた錠だけを取り直す (データの 2 章)
 import type { D1Database } from "@cloudflare/workers-types";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";

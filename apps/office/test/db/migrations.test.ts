@@ -1,4 +1,4 @@
-// マイグレーションを流した D1 のテーブルとカラムが Drizzle のスキーマと合う事を確かめる。データの 4 章
+// マイグレーションを流した D1 のテーブルとカラムが Drizzle のスキーマと合う事を確かめる。テスト設計の データ
 import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as main from "../../src/gate/db/main.ts";

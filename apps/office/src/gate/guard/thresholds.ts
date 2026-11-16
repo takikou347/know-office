@@ -1,4 +1,4 @@
-// 今の基準を settings の最新の行から読み、基準のハッシュを作る。行が無い間は初期値をバージョン 0 として使う (自動停止の 3.1、3.3)
+// 今の基準を settings の最新の行から読み、基準のハッシュを作る。行が無い間は初期値をバージョン 0 として使う (自動停止の 3.1、3.2)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, canonicalJson, DEFAULT_THRESHOLDS, sha256Hex, Thresholds } from "@know-office/core";
 import { desc, eq } from "drizzle-orm";

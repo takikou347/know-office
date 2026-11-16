@@ -1,4 +1,4 @@
-// know-office が入れる knowidea-ui が、npm に出たバージョンだけを指す事を確かめる。足りないコンポーネントは knowidea-ui に足して出してから入れる (サービスと拡張の 4 章)
+// know-office が入れる knowidea-ui が、npm に出たバージョンだけを指す事を確かめる。足りないコンポーネントは knowidea-ui に足して出してから入れる (テスト設計の サービスと拡張)
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

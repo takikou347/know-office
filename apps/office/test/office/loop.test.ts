@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type LoopClock, createLoop } from "../../src/screen/pages/office/loop.ts";
 
-// 部屋を描く回し方。30fps に間引き、見えない間は止め、再開した時は止めていた分だけ動きの時刻をずらす。画面の 3.4
+// 部屋を描く回し方。30fps に間引き、見えない間は止め、再開した時は止めていた分だけ動きの時刻をずらす。画面の全体の 3.2
 
 /**
  * 手で進める作り物の時計と requestAnimationFrame を作る

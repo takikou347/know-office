@@ -1,4 +1,4 @@
-// API の返事に付けるセキュリティヘッダー。04-detail.md の 3.4 と API の決まりの 3.6 の 4
+// API の返事に付けるセキュリティヘッダー。詳細設計の目次の 3.4 と API の決まりの 4.5 の 4
 import { createMiddleware } from "hono/factory";
 import type { GateEnv } from "./env.ts";
 

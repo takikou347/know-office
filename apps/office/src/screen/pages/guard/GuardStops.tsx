@@ -1,4 +1,4 @@
-// セキュリティの画面の、止めている物と止めた記録。止めている物を再開し、直前 20 件の記録の中身を開いて判定を付ける (自動停止の 3.8)
+// セキュリティの画面の、止めている物と止めた記録。止めている物を再開し、直前 20 件の記録の中身を開いて判定を付ける (自動停止の 3.6)
 import { GuardState, type GuardScope, Resumption, StopDetail, StopRow, StopVerdict } from "@know-office/core";
 import { Alert, Button, Card, Dialog, DialogClose, RadioGroup, Stack, Status, Table, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";

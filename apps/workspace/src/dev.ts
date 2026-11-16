@@ -1,4 +1,4 @@
-// 開発環境の代わりのワークスペース。本物と同じサーバーと Runner を手元の空いた番号で起こし、SDK は手元の代わりの Claude API だけを呼び、出来事はゲートウェイの開発の道に送る (ログインと記録の 3.9、社員が考えるの 3.1)
+// 開発環境の代わりのワークスペース。本物と同じサーバーと Runner を手元の空いた番号で起こし、SDK は手元の代わりの Claude API だけを呼び、出来事はゲートウェイの開発の道に送る (ログインと記録の 3.9、社員が考えるの 3.2)
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

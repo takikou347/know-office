@@ -1,4 +1,4 @@
-// 社員 DO を本物の workerd で起こし、StaffBook を包んだ RPC と D1 への書き込みを確かめる。社員と勤怠の 1.3
+// 社員 DO を本物の workerd で起こし、StaffBook を包んだ RPC と D1 への書き込みを確かめる。社員と勤怠の 2 章
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CALL_TASK, DAY, jst, MINUTE, TASK } from "../helpers/staff.ts";
 import { startTestWorker, type TestWorker } from "../helpers/worker.ts";

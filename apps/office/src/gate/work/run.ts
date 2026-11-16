@@ -1,4 +1,4 @@
-// 社員が取ったタスクの SDK の呼び出しを始める。最初の runs、作り直しと再開の後の続き、失敗の数え方と鍵の失敗の間の止め方を持つ (社員が考えるの 3.2、タスクとレビューの 3.1)
+// 社員が取ったタスクの SDK の呼び出しを始める。最初の runs、作り直しと再開の後の続き、失敗の数え方と鍵の失敗の間の止め方を持つ (社員が考えるの 3.3、タスクとレビューの 3.1)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, log, newId, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, type WorkResult } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
@@ -21,7 +21,7 @@ export const AUTH_FAILED_NOTICE = "sdk_auth_failed";
 /** 続けて失敗したタスクの通知の種類 */
 export const RUN_FAILED_NOTICE = "staff_run_failed";
 
-/** タスクの種類ごとの考える深さ。作るタスクは medium、見るタスクは high。ここに無い種類は社員の初期値を使う (社員が考えるの 3.3) */
+/** タスクの種類ごとの考える深さ。作るタスクは medium、見るタスクは high。ここに無い種類は社員の初期値を使う (社員が考えるの 3.4) */
 const EFFORT_BY_KIND: Partial<Record<string, RunInput["effort"]>> = { build: "medium", fix: "medium", content: "medium", review: "high" };
 
 /** 呼び出しを始められる社員の状態。waiting はワークスペースを作り直して待つ間で、受け付けられなければ失敗に数える。延長の終わり (wrapping)、止まり、退勤の後は始めない */

@@ -1,4 +1,4 @@
-// 社員のツールを MCP の受け手に出す時の説明と入力の形が、ゲートウェイの正本の形と食い違わない事を確かめる (社員が考えるの 3.5)
+// 社員のツールを MCP の受け手に出す時の説明と入力の形が、ゲートウェイの正本の形と食い違わない事を確かめる (社員が考えるの 3.6)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ROLE_TOOLS, STAFF_TOOL_CATALOG, STAFF_TOOL_NAMES, StaffRequestTool } from "../src/index.ts";

@@ -1,4 +1,4 @@
-// ワークスペースのフックが聞くルールの判断 (POST /ws/v1/decisions) を、作業トークンから記録と自動停止まで確かめる (社員が考えるの 3.4)
+// ワークスペースのフックが聞くルールの判断 (POST /ws/v1/decisions) を、作業トークンから記録と自動停止まで確かめる (社員が考えるの 3.5)
 import type { StaffId } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

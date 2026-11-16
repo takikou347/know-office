@@ -1,4 +1,4 @@
-// ログインセッションを作る、一覧、切る、守り (ログインと記録の 3.2、ルートの一覧の 1.2)
+// ログインセッションを作る、一覧、切る、守り (ログインと記録の 3.2、API の auth)
 import { Me, Session } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

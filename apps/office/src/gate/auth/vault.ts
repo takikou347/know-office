@@ -1,4 +1,4 @@
-// 実行中に作る鍵を D1 の vault に、MASTER_KEY から作った vault 用の鍵の AES-GCM で暗号にして置く (データの 2.1 の vault、04-detail.md の 3.5)
+// 実行中に作る鍵を D1 の vault に、MASTER_KEY から作った vault 用の鍵の AES-GCM で暗号にして置く (データの 2 章 の vault、詳細設計の目次の 3.3)
 import { AppError, type Clock, deriveKey, fromBase64, Secret, toBase64 } from "@know-office/core";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -146,7 +146,7 @@ export async function storeStatements(
 }
 
 /**
- * 全体を止めた時に vault の鍵を止める (自動停止の 3.5)。know-office が作る鍵は新しいバージョンに取り替えて古いバージョンに revoked_at を入れ、
+ * 全体を止めた時に vault の鍵を止める (自動停止の 3.4)。know-office が作る鍵は新しいバージョンに取り替えて古いバージョンに revoked_at を入れ、
  * 外から受けた鍵 (GitHub App とインストールと Claude の API の鍵) は revoked_at を入れるだけにする。外の鍵はオーナーが入れ直す
  * @param db 今の状態の D1
  * @param master MASTER_KEY

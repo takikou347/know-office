@@ -1,4 +1,4 @@
-// 社員の進みを受ける所。チェックポイントを社員 DO と出来事に渡して作業トークンを差し替え、社員の発言を会話に残す。社員のツールとワークスペースの出来事の両方から呼ぶ (社員が考えるの 3.2、3.7)
+// 社員の進みを受ける所。チェックポイントを社員 DO と出来事に渡して作業トークンを差し替え、社員の発言を会話に残す。社員のツールとワークスペースの出来事の両方から呼ぶ (社員が考えるの 3.3、3.8)
 import { type CheckpointInput, type StaffId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";

@@ -1,4 +1,4 @@
-// タスクの木、組織図、オーナーの承認の返す形と入力 (タスクとレビューの 1 章と 2 章、データの 2.2 と 2.5)
+// タスクの木、組織図、オーナーの承認の返す形と入力 (タスクとレビューの 2 章と 2 章、データの 2 章 と 2.5)
 import { Meta } from "./common.ts";
 import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";

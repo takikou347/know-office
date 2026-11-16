@@ -1,4 +1,4 @@
-// v1.yaml がコードのルートとスキーマから作った物そのままで、OpenAPI 3.1 として正しい事を確かめる。API の決まりの 3.5
+// v1.yaml がコードのルートとスキーマから作った物そのままで、OpenAPI 3.1 として正しい事を確かめる。API の決まりの 4.1
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -45,7 +45,7 @@ describe("OpenAPI の文書", () => {
   });
 
   it("v1.yaml は YAML 1.1 と 1.2 のどちらで読んでも、コードから作った文書と同じ物になる", () => {
-    // knowidea の routes_md.py (PyYAML) は YAML 1.1 で読み、off や yes を真偽に変える
+    // PyYAML のような YAML 1.1 の読み手は、off や yes を真偽に変える
     const generated: unknown = JSON.parse(JSON.stringify(openApiDocument()));
     expect(parse(text, { version: "1.2" })).toEqual(generated);
     expect(parse(text, { version: "1.1" })).toEqual(generated);

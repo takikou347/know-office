@@ -1,4 +1,4 @@
-// 戻した直後のデプロイを数えない守りと、自動停止が戻しを飛ばした時の記録 (サービスと拡張の 3.2、自動停止の 3.4)
+// 戻した直後のデプロイを数えない守りと、自動停止が戻しを飛ばした時の記録 (サービスと拡張の 3.2、自動停止の 3.3)
 import { describe, expect, it } from "vitest";
 import { connectRollback } from "../../src/gate/guard/deps.ts";
 import { collectMetrics, type Analytics } from "../../src/gate/services/deploys.ts";

@@ -1,4 +1,4 @@
-// 勤怠の履歴とダッシュボードのルート。記録の画面とダッシュボードが本物の記録から読む (ルートの一覧の 1.4 と 1.12)
+// 勤怠の履歴とダッシュボードのルート。記録の画面とダッシュボードが本物の記録から読む (API の records と settings)
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { fixedClock } from "../helpers/clock.ts";

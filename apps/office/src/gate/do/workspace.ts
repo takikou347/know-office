@@ -1,4 +1,4 @@
-// ワークスペースのコンテナの DO と、コンテナの外向きの通信の受け手。判断は WorkspaceBox と routeEgress に置き、ここは包むだけ (社員が考えるの 3.1)
+// ワークスペースのコンテナの DO と、コンテナの外向きの通信の受け手。判断は WorkspaceBox と routeEgress に置き、ここは包むだけ (社員が考えるの 3.2)
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { AppError, StaffId, systemClock } from "@know-office/core";
 import { z } from "zod";

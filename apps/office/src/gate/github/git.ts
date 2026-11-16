@@ -225,7 +225,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   const service = match?.[3] === "info/refs" ? url.searchParams.get("service") : match?.[3];
   const repo = RepoName.safeParse(match ? `${match[1] ?? ""}/${match[2] ?? ""}` : "");
   if (!match || !repo.success || (service !== "git-upload-pack" && service !== "git-receive-pack")) throw new AppError("not_found", "git の道でない");
-  // 全体、社員、タスクが止まっている間は、鍵を作らず GitHub へ出さない (自動停止の 3.4)
+  // 全体、社員、タスクが止まっている間は、鍵を作らず GitHub へ出さない (自動停止の 3.3)
   await ensureRunning(c.env, ticket.staffId, ticket.nodeId);
   const push = service === "git-receive-pack";
   const scope = await repoScope(c.env.DB, repo.data);

@@ -1,4 +1,4 @@
-// パスキーの登録と、大事な操作の前の確認 (ログインと記録の 3.3、ルートの一覧の 1.2)
+// パスキーの登録と、大事な操作の前の確認 (ログインと記録の 3.3、API の auth)
 import { Passkey, PasskeyOptions, Problem, StepUp } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

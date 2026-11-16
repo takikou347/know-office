@@ -1,5 +1,5 @@
 // API の失敗の種類。ステータスと短い題を code ごとに決め、画面は code で分ける
-// 正本は knowidea の services/know-office/docs/04-detail/1-api.md の 3.1
+// 正本は knowidea の services/know-office/docs/04-detail/index.md の 4.3
 
 /** 失敗の種類の並び。problem+json の code と type の末尾に使う */
 export const ERROR_CODES = [

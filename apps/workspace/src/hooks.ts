@@ -1,4 +1,4 @@
-// ツールを使う前のフック。ゲートウェイのルールの判断を聞き、届かない、遅い、エラーの時は断る (社員が考えるの 3.4)
+// ツールを使う前のフック。ゲートウェイのルールの判断を聞き、届かない、遅い、エラーの時は断る (社員が考えるの 3.5)
 import { allowedFetch, DecideAnswer, log, PreToolUseInput, type Clock, type Decision, type Fetcher } from "@know-office/core";
 
 /** ゲートウェイの受け口。ワークスペースの外向きの通信はこの宛先だけに出る */

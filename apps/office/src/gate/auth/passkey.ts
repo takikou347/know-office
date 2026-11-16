@@ -73,7 +73,7 @@ export function requireStepUp(c: Context<GateEnv>): void {
  * @throws step_up_required 確認が無いか、15 分を過ぎた時
  */
 export const stepUpGate = createMiddleware<GateEnv>(async (c, next) => {
-  // 入力の検証より先に断り、確認の無い人に入力の形を探らせない。ログインと記録の 1 章
+  // 入力の検証より先に断り、確認の無い人に入力の形を探らせない。ログインと記録の 2 章
   requireStepUp(c);
   await next();
 });

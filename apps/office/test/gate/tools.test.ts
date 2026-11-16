@@ -1,4 +1,4 @@
-// 社員のツールを呼ぶ口 (POST /ws/v1/tools/{toolName}) を、作業トークンから承認とタスクの移りまで確かめる (社員が考えるの 3.5、タスクとレビューの 1.2)
+// 社員のツールを呼ぶ口 (POST /ws/v1/tools/{toolName}) を、作業トークンから承認とタスクの移りまで確かめる (社員が考えるの 3.6、タスクとレビューの 2 章)
 import type { D1Database } from "@cloudflare/workers-types";
 import type { StaffId } from "@know-office/core";
 import { describe, expect, it } from "vitest";

@@ -57,7 +57,7 @@ export const system = createRouter()
     return ok(c, health("gate"));
   })
   .openapi(getApiDocs, (c) => {
-    // Swagger UI は style 属性を使うので、このルートだけ style-src に unsafe-inline を足す。API の決まりの 3.5
+    // Swagger UI は style 属性を使うので、このルートだけ style-src に unsafe-inline を足す。API の決まりの 4.1
     c.header("Content-Security-Policy", CONTENT_SECURITY_POLICY.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"));
     return c.html(DOCS_HTML, 200);
   })

@@ -1,4 +1,4 @@
-// ルールの判断を、操作の種類ごとに通す場合と断る場合で確かめる (社員が考えるの 3.4、4 章)
+// ルールの判断を、操作の種類ごとに通す場合と断る場合で確かめる (社員が考えるの 3.5、テスト設計の 社員が考える)
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

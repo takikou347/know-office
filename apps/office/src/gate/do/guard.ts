@@ -1,4 +1,4 @@
-// 全体のセキュリティ DO。ロックアウト、レート制限、パスキーの challenge を 1 か所で数える (ログインと記録の 1.2)
+// 全体のセキュリティ DO。ロックアウト、レート制限、パスキーの challenge を 1 か所で数える (ログインと記録の 2 章)
 import { DurableObject } from "cloudflare:workers";
 import { type GuardKeys, newId, systemClock } from "@know-office/core";
 import { type Admission, type Challenge, GuardBook, type RateBucket } from "../auth/guard-book.ts";

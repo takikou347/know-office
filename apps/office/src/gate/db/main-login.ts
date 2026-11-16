@@ -1,4 +1,4 @@
-// D1 の DB のうち、ログインと記録のテーブル。データの 2.1
+// D1 の DB のうち、ログインと記録のテーブル。データの 2 章
 import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { flag, id, json, time } from "./columns.ts";
 

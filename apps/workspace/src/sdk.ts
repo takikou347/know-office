@@ -1,4 +1,4 @@
-// Claude Agent SDK の query() を呼び、session を知らせ、失敗で終えたら投げる (社員が考えるの 3.1、3.2)
+// Claude Agent SDK の query() を呼び、session を知らせ、失敗で終えたら投げる (社員が考えるの 3.2、3.3)
 import { type Options, query } from "@anthropic-ai/claude-agent-sdk";
 import type { Agent, AgentOptions } from "./agent.ts";
 

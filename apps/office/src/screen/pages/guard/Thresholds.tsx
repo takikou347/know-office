@@ -1,4 +1,4 @@
-// セキュリティの画面の基準。今の基準を表で出し、1 項目ずつパスキーで確かめて変える (自動停止の 3.3、3.8)
+// セキュリティの画面の基準。今の基準を表で出し、1 項目ずつパスキーで確かめて変える (自動停止の 3.2、3.6)
 import { GuardThresholds } from "@know-office/core";
 import { Alert, Button, Dialog, DialogClose, Stack, Table, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";

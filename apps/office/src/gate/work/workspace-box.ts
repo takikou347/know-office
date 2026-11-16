@@ -1,4 +1,4 @@
-// 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを鍵を付けて呼ぶ。起きなければ知らせる (社員が考えるの 1.3、3.1)
+// 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを鍵を付けて呼ぶ。起きなければ知らせる (社員が考えるの 2 章、3.2)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, CONTAINER_CA, Health, log, newId, ReasonInput, RestoreInput, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";

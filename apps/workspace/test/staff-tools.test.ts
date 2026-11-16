@@ -1,4 +1,4 @@
-// 社員のツールの MCP の受け手が、役のツールだけを出し、ゲートウェイの POST /ws/v1/tools/{toolName} を呼ぶだけである事を確かめる (社員が考えるの 3.5)
+// 社員のツールの MCP の受け手が、役のツールだけを出し、ゲートウェイの POST /ws/v1/tools/{toolName} を呼ぶだけである事を確かめる (社員が考えるの 3.6)
 import type { Fetcher } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { GATE_TOOLS_URL, staffServer, staffToolDefinitions, type StaffToolDeps } from "../src/staff-tools.ts";

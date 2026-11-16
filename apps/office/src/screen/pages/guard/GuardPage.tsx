@@ -1,4 +1,4 @@
-// セキュリティの画面。止めている物と再開、止めた記録と判定、基準、効き目、蒸留した学び、手で止めるボタン。どれもゲートウェイから読む (自動停止の 3.8)
+// セキュリティの画面。止めている物と再開、止めた記録と判定、基準、効き目、蒸留した学び、手で止めるボタン。どれもゲートウェイから読む (自動停止の 3.6)
 import { StaffId } from "@know-office/core";
 import { Stack } from "knowidea-ui";
 import { useCallback, useState } from "react";

@@ -3,7 +3,7 @@ import { AppError } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import type { GateEnv } from "./env.ts";
 
-/** 受ける本文の上限 (1MB)。API の決まりの 1.2 の 7 */
+/** 受ける本文の上限 (1MB)。API の決まりの 4.2 の 7 */
 export const MAX_BODY_BYTES = 1024 * 1024;
 
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
@@ -55,7 +55,7 @@ async function hasBytes(body: ReadableStream<Uint8Array>): Promise<boolean> {
 export const bodyShape = createMiddleware<GateEnv>(async (c, next) => {
   if (METHODS_WITH_BODY.has(c.req.method)) {
     const length = Number(c.req.header("Content-Length") ?? "0");
-    // Content-Length が超えていれば読む前に断る。API の決まりの 1.2 の 7
+    // Content-Length が超えていれば読む前に断る。API の決まりの 4.2 の 7
     if (length > MAX_BODY_BYTES) throw new AppError("payload_too_large", "リクエスト本文が 1MB を超える");
     const body = c.req.raw.clone().body;
     if (body) {

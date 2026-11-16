@@ -1,4 +1,4 @@
-// ワークスペースの Node のサーバーが、社員 DO からの起動確認、タスクの開始、作業トークンの差し替え、会話の記録の復元を受ける事を確かめる (社員が考えるの 1.3、3.6)
+// ワークスペースの Node のサーバーが、社員 DO からの起動確認、タスクの開始、作業トークンの差し替え、会話の記録の復元を受ける事を確かめる (社員が考えるの 2 章、3.7)
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

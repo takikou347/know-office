@@ -6,7 +6,7 @@ import gate from "./index.ts";
 import { PLANNED_ROUTES } from "./routes/planned.ts";
 import { WORKSPACE_ROUTES } from "./work/workspace-api.ts";
 
-/** 文書の版。本番に出す前は上げない (API の決まりの 3.4) */
+/** 文書の版。本番に出す前は上げない (API の決まりの 4.4) */
 const VERSION = "1.18.0";
 
 /** 何も書かないルートの認証。Access の証明とログインセッションの両方を求める */
@@ -104,7 +104,7 @@ export function openApiDocument() {
       title: "know-office API",
       version: VERSION,
       description:
-        "know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/1-api.md。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。",
+        "know-office のゲートウェイと、ワークスペースとの間の API。規約は knowidea の services/know-office/docs/04-detail/index.md の 4 章。成功時は {data, meta}、失敗時は RFC 9457 の application/problem+json を返す。",
     },
     servers: [{ url: "/", description: "know-office の Worker。画面と同じオリジン" }],
     tags: TAGS.map(([name, description]) => ({ name, description })),

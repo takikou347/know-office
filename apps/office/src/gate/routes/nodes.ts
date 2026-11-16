@@ -1,4 +1,4 @@
-// タスク: 目的、目標、プロジェクト、タスクの木を読む、作る、変える (ルートの一覧の 1.7、タスクとレビューの 3.1)
+// タスク: 目的、目標、プロジェクト、タスクの木を読む、作る、変える (API の nodes、タスクとレビューの 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
 import { CreateNodeInput, Node, NodeDetail, NodeStatus, NodeTree, StaffId, UpdateNodeInput } from "@know-office/core";
 import { createRouter } from "../app.ts";

@@ -1,4 +1,4 @@
-// 監査ログの一覧。年ごとの置き場から選んで新しい順に返し、前の年も同じ形で読める (ログインと記録の 3.5、ルートの一覧の 1.1)
+// 監査ログの一覧。年ごとの置き場から選んで新しい順に返し、前の年も同じ形で読める (ログインと記録の 3.5、API の system)
 import { Problem } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

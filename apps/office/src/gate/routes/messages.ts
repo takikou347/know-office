@@ -1,4 +1,4 @@
-// 会話: 社員とのメッセージを読む、送る (社員と自動の 3.7、ルートの一覧の 1.6)
+// 会話: 社員とのメッセージを読む、送る (社員と自動の 3.7、API の conversation)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, codePoints, CreateMessageInput, headChars, jstYear, Message, MESSAGE_INLINE_CHARS, newId, StaffId } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";

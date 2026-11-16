@@ -1,4 +1,4 @@
-// 社員の操作をオーナーのルールと照らし、通すか断るかを決める (社員が考えるの 3.4)
+// 社員の操作をオーナーのルールと照らし、通すか断るかを決める (社員が考えるの 3.5)
 import type { Operation } from "./operation.ts";
 import { inside, protectedPath } from "./path.ts";
 import { shellRefusal } from "./shell.ts";

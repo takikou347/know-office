@@ -1,4 +1,4 @@
-// 基準を守る事。基準を変えると GuardDO に新しいハッシュを渡し、5 分ごとの確かめが settings の最新の行と、それを入れた監査ログの行と比べ、合わなければ全体を止める (自動停止の 3.3)
+// 基準を守る事。基準を変えると GuardDO に新しいハッシュを渡し、5 分ごとの確かめが settings の最新の行と、それを入れた監査ログの行と比べ、合わなければ全体を止める (自動停止の 3.2)
 import { AppError, DEFAULT_THRESHOLDS, newId } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { checkThresholds } from "../../src/gate/guard/observe.ts";

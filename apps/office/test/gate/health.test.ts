@@ -1,4 +1,4 @@
-// 稼働確認が D1 を確かめる事を確かめる。ルートの一覧の 1.1
+// 稼働確認が D1 を確かめる事を確かめる。API の system
 import type { D1Database } from "@cloudflare/workers-types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fixedClock } from "../helpers/clock.ts";

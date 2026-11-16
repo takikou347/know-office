@@ -1,4 +1,4 @@
-// 入れるのはオーナーだけ。Access の証明、ロックアウト、レート制限、Origin を確かめる (ログインと記録の 3.1、API の決まりの 1.2、3.2)
+// 入れるのはオーナーだけ。Access の証明、ロックアウト、レート制限、Origin を確かめる (ログインと記録の 3.1、API の決まりの 4.2、4.3)
 import { Problem, toBase64url } from "@know-office/core";
 import { createFakeAccess } from "../../dev/access.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

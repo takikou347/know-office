@@ -1,4 +1,4 @@
-// サービス: アイデアから運用まで。案を足し、一覧と詳細を読み、オーナーが段階を移す (ルートの一覧の 1.11、サービスと拡張の 3.1)
+// サービス: アイデアから運用まで。案を足し、一覧と詳細を読み、オーナーが段階を移す (API の services、サービスと拡張の 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AdvanceInput, AppError, CreateIdeaInput, Deployment, RollbackInput, ServiceCard, ServiceDetail, ServiceStage } from "@know-office/core";
 import { createRouter } from "../app.ts";

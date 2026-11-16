@@ -1,4 +1,4 @@
-// WAF が無い時の守りを、v1.yaml とコードのルートの一覧から全ルートに当てて確かめる。API の決まりの 3.6
+// WAF が無い時の守りを、v1.yaml とコードのルートの一覧から全ルートに当てて確かめる。API の決まりの 4.5
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -43,7 +43,7 @@ const codeRoutes = [
 });
 
 /**
- * 認証を外してよい操作と、その代わりの守り。ここに足す時は API の決まりの 3.6 の 1 を直してから
+ * 認証を外してよい操作と、その代わりの守り。ここに足す時は API の決まりの 4.5 の 1 を直してから
  */
 const WITHOUT_LOGIN = new Map([
   ["POST /hooks/v1/github", "Access を外す唯一のパス。X-Hub-Signature-256 で確かめる"],

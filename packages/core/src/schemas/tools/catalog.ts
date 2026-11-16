@@ -1,4 +1,4 @@
-// 社員のツールを MCP の受け手に出す時の説明と入力の形。中身と正本の入力の確かめはゲートウェイが持つ (社員が考えるの 3.5、タスクとレビューの 1.2)
+// 社員のツールを MCP の受け手に出す時の説明と入力の形。中身と正本の入力の確かめはゲートウェイが持つ (社員が考えるの 3.6、タスクとレビューの 2 章)
 import type { StaffToolName } from "../../rules/staff-tools.ts";
 import { StaffId } from "../workday.ts";
 import { z } from "../zod.ts";

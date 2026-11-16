@@ -1,4 +1,4 @@
-// 監査ログは記録 DO、エラーログは recordError だけが書く事を確かめる。ログインと記録の 3.4、3.8
+// 監査ログは記録 DO、エラーログは recordError だけが書く事を確かめる。ログインと記録の 3.4、3.6
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// D1 の DB のうち、社員と勤怠、自動停止、社員が考えるのテーブル。データの 2.2 から 2.4
+// D1 の DB のうち、社員と勤怠、自動停止、社員が考えるのテーブル。データの 2 章 から 2.4
 import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { flag, id, json, time } from "./columns.ts";
 

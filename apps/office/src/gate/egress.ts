@@ -1,4 +1,4 @@
-// ワークスペースの外向きの通信の受け手。コンテナから出る要求は宛先ごとにここへ回り、ゲートウェイが作業トークンを確かめる (社員が考えるの 1.2、3.1)
+// ワークスペースの外向きの通信の受け手。コンテナから出る要求は宛先ごとにここへ回り、ゲートウェイが作業トークンを確かめる (社員が考えるの 2 章、3.2)
 import { createRoute } from "@hono/zod-openapi";
 import { AppError, CheckpointInput, type Clock, type Fetcher, fromBase64, HeartbeatInput, systemClock, TranscriptPartInput } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
@@ -25,7 +25,7 @@ export type { Caller } from "./work/ticket.ts";
 /** コンテナから受け手に回す宛先。ほかの宛先はコンテナの外向きの通信を切って届かなくする */
 export const WORKSPACE_EGRESS = { http: ["gate.internal"], https: ["api.anthropic.com", "api.github.com", "github.com"] } as const;
 
-/** 作業トークンを要らないルート。プロキシが送ったコンテナから社員を決める (ルートの一覧の 1.15) */
+/** 作業トークンを要らないルート。プロキシが送ったコンテナから社員を決める (API の workspace-gate) */
 export const OPEN_PATHS = new Set(["/ws/v1/heartbeat", "/ws/v1/checkpoints"]);
 
 /** 受け手の依り所 */
@@ -138,9 +138,9 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
         const token = ticketOf(c.req.raw.headers, host);
         if (token === "") throw new AppError("unauthenticated", "作業トークンが無い");
         const ticket = await authenticateTicket(c.env, token, caller, c.var.clock.now(), c.var.guard);
-        // 1 本の呼び出しの要求は、呼び出しを始めた要求の traceId で記録する。ワークスペースが付けた traceparent より作業トークンを信じる (ログインと記録の 3.8)
+        // 1 本の呼び出しの要求は、呼び出しを始めた要求の traceId で記録する。ワークスペースが付けた traceparent より作業トークンを信じる (ログインと記録の 3.6)
         if (ticket.traceId !== null) c.set("traceId", ticket.traceId);
-        // Claude のプロキシは Anthropic の形のままで、ゲートウェイのルートに入れない (社員が考えるの 1.2)
+        // Claude のプロキシは Anthropic の形のままで、ゲートウェイのルートに入れない (社員が考えるの 2 章)
         if (host === "api.anthropic.com") return relayClaude(c, ticket);
         if (host === "github.com") return relayGit(c, ticket);
         if (host === "api.github.com") return relayGitHubApi(c, ticket);

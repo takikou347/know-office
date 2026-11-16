@@ -1,4 +1,4 @@
-// エラーログを error_events に残す。書く入口はここの recordError だけ (ログインと記録の 3.8)
+// エラーログを error_events に残す。書く入口はここの recordError だけ (ログインと記録の 3.6)
 import { type Clock, jstYear, log, newId, redactText, sha256Hex } from "@know-office/core";
 import { RECORD_BINDINGS, type Bindings } from "../env.ts";
 import { liveOf } from "../live/publish.ts";

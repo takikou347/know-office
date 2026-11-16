@@ -7,7 +7,7 @@ import { activityOf, poseOf } from "../../src/screen/pages/office/motion.ts";
 import { canShow3d } from "../../src/screen/pages/office/support.ts";
 import { OFFICE_THEME, type OfficeThemeId, THEME_IDS, officeThemes, themeOf } from "../../src/screen/pages/office/themes.ts";
 
-// オフィスの 3D の部屋の、three.js を使わずに決まる所 (人形の形、出せるか、案、姿の元)。画面の 3.4
+// オフィスの 3D の部屋の、three.js を使わずに決まる所 (人形の形、出せるか、案、姿の元)。画面の全体の 3.2
 
 /**
  * 時刻 (ミリ秒) を刻んだ並びを作る

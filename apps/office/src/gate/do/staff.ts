@@ -1,4 +1,4 @@
-// 社員 DO。社員 1 人の勤務の時刻と勤怠を持つ。判断は StaffBook に置き、ここは alarm と記憶を包むだけ (社員と勤怠の 1.3)
+// 社員 DO。社員 1 人の勤務の時刻と勤怠を持つ。判断は StaffBook に置き、ここは alarm と記憶を包むだけ (社員と勤怠の 2 章)
 import { DurableObject } from "cloudflare:workers";
 import { AppError, log, type RestoreInput, StaffId, type StaffStatus, systemClock } from "@know-office/core";
 import { z } from "zod";

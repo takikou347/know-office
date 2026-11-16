@@ -1,4 +1,4 @@
-// 走りを終えた後の終わりの送りが、その間に差し替わった作業トークンを使う事を確かめる (社員が考えるの 3.2)
+// 走りを終えた後の終わりの送りが、その間に差し替わった作業トークンを使う事を確かめる (社員が考えるの 3.3)
 import type { RunInput } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { type Reporter, Runner } from "../src/run.ts";

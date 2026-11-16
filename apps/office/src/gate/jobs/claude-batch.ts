@@ -1,4 +1,4 @@
-// Claude のバッチ処理の API を呼ぶ口。送る、終わったかを見る、結果を読む。急がないタスクはワークスペースを通さずここから回す (サービスと拡張の 3.6、社員が考えるの 3.3)
+// Claude のバッチ処理の API を呼ぶ口。送る、終わったかを見る、結果を読む。急がないタスクはワークスペースを通さずここから回す (サービスと拡張の 3.6、社員が考えるの 3.4)
 import { allowedFetch, AppError, batchCostMicroUsd, type ClaudeUsage, type Fetcher, newId, OPUS } from "@know-office/core";
 import { z } from "zod";
 import { endpoints } from "../endpoints.ts";

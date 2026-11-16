@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type OfficeSnapshot, describeEvent, eventsBetween, newsOf } from "../../src/screen/pages/office/events.ts";
 
-// 画面が持つデータの変化から、オフィスで見せる出来事を決める。画面の 3.4
+// 画面が持つデータの変化から、オフィスで見せる出来事を決める。画面の全体の 3.2
 
 const base: OfficeSnapshot = {
   staff: [

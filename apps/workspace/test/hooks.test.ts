@@ -1,4 +1,4 @@
-// ツールを使う前のフックが、ゲートウェイのルールの判断を聞き、答えが無ければ断る事を確かめる (社員が考えるの 3.4、4 章)
+// ツールを使う前のフックが、ゲートウェイのルールの判断を聞き、答えが無ければ断る事を確かめる (社員が考えるの 3.5、テスト設計の 社員が考える)
 import type { Fetcher } from "@know-office/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentOptions, WORK_ROOT } from "../src/agent.ts";

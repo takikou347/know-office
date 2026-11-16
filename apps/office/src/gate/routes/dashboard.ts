@@ -1,4 +1,4 @@
-// ダッシュボード: 社員、承認待ち、今日のタスク、今月の費用、未読の通知を 1 回で返す (ルートの一覧の 1.12)
+// ダッシュボード: 社員、承認待ち、今日のタスク、今月の費用、未読の通知を 1 回で返す (API の records)
 import { createRoute, z } from "@hono/zod-openapi";
 import { type Approval, ApprovalStatus, Dashboard, jstDay, jstDayStart, jstYear } from "@know-office/core";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";

@@ -1,4 +1,4 @@
-// 全体のセキュリティ DO を本物の workerd で確かめる。ログインと記録の 1.2、3.1 の 4、API の決まりの 1.2
+// 全体のセキュリティ DO を本物の workerd で確かめる。ログインと記録の 2 章、3.1 の 4、API の決まりの 4.2
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startTestWorker, type TestWorker } from "../helpers/worker.ts";
 

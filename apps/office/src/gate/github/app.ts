@@ -247,7 +247,7 @@ export async function consumeState(env: Bindings, clock: Clock, state: string): 
   const [payload = "", encoded = ""] = state.split(".");
   const signature = fromBase64url(encoded);
   const key = await signingKey(await vaultKey(env.DB, "session_signing", env.MASTER_KEY, clock));
-  // HMAC の verify は時間が一定の比べ方をする。API の決まりの 3.6 の 3
+  // HMAC の verify は時間が一定の比べ方をする。API の決まりの 4.5 の 3
   const valid = signature !== null && (await crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(`${STATE_CONTEXT}${payload}`)).catch(() => false));
   if (!valid) throw new AppError("forbidden", "state が一致しない");
   const bytes = fromBase64url(payload);
@@ -389,7 +389,7 @@ export class TokenCache {
 }
 
 /**
- * ためた 1 時間の鍵を GitHub の側で取り消し、ためる所を空にする。全体を止めた時に呼ぶ (自動停止の 3.5)
+ * ためた 1 時間の鍵を GitHub の側で取り消し、ためる所を空にする。全体を止めた時に呼ぶ (自動停止の 3.4)
  * 取り消しに失敗した鍵も捨てる。元の鍵は vault で取り替えるので、新しい鍵は作れない
  * @param env バインディング
  * @param deps fetch とためる所

@@ -1,4 +1,4 @@
-// 開発環境の代わりのワークスペースの置き場。ゲートウェイの DevContainer が起こさせ、起きた時からハートビートを送り、起動確認と軽い要求には自分で答え、タスクの開始と記録の戻しから Node のサーバーを起こして回す (ログインと記録の 3.9、社員が考えるの 3.1)
+// 開発環境の代わりのワークスペースの置き場。ゲートウェイの DevContainer が起こさせ、起きた時からハートビートを送り、起動確認と軽い要求には自分で答え、タスクの開始と記録の戻しから Node のサーバーを起こして回す (ログインと記録の 3.9、社員が考えるの 3.2)
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { health, StaffId, systemClock } from "@know-office/core";

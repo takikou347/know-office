@@ -1,4 +1,4 @@
-// Web アプリを前のバージョンに戻す。オーナーが手で戻す時と、自動停止がサービスを止めた時が同じ道を通り、サービスごとに 10 分に 1 度、止めた記録ごとに 1 度だけ rollback.yml を動かす (サービスと拡張の 3.2、自動停止の 3.4)
+// Web アプリを前のバージョンに戻す。オーナーが手で戻す時と、自動停止がサービスを止めた時が同じ道を通り、サービスごとに 10 分に 1 度、止めた記録ごとに 1 度だけ rollback.yml を動かす (サービスと拡張の 3.2、自動停止の 3.3)
 import { AppError, type Deployment, newId, redactPublic } from "@know-office/core";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";

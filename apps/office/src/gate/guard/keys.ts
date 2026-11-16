@@ -1,4 +1,4 @@
-// 全体を止めた後の外の鍵の入れ直し。オーナーが入れた GitHub App の秘密鍵と Claude の API の鍵を vault に置き、両方そろったら全体を再開できるようにする (自動停止の 3.5)
+// 全体を止めた後の外の鍵の入れ直し。オーナーが入れた GitHub App の秘密鍵と Claude の API の鍵を vault に置き、両方そろったら全体を再開できるようにする (自動停止の 3.4)
 import { AppError, type Fetcher, GitHubAppKeys, GitHubInstallation, GitHubInstallationKey, type GuardKeys, type ReplaceGitHubAppKeyInput, Secret } from "@know-office/core";
 import { readLatest, storeStatements } from "../auth/vault.ts";
 import type { Bindings } from "../env.ts";

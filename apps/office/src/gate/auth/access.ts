@@ -1,4 +1,4 @@
-// Cloudflare Access のログインの証明を確かめる。ログインと記録の 3.1、API の決まりの 3.6 の 3
+// Cloudflare Access のログインの証明を確かめる。ログインと記録の 3.1、API の決まりの 4.5 の 3
 import { allowedFetch, AppError, type Clock, type Fetcher } from "@know-office/core";
 import { createLocalJWKSet, errors, type JSONWebKeySet, jwtVerify } from "jose";
 import { z } from "zod";

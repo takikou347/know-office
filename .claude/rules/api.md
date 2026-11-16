@@ -9,9 +9,9 @@ paths:
 
 # API の書き方
 
-正本は knowidea の `../knowidea/services/know-office/docs/04-detail/1-api.md` (決まり)、`2-routes.md` (全ルートと処理の順を v1.yaml から作った一覧)、`3-data.md` (全テーブル)。05-conventions.md の 3.3。全文を読まず、作るルートとテーブルの行を grep で引く。
+正本はこの rules。API の決まりは knowidea の `../knowidea/services/know-office/docs/04-detail/index.md` の 4 章、全ルートと処理の順は `apps/office/openapi/v1.yaml` (Swagger UI)、全テーブルは `apps/office/src/gate/db/` のスキーマのコードと `04-detail/1-data.md` の ER 図。全文を読まず、作るルートとテーブルの所を grep で引く。
 
-- API の正本はコード。ルートは `createRoute`、入力と返す形は `core` の Zod スキーマに書く。`apps/office/openapi/v1.yaml` (OpenAPI 3.1) は `src/gate/api-doc.ts` がそこから作り、手で直さない。ルートかスキーマを変えたら `pnpm --filter @know-office/office openapi` で作り直してコミットする。テスト (`test/gate/openapi.test.ts`) が作った物と同じかを確かめる。同じ時に knowidea で `python3 tools/routes_md.py ../know-office/apps/office/openapi/v1.yaml` を走らせ、`2-routes.md` を作り直す
+- API の正本はコード。ルートは `createRoute`、入力と返す形は `core` の Zod スキーマに書く。`apps/office/openapi/v1.yaml` (OpenAPI 3.1) は `src/gate/api-doc.ts` がそこから作り、手で直さない。ルートかスキーマを変えたら `pnpm --filter @know-office/office openapi` で作り直してコミットする。テスト (`test/gate/openapi.test.ts`) が作った物と同じかを確かめる
 - `createRoute` には `summary` と `x-steps` (処理の順) を必ず書き、ルートだけの失敗は `x-errors`、背景は `description` に書く。文書の `description` の「処理の流れ」と「このルート固有のエラー」は `x-steps` と `x-errors` から作るので、`description` に重ねて書かない。認証が Access の証明とログインセッションでないルートだけ `security` を書く。項目の説明は Zod スキーマの `.meta({ description })` に書く
 - ワークスペースのサーバーのルート (`/v1/`) は `src/gate/work/workspace-api.ts`、まだ作っていないルートは `src/gate/routes/planned.ts` に Issue の番号と並べて、`createRoute` で書く。拡張のルートは `steps` に自分の処理の順だけを書き、入れているかとパスキーの確かめの手順と失敗は土台が足す
 - パスは小文字の kebab-case の名詞の複数形 (`/api/v1/audit-logs`)。1 つしかない物は単数 (`/me`、`/guard/state`)。名詞で表せない操作だけ末尾に動詞 1 語を置いて `POST`。全部の置き換えは `PUT`、一部は `PATCH`
@@ -21,13 +21,13 @@ paths:
 - 成功は `ok(c, data)`、`list(c, items, next)`、`created(c, data, location)`、`noContent(c)` で返し、`c.json()` を直に呼ばない。本文は `data` と `meta` だけ。`meta` は `traceId` を持ち、一覧の `meta` は `next` (次のカーソル、無ければ `null`) も持つ
 - 失敗は `AppError` を投げ、`app.onError` が RFC 9457 の problem+json (`type`、`title`、`status`、`detail`、`instance`、`code`、`traceId`、422 だけ `errors`) に直す。ハンドラーの中で組まない
 - `code` は `core` の `ErrorCode` に並べる。500 は `detail` に中身を入れない
-- ステータスコードは 1-api.md の 3.1 の表だけから選ぶ。分け方は 401 (誰か分からない) → 403 (許さない) → 404 (無い) の順に確かめる
+- ステータスコードは `packages/core/src/errors.ts` の `PROBLEMS` (API の決まりの 4.3) だけから選ぶ。分け方は 401 (誰か分からない) → 403 (許さない) → 404 (無い) の順に確かめる
 - 足すだけの変更は v1 のまま入れる。消す、名前や型や意味を変える、要る入力を足す変更は `/api/v2/` を足す。ただし、本番に出す前 (自動のデプロイを始める前) は、どの変更も v1 のまま直せる。本番の前は `info.version` を上げない
 - 画面は Hono の RPC で同じ型を受け、`fetch` を手で書かない
 - 時刻は RFC 3339 の協定世界時、日は日本時間の `YYYY-MM-DD`、ID は UUID v7、お金は `...MicroUsd` の整数
 - 一覧は `?cursor=` と `limit` (1 から 100、初期値 50)
-- ルートの処理の順とルートだけの失敗は、`createRoute` の `x-steps` と `x-errors` に従う。処理を変えたら先にそこを直し、v1.yaml と 2-routes.md を作り直す
-- WAF が無いので 1-api.md の 3.6 の守りを外さない。入力は Zod の `strict()`、JWT は決めた `alg` だけ、署名の比べは `timingSafeEqual`、外への `fetch` は `allowedFetch` だけ、WebSocket の切り替えは `Origin` を確かめる。Access を外すパスを `/hooks/v1/github` のほかに足さない
+- ルートの処理の順とルートだけの失敗は、`createRoute` の `x-steps` と `x-errors` に従う。処理を変えたら先にそこを直し、v1.yaml を作り直す
+- WAF が無いので API の決まりの 4.5 の守りを外さない。入力は Zod の `strict()`、JWT は決めた `alg` だけ、署名の比べは `timingSafeEqual`、外への `fetch` は `allowedFetch` だけ、WebSocket の切り替えは `Origin` を確かめる。Access を外すパスを `/hooks/v1/github` のほかに足さない
 - 書く時の条件 (段階、版、未読、決まっていない事) は、読んだ後の別の文で確かめない。1 文の条件付き `INSERT ... WHERE NOT EXISTS` か `UPDATE ... WHERE`、または 1 回のバッチに入れ、書けた件数で 409 を決める。一緒に書く物 (出来事、タスク、承認) も同じバッチに入れ、片方だけ残さない
 - できる操作を増やすルート (設定を弱める、2 本目のパスキー、止めた後の再開、拡張を入れる) には、`createRoute` で `x-step-up: true` か、弱める時だけなら `conditional` を付け、`conditional` はハンドラーの頭で `requireStepUp(c)` を呼んで確かめる。強める側 (切る、止める) には付けない
 - `x-step-up: true` のルートは、ハンドラーでなく `createRoute` の `middleware: [stepUpGate]` で確かめ、入力の検証より先に断る。`conditional` だけハンドラーの頭で `requireStepUp(c)` を呼ぶ

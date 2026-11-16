@@ -1,8 +1,8 @@
-// 会話と配信の形。社員とのメッセージ、配信の作業トークン、LiveDO が画面に流す出来事 (社員と自動の 3.7、ルートの一覧の 1.6)
+// 会話と配信の形。社員とのメッセージ、配信の作業トークン、LiveDO が画面に流す出来事 (社員と自動の 3.7、API の conversation)
 import { StaffId, StaffState } from "./workday.ts";
 import { z } from "./zod.ts";
 
-/** D1 の messages.body に置く字数の上限。超える本文は R2 に置く (データの 2.4) */
+/** D1 の messages.body に置く字数の上限。超える本文は R2 に置く (データの 2 章) */
 export const MESSAGE_INLINE_CHARS = 2000;
 
 /** 送れる本文の字数の上限 */

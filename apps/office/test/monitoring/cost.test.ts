@@ -1,4 +1,4 @@
-// 記録に出す値: 使った額をいつでも見えるよう、ダッシュボードが今月 (日本時間) の使った額を返す (サービスと拡張の 3.4、ルートの一覧の 1.12)
+// 記録に出す値: 使った額をいつでも見えるよう、ダッシュボードが今月 (日本時間) の使った額を返す (サービスと拡張の 3.4、API の settings)
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fixedClock } from "../helpers/clock.ts";

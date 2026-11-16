@@ -1,4 +1,4 @@
-// MASTER_KEY から用途ごとの暗号の鍵を作る。鍵は用途ごとに分け、1 つが漏れても他を守る (04-detail.md の 3.5)
+// MASTER_KEY から用途ごとの暗号の鍵を作る。鍵は用途ごとに分け、1 つが漏れても他を守る (詳細設計の目次の 3.3)
 import { fromBase64 } from "./encoding.ts";
 import { AppError } from "./errors.ts";
 

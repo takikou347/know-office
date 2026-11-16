@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type TagBox, createTagSizer, spreadTags } from "../../src/screen/pages/office/tags.ts";
 
-// 名札が重ならないように、上にずらす。画面の 3.4
+// 名札が重ならないように、上にずらす。画面の全体の 3.2
 
 /**
  * 名札の箱を作る

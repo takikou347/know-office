@@ -1,4 +1,4 @@
-// SDK の会話の記録 (JSONL) の増えた分をゲートウェイに送り、落ちた後は社員 DO が戻した記録を SDK の置き場に書いて続きから送る (社員が考えるの 3.2、3.6)
+// SDK の会話の記録 (JSONL) の増えた分をゲートウェイに送り、落ちた後は社員 DO が戻した記録を SDK の置き場に書いて続きから送る (社員が考えるの 3.3、3.7)
 import { existsSync, type Stats } from "node:fs";
 import { constants, type FileHandle, mkdir, open } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";

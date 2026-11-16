@@ -1,4 +1,4 @@
-// ログとエラーログに鍵を残さない事を確かめる。4-foundation.md の 3.8
+// ログとエラーログに鍵を残さない事を確かめる。ログインと記録の 3.5
 import { describe, expect, it } from "vitest";
 import { redact, redactPublic, redactText } from "../src/index.ts";
 

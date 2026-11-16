@@ -1,4 +1,4 @@
-// エラーログの一覧と、traceId で 1 つの要求を追うルート。年ごとの置き場 REC_<年> から読む (ログインと記録の 3.8)
+// エラーログの一覧と、traceId で 1 つの要求を追うルート。年ごとの置き場 REC_<年> から読む (ログインと記録の 3.6)
 import { createRoute, z } from "@hono/zod-openapi";
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, ERROR_SOURCES, ErrorEvent, ErrorEventCode, jstDayStart, jstYear, redactText, Trace, TraceId } from "@know-office/core";

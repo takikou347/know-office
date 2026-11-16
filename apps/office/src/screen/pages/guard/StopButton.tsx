@@ -1,4 +1,4 @@
-// 手で止めるボタン。押すと止まる範囲とタスクの数を確認の画面に出し、確かめた後に止める (自動停止の 3.7)
+// 手で止めるボタン。押すと止まる範囲とタスクの数を確認の画面に出し、確かめた後に止める (自動停止の 3.6)
 import type { GuardScope, StopPreview } from "@know-office/core";
 import { Alert, Button, Dialog, DialogClose } from "knowidea-ui";
 import { useContext, useState } from "react";

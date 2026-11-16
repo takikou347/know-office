@@ -1,4 +1,4 @@
-// 自動停止: 停止中の対象、止めた記録の一覧と 1 件、手で止める、判定、再開、止める前の確認 (ルートの一覧の 1.5、自動停止の 3.6、サービスと拡張の 3.6)。基準と改善は guard-tuning.ts
+// 自動停止: 停止中の対象、止めた記録の一覧と 1 件、手で止める、判定、再開、止める前の確認 (API の guard、自動停止の 3.5、サービスと拡張の 3.6)。基準と改善は guard-tuning.ts
 import type { D1Database } from "@cloudflare/workers-types";
 import { createRoute, z } from "@hono/zod-openapi";
 import {

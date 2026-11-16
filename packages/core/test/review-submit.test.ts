@@ -1,4 +1,4 @@
-// レビュー担当のツール review_submit の入力の形と、社員に見せる説明 (タスクとレビューの 1.2、3.1 の 4)
+// レビュー担当のツール review_submit の入力の形と、社員に見せる説明 (タスクとレビューの 2 章、3.1 の 4)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ReviewSubmitTool } from "../src/index.ts";

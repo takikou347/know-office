@@ -1,4 +1,4 @@
-// 設定: office の設定とサービスの初期値、サービスごとの設定 (ルートの一覧の 1.12、サービスと拡張の 3.3)
+// 設定: office の設定とサービスの初期値、サービスごとの設定 (API の settings、サービスと拡張の 3.3)
 import { createRoute, z } from "@hono/zod-openapi";
 import { INHERITED_KEYS, Setting, StaffId, UpdateSettingInput } from "@know-office/core";
 import { createRouter } from "../app.ts";

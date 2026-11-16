@@ -1,4 +1,4 @@
-// 動く入口への自動の攻撃のチェック。v1.yaml の /api/ の全ルートに悪い要求を送り、決めた 4xx で断り 500 を出さない事を見る (セキュリティの「弱点のチェック」、API の決まりの 3.6)
+// 動く入口への自動の攻撃のチェック。v1.yaml の /api/ の全ルートに悪い要求を送り、決めた 4xx で断り 500 を出さない事を見る (セキュリティの「弱点のチェック」、API の決まりの 4.5)
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type APIRequestContext, expect, test } from "@playwright/test";

@@ -1,4 +1,4 @@
-// ワークスペースのフックがゲートウェイにツールの可否を聞く入力と答え。名前は API の文書 (v1.yaml) の components/schemas の名前になる (社員が考えるの 3.4)
+// ワークスペースのフックがゲートウェイにツールの可否を聞く入力と答え。名前は API の文書 (v1.yaml) の components/schemas の名前になる (社員が考えるの 3.5)
 import { Meta } from "./common.ts";
 import { z } from "./zod.ts";
 

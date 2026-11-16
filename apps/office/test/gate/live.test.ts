@@ -1,4 +1,4 @@
-// 配信のルート。作業トークンは 60 秒のうちに 1 回だけ、Origin は自分だけで、違う時は作業トークンを使い切らない。配る出来事は決めた形だけ (社員と自動の 3.7、ルートの一覧の 1.6)
+// 配信のルート。作業トークンは 60 秒のうちに 1 回だけ、Origin は自分だけで、違う時は作業トークンを使い切らない。配る出来事は決めた形だけ (社員と自動の 3.7、API の conversation)
 import { LiveEvent, Problem } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

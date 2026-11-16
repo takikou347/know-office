@@ -1,4 +1,4 @@
-// 社員がタスクを取った時に自分で最初の runs を呼び、失敗を数え、鍵の失敗の間は呼ばない事を、本物の workerd で確かめる (社員が考えるの 3.2、タスクとレビューの 3.1)
+// 社員がタスクを取った時に自分で最初の runs を呼び、失敗を数え、鍵の失敗の間は呼ばない事を、本物の workerd で確かめる (社員が考えるの 3.3、タスクとレビューの 3.1)
 import { ORG_RULES, ROLE_TOOLS, toBase64 } from "@know-office/core";
 import { decodeJwt } from "jose";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

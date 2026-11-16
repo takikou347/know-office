@@ -1,4 +1,4 @@
-// ID と時刻と JSON の正規化を確かめる。05-conventions.md の 1 章
+// ID と時刻と JSON の正規化を確かめる。詳細設計の目次の 3.1
 import { describe, expect, it } from "vitest";
 import { canonicalJson, jstClock, jstDay, jstYear, keyedId, newId, sha256Hex } from "../src/index.ts";
 

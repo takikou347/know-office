@@ -6,7 +6,7 @@ import { REVIEW_PATH, stubReview } from "./helpers/review.ts";
 import { withGuardLearning } from "./helpers/guard.ts";
 import { withoutWebgl } from "./helpers/webgl.ts";
 
-// 使いやすさ: キーボードだけで承認まで出せ、8 画面と深い所に axe の critical と serious が無い。画面の 3.5
+// 使いやすさ: キーボードだけで承認まで出せ、8 画面と深い所に axe の critical と serious が無い。画面の全体の 3.3
 
 const META = { traceId: "0".repeat(32) };
 

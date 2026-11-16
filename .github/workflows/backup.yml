@@ -1,4 +1,4 @@
-# 毎日 4 時 (日本時間) に、本番の D1 を wrangler d1 export で書き出して R2 の FILES の backups/<置き場>/<日>.sql に置き、30 日より古い写しを消す (ログインと記録の 3.6)。
+# 毎日 4 時 (日本時間) に、本番の D1 を wrangler d1 export で書き出して R2 の FILES の backups/<置き場>/<日>.sql に置き、30 日より古い写しを消す (ログインと記録の 3.5)。
 # 書き出しの間はその D1 への要求が止まるので、使われない 4 時に流す。過去の年の記録は月の 1 日だけ書き出す
 # Cloudflare の鍵が無い間は飛ばさず、流す手順だけを出す。手順は scripts/backup.test.ts が wrangler.jsonc から作った物で確かめる
 name: Backup

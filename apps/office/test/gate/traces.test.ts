@@ -1,4 +1,4 @@
-// エラーログの一覧と、traceId で 1 つの要求を追うルート。年ごとの置き場から読み、追う方はパスキーの確認を求める (ログインと記録の 3.8)
+// エラーログの一覧と、traceId で 1 つの要求を追うルート。年ごとの置き場から読み、追う方はパスキーの確認を求める (ログインと記録の 3.6)
 import type { D1Database } from "@cloudflare/workers-types";
 import { ErrorEvent, Problem, Trace } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

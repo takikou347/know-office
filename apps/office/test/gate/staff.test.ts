@@ -1,4 +1,4 @@
-// 社員の一覧と、その日だけの指示のルート。指示は 1 文の条件付きで書き、同時の 2 つと二重の取り消しを 1 つにする (社員と勤怠の 3.4、ルートの一覧の 1.3)
+// 社員の一覧と、その日だけの指示のルート。指示は 1 文の条件付きで書き、同時の 2 つと二重の取り消しを 1 つにする (社員と勤怠の 3.4、API の staff)
 import { Problem } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

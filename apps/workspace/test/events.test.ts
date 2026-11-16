@@ -1,4 +1,4 @@
-// 働いた事 (発言、終わり、エラー) をゲートウェイの POST /ws/v1/events に届ける口を確かめる (社員が考えるの 3.2、3.7)
+// 働いた事 (発言、終わり、エラー) をゲートウェイの POST /ws/v1/events に届ける口を確かめる (社員が考えるの 3.3、3.8)
 import type { AgentEvent, Fetcher } from "@know-office/core";
 import { describe, expect, it, vi } from "vitest";
 import { GATE_EVENTS_URL, gateReporter } from "../src/events.ts";

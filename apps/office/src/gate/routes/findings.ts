@@ -1,4 +1,4 @@
-// 見つけて直す仕組みが作った、原因ごとの Issue の一覧 (ルートの一覧の 1.4、サービスと拡張の 3.7)
+// 見つけて直す仕組みが作った、原因ごとの Issue の一覧 (API の records、サービスと拡張の 3.7)
 import { createRoute, z } from "@hono/zod-openapi";
 import { Finding, FindingKind, FindingStatus } from "@know-office/core";
 import { and, desc, eq, lt } from "drizzle-orm";

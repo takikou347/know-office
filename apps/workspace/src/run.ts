@@ -1,4 +1,4 @@
-// タスク 1 件分の SDK の呼び出しを持ち、作業トークンが差し替わったら今の呼び出しを終えて続きから呼び直す。呼び直す前と終わった時に会話の記録の増えを送る (社員が考えるの 3.2、3.6)
+// タスク 1 件分の SDK の呼び出しを持ち、作業トークンが差し替わったら今の呼び出しを終えて続きから呼び直す。呼び直す前と終わった時に会話の記録の増えを送る (社員が考えるの 3.3、3.7)
 import { type AgentEvent, AppError, log, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
 import { type Agent, agentOptions, type LocalRun } from "./agent.ts";
 import { type HookDeps, preToolUse } from "./hooks.ts";

@@ -1,4 +1,4 @@
-// 配信: 作業トークンと WebSocket への切り替え (社員と自動の 3.7、ルートの一覧の 1.6)
+// 配信: 作業トークンと WebSocket への切り替え (社員と自動の 3.7、API の conversation)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, LiveTicket } from "@know-office/core";
 import { createMiddleware } from "hono/factory";

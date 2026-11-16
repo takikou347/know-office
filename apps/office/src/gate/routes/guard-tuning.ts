@@ -1,4 +1,4 @@
-// 自動停止の基準と改善: しきい値、効き目、蒸留の案 (ルートの一覧の 1.5、自動停止の 3.6、3.7)
+// 自動停止の基準と改善: しきい値、効き目、蒸留の案 (API の guard、自動停止の 3.5、3.6)
 import { createRoute, z } from "@hono/zod-openapi";
 import { DecisionInput, GuardEffect, GuardThresholds, Lesson, UpdateThresholdsInput } from "@know-office/core";
 import { createRouter } from "../app.ts";

@@ -1,4 +1,4 @@
-// 記録の画面。今月の稼働率を入口の /records/uptime から、office 全体の勤怠を /records/attendance から新しい日から読み、サービスごとと社員ごとの内訳と新しいエラーログを並べ、クエリの trace の要求をたどる (ルートの一覧の 1.4、ログインと記録の 3.8)
+// 記録の画面。今月の稼働率を入口の /records/uptime から、office 全体の勤怠を /records/attendance から新しい日から読み、サービスごとと社員ごとの内訳と新しいエラーログを並べ、クエリの trace の要求をたどる (API の records、ログインと記録の 3.6)
 import { DaySummary, jstDay, StaffOverview, systemClock, Uptime } from "@know-office/core";
 import { Grid, Stat, Table } from "knowidea-ui";
 import { z } from "zod";

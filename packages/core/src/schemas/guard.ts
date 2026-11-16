@@ -1,4 +1,4 @@
-// 自動停止の形。シグナルの出来事、基準、止めた記録の返す形と入力 (自動停止の 1 章と 2 章、データの 2.3)
+// 自動停止の形。シグナルの出来事、基準、止めた記録の返す形と入力 (自動停止の 2 章と 2 章、データの 2 章)
 import { OPERATION_KINDS } from "../rules/operation.ts";
 import { StaffId } from "./workday.ts";
 import { z } from "./zod.ts";
@@ -31,7 +31,7 @@ export type GuardSignal = z.infer<typeof GuardSignal>;
 
 const Task = { staffId: StaffId, nodeId: z.uuid() };
 
-/** ゲートウェイの中で起きた、セキュリティに関わる出来事。guard.observe に渡す (自動停止の 1.2) */
+/** ゲートウェイの中で起きた、セキュリティに関わる出来事。guard.observe に渡す (自動停止の 2 章) */
 export const GuardEvent = z.union([
   z.object({ type: z.literal("rule_denied"), ...Task, operation: z.enum(OPERATION_KINDS), target: z.string() }).strict(),
   z.object({ type: z.literal("command_result"), ...Task, command: z.string(), exitCode: z.number().int(), failedCheck: z.string().nullable() }).strict(),
@@ -132,7 +132,7 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   nearMergeMs: 60 * MINUTE,
 };
 
-/** 出来事を数えた答え。stop は止める、near は止めずに近かったを残す (自動停止の 1.2) */
+/** 出来事を数えた答え。stop は止める、near は止めずに近かったを残す (自動停止の 2 章) */
 export type Judgment = {
   /** 何をするか */
   action: "none" | "near" | "stop";

@@ -1,4 +1,4 @@
-// 作業トークンの署名、期限、発行した先、失効と、チェックポイントでの差し替えを確かめる (社員が考えるの 2 章、3.2、3.3、4 章)
+// 作業トークンの署名、期限、発行した先、失効と、チェックポイントでの差し替えを確かめる (社員が考えるの 2 章、3.3、3.4、テスト設計の 社員が考える)
 import { AppError } from "@know-office/core";
 import { SignJWT } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";

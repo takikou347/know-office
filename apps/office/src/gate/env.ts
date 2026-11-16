@@ -58,7 +58,7 @@ export interface Guard extends Rpc.DurableObjectBranded {
   dropClaim(stopId: string): Promise<null>;
 }
 
-/** 社員 DO の RPC。時刻は呼ぶ側の Clock で渡す。入力は DO の中で Zod で確かめる (社員と勤怠の 1.3) */
+/** 社員 DO の RPC。時刻は呼ぶ側の Clock で渡す。入力は DO の中で Zod で確かめる (社員と勤怠の 2 章) */
 export interface Staff extends Rpc.DurableObjectBranded {
   /** その時刻までに来た出来事を処理する */
   wake(now: number): Promise<null>;
@@ -164,13 +164,13 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   holdsKey(key: string): Promise<boolean>;
 }
 
-/** 記録を年ごとに置く D1 のバインディングの名前。04-detail.md の 3.5 */
+/** 記録を年ごとに置く D1 のバインディングの名前。詳細設計の目次の 3.3 */
 export const RECORD_BINDINGS = ["REC_2026", "REC_2027", "REC_2028", "REC_2029", "REC_2030", "REC_2031"] as const;
 
 /** 記録の D1 のバインディングの名前 */
 export type RecordBinding = (typeof RECORD_BINDINGS)[number];
 
-/** Worker のバインディングと変数。wrangler の設定と同じ名前にする (04-detail.md の 3.5) */
+/** Worker のバインディングと変数。wrangler の設定と同じ名前にする (詳細設計の目次の 3.3) */
 export type Bindings = {
   /** 今の状態の D1 */
   DB: D1Database;

@@ -1,4 +1,4 @@
-// 想定外の失敗をエラーログに残す事を確かめる。ログインと記録の 3.8
+// 想定外の失敗をエラーログに残す事を確かめる。ログインと記録の 3.6
 import { Problem } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fixedClock } from "../helpers/clock.ts";

@@ -1,4 +1,4 @@
-// 認証: パスキーの登録と、パスキーでの確認 (ログインと記録の 3.3、ルートの一覧の 1.2)
+// 認証: パスキーの登録と、パスキーでの確認 (ログインと記録の 3.3、API の auth)
 import { createRoute } from "@hono/zod-openapi";
 import { AppError, newId, Passkey, PasskeyOptions, PasskeyOptionsInput, StepUp, WebAuthnResponse } from "@know-office/core";
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";

@@ -1,4 +1,4 @@
-// 成功は { data, meta }、失敗は problem+json で返す事を確かめる。API の決まりの 2 章
+// 成功は { data, meta }、失敗は problem+json で返す事を確かめる。API の決まりの 4.3
 import { createRoute, z } from "@hono/zod-openapi";
 import { Meta, Problem } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
