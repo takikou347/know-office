@@ -4,6 +4,7 @@ import { Button, List } from "knowidea-ui";
 import { useState } from "react";
 import type { ToggleExtension } from "../../parts/navigate.ts";
 import { Part, Section } from "../../parts/section.tsx";
+import { DocsRepo } from "./DocsRepo.tsx";
 import { GitHubCard } from "./GitHubCard.tsx";
 import { KeyReentry } from "./KeyReentry.tsx";
 import { OfficeRules } from "./OfficeRules.tsx";
@@ -24,6 +25,7 @@ export function SettingsPage({ extensions, toggleExtension }: SettingsPageProps)
       <KeyReentry />
       <OfficeRules />
       <GitHubCard />
+      <DocsRepo />
       <Part title="セッションと鍵">
         <Sessions />
         <Passkey />

@@ -8,7 +8,8 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { runLocalWrangler, seedMain } from "./helpers/seed.ts";
+import { freeRepoNames, restoreSeedServices, runLocalWrangler, seedMain } from "./helpers/seed.ts";
+import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
 
 /** 代わりの GitHub がインストールで選ぶリポジトリ */
 const REPO = "example/know-office";
@@ -42,58 +43,18 @@ function seedStudy(serviceId: string, body: string): void {
   seedMain(`UPDATE services SET study_key = '${key}' WHERE id = '${serviceId}'`);
 }
 
-/**
- * Knowidea-ui の選ぶ欄で 1 つ選ぶ
- * @param page 開いているページ
- * @param label 欄の名前
- * @param option 選ぶ物
- */
-async function choose(page: Page, label: string, option: string): Promise<void> {
-  await page.getByRole("main").getByRole("combobox", { name: label }).click();
-  await page.getByRole("option", { name: option, exact: true }).click();
-}
-
-/**
- * 画面の案を足す欄で案を足し、足した案の詳細を開く
- * @param page 開いているページ
- * @param title 案の名前
- * @returns 足した案のサービス ID
- */
-async function addIdea(page: Page, title: string): Promise<string> {
-  await page.goto("/services");
-  const main = page.getByRole("main");
-  await main.getByLabel("案の名前").fill(title);
-  await choose(page, "種類", "Web アプリ");
-  await main.getByLabel("狙い").fill("通しで確かめる案");
-  await main.getByLabel("使う人").fill("オーナー");
-  await main.getByLabel("月の費用の見込み (ドル)").fill("3.5");
-  await main.getByRole("button", { name: "案を足す" }).click();
-  await expect(main.getByRole("heading", { level: 2, name: title })).toBeVisible();
-  const id = /\/services\/([0-9a-f-]{36})$/.exec(page.url())?.[1];
-  if (id === undefined) throw new Error("足した案を開けない");
-  return id;
-}
-
-/**
- * 段階を移す欄で、理由を書いて移す
- * @param page 開いているページ
- * @param button 移すボタンの文
- * @param reason 理由
- */
-async function move(page: Page, button: string, reason: string): Promise<void> {
-  const main = page.getByRole("main");
-  await main.getByLabel("移す理由").fill(reason);
-  await main.getByRole("button", { name: button }).click();
-}
-
 test.afterEach(() => {
   forgetGitHub();
+  restoreSeedServices();
 });
 
 test("案を足し、検討して元の案をたどり、リポジトリを選んで作り、設定を変えて前のバージョンに戻す", async ({ page }) => {
   await useOwnerPasskey(page);
+  freeRepoNames();
   await page.goto("/services");
   await connectGitHub(page);
+  // 試作に進める前に、設計書のリポジトリを設定で選ぶ
+  await chooseDocsRepo(page);
   const before = await dispatches(page);
   const title = `通しの案 ${crypto.randomUUID().slice(0, 8)}`;
   const id = await addIdea(page, title);

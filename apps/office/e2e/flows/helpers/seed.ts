@@ -64,3 +64,20 @@ export function cancelLeftOrders(staffId: string): void {
       `FROM (SELECT hex(randomblob(16)) AS h, o.* FROM day_orders o WHERE o.staff_id = '${staffId}' AND o.cancels IS NULL AND NOT EXISTS (SELECT 1 FROM day_orders x WHERE x.cancels = o.id))`,
   );
 }
+
+/**
+ * 通しが足した案と、最初に登録したサービスのリポジトリを外して、設計書の置き場 services/<名前>/ の名前が重ならないようにする。名前の同じサービスがあると、試作に進められない
+ */
+export function freeRepoNames(): void {
+  seedMain("UPDATE services SET repo = NULL WHERE repo LIKE 'example/%' OR id IN ('00000000-0000-7000-8000-000000000101', '00000000-0000-7000-8000-000000000102')");
+}
+
+/**
+ * 通しの後に、最初に登録したサービスのリポジトリを元に戻し、通しが足した案のリポジトリと設計書を書くタスクを片付ける。社員がほかの通しの前に取らないようにする
+ */
+export function restoreSeedServices(): void {
+  seedMain("UPDATE services SET repo = NULL WHERE repo LIKE 'example/%'");
+  seedMain("UPDATE services SET repo = 'takikou347/knowidea-ui' WHERE id = '00000000-0000-7000-8000-000000000101'");
+  seedMain("UPDATE services SET repo = 'takikou347/know-office' WHERE id = '00000000-0000-7000-8000-000000000102'");
+  seedMain("UPDATE nodes SET status = 'dropped' WHERE source LIKE 'design:%' AND status IN ('todo', 'doing')");
+}
