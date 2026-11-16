@@ -21,7 +21,7 @@ paths:
 - 画面の通しは Chrome の幅 1,280 で全部、幅 360 で形の変わる画面 (a11y、screens、review、office) を流し、axe の critical と serious を 0 にする。Safari はデプロイの前に Mac で `E2E_BROWSERS=safari` を付けて 1 度流す
 - 走らせる時は 1 ファイルずつ (`pnpm --filter <パッケージ> exec vitest run <ファイル>`、e2e は `pnpm --filter @know-office/office exec playwright test <ファイル>`)。全部は push の前の `pnpm verify` で 1 回だけ
 - 「済み」は、要件のシナリオが入口 (画面の操作、Cron、通知、社員のツール) から画面に出るまで、代わりの Claude と GitHub と Access の上でつながって動く事。単体のテストが通るだけでは済みにしない。つながりは `apps/office/e2e/flows/<利用場面>.spec.ts` で確かめ、ここではゲートウェイの返事を差し替えない (`page.route`、`context.route`、HAR、`addInitScript` での `fetch` の差し替えのどれも)
-- 画面は `src/screen/mock.ts` を読まない。v1.yaml のルートは全部作る。残っている物は `test/screen/no-mock.test.ts` の `STILL_MOCK` と `test/gate/openapi.test.ts` の `UNBUILT` に Issue の番号と並べ、作ったら消す。足さない。`mock.ts` を再 export する中継のファイルを作らない
+- 画面は `src/screen/mock.ts` を読まない。v1.yaml のルートは全部作る。残っている物は `test/screen/no-mock.test.ts` の `STILL_MOCK` と `src/gate/routes/planned.ts` の `PLANNED_ROUTES` に Issue の番号と並べ、作ったら消す。足さない。`mock.ts` を再 export する中継のファイルを作らない
 - 代わりの Claude と GitHub は、本物が断る物 (違う鍵、User-Agent の無い要求、上限) を同じように断る。本物の返事を記録した見本があれば、同じ Zod の形に両方を通す
 - 利用場面の通し (`apps/office/e2e/flows/<利用場面>.spec.ts`) は Playwright の `flows` のプロジェクトで、Chrome の幅 1,280 で 1 本ずつ、ほかの通しの後に流れる。本物の D1 と DO を書き換えるので、前の通しが残した値に頼らず、終わる時に元の値へ戻す
 - パスキーの確認が要る操作は、テストの頭で `useOwnerPasskey(page)` (`e2e/flows/helpers/passkey.ts`) を呼ぶ。`flows/passkey.setup.ts` が設定の画面で登録した 1 本が仮想の認証器に入り、画面が求めた時に自動で確かめる

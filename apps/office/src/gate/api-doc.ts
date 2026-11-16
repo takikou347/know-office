@@ -116,9 +116,9 @@ export function openApiDocument() {
 }
 
 /**
- * 文書を v1.yaml の中身にする
+ * 文書を v1.yaml の中身にする。YAML 1.1 で読む道具 (PyYAML) が off や yes を真偽にしないよう、1.1 の決まりで引用符を付ける
  * @returns YAML の文
  */
 export function openApiYaml(): string {
-  return `# know-office の API の文書。apps/office/src/gate/ の createRoute と core の Zod スキーマから作る。手で直さず、pnpm --filter @know-office/office openapi で作り直す\n${stringify(openApiDocument(), { lineWidth: 0 })}`;
+  return `# know-office の API の文書。apps/office/src/gate/ の createRoute と core の Zod スキーマから作る。手で直さず、pnpm --filter @know-office/office openapi で作り直す\n${stringify(openApiDocument(), { lineWidth: 0, version: "1.1" })}`;
 }

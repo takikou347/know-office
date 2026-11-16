@@ -1,4 +1,4 @@
-// どのルートにも共通の返す形。meta の id は v1.yaml の components/schemas の名前と同じ
+// どのルートにも共通の返す形。meta の id が API の文書 (v1.yaml) の components/schemas の名前になる
 import { z } from "./zod.ts";
 import { ERROR_CODES } from "../errors.ts";
 

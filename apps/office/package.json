@@ -9,7 +9,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "db:local": "for db in DB REC_2026 REC_2027 REC_2028 REC_2029 REC_2030 REC_2031; do wrangler d1 migrations apply $db --local || exit 1; done",
-    "api-docs": "node --experimental-strip-types scripts/api-docs.ts"
+    "api-docs": "node --experimental-strip-types scripts/api-docs.ts",
+    "openapi": "vitest run test/gate/openapi.test.ts --update"
   },
   "dependencies": {
     "@hono/zod-openapi": "1.6.3",
