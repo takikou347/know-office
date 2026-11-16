@@ -13,7 +13,7 @@ description: know-office の GitHub Issue 1 件を、要件のシナリオごと
 6. 通す: `pnpm verify` (画面を変えたら `pnpm verify --e2e`)。作業ツリーごとに e2e のポートが違うので、ほかの作業ツリーと同時に流してよい。落ちた手順は出力の最後だけが出るので、直したらそのファイルだけを走らせ直し (vitest は `pnpm --filter <パッケージ> exec vitest run <ファイル>`、e2e は `pnpm --filter @know-office/office exec playwright test <ファイル>`)、最後にもう一度 `pnpm verify`。全部を流すのは最後の 1 回だけ
 7. Issue を閉じてよい (PR の本文に `Closes #<番号>` を書いてよい) のは、その Issue の要件のシナリオが `apps/office/e2e/flows/` の通しで、画面からつながって動いた時だけ。サーバーの側だけ作った時は `Refs #<番号>` にして閉じず、残りを Issue に書き足す。作る途中で見つけた別の課題は同じ PR に入れず、新しい Issue を立てる。`PLANNED_ROUTES` (`src/gate/routes/planned.ts`) と `STILL_MOCK` (`.claude/rules/tests.md`) から、作った物を消す
 8. レビューの前に、`.claude/rules/api.md` と `tests.md` のうち、よく差し戻される物 (書く条件と一緒に書く出来事を 1 文かバッチに入れる、`x-step-up`、外から来た ID とキーと道の形、前の作業トークンの失効、同時と二重と境目と分岐ごとのテスト、外への送信の二重、費用の出口、設計書の直し) を差分に当てて自分で確かめる。レビューは knowidea のスキル `review` で頼み、3 で控えた落ちた理由を添える
-9. PR の出し方と main への入れ方は knowidea のスキル `land`。PR は先に下書きで出し、CI をレビューと同時に回す。本文の `Closes` と `Refs` は 7 で決める
+9. PR の題は Issue と同じ中身にする。出し方と main への入れ方は knowidea のスキル `land`。PR は先に下書きで出し、CI をレビューと同時に回す。本文の `Closes` と `Refs` は 7 で決める
 
 ## 並列で進める時
 
@@ -21,5 +21,5 @@ description: know-office の GitHub Issue 1 件を、要件のシナリオごと
 
 ## 区切りごとの監査
 
-- 親の Issue が 1 つ閉じるごとと、デプロイの前に、エージェント `auditor` に要件の全シナリオを入口から画面まで追わせる。diff のレビューでは全体の抜けは見つからない
+- 親の Issue が 1 つ閉じるごとと、デプロイの前に、作った者と別のモデルで (Agent の `model` で指定する) エージェント `auditor` に要件の全シナリオを入口から画面まで追わせる。diff のレビューでは全体の抜けは見つからない
 - オーナーへの「終わった」の報告は、閉じた Issue の数でなく、`RELEASE=1 pnpm verify --e2e` (`UNBUILT` と `STILL_MOCK` が空で、利用場面の通しが全部通る) と、開いている Issue が本物の環境待ちだけである事で言う
