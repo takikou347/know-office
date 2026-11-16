@@ -211,6 +211,8 @@ export {
   CLOSABLE_STAGES,
   compareSemver,
   CreateIdeaInput,
+  IdeaProposal,
+  IdeasAnswer,
   DeployDetail,
   Deployment,
   ReleaseDetail,

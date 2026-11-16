@@ -1,4 +1,4 @@
-// 週に 1 度のバッチ処理と、見つけた時に調べる急ぐ故障のバッチ処理。記録をまとめて Claude のバッチ処理に送り、5 分ごとに終わりを見て結果を入れる (サービスと拡張の 3.6、3.7)
+// 週に 1 度のバッチ処理 (蒸留、見つけて直す調べ、アイデア出し) と、見つけた時に調べる急ぐ故障のバッチ処理。記録をまとめて Claude のバッチ処理に送り、5 分ごとに終わりを見て結果を入れる (サービスと拡張の 3.1、3.6、3.7)
 import { type Clock, type Fetcher, jstDay, jstDayStart, newId } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
@@ -6,27 +6,28 @@ import { FINDINGS_JOB, syncIssues, URGENT_JOB, URGENT_PER_DAY, urgentBatches } f
 import type { IssueTracker } from "../findings/tracker.ts";
 import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
+import { IDEAS_JOB } from "./ideas.ts";
 import { batchEnded, type BatchRequest, type BatchResult, batchResults, submitBatch } from "./claude-batch.ts";
 
 /** 日本時間の月曜 3 時。Cron は協定世界時で書くので日曜の 18 時になる。蒸留を始める */
 export const DISTILL_CRON = "0 18 * * 0";
 
-/** 日本時間の月曜 4 時。見つけて直す調べを始める */
+/** 日本時間の月曜 4 時。見つけて直す調べと、IDEA_BATCH が on ならアイデア出しを始める */
 export const FINDINGS_CRON = "0 19 * * 0";
 
 const DAY = 24 * 60 * 60_000;
 
-/** Cron の文字列から始める種類 */
-const WEEKLY_CRONS = new Map<string, BatchKind>([
-  [DISTILL_CRON, "distill"],
-  [FINDINGS_CRON, "findings"],
+/** Cron の文字列から始める種類。wrangler.jsonc の triggers.crons に同じ文字列を置く */
+const WEEKLY_CRONS = new Map<string, BatchKind[]>([
+  [DISTILL_CRON, ["distill"]],
+  [FINDINGS_CRON, ["findings", "ideas"]],
 ]);
 
 /** 始めた印を、送れずに残った物とみなすまでの間 */
 const STALE_PENDING_MS = 30 * 60_000;
 
 /** バッチ処理の種類。urgent は急ぐ故障で、週でなく日と原因ごとに 1 つ */
-export type BatchKind = "distill" | "findings" | "urgent";
+export type BatchKind = "distill" | "findings" | "ideas" | "urgent";
 
 /** 週のバッチ処理が外へ頼む口 */
 export type WeeklyDeps = {
@@ -69,9 +70,9 @@ export type WeeklyJob = {
   apply(env: Bindings, deps: WeeklyDeps, row: BatchRow, results: BatchResult[], now: number): Promise<void>;
 };
 
-const JOBS: Record<BatchKind, WeeklyJob> = { distill: DISTILL_JOB, findings: FINDINGS_JOB, urgent: URGENT_JOB };
+const JOBS: Record<BatchKind, WeeklyJob> = { distill: DISTILL_JOB, findings: FINDINGS_JOB, ideas: IDEAS_JOB, urgent: URGENT_JOB };
 
-const Pending = z.object({ id: z.string(), kind: z.enum(["distill", "findings", "urgent"]), week: z.string(), batch_id: z.string(), detail: z.string().nullable(), created_at: z.number() });
+const Pending = z.object({ id: z.string(), kind: z.enum(["distill", "findings", "ideas", "urgent"]), week: z.string(), batch_id: z.string(), detail: z.string().nullable(), created_at: z.number() });
 
 /**
  * 今の時刻から前の週を出す。今が月曜でなくても、今の週の前の週を返す
@@ -185,7 +186,7 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
 }
 
 /**
- * 週の Cron なら、その種類のバッチ処理を始める。失敗は投げずにエラーログに残す
+ * 週の Cron なら、その Cron の種類のバッチ処理を始める。失敗は投げずに種類ごとにエラーログに残す
  * @param cron 呼ばれた Cron の文字列
  * @param env バインディング
  * @param ctx 返事の後も処理を続けさせる waitUntil
@@ -195,8 +196,10 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
  * @returns 週の Cron だったら true
  */
 export function runWeekly(cron: string, env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }, clock: Clock, deps: WeeklyDeps): boolean {
-  const kind = WEEKLY_CRONS.get(cron);
-  if (kind === undefined) return false;
-  ctx.waitUntil(startBatch(env, kind, deps, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: `${kind}_start_failed`, error }, clock)));
+  const kinds = WEEKLY_CRONS.get(cron);
+  if (kinds === undefined) return false;
+  for (const kind of kinds) {
+    ctx.waitUntil(startBatch(env, kind, deps, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: `${kind}_start_failed`, error }, clock)));
+  }
   return true;
 }

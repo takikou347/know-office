@@ -212,7 +212,7 @@ export const batches = sqliteTable(
   "batches",
   {
     id: id(),
-    kind: text("kind", { enum: ["distill", "findings", "urgent"] }).notNull(),
+    kind: text("kind", { enum: ["distill", "findings", "ideas", "urgent"] }).notNull(),
     week: text("week").notNull(),
     batchId: text("batch_id"),
     status: text("status", { enum: ["pending", "submitted", "applied"] }).notNull(),

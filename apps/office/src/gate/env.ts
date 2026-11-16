@@ -206,6 +206,8 @@ export type Bindings = {
   OFFICE_REPO?: string;
   /** 急ぐ故障を見つけた時の調べ。費用が出るので、オーナーの はい の後に on にする。初期値は off */
   URGENT_SCAN?: string;
+  /** 週に 1 度のアイデア出し。費用が出るので、オーナーの はい の後に on にする。初期値は off */
+  IDEA_BATCH?: string;
 } & Partial<Record<RecordBinding, D1Database>>;
 
 /** ゲートウェイの Hono に渡す型。バインディングとミドルウェアが置く値の型を持つ */

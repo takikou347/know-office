@@ -57,8 +57,9 @@ describe("記録のつなぎの見張り", () => {
     await d1.REC_2027.prepare("DROP TRIGGER audit_log_no_update").run();
     await d1.REC_2027.prepare("UPDATE audit_log SET target = 'changed' WHERE rowid = 2").run();
     const recorder = gate.env.RECORDER.get(gate.env.RECORDER.idFromName("recorder"));
-    const verify = recorder.verify.bind(recorder);
-    recorder.verify = (year: number) => (year === 2026 ? Promise.reject(new Error("届かない")) : verify(year));
+    // 2026 年だけ記録 DO に届かない事にする
+    const down = { ...recorder, verify: (year: number) => (year === 2026 ? Promise.reject(new Error("届かない")) : recorder.verify(year)) };
+    Object.assign(gate.env, { RECORDER: { idFromName: () => "recorder", get: () => down } });
     await verifyChains(gate.env, clock, gate.deps);
     expect(await stopped()).toEqual({ stops: [{ scope: "office", signal: "certain_fraud" }], notices: [{ kind: "guard_stop" }] });
     expect((await d1.REC_2027.prepare("SELECT code FROM error_events").all()).results).toEqual([{ code: "chain_verify_failed" }]);

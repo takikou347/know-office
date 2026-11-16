@@ -179,6 +179,12 @@ export const CreateIdeaInput = z
 /** 案を足す入力の型 */
 export type CreateIdeaInput = z.infer<typeof CreateIdeaInput>;
 
+/** アイデア出しのバッチ処理で社長のモデルが返す 1 件の案。足す時の上限は案を足す入力と同じ */
+export const IdeaProposal = CreateIdeaInput.pick({ title: true, kind: true, aim: true, users: true }).strict();
+
+/** アイデア出しの答え。案は 1 件ずつ確かめ、形の違う物だけを捨てる */
+export const IdeasAnswer = z.object({ ideas: z.array(z.unknown()).max(20) }).loose();
+
 /** 段階を移す入力。staffId は prototype に進める時に要る */
 export const AdvanceInput = z
   .object({

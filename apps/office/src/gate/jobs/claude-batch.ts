@@ -160,14 +160,15 @@ export async function batchResults(env: Bindings, fetch: Fetcher, batchId: strin
 }
 
 /**
- * バッチ処理の使った量を office の範囲で usage に残す。レビュー担当のモデルで、1 件ずつの半額で数える。
+ * バッチ処理の使った量を office の範囲で usage に残す。Opus で、1 件ずつの半額で数える。
  * 同じバッチを読み直して 2 度呼んでも、結果ごとに 1 行だけ残す
  * @param env バインディング
  * @param batchId バッチの ID
  * @param results バッチの結果
  * @param at 残す時刻。読み直しても変わらないよう、batches の行を作った時刻を渡す
+ * @param staffId 使った社員。蒸留と調べはレビュー担当、アイデア出しは社長
  */
-export async function recordBatchUsage(env: Bindings, batchId: string, results: BatchResult[], at: number): Promise<void> {
+export async function recordBatchUsage(env: Bindings, batchId: string, results: BatchResult[], at: number, staffId: "reviewer" | "president" = "reviewer"): Promise<void> {
   const db = recordsOf(env, at);
   const statements = results.flatMap((r, i) => {
     if (!r.usage) return [];
@@ -177,9 +178,9 @@ export async function recordBatchUsage(env: Bindings, batchId: string, results: 
       db
         .prepare(
           `INSERT INTO usage (id, at, staff_id, node_id, scope, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micro_usd, request_id, waited_ms, trace_id)
-           SELECT ?, ?, 'reviewer', NULL, 'office', ?, ?, ?, ?, ?, ?, ?, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM usage WHERE at = ? AND request_id = ?)`,
+           SELECT ?, ?, ?, NULL, 'office', ?, ?, ?, ?, ?, ?, ?, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM usage WHERE at = ? AND request_id = ?)`,
         )
-        .bind(newId(clockAt(at + i)), at, OPUS, r.usage.inputTokens, r.usage.outputTokens, r.usage.cacheReadTokens, r.usage.cacheWriteTokens, batchCostMicroUsd(OPUS, r.usage), requestId, at, requestId),
+        .bind(newId(clockAt(at + i)), at, staffId, OPUS, r.usage.inputTokens, r.usage.outputTokens, r.usage.cacheReadTokens, r.usage.cacheWriteTokens, batchCostMicroUsd(OPUS, r.usage), requestId, at, requestId),
     ];
   });
   if (statements.length > 0) await db.batch(statements);
