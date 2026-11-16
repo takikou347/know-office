@@ -228,18 +228,23 @@ describe("ワークスペースの git の push", () => {
     expect(world.gate.github.gitBodies.at(-1)?.bytes).toBe(body.byteLength);
   });
 
-  it.each([
-    { name: "長さが 16 進数でない", body: "zzzz" },
-    { name: "長さの頭に符号がある", body: `+066${"0".repeat(40)} ${"c".repeat(40)} refs/heads/ko/x\n0000` },
-    { name: "長さが 4 より小さい", body: "0003" },
-    { name: "長さが本文より長い", body: "00ff0000" },
-    { name: "flush が無い", body: `0067${"0".repeat(40)} ${"c".repeat(40)} refs/heads/ko/x\n` },
-    { name: "命令の形が違う", body: "0010not-a-cmd\n0000" },
-  ])("壊れた pkt-line は 400: $name", async ({ body }) => {
+  it("壊れた pkt-line (長さが 16 進数でない、頭に符号がある、4 より小さい、本文より長い、flush が無い、命令の形が違う) は 400 で、GitHub に送らない", async () => {
     await connect(world);
     const work = await startTask(world, UI);
-    const res = await fromWorkspace(world, work, gitPost(work.token, new TextEncoder().encode(body)));
-    expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 400, code: "malformed_request" });
+    const cases = [
+      { name: "長さが 16 進数でない", body: "zzzz" },
+      { name: "長さの頭に符号がある", body: `+066${"0".repeat(40)} ${"c".repeat(40)} refs/heads/ko/x\n0000` },
+      { name: "長さが 4 より小さい", body: "0003" },
+      { name: "長さが本文より長い", body: "00ff0000" },
+      { name: "flush が無い", body: `0067${"0".repeat(40)} ${"c".repeat(40)} refs/heads/ko/x\n` },
+      { name: "命令の形が違う", body: "0010not-a-cmd\n0000" },
+    ];
+    const answers: Record<string, unknown> = {};
+    for (const { name, body } of cases) {
+      const res = await fromWorkspace(world, work, gitPost(work.token, new TextEncoder().encode(body)));
+      answers[name] = { status: res.status, code: Problem.parse(await res.json()).code };
+    }
+    expect(answers).toEqual(Object.fromEntries(cases.map((c) => [c.name, { status: 400, code: "malformed_request" }])));
     expect(gitRequests()).toEqual([]);
   });
 

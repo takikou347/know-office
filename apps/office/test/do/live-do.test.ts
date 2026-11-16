@@ -79,21 +79,22 @@ describe("配信 DO", () => {
     for (const o of [a, b, c]) o.ws.close();
   });
 
-  it(`${String(LIVE_MAX_SOCKETS + 1)} 本目を開くと最も古い接続を 1008 で閉じる`, async () => {
+  // DO が自分から閉じた接続は、wrangler の手元の中継が TCP を閉じず、Node の WebSocket の close が閉じる知らせの約 10 秒後に届く。
+  // 閉じた番号は close でしか読めないので、古さで閉じる物と数で閉じる物を 1 つの入口で続けて起こし、2 つの待ちを重ねる
+  it(`開いてから 1 時間を過ぎた接続は 1000 で閉じ、${String(LIVE_MAX_SOCKETS + 1)} 本目を開くと最も古い接続を 1008 で閉じる`, async () => {
+    const old = await open(worker, "old", Date.now() - LIVE_MAX_AGE_MS - 1);
+    // 過ぎた時刻の alarm がすぐ動き、閉じる知らせが届くまで待ってから、数の上限を確かめる
+    await until(() => old.ws.readyState >= WebSocket.CLOSING);
     const base = Date.now();
     const opened: Opened[] = [];
     for (let n = 0; n < LIVE_MAX_SOCKETS; n += 1) opened.push(await open(worker, `s${String(n)}`, base + n));
     const extra = await open(worker, "extra", base + LIVE_MAX_SOCKETS);
-    expect(await opened[0]?.closed).toBe(1008);
+    expect(await Promise.all([old.closed, opened[0]?.closed])).toEqual([1000, 1008]);
     await worker.live("publish", NOTICE);
     await until(() => extra.frames.length > 0 && opened.slice(1).every((o) => o.frames.length > 0));
+    expect(old.frames).toEqual([]);
     expect(opened[0]?.frames).toEqual([]);
     expect(opened.slice(1).every((o) => o.frames.length === 1)).toBe(true);
     for (const o of [...opened.slice(1), extra]) o.ws.close();
-  });
-
-  it("開いてから 1 時間を過ぎた接続は閉じる", async () => {
-    const old = await open(worker, "old", Date.now() - LIVE_MAX_AGE_MS - 1);
-    expect(await old.closed).toBe(1000);
   });
 });

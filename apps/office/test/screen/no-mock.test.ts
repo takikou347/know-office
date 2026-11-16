@@ -43,7 +43,7 @@ const E2E = join(import.meta.dirname, "../../e2e");
  */
 const STUBBED: Record<string, number> = {
   "a11y.spec.ts": 3,
-  "guard.spec.ts": 5,
+  "guard.spec.ts": 3,
   "helpers/guard.ts": 3,
   "helpers/review.ts": 1,
   "keys.spec.ts": 5,

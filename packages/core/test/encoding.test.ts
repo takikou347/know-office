@@ -14,7 +14,10 @@ describe("base64 の変換", () => {
 
   it("会話の記録ほどの大きなバイト列も base64 にでき、戻せる", () => {
     const big = Uint8Array.from({ length: 4 * 1024 * 1024 }, (_, i) => i % 251);
-    expect(fromBase64(toBase64(big))).toEqual(big);
+    const back = fromBase64(toBase64(big));
+    // 4MB を 1 バイトずつ toEqual で比べると 5 秒かかるので、長さと中身の一致を 1 度に見る
+    expect(back?.length).toBe(big.length);
+    expect(back?.every((b, i) => b === big[i])).toBe(true);
   });
 
   it.each(["a", "!!", "AAH6+/z9", "A=A="])("壊れた base64url %s は null", (text) => {

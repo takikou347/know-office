@@ -95,29 +95,21 @@ describe("配信の作業トークン", () => {
 });
 
 describe("配信の切り替えの守り", () => {
-  for (const [name, origin] of [
-    ["無い", null],
-    ["null", "null"],
-    ["別のポート", "http://localhost:8080"],
-    ["自分の名前で始まる別の所", "http://localhost.evil.com"],
-    ["末尾の違う所", "http://localhost/"],
-    ["https に変えた所", "https://localhost"],
-  ] as const) {
-    it(`Origin が${name}時は 403 で、作業トークンを使い切らない`, async () => {
+  it("Origin が無い、null、別のポート、自分の名前で始まる別の所、末尾の違う所、https に変えた所の時は 403 で、作業トークンを使い切らない", async () => {
+    const origins = [null, "null", "http://localhost:8080", "http://localhost.evil.com", "http://localhost/", "https://localhost"];
+    const answers: Record<string, string> = {};
+    for (const origin of origins) {
       const value = await ticket();
       const res = await open(value, { Origin: origin });
-      expect(res.status).toBe(403);
-      expect(Problem.parse(await res.json()).code).toBe("origin_mismatch");
-      expect((await open(value)).status).toBe(200);
-    });
-  }
-
-  it("作業トークンが無く Origin も違う時は 403 を返す", async () => {
-    expect((await open(null, { Origin: "http://evil.example" })).status).toBe(403);
-    expect((await open(null)).status).toBe(422);
+      // 断った後も、同じ作業トークンで開ける
+      answers[String(origin)] = `${String(res.status)} ${Problem.parse(await res.json()).code} ${String((await open(value)).status)}`;
+    }
+    expect(answers).toEqual(Object.fromEntries(origins.map((o) => [String(o), "403 origin_mismatch 200"])));
   });
 
-  it("形の違う作業トークンは 401、Upgrade が無ければ 400 で使い切らない", async () => {
+  it("作業トークンが無く Origin も違う時は 403、形の違う作業トークンは 401、Upgrade が無ければ 400 で使い切らない", async () => {
+    expect((await open(null, { Origin: "http://evil.example" })).status).toBe(403);
+    expect((await open(null)).status).toBe(422);
     expect((await open("x".repeat(44))).status).toBe(401);
     const value = await ticket();
     const res = await open(value, { Upgrade: null });

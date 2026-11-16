@@ -19,6 +19,16 @@ function recordRequests(page: Page): string[] {
   return urls;
 }
 
+/** 読み込む物と動きは幅で変わらないので、幅 1,280 だけで見る。狭い幅の部屋の形は、画面ごとのはみ出しと a11y.spec.ts で見る */
+const WIDE_ONLY = "読み込む物と動きは幅で変わらないので、幅 1,280 だけで見る";
+
+/**
+ * 狭い幅のプロジェクトかを返す
+ * @param page 開くページ
+ * @returns 幅が 600 より狭ければ true
+ */
+const narrow = (page: Page) => (page.viewportSize()?.width ?? 0) < 600;
+
 /**
  * 部屋の区画を返す
  * @param page 見るページ
@@ -67,6 +77,7 @@ test.describe("画面の一覧", () => {
 
 test.describe("速さ", () => {
   test("3D を読み込まない", async ({ page }) => {
+    test.skip(narrow(page), WIDE_ONLY);
     const urls = recordRequests(page);
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1, name: "ダッシュボード" })).toBeVisible();
@@ -95,6 +106,7 @@ test.describe("オフィスの部屋", () => {
   });
 
   test("動きを減らす設定では動かさない", async ({ page }) => {
+    test.skip(narrow(page), WIDE_ONLY);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/office");
     await expect(roomOf(page).locator("canvas")).toBeVisible();
@@ -109,9 +121,12 @@ test.describe("オフィスの部屋", () => {
   });
 
   test("動きを止めるボタン", async ({ page }) => {
+    test.skip(narrow(page), WIDE_ONLY);
     await page.goto("/office");
     const halt = page.getByRole("button", { name: "動きを止める" });
     await expect(halt).toHaveAttribute("aria-pressed", "false");
+    // ボタンは部屋の絵より先に出るので、絵が出てから撮る
+    await expect(roomOf(page).locator("canvas")).toBeVisible();
     // 確かめ方が効いている事: 動いている間は、時間が経つと絵が変わる
     const moving = await pictureOf(page);
     await page.waitForTimeout(600);

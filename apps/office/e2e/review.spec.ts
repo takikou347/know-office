@@ -47,6 +47,7 @@ test.describe("社員の所見と判断", () => {
 });
 
 test("1,000 行の変更も、最初のファイルだけを先に読んで出す", async ({ page }) => {
+  test.skip(width(page) < 600, "読む順は幅で変わらないので、幅 1,280 だけで見る");
   // 2 秒の速さ (要件 screens のレビューを開く速さ) は、開発のサーバーでは測れないので、本番の形で測る時に確かめる
   const called = await stubReview(page, { firstLines: 1000 });
   await page.goto(REVIEW_PATH);
@@ -55,6 +56,7 @@ test("1,000 行の変更も、最初のファイルだけを先に読んで出�
 });
 
 test("残りのファイルは開いた時に読み、開いた先を読んだ事にする", async ({ page }) => {
+  test.skip(width(page) < 600, "読む順は幅で変わらないので、幅 1,280 だけで見る");
   const called = await stubReview(page);
   await page.goto(REVIEW_PATH);
   await expect(page.locator(".ki-diff").first()).toBeVisible();

@@ -49,35 +49,30 @@ describe("入れるのはオーナーだけ", () => {
     expect(await codeOf(res)).toBe("forbidden");
   });
 
-  it.each([
-    ["期限の切れた証明", () => ({ exp: Math.floor(clock.now() / 1000) - 1 })],
-    ["ほかのアプリの証明", () => ({ aud: ["other-aud"] })],
-    ["ほかのチームの証明", () => ({ iss: "https://other.cloudflareaccess.com" })],
-  ])("%s は 401", async (_, claims) => {
-    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign(claims()) } });
-    expect(res.status).toBe(401);
-  });
-
-  it("署名を書き換えた証明と、alg を none にした証明は 401", async () => {
+  it("期限の切れた証明、ほかのアプリやチームの証明、署名を書き換えた証明、alg を none か HS256 にすり替えた証明、ほかの鍵で署名した証明は 401", async () => {
     const proof = await gate.access.sign();
     const [head = "", body = ""] = proof.split(".");
     const none = `${btoa(JSON.stringify({ alg: "none", typ: "JWT" })).replace(/=+$/, "")}.${body}.`;
-    for (const bad of [`${proof.slice(0, -4)}AAAA`, none, `${head}.${body}.`]) {
-      const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": bad } });
-      expect(res.status).toBe(401);
-    }
-  });
-
-  it("ほかの鍵で署名した証明と、alg を HS256 にすり替えた証明は 401", async () => {
     const stranger = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock });
-    const [, body = ""] = (await gate.access.sign()).split(".");
     const input = `${jsonPart({ alg: "HS256", kid: gate.access.kid(), typ: "JWT" })}.${body}`;
     const hmac = await crypto.subtle.importKey("raw", new TextEncoder().encode("guessed"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const hs256 = `${input}.${toBase64url(await crypto.subtle.sign("HMAC", hmac, new TextEncoder().encode(input)))}`;
-    for (const bad of [await stranger.sign(), hs256]) {
-      const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": bad } });
-      expect(res.status).toBe(401);
+    const bad = {
+      期限の切れた証明: await gate.access.sign({ exp: Math.floor(clock.now() / 1000) - 1 }),
+      ほかのアプリの証明: await gate.access.sign({ aud: ["other-aud"] }),
+      ほかのチームの証明: await gate.access.sign({ iss: "https://other.cloudflareaccess.com" }),
+      署名を書き換えた証明: `${proof.slice(0, -4)}AAAA`,
+      "alg を none にした証明": none,
+      署名の無い証明: `${head}.${body}.`,
+      ほかの鍵で署名した証明: await stranger.sign(),
+      "alg を HS256 にすり替えた証明": hs256,
+    };
+    // 同じ送信元の失敗は 5 回でロックアウトになるので、証明ごとに送信元を変える
+    const statuses: Record<string, number> = {};
+    for (const [i, [name, assertion]] of Object.entries(bad).entries()) {
+      statuses[name] = (await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": assertion, "CF-Connecting-IP": `198.51.100.${String(i + 1)}` } })).status;
     }
+    expect(statuses).toEqual(Object.fromEntries(Object.keys(bad).map((name) => [name, 401])));
   });
 
   it("メールアドレスは大文字と小文字を区別しない", async () => {
@@ -129,7 +124,7 @@ describe("入れるのはオーナーだけ", () => {
     expect((await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } })).status).toBe(200);
   });
 
-  it("公開鍵を取り直せなくても、ためた鍵で知っている kid の証明は通し、知らない kid は 30 秒取りに行かず 503", async () => {
+  it("公開鍵を取り直せなくても、ためた鍵で知っている kid の証明は通し、知らない kid は 30 秒取りに行かず 503 で、その後も知っている kid の証明は通す", async () => {
     const health = async (proof: string) => gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": proof } });
     expect((await health(await gate.access.sign())).status).toBe(200);
     clock.advance(61 * 60_000);
@@ -143,22 +138,14 @@ describe("入れるのはオーナーだけ", () => {
     expect(res.status).toBe(503);
     expect(await codeOf(res)).toBe("unavailable");
     expect(gate.certs.calls).toBe(2);
+    // 知らない kid の取り直しに失敗した後も、知っている kid の証明は通す
+    expect((await health(await gate.access.sign())).status).toBe(200);
+    expect(gate.certs.calls).toBe(2);
     // 30 秒を過ぎたら取り直し、戻った Access の鍵をためる
     clock.advance(31_000);
     gate.certs.answer = "ok";
     expect((await health(await gate.access.sign())).status).toBe(200);
     expect(gate.certs.calls).toBe(3);
-  });
-
-  it("知らない kid の取り直しに失敗した後も、知っている kid の証明は通す", async () => {
-    const health = async (proof: string) => gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": proof } });
-    expect((await health(await gate.access.sign())).status).toBe(200);
-    clock.advance(61 * 60_000);
-    gate.certs.answer = "down";
-    const stranger = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock });
-    expect((await health(await stranger.sign())).status).toBe(503);
-    expect((await health(await gate.access.sign())).status).toBe(200);
-    expect(gate.certs.calls).toBe(2);
   });
 
   it("最後に取れてから 24 時間を過ぎた鍵では、知っている kid の証明も通さず 503 unavailable", async () => {
@@ -254,27 +241,30 @@ describe("Access の作業用の鍵", () => {
     expect(await d1.DB.prepare("SELECT count(*) AS n FROM sessions").first("n")).toBe(0);
   });
 
-  // 断ったのが Access の証明の確かめだと分かるよう、Access の失敗の記録が 1 行残る事も見る。セッションの確かめで断られたのでは、鍵の証明を通した事になる
-  it.each([
-    ["セッションの要るほかのルート", "/api/v1/me", "GET"],
-    ["稼働確認への GET 以外", "/api/v1/health", "POST"],
-    ["末尾に / の付いた稼働確認", "/api/v1/health/", "GET"],
-  ])("決めた鍵の証明でも%sは Access で断る", async (_, path, method) => {
-    const res = await gate.request(path, { method, headers: { Origin: ORIGIN, "Cf-Access-Jwt-Assertion": await serviceProof(SMOKE_CLIENT_ID) } });
-    expect([401, 405]).toContain(res.status);
-    expect(await d1.DB.prepare("SELECT kind, ok FROM login_attempts").all().then((r) => r.results)).toEqual([{ kind: "access", ok: 0 }]);
+  it("決めた鍵の証明でもセッションの要るほかのルート、稼働確認への GET 以外、末尾に / の付いた稼働確認は Access で断る", async () => {
+    const cases = [
+      ["/api/v1/me", "GET"],
+      ["/api/v1/health", "POST"],
+      ["/api/v1/health/", "GET"],
+    ] as const;
+    // 断ったのが Access の証明の確かめだと分かるよう、Access の失敗の記録が 1 行ずつ増える事も見る。セッションの確かめで断られたのでは、鍵の証明を通した事になる
+    const answers: Record<string, string> = {};
+    for (const [path, method] of cases) {
+      const res = await gate.request(path, { method, headers: { Origin: ORIGIN, "Cf-Access-Jwt-Assertion": await serviceProof(SMOKE_CLIENT_ID) } });
+      const failures = await d1.DB.prepare("SELECT count(*) AS n FROM login_attempts WHERE kind = 'access' AND ok = 0").first("n");
+      answers[`${method} ${path}`] = `${[401, 405].includes(res.status) ? "断った" : String(res.status)} ${String(failures)}`;
+    }
+    expect(answers).toEqual({ "GET /api/v1/me": "断った 1", "POST /api/v1/health": "断った 2", "GET /api/v1/health/": "断った 3" });
+    expect(await d1.DB.prepare("SELECT count(*) AS n FROM login_attempts").first("n")).toBe(3);
   });
 
-  it("ほかの鍵の証明は稼働確認でも 401", async () => {
-    const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof("other-client.access") } });
-    expect(res.status).toBe(401);
-    expect(await codeOf(res)).toBe("unauthenticated");
-  });
-
-  it("鍵を決めていない時は稼働確認でも 401", async () => {
+  it("ほかの鍵の証明と、鍵を決めていない時は、稼働確認でも 401", async () => {
+    const other = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof("other-client.access") } });
+    expect(other.status).toBe(401);
+    expect(await codeOf(other)).toBe("unauthenticated");
     const env = { ...gate.env, ACCESS_SMOKE_CLIENT_ID: undefined };
-    const res = await gate.app.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof("") } }, env);
-    expect(res.status).toBe(401);
+    const unset = await gate.app.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await serviceProof(""), "CF-Connecting-IP": "198.51.100.200" } }, env);
+    expect(unset.status).toBe(401);
   });
 
   it("鍵の証明に email も付いていればオーナーとして確かめる", async () => {

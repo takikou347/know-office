@@ -100,18 +100,15 @@ describe("セッション", () => {
     expect(JSON.stringify(results)).not.toContain(token);
   });
 
-  it("署名を書き換えたクッキーは 401", async () => {
+  it("署名を書き換えたクッキーと、署名が base64url として壊れたクッキー「a」「!!」「」は 500 でなく 401", async () => {
     const headers = await gate.signIn();
     const cookie = headers["Cookie"] ?? "";
-    const res = await gate.request("/api/v1/me", { headers: { ...headers, Cookie: `${cookie.slice(0, -2)}AA` } });
-    expect(res.status).toBe(401);
-  });
-
-  it.each(["a", "!!", ""])("署名が base64url として壊れたクッキー「%s」も 500 でなく 401", async (signature) => {
-    const headers = await gate.signIn();
-    const token = (headers["Cookie"] ?? "").split(".")[0] ?? "";
-    const res = await gate.request("/api/v1/me", { headers: { ...headers, Cookie: `${token}.${signature}` } });
-    expect(res.status).toBe(401);
+    const token = cookie.split(".")[0] ?? "";
+    const statuses: Record<string, number> = {};
+    for (const bad of [`${cookie.slice(0, -2)}AA`, ...["a", "!!", ""].map((signature) => `${token}.${signature}`)]) {
+      statuses[bad] = (await gate.request("/api/v1/me", { headers: { ...headers, Cookie: bad } })).status;
+    }
+    expect(Object.values(statuses)).toEqual([401, 401, 401, 401]);
   });
 
   it("2 時間操作が無いと切れる。操作があれば続く", async () => {

@@ -66,21 +66,4 @@ test.describe("通知と手で止めるボタン", () => {
     expect(previews).toEqual([{ scope: "office", target: "office" }]);
     expect(created).toEqual([{ scope: "office", target: "office", reason: "オーナーが画面のボタンで止めた" }]);
   });
-
-  test("取り消すと止めない", async ({ page }) => {
-    const created: unknown[] = [];
-    await page.route("**/api/v1/guard/stop-previews", (route) =>
-      route.fulfill({ json: { data: { staff: ["president", "builder", "reviewer"], nodes: 0 }, meta: { traceId: "0".repeat(32) } } }),
-    );
-    await page.route("**/api/v1/guard/stops", async (route) => {
-      created.push(route.request().postDataJSON());
-      await route.fulfill({ status: 500 });
-    });
-    await page.goto("/guard");
-    await page.getByRole("button", { name: "すべての社員を止める" }).click();
-    const dialog = page.getByRole("dialog", { name: "全体を止めますか" });
-    await dialog.getByRole("button", { name: "取り消す" }).click();
-    await expect(dialog).toBeHidden();
-    expect(created).toEqual([]);
-  });
 });

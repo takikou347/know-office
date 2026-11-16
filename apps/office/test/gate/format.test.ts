@@ -68,20 +68,18 @@ describe("返事の形", () => {
     expect(Meta.parse((await read(res)).meta).traceId).toBe(traceId);
   });
 
-  it("無いルートは 404 の problem+json を返す", async () => {
+  it("無いルートは 404 の problem+json を返し、ルートはあるがメソッドが異なれば 405 と Allow を返す", async () => {
     const res = await gate.request("/api/v1/nothing", { headers: signedIn });
     expect(res.status).toBe(404);
     expect(res.headers.get("Content-Type")).toBe("application/problem+json");
     const body = await read(res);
     expect(Object.keys(body).toSorted()).toEqual(PROBLEM_KEYS);
     expect(body).toMatchObject({ type: "urn:know-office:problem:not_found", status: 404, code: "not_found", instance: "/api/v1/nothing" });
-  });
 
-  it("ルートはあるがメソッドが異なれば 405 と Allow を返す", async () => {
-    const res = await gate.request("/api/v1/health", { method: "DELETE", headers: signedIn });
-    expect(res.status).toBe(405);
-    expect(res.headers.get("Allow")).toBe("GET");
-    expect((await problem(res)).code).toBe("method_not_allowed");
+    const other = await gate.request("/api/v1/health", { method: "DELETE", headers: signedIn });
+    expect(other.status).toBe(405);
+    expect(other.headers.get("Allow")).toBe("GET");
+    expect((await problem(other)).code).toBe("method_not_allowed");
   });
 });
 
@@ -98,36 +96,22 @@ function post(body: string, headers: Record<string, string> = { "Content-Type": 
 
 describe("入力の失敗", () => {
 
-  it("422 の errors の pointer が本文の項目を指す", async () => {
+  it("422 の errors の pointer は本文の項目を #/<名前>、クエリを #/query/<名前> で指す", async () => {
     const res = await post(JSON.stringify({ title: "長すぎるタイトル" }));
     expect(res.status).toBe(422);
     const body = await problem(res);
     expect(body.code).toBe("validation_failed");
     expect(body.errors?.map((e) => e.pointer)).toEqual(["#/title"]);
+
+    const query = await problem(await post(JSON.stringify({ title: "a" }), undefined, "?limit=1000"));
+    expect(query.errors?.map((e) => e.pointer)).toEqual(["#/query/limit"]);
   });
 
-  it("422 の errors の pointer はクエリを #/query/<名前> で指す", async () => {
-    const res = await post(JSON.stringify({ title: "a" }), undefined, "?limit=1000");
-    const body = await problem(res);
-    expect(body.errors?.map((e) => e.pointer)).toEqual(["#/query/limit"]);
-  });
-
-  it("知らないクエリパラメーターは 400 malformed_request", async () => {
-    const res = await post(JSON.stringify({ title: "a" }), undefined, "?limit=1&unknown=1");
-    expect(res.status).toBe(400);
-    expect((await problem(res)).code).toBe("malformed_request");
-  });
-
-  it("JSON として不正なら 400 malformed_request", async () => {
-    const res = await post("{");
-    expect(res.status).toBe(400);
-    expect((await problem(res)).code).toBe("malformed_request");
-  });
-
-  it("Content-Type が application/json でなければ 415", async () => {
-    const res = await post("title=a", { "Content-Type": "application/x-www-form-urlencoded" });
-    expect(res.status).toBe(415);
-    expect((await problem(res)).code).toBe("unsupported_media_type");
+  it("知らないクエリパラメーターと、JSON として不正な本文は 400 malformed_request", async () => {
+    for (const res of [await post(JSON.stringify({ title: "a" }), undefined, "?limit=1&unknown=1"), await post("{")]) {
+      expect(res.status).toBe(400);
+      expect((await problem(res)).code).toBe("malformed_request");
+    }
   });
 
   it("本文の無い POST は Content-Type 無しで通る", async () => {
@@ -143,7 +127,10 @@ describe("入力の失敗", () => {
     expect(streamed.status).toBe(204);
   });
 
-  it("空でない本文で Content-Type 無しは 415 のまま", async () => {
+  it("Content-Type が application/json でないか、空でない本文で Content-Type が無ければ 415", async () => {
+    const form = await post("title=a", { "Content-Type": "application/x-www-form-urlencoded" });
+    expect(form.status).toBe(415);
+    expect((await problem(form)).code).toBe("unsupported_media_type");
     const res = await gate.request("/api/v1/touch", { method: "POST", body: new TextEncoder().encode("{}"), headers: signedIn });
     expect(res.status).toBe(415);
     expect((await problem(res)).code).toBe("unsupported_media_type");
@@ -159,42 +146,38 @@ describe("入力の失敗", () => {
     expect(streamed.status).toBe(415);
   });
 
-  it("本文が 1MB を超えれば 413", async () => {
+  it("本文が 1MB を超えれば 413。Content-Length が超えれば本文を読む前に、無ければ 1MB を超えた所で読むのを止める", async () => {
     const res = await post(JSON.stringify({ title: "a".repeat(1024 * 1024) }));
     expect(res.status).toBe(413);
     expect((await problem(res)).code).toBe("payload_too_large");
-  });
 
-  it("Content-Length が 1MB を超えれば、本文を読む前に 413", async () => {
     const untouchable = new ReadableStream<Uint8Array>({
       pull() {
         throw new Error("本文を読んだ");
       },
     });
-    const res = await gate.request("/api/v1/echo", {
+    const declared = await gate.request("/api/v1/echo", {
       method: "POST",
       body: untouchable,
       headers: { ...signedIn, "Content-Type": "application/json", "Content-Length": String(MAX_BODY_BYTES + 1) },
       duplex: "half",
     } as RequestInit);
-    expect(res.status).toBe(413);
-  });
+    expect(declared.status).toBe(413);
 
-  it("Content-Length が無ければ、1MB を超えた所で読むのを止めて 413", async () => {
     const chunk = new Uint8Array(64 * 1024).fill(0x20);
     const endless = new ReadableStream<Uint8Array>({
       pull(controller) {
         controller.enqueue(chunk);
       },
     });
-    const res = await gate.request("/api/v1/echo", {
+    const streamed = await gate.request("/api/v1/echo", {
       method: "POST",
       body: endless,
       headers: { ...signedIn, "Content-Type": "application/json" },
       duplex: "half",
     } as RequestInit);
-    expect(res.status).toBe(413);
-  }, 5000);
+    expect(streamed.status).toBe(413);
+  });
 
   it("想定外の失敗は 500 で、detail に中身を入れない", async () => {
     const res = await gate.request("/api/v1/boom", { headers: signedIn });

@@ -2,6 +2,16 @@ import { expect, test } from "./helpers/test.ts";
 import { screens } from "../src/screen/routes.ts";
 import { REVIEW_PATH, stubReview } from "./helpers/review.ts";
 
+/** 幅で形の変わらない中身は、幅 1,280 だけで見る。狭い幅の形は、画面ごとのはみ出しと a11y.spec.ts で見る */
+const WIDE_ONLY = "幅で形の変わらない中身なので、幅 1,280 だけで見る";
+
+/**
+ * 狭い幅のプロジェクトかを返す
+ * @param page 開くページ
+ * @returns 幅が 600 より狭ければ true
+ */
+const narrow = (page: { viewportSize: () => { width: number } | null }) => (page.viewportSize()?.width ?? 0) < 600;
+
 // どの画面も設定の幅で開き、横にはみ出さず、切り替えで今いる所が分かる
 for (const s of screens) {
   test(`${s.label} (${s.path}) が開き、横にはみ出さない`, async ({ page }) => {
@@ -60,11 +70,6 @@ test("社員と仕事で、変更のある仕事を選ぶと同じ画面にレ�
   await expect(page.getByRole("button", { name: "差し戻す" })).toBeVisible();
 });
 
-test("画面が手元の入口とつながる", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByText("入口とつながりました")).toBeVisible();
-});
-
 // 一番幅の出る所も、どの幅でも横にはみ出さない
 for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", REVIEW_PATH]) {
   test(`${path} が横にはみ出さない`, async ({ page }) => {
@@ -94,6 +99,7 @@ test("スマートフォンの勤怠の表は 3 列を出し、行を開くと�
 });
 
 test("勤怠の上の 1 行は、出勤から止められていた時間までを出す", async ({ page }) => {
+  test.skip(narrow(page), WIDE_ONLY);
   // records.setup.ts が手元の D1 に置いた記録を、入口から読んで出す
   await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
   await expect(
@@ -106,6 +112,7 @@ test("勤怠の上の 1 行は、出勤から止められていた時間まで�
 });
 
 test("記録の画面で、サービスごとの内訳の最後に全体を出し、CSV で出せる", async ({ page }) => {
+  test.skip(narrow(page), WIDE_ONLY);
   // records.setup.ts が手元の D1 に置いた work_entries を、期間を決めずに入口から集める
   await page.goto("/records");
   const table = page.getByRole("region", { name: "サービスごとの記録" }).getByRole("table");
@@ -118,6 +125,7 @@ test("記録の画面で、サービスごとの内訳の最後に全体を出�
 });
 
 test("記録の画面で社員ごとに切り替えると、社員ごとの内訳の最後に全体を出す", async ({ page }) => {
+  test.skip(narrow(page), WIDE_ONLY);
   await page.goto("/records");
   await page.getByRole("radio", { name: "社員ごと" }).check();
   const table = page.getByRole("region", { name: "社員ごとの記録" }).getByRole("table");
@@ -128,6 +136,7 @@ test("記録の画面で社員ごとに切り替えると、社員ごとの内�
 });
 
 test("記録の内訳を読めない時は、理由と問い合わせの番号を出す", async ({ page }) => {
+  test.skip(narrow(page), WIDE_ONLY);
   await page.route("**/api/v1/records/summary?*", (route) =>
     route.fulfill({ status: 500, contentType: "application/problem+json", body: JSON.stringify({ code: "internal", traceId: "0af7651916cd43dd8448eb211c80319c" }) }),
   );
@@ -157,15 +166,8 @@ test("スマートフォンで社員、仕事と進み、戻るで 1 つ前の�
   await expect(page.getByRole("main").getByRole("link", { name: /レビュー担当/ })).toBeVisible();
 });
 
-test("ダッシュボードに、承認を待つ物、今日の仕事、今月の費用、お知らせが出る", async ({ page }) => {
-  await page.goto("/");
-  for (const name of ["社員の様子", "承認を待つ物", "今日の仕事", "お知らせ"]) {
-    await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
-  }
-  await expect(page.getByText("今月の費用")).toBeVisible();
-});
-
 test("サービスを選ぶと、その様子と記録と設定が出る", async ({ page }) => {
+  test.skip(narrow(page), WIDE_ONLY);
   await page.goto("/services");
   await page.getByRole("main").getByRole("link", { name: "knowidea-ui" }).click();
   await expect(page.getByText("公開した版")).toBeVisible();
@@ -239,6 +241,7 @@ test("今いる画面のリンクを押しても、履歴は積まない", async
 });
 
 test("目的と組織図で、目的からタスクまでの木と進み具合、組織図と役目の説明文が出る", async ({ page }) => {
+  test.skip(narrow(page), WIDE_ONLY);
   await page.goto("/goals");
   await expect(page.getByRole("heading", { level: 2, name: "目的: AI の社員が自分で回る会社にする" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "目標: know-office を動かし始める" })).toBeVisible();

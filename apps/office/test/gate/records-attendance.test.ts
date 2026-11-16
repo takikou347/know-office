@@ -73,7 +73,7 @@ describe("勤怠の履歴", () => {
     expect(second.meta.next).toBeNull();
   });
 
-  it("件数は 1 と 100 を受け、0 と 101 は 422。始めが終わりより後も 422", async () => {
+  it("件数は 1 と 100 を受け、0 と 101 は 422。始めが終わりより後と知らない社員も 422、形の違うカーソルは 400", async () => {
     await total("builder", "2026-11-13", 1);
     expect((await history("?limit=1")).status).toBe(200);
     expect((await history("?limit=100")).status).toBe(200);
@@ -81,6 +81,8 @@ describe("勤怠の履歴", () => {
     expect((await history("?limit=101")).status).toBe(422);
     expect((await history("?from=2026-11-14&to=2026-11-13")).status).toBe(422);
     expect((await history("?from=2026-11-13&to=2026-11-13")).status).toBe(200);
+    expect((await history("?staffId=owner")).status).toBe(422);
+    expect((await history("?cursor=2026-11-13.x' OR 1")).status).toBe(400);
   });
 
   it("同じ日の 3 人を 1 件ずつ読んでも、重なりも抜けも無く、集計の無い日は出さない", async () => {
@@ -94,11 +96,6 @@ describe("勤怠の履歴", () => {
       cursor = page.meta.next;
     }
     expect(seen).toEqual(["2026-11-13 builder", "2026-11-13 president", "2026-11-13 reviewer", "2026-11-11 builder"]);
-  });
-
-  it("形の違うカーソルは 400、知らない社員は 422", async () => {
-    expect((await history("?cursor=2026-11-13.x' OR 1")).status).toBe(400);
-    expect((await history("?staffId=owner")).status).toBe(422);
   });
 });
 
