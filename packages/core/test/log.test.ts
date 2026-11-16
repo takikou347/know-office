@@ -23,6 +23,40 @@ describe("鍵を伏せる", () => {
     expect(redactText("D1 が応答しない (traceId 0af7651916cd43dd)")).toBe("D1 が応答しない (traceId 0af7651916cd43dd)");
   });
 
+  it.each([
+    ["引用符で囲んだ空白のある値", 'password="v1x v2y" next', ["v1x", "v2y"]],
+    ["単引用符で囲んだ空白のある値", "token='v1x v2y' next", ["v1x", "v2y"]],
+    ["JSON の値の中のエスケープした引用符", '{"password":"v1x\\"v2y v3z","x":1}', ["v1x", "v2y", "v3z"]],
+    ["名前=値の値の中のエスケープした引用符", 'secret="v1x\\"v2y v3z" next', ["v1x", "v2y", "v3z"]],
+    ["値の途中から始まる引用符", "password=v1x'v2y v3z' next", ["v1x", "v2y", "v3z"]],
+    ["引用符の中の Bearer の値", '{"api_key": "Bearer v1x v2y"}', ["v1x", "v2y"]],
+  ])("%s を最後まで伏せる", (_, text, parts) => {
+    const out = redactText(text);
+    for (const part of parts) expect(out).not.toContain(part);
+    expect(out).toContain("[伏せた]");
+  });
+
+  it("伏せた値の後ろの文と項目は残す", () => {
+    expect(redactText('password="v1x v2y" next')).toBe('password="[伏せた]" next');
+    expect(redactText("token='v1x v2y' next")).toBe("token='[伏せた]' next");
+    expect(redactText('{"password":"v1x\\"v2y v3z","x":1}')).toBe('{"password":"[伏せた]","x":1}');
+    expect(redactText("password=v1x'v2y v3z' next")).toBe("password=[伏せた] next");
+  });
+
+  it("鍵らしい語を含むだけの普通の文は変えない", () => {
+    const text = "the key point is that the token bucket refills, so don't worry about the secret's \"safe\" path";
+    expect(redactText(text)).toBe(text);
+  });
+
+  it("閉じない引用符の長い文でも 50ms 以内に伏せる", () => {
+    // 閉じない引用符の中にエスケープした引用符が続く 50,000 字
+    const text = `password="${"v1\\\" ".repeat(12_500)}`;
+    const start = performance.now();
+    const out = redactText(text);
+    expect(performance.now() - start).toBeLessThan(50);
+    expect(out).not.toContain("v1");
+  });
+
   it("鍵らしい名前の項目は値ごと伏せ、ほかの項目の文も伏せる", () => {
     expect(redact({ apiKey: "x", nested: { message: "token=abc" }, list: ["Bearer zzz"] })).toEqual({
       apiKey: "[伏せた]",
