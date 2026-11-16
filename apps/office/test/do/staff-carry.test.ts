@@ -115,7 +115,7 @@ describe("退勤で続きにしたタスク (3.3)", () => {
     expect(await rows("SELECT result FROM work_entries")).toEqual([{ result: "continued" }]);
   });
 
-  it("退勤を D1 に書いた後に落ち、起き直す前にタスクがまた取られていても、todo に戻し直さない", async () => {
+  it("退勤を D1 に書いた後に落ち、起き直す前にタスクがまた取られていても、todo に戻し直さず、続けた出来事も残さない", async () => {
     const s = await wrappingUp();
     const crashing = bookAround(s, async (write) => {
       await write();
@@ -125,10 +125,12 @@ describe("退勤で続きにしたタスク (3.3)", () => {
     expect(await node()).toEqual({ status: "todo", version: 2, assignee: "builder" });
     // 起き直す前に、ほかの道がタスクをもう一度 doing にする
     await testDb().prepare("UPDATE nodes SET status = 'doing', version = version + 1 WHERE id = ?").bind(TASK.nodeId).run();
-    const again = hire("builder", s.storage);
-    await again.book.wake(jst(17, 31));
+    const sink = eventSink();
+    await bookAround(s, passThrough, sink.write).wake(jst(17, 31));
     expect(await node()).toEqual({ status: "doing", version: 3, assignee: "builder" });
     expect(await rows("SELECT result FROM work_entries")).toEqual([{ result: "continued" }]);
+    // 起き直した時にはもうその社員の todo でないので、続けたとは言えない
+    expect(sink.written).toEqual([]);
   });
 
   it("記録の D1 に出来事を書けない間も、退勤が終わり、ほかの操作が通り、戻った後に出来事を 1 件だけ残す", async () => {
