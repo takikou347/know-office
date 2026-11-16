@@ -2,7 +2,7 @@
 import type { StaffId } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { checkHealth } from "../../src/gate/ledger/uptime.ts";
+import { checkHealth, SLOW_PROBE_MS } from "../../src/gate/ledger/uptime.ts";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
 import { createTestGate, type TestGate } from "../helpers/gate.ts";
@@ -57,28 +57,21 @@ function moveTo(to: number): void {
 }
 
 /**
- * 1 つの社員 DO の答えを決めた長さだけ遅らせた env を作る。時計はほかの部分と共にあるので、ほかが答えた後に進める
- * @param late 遅らせる社員
- * @param ms 遅らせる長さ
- * @returns env
+ * 1 つの部分だけ答えまでの長さを決めて返すストップウォッチを作る。ほかの部分は 0 にする
+ * @param late 遅らせる部分
+ * @param ms 答えまでの長さ
+ * @returns checkHealth に渡すストップウォッチ
  */
-function envWithSlow(late: StaffId, ms: number): typeof gate.env {
-  const staff = gate.env.STAFF;
-  const slow = {
-    idFromName: (name: StaffId) => name,
-    get: (name: StaffId) =>
-      name === late
-        ? {
-            status: async () => {
-              await new Promise((resolve) => setTimeout(resolve, 500));
-              clock.advance(ms);
-              return null;
-            },
-          }
-        : staff.get(staff.idFromName(name)),
-  };
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  return { ...gate.env, STAFF: slow } as unknown as typeof gate.env;
+function slowPart(late: string, ms: number): (part: string) => () => number {
+  return (part) => () => (part === late ? ms : 0);
+}
+
+/**
+ * 通知を読む
+ * @returns 通知の並び
+ */
+async function readNotices() {
+  return Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data;
 }
 
 describe("止まらなさ", () => {
@@ -118,34 +111,64 @@ describe("止まらなさ", () => {
   });
 
   it("遅れを知らせる", async () => {
-    // 社員 DO の 1 つが答えるまでに 4 秒かかる。通るが、遅れとして知らせる
-    await checkHealth(envWithSlow("reviewer", 4_000), clock);
-    const items = Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data;
+    // 社員 DO の 1 つが答えるまでに基準より 1 秒長くかかる。通るが、遅れとして知らせる
+    await checkHealth(gate.env, clock, { stopwatch: slowPart("staff:reviewer", SLOW_PROBE_MS + 1_000) });
+    const items = await readNotices();
     expect(items).toEqual([expect.objectContaining({ level: "warn", kind: "health_slow", scope: "office", link: "/records" })]);
     expect(items[0]?.title).toContain("staff:reviewer");
     const row = await d1.DB.prepare("SELECT ok FROM health_checks WHERE part = 'staff:reviewer'").first();
     expect(row).toEqual({ ok: 1 });
   });
 
-  it("答えが 3 秒ちょうどまでなら知らせない", async () => {
-    await checkHealth(envWithSlow("reviewer", 3_000), clock);
-    expect(Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data).toEqual([]);
+  it("答えが基準ちょうどまでなら知らせない", async () => {
+    await checkHealth(gate.env, clock, { stopwatch: slowPart("staff:reviewer", SLOW_PROBE_MS) });
+    expect(await readNotices()).toEqual([]);
+    await checkHealth(gate.env, clock, { stopwatch: slowPart("staff:reviewer", SLOW_PROBE_MS + 1) });
+    expect(await readNotices()).toHaveLength(1);
   });
 
-  it("同じ部分の故障は、読むまで重ねず、読んだ後にまた落ちれば知らせる", async () => {
+  it("故障を重ねない", async () => {
+    // 同時に走った 2 つの確かめと、5 分後の確かめで、同じ部分の通知は 1 件。ほかの部分の故障は別に知らせる
     await Promise.all([checkHealth(envWithFailing("builder"), clock), checkHealth(envWithFailing("builder"), clock)]);
     moveTo(at(16, 10, 5));
     await checkHealth(envWithFailing("builder"), clock);
-    // ほかの部分の故障は別に知らせる
     await checkHealth(envWithFailing("president"), clock);
-    let items = Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data;
-    expect(items.map((n) => n.title).toSorted()).toEqual([expect.stringContaining("staff:builder"), expect.stringContaining("staff:president")]);
-    const builder = items.find((n) => n.title.includes("staff:builder"));
-    await gate.request(`/api/v1/notices/${builder?.id ?? ""}/read`, { method: "PUT", headers });
-    moveTo(at(16, 10, 10));
+    const titles = (await readNotices()).map((n) => n.title).toSorted();
+    expect(titles).toEqual([expect.stringContaining("staff:builder"), expect.stringContaining("staff:president")]);
+  });
+
+  it("読んだ後にまた落ちれば知らせる", async () => {
     await checkHealth(envWithFailing("builder"), clock);
-    items = Notices.parse(await (await gate.request("/api/v1/notices", { headers })).json()).data;
-    expect(items.filter((n) => n.title.includes("staff:builder"))).toHaveLength(2);
+    const [first] = await readNotices();
+    expect((await gate.request(`/api/v1/notices/${first?.id ?? ""}/read`, { method: "PUT", headers })).status).toBe(204);
+    moveTo(at(16, 10, 5));
+    await checkHealth(envWithFailing("builder"), clock);
+    expect(await readNotices()).toHaveLength(2);
+  });
+
+  it("通知を書けなくても確かめの行とほかの部分の通知を残し、エラーログに残す", async () => {
+    // builder の通知だけ書けない D1 にする
+    const db = gate.env.DB;
+    const failing = {
+      batch: db.batch.bind(db),
+      prepare: (sql: string) => {
+        const statement = db.prepare(sql);
+        if (!sql.startsWith("INSERT INTO notices")) return statement;
+        return { bind: (...values: unknown[]) => (values.some((v) => String(v).includes("staff:builder")) ? { run: () => Promise.reject(new Error("D1 が答えない")) } : statement.bind(...values)) };
+      },
+    };
+    const staff = gate.env.STAFF;
+    const broken = {
+      idFromName: (name: StaffId) => name,
+      get: (name: StaffId) => (name === "builder" || name === "president" ? { status: () => Promise.reject(new Error("社員 DO が応答しない")) } : staff.get(staff.idFromName(name))),
+    };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    await checkHealth({ ...gate.env, DB: failing, STAFF: broken } as unknown as typeof gate.env, clock);
+    const rows = await d1.DB.prepare("SELECT count(*) AS n FROM health_checks").first();
+    expect(rows).toEqual({ n: 6 });
+    expect((await readNotices()).map((n) => n.title)).toEqual([expect.stringContaining("staff:president")]);
+    const { results } = await d1.REC_2026.prepare("SELECT code FROM error_events WHERE code = 'health_notice_failed'").all();
+    expect(results).toEqual([{ code: "health_notice_failed" }]);
   });
 
   it("確かめの無い月は稼働率を出さず、形の違う月は 422", async () => {
@@ -164,7 +187,7 @@ describe("止まらなさ", () => {
     const env = { ...gate.env, STAFF: hanging } as unknown as typeof gate.env;
     // 時計は止めてあるので、待った長さは実の時間で測る
     const started = performance.now();
-    await checkHealth(env, clock, 50);
+    await checkHealth(env, clock, { timeoutMs: 50 });
     expect(performance.now() - started).toBeLessThan(2000);
     const parts = await d1.DB.prepare("SELECT part, ok FROM health_checks WHERE part LIKE 'staff:%' ORDER BY part").all();
     expect(parts.results).toEqual([
