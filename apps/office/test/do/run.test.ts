@@ -141,6 +141,24 @@ describe("社員が自分で働き始める", () => {
     expect(await worker.staff("builder", "status", jst(9, 3))).toMatchObject({ nodeId: next });
   });
 
+  it("ワークスペースが中断に答えなくても、エラーログを残して次のタスクを取る", async () => {
+    const next = "0190f4a8-0000-7000-8000-000000000103";
+    await worker.query(
+      "DB",
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, body, status, priority, assignee, task_kind, repo, created_by, created_at, updated_at) VALUES ('${next}', 'task', NULL, 'office', '次のタスク', NULL, 'todo', 2, 'builder', 'build', 'takikou347/know-office', 'president', 0, 0)`,
+    );
+    await worker.staff("builder", "pull", jst(9, 1));
+    await until(async () => (await runs(worker)).length > 0);
+    await worker.workspaceMode("builder", "abort_down");
+    await worker.query("DB", `UPDATE nodes SET status = 'stopped' WHERE id = '${TASK.nodeId}'`);
+    await worker.staff("builder", "dropTask", TASK.nodeId, jst(9, 2));
+    await until(async () => (await runs(worker)).length > 1);
+    expect((await runs(worker)).map((r) => r.nodeId)).toEqual([TASK.nodeId, next]);
+    expect(await worker.staff("builder", "status", jst(9, 3))).toMatchObject({ nodeId: next });
+    const failed = (await worker.errorLogs()).filter((line) => line.includes('"event":"workspace_call_failed"') && line.includes('"call":"abort"'));
+    expect(failed).toHaveLength(1);
+  });
+
   it("タスクを取った後に runs を呼ばずに落ちても、arm が見つけて呼ぶ", async () => {
     await worker.query("DB", `UPDATE nodes SET status = 'doing' WHERE id = '${TASK.nodeId}'`);
     // pull を通らずに持たせ、runs を呼ぶ前に DO が落ちた形にする

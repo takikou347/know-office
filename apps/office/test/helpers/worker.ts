@@ -27,8 +27,10 @@ export type TestWorker = {
   liveUrl(query: { session: string; ip: string; at: number }): Promise<string>;
   /** 社員のワークスペースの代わりが受けた呼び出し */
   workspace(staffId: string): Promise<{ method: string; args: unknown[] }[]>;
-  /** 社員のワークスペースの代わりの runs の答え方を決める。busy はもう走っている、down は届かない */
-  workspaceMode(staffId: string, mode: "ok" | "busy" | "down"): Promise<void>;
+  /** 社員のワークスペースの代わりの答え方を決める。busy は runs にもう走っている、down は runs に届かない、abort_down は中断に答えない */
+  workspaceMode(staffId: string, mode: "ok" | "busy" | "down" | "abort_down"): Promise<void>;
+  /** DO と入口が出したエラーログの行 */
+  errorLogs(): Promise<string[]>;
   /** 止める */
   dispose(): Promise<void>;
 };
@@ -95,6 +97,7 @@ export async function startTestWorker(): Promise<TestWorker> {
     workspaceMode: async (staffId, mode) => {
       await post("/workspace-mode", { staffId, mode });
     },
+    errorLogs: async () => z.array(z.string()).parse(await post("/logs", {})),
     dispose: () => worker.dispose(),
   };
 }

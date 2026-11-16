@@ -11,6 +11,16 @@ import type { Bindings, WorkspaceContainer } from "../../src/gate/env.ts";
 
 export { GuardDO, LiveDO, RecorderDO, StaffDO, WorkspaceDO };
 
+/** DO と入口が console.error に出したエラーログの行。手元の workerd では DO と入口が同じ isolate で動くので、ここに並べてテストで読む */
+const ERROR_LOGS: string[] = [];
+// oxlint-disable-next-line eslint/no-console
+const printError = console.error.bind(console);
+// oxlint-disable-next-line eslint/no-console
+console.error = (...args: unknown[]) => {
+  ERROR_LOGS.push(args.map(String).join(" "));
+  printError(...args);
+};
+
 /** 配信 DO への呼び出し */
 const LiveCall = z.discriminatedUnion("method", [
   z.object({ method: z.literal("issue"), args: z.tuple([z.number()]) }),
@@ -107,8 +117,11 @@ export class RecordingWorkspace extends DurableObject<Bindings> implements Works
    * @param reason 理由
    * @returns 無し
    */
-  abort(reason: string): Promise<null> {
-    return this.#push("abort", reason);
+  async abort(reason: string): Promise<null> {
+    await this.#push("abort", reason);
+    // テストが決めた答え方。abort_down は中断に答えない
+    if ((await this.ctx.storage.get("mode")) === "abort_down") throw new AppError("unavailable", "ワークスペースが中断に答えない");
+    return null;
   }
 
   /**
@@ -272,10 +285,11 @@ export default {
       return Response.json(files);
     }
     if (path === "/workspace-mode") {
-      const { staffId, mode } = z.object({ staffId: z.string(), mode: z.enum(["ok", "busy", "down"]) }).parse(body);
+      const { staffId, mode } = z.object({ staffId: z.string(), mode: z.enum(["ok", "busy", "down", "abort_down"]) }).parse(body);
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion
       return Response.json(await (env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)) as unknown as RecordingWorkspace).setMode(mode));
     }
+    if (path === "/logs") return Response.json(ERROR_LOGS);
     if (path === "/workspace") {
       const { staffId } = z.object({ staffId: z.string() }).parse(body);
       const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId));

@@ -1,5 +1,6 @@
 // 開発の代わりのワークスペースが送る出来事を、development の時だけゲートウェイの受け手に回す事を確かめる (ログインと記録の 3.9、社員が考えるの 3.2)
 import { describe, expect, it } from "vitest";
+import { entryFetch } from "../../src/gate/entry.ts";
 import type { Bindings } from "../../src/gate/env.ts";
 import { devWorkspaceEgress } from "../../src/gate/work/dev-container.ts";
 import { issueTicket } from "../../src/gate/work/ticket.ts";
@@ -63,6 +64,28 @@ describe("開発の代わりのワークスペースの出来事", () => {
     const { nodeId, token } = await builderAtWork(world);
     const env = { ...world.gate.env, ENVIRONMENT: environment };
     expect(send(env, "/__dev/workspace/builder/ws/v1/events", token, [{ kind: "result", nodeId, result: "done" }])).toBeNull();
+  });
+
+  it.each([["production"], ["preview"], [undefined]])("development でない所 (%s) の Worker の入口は、開発の道を断り、ワークスペースの受け手に回さない", async (environment) => {
+    const { nodeId, token } = await builderAtWork(world);
+    const env = { ...world.gate.env, ENVIRONMENT: environment };
+    const request = new Request("http://localhost:5174/__dev/workspace/builder/ws/v1/events", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ events: [{ kind: "result", nodeId, result: "done" }] }),
+    });
+    // worker.ts の default export の fetch と同じ関数。worker.ts は DO のクラスも出すので Node では読まない
+    const res = await entryFetch(request, env);
+    expect([401, 404]).toContain(res.status);
+    expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", nodeId)).toEqual([{ status: "doing" }]);
+  });
+
+  it("DEV_FAKES_URL が手元でない時は、投げずに 404 で断る", async () => {
+    const { nodeId, token } = await builderAtWork(world);
+    const env = { ...world.gate.env, DEV_FAKES_URL: "https://fakes.example.com" };
+    const res = await send(env, "/__dev/workspace/builder/ws/v1/events", token, [{ kind: "result", nodeId, result: "done" }]);
+    expect(res?.status).toBe(404);
+    expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", nodeId)).toEqual([{ status: "doing" }]);
   });
 
   it("開発の道でない要求はゲートウェイに任せる", () => {

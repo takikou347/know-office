@@ -138,8 +138,12 @@ export function devWorkspaceEgress(request: Request, env: Bindings, options: Egr
   const url = new URL(request.url);
   const match = DEV_EGRESS.exec(url.pathname);
   if (!match || env.ENVIRONMENT !== "development") return null;
-  // DEV_FAKES_URL が手元でなければ、代わりのワークスペースも無いので受けない
-  devWorkspaceBase(env);
+  // DEV_FAKES_URL が手元でなければ、代わりのワークスペースも無いので受けない。入口の fetch の中で投げず、断る返事にする
+  try {
+    devWorkspaceBase(env);
+  } catch {
+    return Promise.resolve(new Response(null, { status: 404 }));
+  }
   const staffId = StaffId.safeParse(match[1]);
   const path = match[2] ?? "";
   if (!staffId.success || OPEN_PATHS.has(path)) return Promise.resolve(new Response(null, { status: 404 }));
