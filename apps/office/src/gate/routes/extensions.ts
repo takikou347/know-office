@@ -4,12 +4,13 @@ import { AppError, EXTENSION_ID, Extension, ToggleExtensionInput } from "@know-o
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { createRouter } from "../app.ts";
-import { requireStepUp } from "../auth/passkey.ts";
+import { requireStepUp, stepUpGate } from "../auth/passkey.ts";
 import type { GateEnv } from "../env.ts";
 import type { ExtensionContext, ExtensionDefinition, ExtensionRoute } from "../extensions/define.ts";
 import { enabledExtensions, extensionStates, extensionStore, toggleExtension } from "../extensions/state.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
+import { openOwnerData, putOwnerData } from "../work/owner-data.ts";
 import { list, ok } from "../respond.ts";
 
 const jsonBody = <T>(schema: T) => ({ content: { "application/json": { schema } }, required: true });
@@ -38,13 +39,21 @@ function requireEnabled(ext: ExtensionDefinition, extensions: readonly Extension
 const view = (ext: ExtensionDefinition, enabled: boolean): Extension => ({ id: ext.id, title: ext.title, enabled, ownerData: ext.ownerData });
 
 /**
- * 拡張の中身に渡す物を作る。鍵、D1、DO は渡さず、時刻とその拡張の置き場だけを渡す
+ * 拡張の中身に渡す物を作る。鍵、D1、DO は渡さず、時刻とその拡張の置き場を渡す。
+ * オーナーの情報を扱う拡張には、項目ごとに暗号にして置き、読むたびにオーナーが読んだ記録を残す置き場も渡す
  * @param c 要求の文脈
  * @param ext 拡張
  * @returns 拡張の中身が受ける物
  */
 function contextOf(c: Context<GateEnv>, ext: ExtensionDefinition): ExtensionContext {
-  return { now: c.var.clock.now(), store: extensionStore(c.env.FILES, ext.id) };
+  const now = c.var.clock.now();
+  const ownerData = ext.ownerData
+    ? {
+        get: (field: string) => openOwnerData(c.env.DB, c.env.MASTER_KEY, { extId: ext.id, field, by: "owner", nodeId: null }, now),
+        put: (field: string, value: string) => putOwnerData(c.env.DB, c.env.MASTER_KEY, { extId: ext.id, field, value }, now),
+      }
+    : null;
+  return { now, store: extensionStore(c.env.FILES, ext.id), ownerData };
 }
 
 /**
@@ -55,7 +64,16 @@ function contextOf(c: Context<GateEnv>, ext: ExtensionDefinition): ExtensionCont
  * @param extensions 読み込んだ拡張
  */
 function mount(router: OpenAPIHono<GateEnv>, ext: ExtensionDefinition, r: ExtensionRoute, extensions: readonly ExtensionDefinition[]): void {
-  const base = { path: `/api/v1/ext/${ext.id}${r.path}`, operationId: r.operationId, summary: r.summary, tags: ["extensions"], middleware: requireEnabled(ext, extensions) };
+  // オーナーの情報を扱う拡張は、読むルートも開くたびにパスキーで確かめる。確認は入れているかと入力の確かめより先に断る
+  const middleware = ext.ownerData ? [stepUpGate, requireEnabled(ext, extensions)] : [requireEnabled(ext, extensions)];
+  const base = {
+    path: `/api/v1/ext/${ext.id}${r.path}`,
+    operationId: r.operationId,
+    summary: r.summary,
+    tags: ["extensions"],
+    middleware,
+    ...(ext.ownerData ? { "x-step-up": true } : {}),
+  };
   if (r.method === "get") {
     router.openapi(createRoute({ ...base, method: "get", responses: { 200: okResponse(r.response), ...problems(401, 403, 404, 429, 500) } }), async (c) => ok(c, await r.run(contextOf(c, ext))));
     return;

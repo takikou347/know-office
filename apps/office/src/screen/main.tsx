@@ -1,12 +1,14 @@
 import "knowidea-tokens/tokens.css";
 import "knowidea-css/index.css";
 import "./app.css";
-import type { Extension, Health } from "@know-office/core";
+import { Extension, type Health } from "@know-office/core";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import { App } from "./App.tsx";
 import { ApiContext, createApi, sessionFetch } from "./api.ts";
 import { ExtensionFetchContext, withScreens } from "./extensions.ts";
+import { send } from "./parts/load.tsx";
 import { routeOfClick } from "./link.ts";
 import { titleOf } from "./routes.ts";
 
@@ -124,9 +126,11 @@ function Root() {
     document.title = titleNow();
   }, [extensions]);
   const toggleExtension = useCallback(async (id: string, enabled: boolean) => {
-    const res = await api.api.v1.extensions[":extensionId"].$put({ param: { extensionId: id }, json: { enabled } }).catch(() => null);
-    if (!res?.ok) return;
-    const { data } = await res.json();
+    // 入れるとできる操作が増えるので、入口がパスキーの確認を求めたら確かめてから送り直す
+    const sent = await send(api, () => api.api.v1.extensions[":extensionId"].$put({ param: { extensionId: id }, json: { enabled } }));
+    if (!sent.ok) return;
+    // 返事の形は Extension で確かめてから置く
+    const data = Extension.parse(z.object({ data: z.unknown() }).loose().parse(await sent.res.json()).data);
     setExtensions((cur) => cur.map((e) => (e.id === data.id ? data : e)));
   }, []);
   return (

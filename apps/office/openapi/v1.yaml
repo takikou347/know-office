@@ -5861,6 +5861,265 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/ext/career/profile:
+    get:
+      operationId: getCareerProfile
+      tags:
+      - extensions
+      summary: 職務経歴を開く
+      description: '処理の流れ:
+
+
+        1. パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する
+
+        2. `owner_data` の `career` の項目ごとに `deriveKey(MASTER_KEY, "owner-data")` で暗号を解き、置いていない項目は空の文にする
+
+        3. 戻せた項目ごとに `owner_data_reads` に `by: owner` で 1 行足す
+
+
+        このルート固有のエラー:
+
+
+        - 401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた
+
+        - 404 `not_found`: 拡張機能が無効'
+      x-step-up: true
+      x-steps:
+      - 'パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する'
+      - '`owner_data` の `career` の項目ごとに `deriveKey(MASTER_KEY, "owner-data")` で暗号を解き、置いていない項目は空の文にする'
+      - '戻せた項目ごとに `owner_data_reads` に `by: owner` で 1 行足す'
+      x-errors:
+      - '401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた'
+      - '404 `not_found`: 拡張機能が無効'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CareerProfile'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: updateCareerProfile
+      tags:
+      - extensions
+      summary: 職務経歴を置き換える
+      description: '処理の流れ:
+
+
+        1. パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する
+
+        2. 項目ごとに暗号にし、同じ項目の前の行を消して足すのを 1 回のバッチで書く
+
+        3. 監査ログに `extension.write` を記録する
+
+
+        このルート固有のエラー:
+
+
+        - 401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた
+
+        - 404 `not_found`: 拡張機能が無効'
+      x-step-up: true
+      x-steps:
+      - 'パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する'
+      - '項目ごとに暗号にし、同じ項目の前の行を消して足すのを 1 回のバッチで書く'
+      - '監査ログに `extension.write` を記録する'
+      x-errors:
+      - '401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた'
+      - '404 `not_found`: 拡張機能が無効'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCareerProfileInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CareerProfile'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/ext/career/showcase:
+    get:
+      operationId: getCareerShowcase
+      tags:
+      - extensions
+      summary: 人に見せるために書き出した項目を読む
+      description: '処理の流れ:
+
+
+        1. パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する
+
+        2. R2 の `ext/career/showcase.json` を読む。無ければ空を返す
+
+
+        このルート固有のエラー:
+
+
+        - 401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた
+
+        - 404 `not_found`: 拡張機能が無効'
+      x-step-up: true
+      x-steps:
+      - 'パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する'
+      - 'R2 の `ext/career/showcase.json` を読む。無ければ空を返す'
+      x-errors:
+      - '401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた'
+      - '404 `not_found`: 拡張機能が無効'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CareerShowcase'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: updateCareerShowcase
+      tags:
+      - extensions
+      summary: 人に見せる項目を選んで書き出す
+      description: '処理の流れ:
+
+
+        1. パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する
+
+        2. 選んだ項目だけの暗号を解き (`owner_data_reads` に `by: owner` で残す)、R2 の `ext/career/showcase.json` を置き換える。選ばない項目は入れない
+
+        3. 監査ログに `extension.write` を記録する
+
+
+        このルート固有のエラー:
+
+
+        - 401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた
+
+        - 404 `not_found`: 拡張機能が無効'
+      x-step-up: true
+      x-steps:
+      - 'パスキーの確認を確かめ、拡張機能 `career` が有効であることを確認する'
+      - '選んだ項目だけの暗号を解き (`owner_data_reads` に `by: owner` で残す)、R2 の `ext/career/showcase.json` を置き換える。選ばない項目は入れない'
+      - '監査ログに `extension.write` を記録する'
+      x-errors:
+      - '401 `step_up_required`: パスキーの確認が無いか、15 分を過ぎた'
+      - '404 `not_found`: 拡張機能が無効'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCareerShowcaseInput'
+      security:
+      - accessJwt: []
+        session: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CareerShowcase'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+                required:
+                - data
+                - meta
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableContent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/ext/sample-notes/note:
     get:
       operationId: getSampleNote
@@ -9377,6 +9636,68 @@ components:
           type: boolean
       required:
       - enabled
+      additionalProperties: false
+    CareerProfile:
+      type: object
+      description: 職務経歴。置いていない項目は空の文
+      properties:
+        summary:
+          type: string
+          maxLength: 4000
+        history:
+          type: string
+          maxLength: 4000
+        skills:
+          type: string
+          maxLength: 4000
+      required:
+      - summary
+      - history
+      - skills
+      additionalProperties: false
+    UpdateCareerProfileInput:
+      type: object
+      properties:
+        summary:
+          type: string
+          maxLength: 4000
+        history:
+          type: string
+          maxLength: 4000
+        skills:
+          type: string
+          maxLength: 4000
+      required:
+      - summary
+      - history
+      - skills
+      additionalProperties: false
+    CareerShowcase:
+      type: object
+      description: 人に見せるために書き出した項目と値。書き出していない項目は持たない
+      properties:
+        items:
+          type: object
+          additionalProperties:
+            type: string
+      required:
+      - items
+      additionalProperties: false
+    UpdateCareerShowcaseInput:
+      type: object
+      description: 人に見せる項目。同じ項目は 1 度だけ
+      properties:
+        fields:
+          type: array
+          items:
+            type: string
+            enum:
+            - summary
+            - history
+            - skills
+          maxItems: 3
+      required:
+      - fields
       additionalProperties: false
     SampleNote:
       type: object

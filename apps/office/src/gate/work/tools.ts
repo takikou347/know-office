@@ -522,7 +522,7 @@ export async function prepareTool(env: Bindings, forge: Forge, call: ToolCall, e
 }
 
 /**
- * 入れている拡張のツールを探し、入力を確かめて、動かす関数を返す。拡張には時刻とその拡張の置き場だけを渡す
+ * 入れている拡張のツールを探し、入力を確かめて、動かす関数を返す。拡張には時刻とその拡張の置き場だけを渡し、オーナーの情報は渡さない
  * @param env バインディング
  * @param call 呼び出し
  * @param extensions 読み込んだ拡張
@@ -538,7 +538,7 @@ async function prepareExtensionTool(env: Bindings, call: ToolCall, extensions: r
   return async () => {
     // 入力は上でツールのスキーマに通した物なので、そのツールの中身に渡せる
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    const result = await found.tool.run({ now: call.now, store: extensionStore(env.FILES, found.ext.id) }, input.data as never);
+    const result = await found.tool.run({ now: call.now, store: extensionStore(env.FILES, found.ext.id), ownerData: null }, input.data as never);
     return { content: JSON.stringify(result), isError: false };
   };
 }

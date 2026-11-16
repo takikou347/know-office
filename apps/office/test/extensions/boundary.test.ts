@@ -1,4 +1,4 @@
-// 拡張の境目。置き場は拡張の外を指せず、形の違う定義と、オーナーの情報を扱う拡張は差し込めない (サービスと拡張の 3.8)
+// 拡張の境目。置き場は拡張の外を指せず、形の違う定義は差し込めない (サービスと拡張の 3.8)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineExtension, type ExtensionDefinition } from "../../src/gate/extensions/define.ts";
@@ -29,10 +29,9 @@ describe("拡張の境目", () => {
     expect((await world.d1.FILES.list({ prefix: "ext/test-ext/" })).objects.map((o) => o.key)).toEqual([`ext/test-ext/${"a".repeat(64)}.json`]);
   });
 
-  it("オーナーの情報を扱う拡張と、形の違う ID、ツールの名前、パスは定義で断る", () => {
+  it("形の違う ID、ツールの名前、パスは定義で断る", () => {
     const route = { method: "get", operationId: "getTest", summary: "試す", response: z.object({}).strict(), run: () => Promise.resolve({}) } as const;
     const tool = { schema: z.object({}).strict(), run: () => Promise.resolve({}) };
-    expect(() => defineExtension(definition({ ownerData: true }))).toThrow("オーナーの情報を扱う拡張はまだ差し込めない");
     for (const id of ["Test", "test_ext", "test--ext", "-test", "test-", "1test", ""]) expect(() => defineExtension(definition({ id }))).toThrow("拡張の ID の形が違う");
     for (const name of ["Read", "note__read", "note-read", "_note", "note_"]) expect(() => defineExtension(definition({ tools: { [name]: tool } }))).toThrow("ツールの名前の形が違う");
     for (const path of ["note", "/", "/../x", "/a/./b", "/Note", "/a_b", "/a/"]) expect(() => defineExtension(definition({ routes: [{ ...route, path }] }))).toThrow("ルートのパスの形が違う");

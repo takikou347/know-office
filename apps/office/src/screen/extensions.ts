@@ -3,7 +3,8 @@ import type { Extension } from "@know-office/core";
 import type { NavItem } from "knowidea-ui";
 import { type ComponentType, createContext } from "react";
 import { z, type ZodType } from "zod";
-import type { Fetch } from "./api.ts";
+import type { Api, Fetch } from "./api.ts";
+import { withStepUp } from "./parts/step-up.ts";
 import type { ExtensionNav } from "./routes.ts";
 
 /** 拡張の画面が自分のルート (`/api/v1/ext/<拡張 ID>` の下) を呼ぶ口。失敗と形の違う返事は null */
@@ -68,15 +69,18 @@ export const ExtensionFetchContext = createContext<{ base: string; fetch: Fetch 
 const Envelope = z.object({ data: z.unknown() }).loose();
 
 /**
- * 拡張のルートを呼ぶ口を作る。拡張のルートは拡張ごとに足すので入口の RPC の型に無く、返事は拡張の Zod スキーマで確かめる
+ * 拡張のルートを呼ぶ口を作る。拡張のルートは拡張ごとに足すので入口の RPC の型に無く、返事は拡張の Zod スキーマで確かめる。
+ * 入口がパスキーの確認を求めた時 (オーナーの情報を扱う拡張) は、確かめてから 1 度だけ呼び直す
  * @param id 拡張 ID
  * @param origin 入口の origin と fetch。無ければ呼ばずに null を返す
+ * @param api パスキーで確かめる時に呼ぶ入口の口。無ければ確かめずに失敗にする
  * @returns 呼ぶ口
  */
-export function extensionApi(id: string, origin: { base: string; fetch: Fetch } | null): ExtensionApi {
+export function extensionApi(id: string, origin: { base: string; fetch: Fetch } | null, api: Api | null = null): ExtensionApi {
   const call = async <T>(path: string, init: RequestInit, schema: ZodType<T>): Promise<T | null> => {
     if (!origin) return null;
-    const res = await origin.fetch(`${origin.base}/api/v1/ext/${id}${path}`, { credentials: "same-origin", ...init }).catch(() => null);
+    const send = () => origin.fetch(`${origin.base}/api/v1/ext/${id}${path}`, { credentials: "same-origin", ...init });
+    const res = await (api ? withStepUp(api, send) : send()).catch(() => null);
     if (!res?.ok) return null;
     const body = Envelope.safeParse(await res.json().catch(() => null));
     const data = schema.safeParse(body.data?.data);

@@ -137,7 +137,7 @@ describe("差し込み口", () => {
     const gate = await createTestGate({ clock: world.clock, d1: world.d1, extensions });
     const w: WorkWorld = { ...world, gate, headers: await gate.signIn() };
 
-    expect(z.array(ExtensionRow).parse(await api(w, "GET", "/api/v1/extensions")).map((e) => e.id)).toEqual(["sample-notes", "test-counter"]);
+    expect(z.array(ExtensionRow).parse(await api(w, "GET", "/api/v1/extensions")).map((e) => e.id)).toEqual(["career", "sample-notes", "test-counter"]);
     await toggle(w, "test-counter", true);
     expect(await staffTools(gate.env, "reviewer", extensions)).toContain("ext__test-counter__count_up");
     expect(await ask(gate, w, "mcp__staff__ext__test-counter__count_up", extensions)).toEqual({ allow: true, reason: "入れた拡張のツール" });

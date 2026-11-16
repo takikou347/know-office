@@ -10,12 +10,25 @@ export type ExtensionStore = {
   put(key: string, value: unknown): Promise<void>;
 };
 
+/**
+ * オーナーの情報の置き場。項目ごとに土台が暗号にして owner_data に置き、読むたびに owner_data_reads に残す。
+ * ownerData の拡張のルートだけが受け、どのルートもパスキーの確認の後に動く。ツールは受けない
+ */
+export type OwnerDataStore = {
+  /** 項目を読む。無ければ null。読めたら読んだ記録を残す */
+  get(field: string): Promise<string | null>;
+  /** 項目を置き換える */
+  put(field: string, value: string): Promise<void>;
+};
+
 /** 拡張のルートとツールが受ける物。鍵、D1、DO、社員の DO は渡さない */
 export type ExtensionContext = {
   /** 今の時刻 */
   now: number;
   /** その拡張の置き場 */
   store: ExtensionStore;
+  /** オーナーの情報の置き場。ownerData の拡張のルートだけが受け、ほかは null */
+  ownerData: OwnerDataStore | null;
 };
 
 /** 拡張のルートで共通の項目。path は `/api/v1/ext/<拡張 ID>` の後ろ */
@@ -63,7 +76,7 @@ export type ExtensionDefinition = {
   id: string;
   /** 画面と一覧に出す名前 */
   title: string;
-  /** オーナーの情報を扱うか */
+  /** オーナーの情報を扱うか。扱う拡張のルートはどれもパスキーの確認を求め、ctx.ownerData を受ける */
   ownerData: boolean;
   /** `/api/v1/ext/<id>` の下のルート */
   routes: readonly ExtensionRoute[];
@@ -80,11 +93,10 @@ const DEFINED = new WeakSet<object>();
  * 拡張を定義する。ID、ツールの名前、パスの形を確かめる
  * @param def 拡張の定義
  * @returns 確かめた定義
- * @throws Error 形が違う時と、オーナーの情報を扱う時。項目ごとの暗号、パスキーの確認、読んだ記録の置き場ができるまで差し込ませない
+ * @throws Error ID、ツールの名前、パスの形が違う時
  */
 export function defineExtension(def: ExtensionDefinition): ExtensionDefinition {
   if (!EXTENSION_ID.test(def.id)) throw new Error(`拡張の ID の形が違う: ${def.id}`);
-  if (def.ownerData) throw new Error(`オーナーの情報を扱う拡張はまだ差し込めない: ${def.id}`);
   for (const name of Object.keys(def.tools)) if (!EXTENSION_TOOL.test(name)) throw new Error(`拡張のツールの名前の形が違う: ${def.id} の ${name}`);
   for (const r of def.routes) if (!ROUTE_PATH.test(r.path)) throw new Error(`拡張のルートのパスの形が違う: ${def.id} の ${r.path}`);
   const frozen = Object.freeze({ ...def, routes: Object.freeze([...def.routes]), tools: Object.freeze({ ...def.tools }) });

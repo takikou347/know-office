@@ -1,5 +1,6 @@
-// 入れた拡張の画面。拡張には、その拡張のルートを呼ぶ口だけを渡す
+// 入れた拡張の画面。拡張には、その拡張のルートを呼ぶ口だけを渡す。パスキーの確認は口が受け持つ
 import { useContext, useMemo } from "react";
+import { ApiContext } from "../../api.ts";
 import { EXTENSION_SCREENS, ExtensionFetchContext, extensionApi } from "../../extensions.ts";
 import { Section } from "../../parts/section.tsx";
 
@@ -16,7 +17,9 @@ export interface ExtensionPageProps {
  */
 export function ExtensionPage({ id }: ExtensionPageProps) {
   const origin = useContext(ExtensionFetchContext);
-  const api = useMemo(() => extensionApi(id, origin), [id, origin]);
+  const gate = useContext(ApiContext);
+  // オーナーの情報を扱う拡張のルートはパスキーの確認を求めるので、確かめる時に使う入口の口も渡す
+  const api = useMemo(() => extensionApi(id, origin, gate), [id, origin, gate]);
   const screen = EXTENSION_SCREENS[id];
   if (!screen) return null;
   return (
