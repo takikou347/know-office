@@ -49,6 +49,8 @@ export type ExtensionRoute =
 
 /** 拡張のツール。入力は schema を通してから run に渡す */
 export type ExtensionTool = {
+  /** 社員に見せる説明。省くと拡張の名前から作る */
+  description?: string;
   /** 入力の Zod スキーマ */
   schema: ZodType;
   /** 中身。input は schema を通した物 */

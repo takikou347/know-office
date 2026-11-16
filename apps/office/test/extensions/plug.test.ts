@@ -1,10 +1,11 @@
 // 管理の拡張の差し込み口。設定で入れ切りし、切るとルートとツールが使えなくなり、入れ直すと前のデータが残っている (サービスと拡張の 3.8)
-import { decide, DEFAULT_RULES, type StaffId, toOperation } from "@know-office/core";
+import { decide, DEFAULT_RULES, RunInput, type StaffId, toOperation } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
 import { defineExtension, type ExtensionDefinition } from "../../src/gate/extensions/define.ts";
 import { INSTALLED } from "../../src/gate/extensions/installed.ts";
+import { runBase } from "../../src/gate/work/run.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { runTool, staffTools } from "../../src/gate/work/tools.ts";
 import { createTestGate, type TestGate } from "../helpers/gate.ts";
@@ -144,6 +145,21 @@ describe("差し込み口", () => {
     expect(await api(w, "GET", "/api/v1/ext/test-counter/count")).toEqual({ count: 1 });
     // 拡張のデータは拡張ごとの置き場 (R2 の ext/<id>/) にだけ書く
     expect((await gate.env.FILES.list({ prefix: "ext/test-counter/" })).objects.map((o) => o.key)).toEqual(["ext/test-counter/count.json"]);
+  });
+
+  it("入れた拡張のツールを、説明と入力の形を付けてワークスペースに渡す", async () => {
+    const nodeId = crypto.randomUUID();
+    await world.d1.DB.prepare("INSERT INTO nodes (id, kind, parent_id, scope, title, status, priority, assignee, created_by, created_at, updated_at) VALUES (?, 'task', NULL, 'office', '直す', 'doing', 1, 'builder', 'president', 0, 0)")
+      .bind(nodeId)
+      .run();
+    expect((await runBase(world.gate.env, "builder", nodeId, null)).extensionTools).toEqual([]);
+    await toggle(world, "sample-notes", true);
+    const base = await runBase(world.gate.env, "builder", nodeId, null);
+    expect(RunInput.parse({ ...base, nodeId, ticket: "t", prompt: "p" }).extensionTools).toEqual([
+      { name: "ext__sample-notes__note_read", description: expect.stringContaining("メモ") as unknown, inputSchema: expect.objectContaining({ type: "object" }) as unknown },
+    ]);
+    await toggle(world, "sample-notes", false);
+    expect((await runBase(world.gate.env, "builder", nodeId, null)).extensionTools).toEqual([]);
   });
 
   it("確認なしで入れると断られ、記録が残る", async () => {

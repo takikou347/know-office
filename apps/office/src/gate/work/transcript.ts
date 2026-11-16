@@ -191,7 +191,7 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
   const workspace = env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId));
   await workspace.restore(saved);
   const { promptVersion } = await staffDo.runState(nodeId);
-  const base = await runBase(env.DB, staffId, nodeId, promptVersion);
+  const base = await runBase(env, staffId, nodeId, promptVersion);
   const { token, jti } = await issueTicket(env, staffId, nodeId, now);
   try {
     await workspace.run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: RESUME_PROMPT, resume: saved.sessionId }));

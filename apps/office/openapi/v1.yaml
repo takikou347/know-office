@@ -9673,6 +9673,12 @@ components:
             - idea_add
             - ask_boss
             - ask_owner
+        extensionTools:
+          type: array
+          maxItems: 32
+          description: 入れている拡張のツール。ワークスペースは役のツールと同じ受け手 staff に足し、どれもゲートウェイの同じ口を呼ぶ
+          items:
+            $ref: '#/components/schemas/ExtensionToolSpec'
       required:
       - nodeId
       - ticket
@@ -9681,6 +9687,26 @@ components:
       - systemPrompt
       - prompt
       - tools
+      additionalProperties: false
+    ExtensionToolSpec:
+      type: object
+      description: 入れた拡張のツール 1 つ。ワークスペースは inputSchema (JSON Schema) から入力の形を作る
+      properties:
+        name:
+          type: string
+          maxLength: 128
+          pattern: ^ext__[a-z][a-z\d]*(?:-[a-z\d]+)*__[a-z][a-z\d]*(?:_[a-z\d]+)*$
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        inputSchema:
+          type: object
+          additionalProperties: {}
+      required:
+      - name
+      - description
+      - inputSchema
       additionalProperties: false
     WorkspaceMessageInput:
       type: object

@@ -10,6 +10,39 @@ export const HeartbeatInput = z.object({ at: z.iso.datetime() }).strict().meta({
 /** ハートビートの型 */
 export type HeartbeatInput = z.infer<typeof HeartbeatInput>;
 
+/** ワークスペースに渡す拡張のツールの数の上限 */
+export const EXTENSION_TOOLS_MAX = 32;
+
+/** ゲートウェイでの拡張のツールの名前。`ext__<拡張 ID>__<ツール>` で、形は EXTENSION_ID と EXTENSION_TOOL と同じ */
+export const EXTENSION_TOOL_NAME = /^ext__[a-z][a-z\d]*(?:-[a-z\d]+)*__[a-z][a-z\d]*(?:_[a-z\d]+)*$/;
+
+/** 入れた拡張のツール 1 つ。ワークスペースは inputSchema (JSON Schema) から入力の形を作り、MCP の受け手 staff に足す */
+export const ExtensionToolSpec = z
+  .object({
+    name: z.string().max(128).regex(EXTENSION_TOOL_NAME),
+    description: z.string().min(1).max(1000),
+    inputSchema: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .meta({ id: "ExtensionToolSpec" });
+
+/** 入れた拡張のツール 1 つの型 */
+export type ExtensionToolSpec = z.infer<typeof ExtensionToolSpec>;
+
+/**
+ * 拡張のツールの入力の JSON Schema から、SDK のツールに渡す入力の形を作る
+ * @param inputSchema 入力の JSON Schema
+ * @returns 項目ごとの Zod スキーマ。オブジェクトの形でない時と読めない時は null
+ */
+export function extensionToolShape(inputSchema: Record<string, unknown>): Record<string, z.ZodType> | null {
+  try {
+    const schema = z.fromJSONSchema(inputSchema);
+    return schema instanceof z.ZodObject ? schema.shape : null;
+  } catch {
+    return null;
+  }
+}
+
 /** POST /v1/runs の入力。タスク 1 件分の SDK の呼び出し */
 export const RunInput = z
   .object({
@@ -22,6 +55,8 @@ export const RunInput = z
     resume: z.string().min(1).optional(),
     // 社員の役で使える社員のツール。ワークスペースはこの名前のツールだけを MCP の受け手 staff に出す
     tools: z.array(z.enum(STAFF_TOOL_NAMES)).max(STAFF_TOOL_NAMES.length),
+    // 入れている拡張のツール。ワークスペースは役のツールと同じ受け手 staff に足し、どれもゲートウェイの同じ口を呼ぶ
+    extensionTools: z.array(ExtensionToolSpec).max(EXTENSION_TOOLS_MAX).optional(),
   })
   .strict()
   .meta({ id: "RunInput" });

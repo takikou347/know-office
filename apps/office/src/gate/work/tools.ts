@@ -5,6 +5,8 @@ import {
   AskBossTool,
   AskOwnerTool,
   CheckpointTool,
+  EXTENSION_TOOLS_MAX,
+  type ExtensionToolSpec,
   IdeaAddTool,
   newId,
   NodeAssignTool,
@@ -453,6 +455,20 @@ async function extensionTools(env: Bindings, extensions: readonly ExtensionDefin
     for (const [name, tool] of Object.entries(ext.tools)) out.set(`ext__${ext.id}__${name}`, { ext, tool });
   }
   return out;
+}
+
+/**
+ * 入れている拡張のツールを、ワークスペースに渡す形で並べる。入力の形は拡張の Zod スキーマを JSON Schema に直した物
+ * @param env バインディング
+ * @param extensions 読み込んだ拡張
+ * @returns 名前、説明、入力の形。上限の数まで
+ */
+export async function extensionToolSpecs(env: Bindings, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<ExtensionToolSpec[]> {
+  return [...(await extensionTools(env, extensions))].slice(0, EXTENSION_TOOLS_MAX).map(([name, { ext, tool }]) => ({
+    name,
+    description: tool.description ?? `${ext.title}の拡張のツール`,
+    inputSchema: z.toJSONSchema(tool.schema, { io: "input", unrepresentable: "any" }),
+  }));
 }
 
 /**

@@ -35,6 +35,6 @@ export default defineExtension({
     },
   ],
   tools: {
-    note_read: { schema: NoteReadTool, run: (ctx) => readNote(ctx.store) },
+    note_read: { description: "オーナーが社員に残したメモを読む", schema: NoteReadTool, run: (ctx) => readNote(ctx.store) },
   },
 });

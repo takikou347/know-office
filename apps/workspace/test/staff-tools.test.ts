@@ -63,6 +63,26 @@ describe("社員のツールの MCP の受け手", () => {
     expect(server).toMatchObject({ type: "sdk", name: "staff" });
   });
 
+  it("入れた拡張のツールも、ゲートウェイの名前で説明と入力の形を付けて出し、呼ぶとゲートウェイに送る", async () => {
+    const gate = gateway(OK);
+    const deps: StaffToolDeps = { fetcher: gate.fetcher, token: () => "ticket-1" };
+    const spec = {
+      name: "ext__sample-notes__note_read",
+      description: "オーナーのメモを読む",
+      inputSchema: { type: "object", properties: { line: { type: "integer", minimum: 1 } }, additionalProperties: false },
+    };
+    const tools = staffToolDefinitions(deps, ["ask_boss"], [spec]);
+    expect(tools.map((t) => t.name)).toEqual(["ask_boss", "ext__sample-notes__note_read"]);
+    const ext = tools[1];
+    expect(ext?.description).toBe("オーナーのメモを読む");
+    expect(Object.keys(ext?.inputSchema ?? {})).toEqual(["line"]);
+    expect(await ext?.handler({ line: 2 }, {})).toMatchObject({ isError: false });
+    expect(gate.seen).toEqual([{ url: `${GATE_TOOLS_URL}ext__sample-notes__note_read`, authorization: "Bearer ticket-1", body: { toolInput: { line: 2 } } }]);
+    // 名前の形が違う物と、形を読めない入力の物は出さない
+    const odd = staffToolDefinitions(deps, [], [{ ...spec, name: "vault_read" }, { ...spec, name: "ext__x__y", inputSchema: { type: "string" } }]);
+    expect(odd.map((t) => t.name)).toEqual([]);
+  });
+
   it("呼ぶと作業トークンを付けてゲートウェイに入力を送り、答えの content を返す", async () => {
     const gate = gateway(OK);
     const result = await invoke({ fetcher: gate.fetcher, token: () => "ticket-1" }, "ask_boss", { reason: "次は" });

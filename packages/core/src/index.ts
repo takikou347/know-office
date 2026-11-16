@@ -19,7 +19,26 @@ export { AttendanceQuery, Dashboard, Month, RecordGroup, RecordSummary, RecordTo
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
-export { AGENT_EVENTS_MAX, AgentEvent, AgentEventsInput, HeartbeatInput, ReasonInput, RESTORE_BODY_BYTES, RESTORE_TRANSCRIPT_BYTES, RestoreInput, RunInput, TicketInput, TRANSCRIPT_PART_BYTES, TranscriptPartInput, WorkspaceMessageInput, WorkTicketClaims } from "./schemas/workspace.ts";
+export {
+  AGENT_EVENTS_MAX,
+  AgentEvent,
+  AgentEventsInput,
+  EXTENSION_TOOL_NAME,
+  EXTENSION_TOOLS_MAX,
+  ExtensionToolSpec,
+  extensionToolShape,
+  HeartbeatInput,
+  ReasonInput,
+  RESTORE_BODY_BYTES,
+  RESTORE_TRANSCRIPT_BYTES,
+  RestoreInput,
+  RunInput,
+  TicketInput,
+  TRANSCRIPT_PART_BYTES,
+  TranscriptPartInput,
+  WorkspaceMessageInput,
+  WorkTicketClaims,
+} from "./schemas/workspace.ts";
 export { DEFAULT_RULES, decide, type RuleContext, type RuleDecision } from "./rules/decide.ts";
 export { isStaffTool, ROLE_TOOLS, STAFF_TOOL_NAMES, type StaffToolName } from "./rules/staff-tools.ts";
 export { decideRepo, mainRuleset, missingConditions, OWNER_GUARDED_PATHS, ownerGuardedPath, type RepoDecision, type RepoRequest, type RepoScope, RULESET_NAME, type RulesetBody } from "./rules/repo.ts";

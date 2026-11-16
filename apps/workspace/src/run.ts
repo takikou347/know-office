@@ -253,7 +253,7 @@ export class Runner {
         const controller = current.controller;
         const hook = preToolUse({ ...this.#hookBase, token: () => this.token() });
         // MCP の受け手は SDK の呼び出しごとに作る。作業トークンはツールを呼ぶたびに今の物を読み、チェックポイントの後に記録を送る
-        const staff = staffServer({ fetcher: this.#hookBase.fetcher, token: () => this.token(), onCheckpoint: () => void this.#flush(current) }, current.input.tools);
+        const staff = staffServer({ fetcher: this.#hookBase.fetcher, token: () => this.token(), onCheckpoint: () => void this.#flush(current) }, current.input.tools, current.input.extensionTools);
         let text: string | undefined | void;
         try {
           text = await this.#agent({

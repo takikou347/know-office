@@ -10,6 +10,7 @@ import { announceNotice } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 import { appendNodeEvent, findNode, type NodeRow, revertNode } from "./nodes.ts";
 import { issueTicket, revokeTaskTickets } from "./ticket.ts";
+import { extensionToolSpecs } from "./tools.ts";
 
 /** 続けてこの回数だけ始められないか失敗したら、タスクを todo に戻さずオーナーの答えを待たせる */
 export const RUN_FAILURE_LIMIT = 3;
@@ -60,16 +61,16 @@ export async function authBlocked(db: D1Database): Promise<boolean> {
 }
 
 /**
- * 呼び出しのモデル、考える深さ、役目の説明文、社員の役で使える社員のツールを読む
- * @param db 今の状態の D1
+ * 呼び出しのモデル、考える深さ、役目の説明文、社員の役で使える社員のツールと入れている拡張のツールを読む
+ * @param env バインディング
  * @param staffId 社員 ID
  * @param nodeId タスク ID
  * @param promptVersion 始めた時の役目の説明文の版。無ければ今の版
  * @returns RunInput のうち、作業トークン、指示、session のほか
  * @throws internal 社員か役目の説明文が無い時
  */
-export async function runBase(db: D1Database, staffId: StaffId, nodeId: string, promptVersion: number | null): Promise<Pick<RunInput, "model" | "effort" | "systemPrompt" | "tools">> {
-  const orm = drizzle(db);
+export async function runBase(env: Bindings, staffId: StaffId, nodeId: string, promptVersion: number | null): Promise<Pick<RunInput, "model" | "effort" | "systemPrompt" | "tools" | "extensionTools">> {
+  const orm = drizzle(env.DB);
   const [who] = await orm.select().from(staff).where(eq(staff.id, staffId)).limit(1);
   if (!who) throw new AppError("internal", "社員が無い");
   const [prompt] = await orm
@@ -81,7 +82,8 @@ export async function runBase(db: D1Database, staffId: StaffId, nodeId: string, 
   const [node] = await orm.select({ taskKind: nodes.taskKind }).from(nodes).where(eq(nodes.id, nodeId)).limit(1);
   const effort = EFFORT_BY_KIND[node?.taskKind ?? ""] ?? RunInput.shape.effort.parse(who.effort);
   // 組織の決まりを先に、役目の説明文を後に、変わらない順で並べ、読み直しの割引を効かせる
-  return { model: who.model, effort, systemPrompt: `${ORG_RULES}\n\n${prompt.body}`, tools: [...ROLE_TOOLS[staffId]] };
+  // 入れている拡張のツールは役によらず渡す。動かす前にゲートウェイがルールで判断する
+  return { model: who.model, effort, systemPrompt: `${ORG_RULES}\n\n${prompt.body}`, tools: [...ROLE_TOOLS[staffId]], extensionTools: await extensionToolSpecs(env) };
 }
 
 /**
@@ -145,7 +147,7 @@ export async function startRun(env: Bindings, staffId: StaffId, now: number): Pr
   const row = await findNode(env.DB, nodeId);
   if (row.status !== "doing" || row.assignee !== staffId) return "skipped";
   const { promptVersion } = await target.runState(nodeId);
-  const base = await runBase(env.DB, staffId, nodeId, promptVersion);
+  const base = await runBase(env, staffId, nodeId, promptVersion);
   const { token, jti } = await issueTicket(env, staffId, nodeId, now);
   try {
     await env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)).run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: taskPrompt(row) }));
