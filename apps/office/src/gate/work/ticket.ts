@@ -184,6 +184,27 @@ export async function retireOtherTickets(env: Bindings, staffId: StaffId, nodeId
 }
 
 /**
+ * タスクの作業トークンを失効させ、監査ログに残す。only を渡せばその作業トークンだけ、無ければそのタスクのすべて
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param nodeId タスク ID
+ * @param reason 失効させた訳 (finished、failed、unused など)
+ * @param now 今の時刻
+ * @param only 失効させる作業トークン ID
+ * @returns 失効させた作業トークン ID
+ */
+export async function revokeTaskTickets(env: Bindings, staffId: StaffId, nodeId: string, reason: string, now: number, only?: string[]): Promise<string[]> {
+  const staff = staffOf(env, staffId);
+  let revoked: string[];
+  if (only) {
+    await staff.revokeTokens(only);
+    revoked = only;
+  } else revoked = await staff.revokeOthers(nodeId, "");
+  for (const jti of revoked) await record(env, now, "ticket.revoke", staffId, jti, { nodeId, reason });
+  return revoked;
+}
+
+/**
  * チェックポイントで、残りが 10 分を切った作業トークンを発行し直してワークスペースに渡す。渡し終えたら前の作業トークンを失効させる
  * 渡せない時は前の作業トークンを残し、次のチェックポイントでもう一度渡す
  * @param env バインディング

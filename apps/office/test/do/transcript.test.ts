@@ -1,5 +1,5 @@
 // 会話の記録を社員 DO がタスクごとの鍵で暗号にして R2 に置き、ワークスペースが落ちて作り直した後に戻して同じ session の続きを呼ぶ事を、本物の workerd で確かめる (社員が考えるの 3.6、4 章)
-import { deriveKey, fromBase64, toBase64 } from "@know-office/core";
+import { deriveKey, fromBase64, ORG_RULES, ROLE_TOOLS, toBase64 } from "@know-office/core";
 import { decodeJwt } from "jose";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -96,7 +96,7 @@ describe("経過の記憶", () => {
     expect(got.map((c) => c.method)).toEqual(["start", "restart", "restore", "run"]);
     expect(got[2]?.args[0]).toEqual({ sessionId: SESSION, transcript: b64(LINES.join("")), nextSeq: 2 });
     const run = got[3]?.args[0];
-    expect(run).toMatchObject({ nodeId: TASK.nodeId, resume: SESSION, model: "claude-sonnet-5-5", effort: "medium", systemPrompt: BUILDER_PROMPT, tools: ["pr_open", "idea_add", "service_close_request", "ask_boss", "ask_owner"] });
+    expect(run).toMatchObject({ nodeId: TASK.nodeId, resume: SESSION, model: "claude-sonnet-5-5", effort: "medium", systemPrompt: `${ORG_RULES}\n\n${BUILDER_PROMPT}`, tools: [...ROLE_TOOLS.builder] });
     // 続きは、このタスクだけに使える新しい作業トークンで呼ぶ
     const ticket = typeof run === "object" && run !== null && "ticket" in run ? String(run.ticket) : "";
     const claims = z.object({ sub: z.string(), node: z.string(), ws: z.string(), jti: z.string() }).parse(decodeJwt(ticket));

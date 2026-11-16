@@ -1,5 +1,5 @@
-// 5 分ごとの定期ジョブ。D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
-import { type Clock, newId } from "@know-office/core";
+// 5 分ごとの定期ジョブ。社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
+import { type Clock, newId, StaffId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { notices } from "../db/main.ts";
@@ -58,7 +58,7 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
 }
 
 /**
- * 定期ジョブを走らせる。失敗は投げずにエラーログに残し、次の 5 分でまた試す
+ * 定期ジョブを走らせる。社員ごとの arm、置き場、最長時間、基準を見る。失敗は投げずにエラーログに残し、次の 5 分でまた試す
  * @param env バインディング
  * @param ctx 返事の後も処理を続けさせる waitUntil
  * @param ctx.waitUntil 待たせる Promise を渡す
@@ -66,6 +66,13 @@ export async function checkStorage(env: Bindings, clock: Clock): Promise<void> {
  * @param weekly 週のバッチ処理が外へ頼む口。渡した時は、送ったバッチの終わりを見て結果を入れ、その fetch で GitHub に写し直す
  */
 export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }, clock: Clock, weekly?: WeeklyDeps): void {
+  // 新しい社員 DO は誰かが呼ぶまで alarm を持たず、9 時に出勤しない。プレビューは社員を働かせない (Claude を呼ばない)
+  if (env.ENVIRONMENT !== "preview") {
+    for (const staffId of StaffId.options) {
+      const target = env.STAFF.get(env.STAFF.idFromName(staffId));
+      ctx.waitUntil(target.arm(clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "staff_arm_failed", error }, clock)));
+    }
+  }
   if (weekly) {
     ctx.waitUntil(pollBatches(env, weekly, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "batch_poll_failed", error }, clock)));
     const forge = vaultForge(env, { fetcher: weekly.fetch, clock, cache: SHARED_TOKENS });

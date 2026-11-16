@@ -147,6 +147,16 @@ describe("オーナーの情報", () => {
     const { decision } = judge({ name: "", tool: "mcp__staff__owner_info_read", input: { item: "address" }, ctx: { ownerInfoItems: ["timezone"] } });
     expect(decision.allow).toBe(false);
   });
+
+  // 要件のシナリオではなく、owner_info_read を社員のツールの一覧に入れても、役のツールとして通さない守り
+  it("役の一覧に owner_info_read があっても、許していない項目と外部の文章の後は断る", () => {
+    const officeTools = ROLE_TOOLS.builder;
+    for (const ctx of [{ ownerInfoItems: ["timezone"], officeTools }, { ownerInfoItems: ["address"], officeTools, external: true }]) {
+      const { op, decision } = judge({ name: "", tool: "mcp__staff__owner_info_read", input: { item: "address" }, ctx });
+      expect(op.kind).toBe("owner_info.read");
+      expect(decision.allow).toBe(false);
+    }
+  });
 });
 
 describe("サービスの鍵", () => {

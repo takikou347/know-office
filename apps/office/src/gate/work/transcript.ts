@@ -1,12 +1,13 @@
 // 会話の記録をタスクごとの鍵の AES-GCM で暗号にして R2 に置き、ワークスペースが落ちて作り直した後に復号して戻し、同じ session の続きを呼ぶ (社員が考えるの 3.6)
 import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
-import { AppError, deriveKey, fromBase64, log, newId, RESTORE_TRANSCRIPT_BYTES, type RestoreInput, ROLE_TOOLS, RunInput, type StaffId, toBase64, TranscriptPartInput } from "@know-office/core";
+import { AppError, deriveKey, fromBase64, log, newId, RESTORE_TRANSCRIPT_BYTES, type RestoreInput, RunInput, type StaffId, toBase64, TranscriptPartInput } from "@know-office/core";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { nodes, staff, staffPrompts, transcriptParts } from "../db/main.ts";
+import { transcriptParts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import { clockAt } from "./attendance.ts";
+import { authBlocked, runBase, type RunStart, startRun } from "./run.ts";
 import { issueTicket, retireOtherTickets } from "./ticket.ts";
 
 /** 会話の記録の置き場。社員 DO だけが持つ */
@@ -28,9 +29,6 @@ const SEAL_OVERHEAD = IV_BYTES + 16;
 
 /** 落ちた後に続きから呼ぶ時の指示。最初の指示は会話の記録に残っているので繰り返さない */
 export const RESUME_PROMPT = "ワークスペースが落ちて作り直したので、会話の記録から続きを呼び直した。最後のチェックポイントより後の作業はリポジトリに残っていないかもしれないので、リポジトリの状態を確かめ直してから続ける";
-
-/** タスクの種類ごとの考える深さ。作るタスクは medium、見るタスクは high。ここに無い種類は社員の初期値を使う (社員が考えるの 3.3) */
-const EFFORT_BY_KIND: Partial<Record<string, RunInput["effort"]>> = { build: "medium", fix: "medium", content: "medium", review: "high" };
 
 /**
  * 部分を置く R2 の道を返す
@@ -173,29 +171,6 @@ export async function loadTranscript(store: TranscriptStore, staffId: StaffId, n
 }
 
 /**
- * 続きを呼ぶ時の、モデル、考える深さ、役目の説明文、社員の役で使える社員のツールを読む
- * @param db 今の状態の D1
- * @param staffId 社員 ID
- * @param nodeId タスク ID
- * @returns RunInput のうち、作業トークン、指示、session のほか
- * @throws internal 社員か役目の説明文が無い時
- */
-async function runBase(db: D1Database, staffId: StaffId, nodeId: string): Promise<Pick<RunInput, "model" | "effort" | "systemPrompt" | "tools">> {
-  const orm = drizzle(db);
-  const [who] = await orm.select().from(staff).where(eq(staff.id, staffId)).limit(1);
-  if (!who) throw new AppError("internal", "社員が無い");
-  const [prompt] = await orm
-    .select({ body: staffPrompts.body })
-    .from(staffPrompts)
-    .where(and(eq(staffPrompts.staffId, staffId), eq(staffPrompts.version, who.promptVersion)))
-    .limit(1);
-  if (!prompt) throw new AppError("internal", "役目の説明文が無い");
-  const [node] = await orm.select({ taskKind: nodes.taskKind }).from(nodes).where(eq(nodes.id, nodeId)).limit(1);
-  const effort = EFFORT_BY_KIND[node?.taskKind ?? ""] ?? RunInput.shape.effort.parse(who.effort);
-  return { model: who.model, effort, systemPrompt: prompt.body, tools: [...ROLE_TOOLS[staffId]] };
-}
-
-/**
  * ワークスペースを作り直した後に、社員が持つタスクの会話の記録を戻し、同じ session の続きを新しい作業トークンで呼ぶ
  * 止めている間と勤務の外、記録の無いタスクは呼ばない
  * @param env バインディング
@@ -211,9 +186,12 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
   if (nodeId === null || state === "stopped" || state === "off") return false;
   const saved = await staffDo.loadTranscript(nodeId);
   if (!saved) return false;
+  // 鍵が違う間は、続きも呼ばない。読んだ後の arm で呼ぶ
+  if (await authBlocked(env.DB)) return false;
   const workspace = env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId));
   await workspace.restore(saved);
-  const base = await runBase(env.DB, staffId, nodeId);
+  const { promptVersion } = await staffDo.runState(nodeId);
+  const base = await runBase(env.DB, staffId, nodeId, promptVersion);
   const { token, jti } = await issueTicket(env, staffId, nodeId, now);
   try {
     await workspace.run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: RESUME_PROMPT, resume: saved.sessionId }));
@@ -222,7 +200,20 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
     await staffDo.revokeTokens([jti]);
     throw error;
   }
+  await staffDo.markRun(nodeId, "started");
   // 落ちたワークスペースに渡していた作業トークンは、続きを渡した後に使えなくする
   await retireOtherTickets(env, staffId, nodeId, jti, now);
   return true;
+}
+
+/**
+ * 社員が持つタスクの呼び出しを、記録があれば続きから、無ければ最初から呼ぶ。作り直した後、再開した後、arm が走っていないタスクを見つけた時に使う
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param now 今の時刻
+ * @returns 続きを呼んだか、最初から始めた結果
+ */
+export async function continueRun(env: Bindings, staffId: StaffId, now: number): Promise<boolean | RunStart> {
+  if (await resumeRun(env, staffId, now)) return true;
+  return startRun(env, staffId, now);
 }

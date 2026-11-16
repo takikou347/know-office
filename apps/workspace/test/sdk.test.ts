@@ -46,6 +46,25 @@ const failing: QueryFn = async function* () {
   yield { type: "result", subtype: "error_during_execution", session_id: "session-1" };
 };
 
+/**
+ * 終わりの文を返して成功で終える SDK の代わり
+ * @yields 成功の result
+ */
+const finished: QueryFn = async function* () {
+  yield { type: "result", subtype: "success", is_error: false, result: "直した", session_id: "session-1" };
+};
+
+/**
+ * API の失敗で終える SDK の代わりを作る。success でも is_error が付く
+ * @param status API のステータス
+ * @returns SDK の代わり
+ */
+function ended(status: number): QueryFn {
+  return async function* () {
+    yield { type: "result", subtype: "success", is_error: true, api_error_status: status, result: "Invalid API key sk-ant-abc", session_id: "session-1" };
+  };
+}
+
 /** 開いた物。テストの後に閉じて消す */
 const opened: { servers: Server[]; dirs: string[] } = { servers: [], dirs: [] };
 
@@ -192,7 +211,17 @@ describe("ワークスペースの Claude Agent SDK", () => {
     const options = seen[0]?.options;
     expect(seen[0]?.prompt).toBe("ログインを直す");
     expect(options).toMatchObject({ model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目の説明文 v1", settingSources: [], cwd: "/work", permissionMode: "dontAsk" });
-    expect(Object.keys(options?.env ?? {}).toSorted()).toEqual(["ANTHROPIC_API_KEY", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
+    expect(Object.keys(options?.env ?? {}).toSorted()).toEqual([
+      "ANTHROPIC_API_KEY",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "ANTHROPIC_SMALL_FAST_MODEL",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      "HOME",
+      "NODE_EXTRA_CA_CERTS",
+      "PATH",
+    ]);
+    // 裏の軽い呼び出しも、役で許した軽いモデルにする。決まった宛先のほかへの通信は切る
+    expect(options?.env).toMatchObject({ ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-haiku-5-5", ANTHROPIC_SMALL_FAST_MODEL: "claude-haiku-5-5", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" });
     expect(options?.hooks?.PreToolUse?.[0]?.hooks).toHaveLength(1);
     // MCP の受け手は社員のツールの staff だけで、ほかの置き場の MCP の設定を読まない
     expect(Object.keys(options?.mcpServers ?? {})).toEqual(["staff"]);
@@ -248,6 +277,34 @@ describe("ワークスペースの Claude Agent SDK", () => {
   it("SDK が失敗で終えたら投げる", async () => {
     await expect(sdkAgent(failing)(task(gate(true, []), []))).rejects.toThrow("error_during_execution");
   });
+
+  it("SDK が終わりの文を返す", async () => {
+    expect(await sdkAgent(finished)(task(gate(true, []), []))).toBe("直した");
+  });
+
+  it("success でも API の失敗で終えた時は投げ、401 と 403 は鍵の失敗にする", async () => {
+    await expect(sdkAgent(ended(401))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
+    await expect(sdkAgent(ended(403))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
+    await expect(sdkAgent(ended(500))(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_failed" });
+    // SDK の文は鍵を含みうるので、投げる文に入れない
+    await expect(sdkAgent(ended(401))(task(gate(true, []), []))).rejects.not.toThrow(/sk-ant/);
+  });
+
+  it("本物の SDK に Claude が 401 を返すと、待ち直さずに鍵の失敗で投げる", async () => {
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }));
+      });
+    });
+    opened.servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("番号が分からない");
+    const run = await localQuery(`http://127.0.0.1:${String(address.port)}`, tempDir());
+    await expect(sdkAgent(run)(task(gate(true, []), []))).rejects.toMatchObject({ name: "sdk_auth_failed" });
+  }, 10_000);
 
   it("本物の SDK が作業トークンを鍵にして Claude を呼び、session を知らせて終わる", async () => {
     const claude = await fakeClaude([[{ type: "text", text: "直した" }]]);

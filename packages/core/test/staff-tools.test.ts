@@ -11,6 +11,10 @@ describe("社員のツールの説明と入力の形", () => {
     expect(Object.values(ROLE_TOOLS).flat().filter((name) => !listed.includes(name))).toEqual([]);
   });
 
+  it("3 人とも checkpoint、report、owner_info_read を使える", () => {
+    for (const tools of Object.values(ROLE_TOOLS)) expect(tools).toEqual(expect.arrayContaining(["checkpoint", "report", "owner_info_read"]));
+  });
+
   it("staff_request の平らにした形を通った正しい入力は、正本の共用体も通す", () => {
     const flat = z.object(STAFF_TOOL_CATALOG.staff_request.shape).strict();
     for (const input of [

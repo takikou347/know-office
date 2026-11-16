@@ -1,8 +1,9 @@
 // タスク 1 件の SDK の呼び出しと、作業トークンを差し替えた時の続きからの呼び直しを確かめる (社員が考えるの 3.2)
-import type { RunInput } from "@know-office/core";
+import type { AgentEvent, RunInput } from "@know-office/core";
 import { describe, expect, it, vi } from "vitest";
 import type { Agent, AgentCall } from "../src/agent.ts";
-import { Runner } from "../src/run.ts";
+import { type Reporter, Runner } from "../src/run.ts";
+import { SdkFailure } from "../src/sdk.ts";
 
 const NODE = "0190f4a8-0000-7000-8000-000000000101";
 const RUN: RunInput = { nodeId: NODE, ticket: "ticket-1", model: "claude-sonnet-5-5", effort: "medium", systemPrompt: "役目", prompt: "ログインを直す", tools: ["ask_boss"] };
@@ -183,5 +184,137 @@ describe("1 時間を超えるタスク", () => {
     await settle();
     expect(runner.running).toBe(false);
     expect(failures).toHaveLength(1);
+  });
+});
+
+/**
+ * ゲートウェイに送った出来事を控える口を作る
+ * @param runner 送った時に走っていたかを見る呼び出し。後から入れる
+ * @returns 送り先と送った物
+ */
+function reporter() {
+  const sent: { ticket: string; events: AgentEvent[]; running: boolean }[] = [];
+  const box: { runner?: Runner } = {};
+  const reporterOf: Reporter = {
+    report: (ticket, events) => {
+      sent.push({ ticket, events, running: box.runner?.running ?? false });
+      return Promise.resolve();
+    },
+  };
+  return { reporterOf, sent, box };
+}
+
+/**
+ * 会話の記録を送った時を控える口を作る
+ * @returns 送った物と口
+ */
+function flushes() {
+  const flushed: string[] = [];
+  const transcripts = { flush: (sessionId: string, ticket: string) => Promise.resolve(void flushed.push(`${sessionId} ${ticket}`)), restore: () => Promise.resolve() };
+  return { flushed, transcripts };
+}
+
+describe("働いた事をゲートウェイに届ける", () => {
+  it("呼び出しが終わったら、走りを空けてから最後の文と終わりを送る", async () => {
+    const { reporterOf, sent, box } = reporter();
+    const runner = new Runner(
+      (call) => {
+        call.onSession("session-1");
+        return Promise.resolve("直した");
+      },
+      () => {},
+      undefined,
+      undefined,
+      reporterOf,
+    );
+    box.runner = runner;
+    runner.start(RUN);
+    await settle();
+    expect(sent).toEqual([
+      {
+        ticket: "ticket-1",
+        running: false,
+        events: [
+          { kind: "message", body: "直した" },
+          { kind: "result", nodeId: NODE, result: "done" },
+        ],
+      },
+    ]);
+  });
+
+  it("SDK が失敗したら、走りを空けてからエラーと handed_back を送り、SDK の文は送らない", async () => {
+    const { reporterOf, sent, box } = reporter();
+    const runner = new Runner(() => Promise.reject(new SdkFailure("sdk_auth_failed", "Claude API が 401 で断った")), () => {}, undefined, undefined, reporterOf);
+    box.runner = runner;
+    runner.start(RUN);
+    await settle();
+    expect(sent).toEqual([
+      {
+        ticket: "ticket-1",
+        running: false,
+        events: [
+          { kind: "error", name: "sdk_auth_failed", message: "Claude API が 401 で断った" },
+          { kind: "result", nodeId: NODE, result: "handed_back" },
+        ],
+      },
+    ]);
+    const other = reporter();
+    const failing = new Runner(() => Promise.reject(new Error("sk-ant-secret が漏れた")), () => {}, undefined, undefined, other.reporterOf);
+    failing.start(RUN);
+    await settle();
+    expect(other.sent[0]?.events[0]).toEqual({ kind: "error", name: "sdk_failed", message: "SDK の呼び出しが失敗した" });
+  });
+
+  it("止めると、記録を送ってから止め、終わりもエラーも送らない", async () => {
+    const { agent, calls } = fakeAgent();
+    const { reporterOf, sent } = reporter();
+    const { flushed, transcripts } = flushes();
+    const runner = new Runner(agent, () => {}, undefined, transcripts, reporterOf);
+    runner.start(RUN);
+    await settle();
+    await runner.abort("wrap_up");
+    expect(calls[0]?.options.abortController.signal.aborted).toBe(true);
+    expect(flushed).toEqual(["session-1 ticket-1"]);
+    expect(runner.running).toBe(false);
+    expect(sent).toEqual([]);
+    // 走っていない時は何もしない
+    await runner.abort("wrap_up");
+  });
+
+  it("オーナーの発言は、記録を送ってから今の呼び出しを止め、発言を指示に続きから 1 回だけ呼び、止めた呼び出しの終わりは送らない", async () => {
+    const { agent, calls, finish } = fakeAgent();
+    const { reporterOf, sent } = reporter();
+    const { flushed, transcripts } = flushes();
+    const runner = new Runner(agent, () => {}, undefined, transcripts, reporterOf);
+    runner.start(RUN);
+    await settle();
+    await runner.addMessage("テストも足して");
+    await settle();
+    expect(flushed[0]).toBe("session-1 ticket-1");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.options.abortController.signal.aborted).toBe(true);
+    expect(calls[1]?.prompt).toContain("テストも足して");
+    expect(calls[1]?.options.resume).toBe("session-1");
+    expect(sent).toEqual([]);
+    finish();
+    await settle();
+    expect(sent.map((s) => s.events.map((e) => e.kind))).toEqual([["result"]]);
+  });
+
+  it("同時の 2 つの発言は、1 回の続きにまとめる", async () => {
+    const { agent, calls } = fakeAgent();
+    const runner = new Runner(agent, () => {});
+    runner.start(RUN);
+    await settle();
+    await Promise.all([runner.addMessage("1 つ目"), runner.addMessage("2 つ目")]);
+    await settle();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.prompt).toContain("1 つ目");
+    expect(calls[1]?.prompt).toContain("2 つ目");
+  });
+
+  it("走っていない時の発言は conflict で断る", async () => {
+    const runner = new Runner(() => Promise.resolve(), () => {});
+    await expect(runner.addMessage("聞こえる?")).rejects.toMatchObject({ code: "conflict" });
   });
 });

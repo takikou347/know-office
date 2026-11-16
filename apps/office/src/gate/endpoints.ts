@@ -56,3 +56,16 @@ export function endpoints(env: EndpointEnv): Endpoints {
     githubGit: `${base}/github/git`,
   };
 }
+
+/**
+ * 開発の代わりのワークスペースの宛先を返す。development で、代わりの物が手元にある時だけ返す。本番とプレビューのコンテナの代わりには使わない
+ * @param env 変数
+ * @returns 代わりのワークスペースの置き場
+ * @throws internal development でない時、ENVIRONMENT が無い時、DEV_FAKES_URL が手元の宛先でない時
+ */
+export function devWorkspaceBase(env: EndpointEnv): string {
+  if (env.ENVIRONMENT !== "development") throw new AppError("internal", "ワークスペースのコンテナが無い");
+  const base = env.DEV_FAKES_URL ?? "";
+  if (!LOCAL.test(base)) throw new AppError("internal", "DEV_FAKES_URL が手元の宛先でない");
+  return `${base}/workspace`;
+}

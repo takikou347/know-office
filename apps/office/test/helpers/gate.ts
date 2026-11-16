@@ -21,6 +21,7 @@ import { StaffBook, type StaffStorage, type Workspace } from "../../src/gate/wor
 import type { TestD1 } from "./d1.ts";
 import { fakeLive, type TestLive } from "./live.ts";
 import { overRpc } from "./rpc.ts";
+import { type RunMarks, staffRunFakes, workspaceFake } from "./staff-runs.ts";
 
 const FAKES = "http://localhost:5199";
 /** テストのゲートウェイの origin。app.request は http://localhost に要求を出す */
@@ -96,6 +97,8 @@ export type TestStaff = {
 export type TestWorkspace = {
   /** 受けた作業トークン */
   tickets: string[];
+  /** 受けた runs の入力 */
+  runs: unknown[];
   /** true なら届かない */
   down: boolean;
 };
@@ -249,14 +252,9 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     releaseStop: office.releaseStop.bind(office), dropClaim: office.dropClaim.bind(office),
     restoreStop: office.restoreStop.bind(office),
   };
-  const workspaces: Record<StaffId, TestWorkspace> = { president: { tickets: [], down: false }, builder: { tickets: [], down: false }, reviewer: { tickets: [], down: false } };
-  const workspaceDo = (id: StaffId) => ({
-    replaceTicket: (ticket: string) => {
-      if (workspaces[id].down) return Promise.reject(new Error("ワークスペースに届かない"));
-      workspaces[id].tickets.push(ticket);
-      return Promise.resolve(null);
-    },
-  });
+  const workspaces: Record<StaffId, TestWorkspace> = { president: { tickets: [], runs: [], down: false }, builder: { tickets: [], runs: [], down: false }, reviewer: { tickets: [], runs: [], down: false } };
+  const workspaceDo = (id: StaffId) => workspaceFake(workspaces[id]);
+  const runMarks: RunMarks = new Map();
   // StaffDO は勤務の本と数え方の本を持つ。名前ごとに別の代わりを返す
   const staffDo = (id: StaffId) => {
     const { book, guard: g } = staff[id];
@@ -280,6 +278,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
         return null;
       }),
       pull: (now: number) => pullNext(env, book, now),
+      ...staffRunFakes(env, id, book, runMarks),
       heartbeat: overRpc(book.heartbeat.bind(book)),
       checkpoint: overRpc(book.checkpoint.bind(book)),
       stop: book.stop.bind(book),

@@ -7,6 +7,7 @@ import type { Bindings, WorkspaceContainer } from "../env.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import type { Caller } from "../work/ticket.ts";
 import { announceNotice } from "../live/publish.ts";
+import { containerFor } from "../work/dev-container.ts";
 import { type ContainerLike, noticeWorkspaceDown, WorkspaceBox } from "../work/workspace-box.ts";
 
 /** ワークスペースのサーバーの鍵を置く、記憶の鍵の名前 */
@@ -72,11 +73,13 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
   }
 
   /**
-   * 経過を書き残させる。ワークスペースの中断のルート (POST /v1/abort) ができるまでは、チェックポイントを待つだけで何もしない
+   * 経過を書き残させてから、走っている呼び出しを止めさせる (POST /v1/abort)。退勤の前に呼ぶ。コンテナが止まっていれば何もしない
    * @returns 無し
+   * @throws unavailable ワークスペースが答えない時
    */
-  wrapUp(): Promise<null> {
-    return Promise.resolve(null);
+  async wrapUp(): Promise<null> {
+    await this.#box(await this.#staffId()).abort("wrap_up");
+    return null;
   }
 
   /**
@@ -113,16 +116,16 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
    * コンテナを包む。初めの 1 回だけ作り、後は同じ物を返す
    * @param staffId 社員 ID
    * @returns WorkspaceBox
-   * @throws internal コンテナが無い、社員 ID が違う時
+   * @throws internal コンテナが無い (development の代わりも使えない)、社員 ID が違う時
    */
   #box(staffId: string): WorkspaceBox<Fetcher> {
-    const container = this.ctx.container;
     const parsed = StaffId.safeParse(staffId);
-    if (!container || !parsed.success || this.ctx.id.name !== parsed.data) throw new AppError("internal", "ワークスペースのコンテナが無い");
+    if (!parsed.success || this.ctx.id.name !== parsed.data) throw new AppError("internal", "ワークスペースのコンテナが無い");
     if (this.#held) return this.#held;
     const caller: Caller = { staffId: parsed.data, workspaceId: this.ctx.id.toString() };
-    // ctx.container は getTcpPort の Fetcher を返す。WorkspaceBox が使う fetch だけを持つ
-    const like: ContainerLike<Fetcher> = container;
+    // ctx.container は getTcpPort の Fetcher を返す。WorkspaceBox が使う fetch だけを持つ。手元の開発は Containers を切っているので、代わりのワークスペースに回す
+    const real: ContainerLike<Fetcher> | undefined = this.ctx.container;
+    const like = containerFor(this.env, real, parsed.data, (url, init) => fetch(url, init));
     const storage = this.ctx.storage;
     // 鍵は DO が起き直してもコンテナが動いている間は使うので、記憶に置く
     const keys = {

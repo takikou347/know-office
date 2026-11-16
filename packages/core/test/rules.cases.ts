@@ -122,6 +122,8 @@ export const CASES: Record<OperationKind, { allow: Case[]; deny: Case[] }> = {
   "office.tool": {
     allow: [
       { name: "上司に聞く", tool: "mcp__staff__ask_boss", input: { reason: "次は" }, ctx: { officeTools: ["ask_boss"] } },
+      { name: "チェックポイントを伝える", tool: "mcp__staff__checkpoint", input: { kind: "commit" }, ctx: { officeTools: ["checkpoint"] } },
+      { name: "オーナーに発言する", tool: "mcp__staff__report", input: { body: "終わった" }, ctx: { officeTools: ["report"] } },
       { name: "社長が社員の追加を求める", tool: "mcp__staff__staff_request", input: { kind: "staff_add" }, ctx: { officeTools: ["staff_request"] } },
     ],
     deny: [
@@ -173,8 +175,6 @@ export const CASES: Record<OperationKind, { allow: Case[]; deny: Case[] }> = {
     deny: [
       { name: "知らないツール", tool: "KillShell", input: {} },
       { name: "知らない MCP のツール", tool: "mcp__other__owner_info_read", input: { item: "timezone" } },
-      { name: "中身の無いチェックポイントのツール", tool: "mcp__staff__checkpoint", input: { kind: "commit" }, ctx: { officeTools: ["ask_boss"] } },
-      { name: "中身の無いオーナーに話すツール", tool: "mcp__staff__report", input: { body: "終わった" }, ctx: { officeTools: ["ask_boss"] } },
     ],
   },
 };

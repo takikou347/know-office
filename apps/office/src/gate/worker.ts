@@ -22,7 +22,7 @@ const weekly: WeeklyDeps = { fetch: fetcher, tracker: UNCONNECTED_TRACKER };
 
 export default {
   fetch: gate.fetch,
-  // wrangler.jsonc の triggers.crons で、5 分ごとと毎日 0 時 5 分に呼ばれる。週の Cron は wrangler.jsonc に足した時から呼ばれる
+  // wrangler.jsonc の triggers.crons で、5 分ごと (社員の alarm を掛け、置き場などを見る) と毎日 0 時 5 分に呼ばれる。週の Cron は wrangler.jsonc に足した時から呼ばれる
   scheduled: (controller: ScheduledController, env: Bindings, ctx: ExecutionContext) => {
     if (runWeekly(controller.cron, env, ctx, systemClock, weekly)) return;
     if (controller.cron === DAILY_CRON) runDaily(env, ctx, systemClock, weekly);

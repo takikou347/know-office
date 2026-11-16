@@ -1,6 +1,7 @@
 // 社員 DO。社員 1 人の勤務の時刻と勤怠を持つ。判断は StaffBook に置き、ここは alarm と記憶を包むだけ (社員と勤怠の 1.3)
 import { DurableObject } from "cloudflare:workers";
 import { AppError, log, type RestoreInput, StaffId, type StaffStatus, systemClock } from "@know-office/core";
+import { z } from "zod";
 import type { DurableObjectStub } from "@cloudflare/workers-types";
 import type { Bindings, Staff, WorkspaceContainer } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
@@ -8,7 +9,11 @@ import { type IssuedTicket, type RenewedTicket, StaffGuard, type TicketCheck } f
 import { type Pulled, pullNext } from "../work/loop.ts";
 import { announce, announceNotice } from "../live/publish.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
-import { appendTranscript, loadTranscript, resumeRun, type TranscriptStore } from "../work/transcript.ts";
+import { startRun } from "../work/run.ts";
+import { appendTranscript, continueRun, loadTranscript, type TranscriptStore } from "../work/transcript.ts";
+
+/** 今のタスクの呼び出しの様子。started は runs が受け付けられた、failures は続けて失敗した回数 */
+const RunMarks = z.record(z.string(), z.object({ started: z.boolean(), failures: z.number().int().nonnegative() }).strict());
 
 /** 社員 DO。`idFromName(<社員 ID>)` で社員 1 人に 1 つ。ゲートウェイだけが RPC で呼び、時刻は呼ぶ側の Clock で渡す */
 export class StaffDO extends DurableObject<Bindings> implements Staff {
@@ -18,6 +23,8 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   #chain: Promise<unknown> = Promise.resolve();
   // 前に画面に配った「状態/今のタスク」。起き直した後は null から始め、1 回目は必ず配る
   #published: string | null = null;
+  /** ワークスペースへの頼み (起こす、止める、書き残させる、作り直す) を順に流す鎖。書き残させる前に止めない */
+  #workspaceChain: Promise<unknown> = Promise.resolve();
 
   /**
    * 次の出来事を処理し、次の alarm を掛ける。alarm は本物の時刻で鳴る
@@ -93,8 +100,73 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param now 今の時刻
    * @returns 取ったか。nodeId は取ったか、もう持っていたタスク
    */
-  pull(now: number): Promise<Pulled> {
-    return this.#serial((book) => pullNext(this.env, book, now), now);
+  async pull(now: number): Promise<Pulled> {
+    const pulled = await this.#serial((book) => pullNext(this.env, book, now), now);
+    // 呼び出しは鎖の外で始める。作業トークンの発行がこの DO の鎖を通るので、鎖の中で待つと止まる
+    if (pulled.taken) this.#begin("start", now);
+    return pulled;
+  }
+
+  /**
+   * 次の alarm が掛かっていなければ wake で掛ける。持っているタスクの呼び出しが始まっていなければ始める。5 分ごとの定期ジョブが呼ぶ
+   * 新しい社員 DO は、誰かが呼ぶまで alarm を持たないので、9 時に出勤しない
+   * @param now 今の時刻
+   * @returns 掛かっている alarm の時刻。無ければ null
+   */
+  async arm(now: number): Promise<{ alarm: number | null }> {
+    if ((await this.ctx.storage.getAlarm()) === null) await this.wake(now);
+    const { state, nodeId } = await this.status(now);
+    // pull でタスクを doing にした後、呼び出しを始める前に DO が落ちると、誰も始めない。ここで見つけて始める
+    if (nodeId !== null && (state === "working" || state === "called") && !(await this.runState(nodeId)).started) this.#begin("continue", now);
+    return { alarm: await this.ctx.storage.getAlarm() };
+  }
+
+  /**
+   * 今のタスクの呼び出しの様子を返す
+   * @param nodeId タスク ID
+   * @returns 始めた時の役目の説明文の版、受け付けられたか、続けて失敗した回数
+   */
+  runState(nodeId: string): Promise<{ promptVersion: number | null; started: boolean; failures: number }> {
+    return this.#serial(async (book) => {
+      const mark = (await this.#marks())[nodeId];
+      return { promptVersion: await book.promptVersionOf(nodeId), started: mark?.started ?? false, failures: mark?.failures ?? 0 };
+    });
+  }
+
+  /**
+   * 呼び出しの様子を書く。started は受け付けられた、failed は失敗を 1 つ数える、done は数えを消す
+   * @param nodeId タスク ID
+   * @param mark 書く様子
+   * @returns 数えた後の失敗の回数
+   */
+  markRun(nodeId: string, mark: "started" | "failed" | "done"): Promise<{ failures: number }> {
+    return this.#serial(async () => {
+      const marks = await this.#marks();
+      const was = marks[nodeId] ?? { started: false, failures: 0 };
+      if (mark === "done") delete marks[nodeId];
+      else marks[nodeId] = mark === "started" ? { ...was, started: true } : { started: false, failures: was.failures + 1 };
+      await this.ctx.storage.put("runs", marks);
+      return { failures: marks[nodeId]?.failures ?? 0 };
+    });
+  }
+
+  /**
+   * 記憶の呼び出しの様子を読む
+   * @returns タスクごとの様子
+   */
+  async #marks(): Promise<z.infer<typeof RunMarks>> {
+    return RunMarks.parse((await this.ctx.storage.get("runs")) ?? {});
+  }
+
+  /**
+   * 持っているタスクの呼び出しを、待たずに始める。失敗は log に残し、次の arm がもう一度見る
+   * @param how start は最初から、continue は記録があれば続きから
+   * @param now 今の時刻
+   */
+  #begin(how: "start" | "continue", now: number): void {
+    void this.#open()
+      .then((book) => (how === "start" ? startRun(this.env, book.staffId, now) : continueRun(this.env, book.staffId, now)))
+      .catch((error: unknown) => log("error", "run_begin_failed", { how, error: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
   }
 
   /**
@@ -113,8 +185,10 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param now 今の時刻
    * @returns 無し
    */
-  call(task: unknown, now: number): Promise<null> {
-    return this.#run((book) => book.call(task, now), now);
+  async call(task: unknown, now: number): Promise<null> {
+    await this.#run((book) => book.call(task, now), now);
+    this.#begin("start", now);
+    return null;
   }
 
   /**
@@ -150,8 +224,11 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param now 今の時刻
    * @returns 無し
    */
-  resume(now: number): Promise<null> {
-    return this.#run((book) => book.resume(now), now);
+  async resume(now: number): Promise<null> {
+    await this.#run((book) => book.resume(now), now);
+    // 止めた時にワークスペースを作り直しているので、持っているタスクを続きから呼ぶ
+    this.#begin("continue", now);
+    return null;
   }
 
   /**
@@ -387,22 +464,24 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    */
   #workspace(staffId: StaffId): Workspace {
     const request = (name: string, step: (stub: DurableObjectStub<WorkspaceContainer>) => Promise<null>): Promise<void> => {
-      // 待たずに頼む。DO は呼び出しの後も動いているので、頼んだ物は最後まで走る
-      void (async () => step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId))))().catch((error: unknown) => {
-        // 起きなかった時の通知は WorkspaceBox が出す。ここは呼び出しの失敗を残すだけ
-        log("error", "workspace_call_failed", { staffId, call: name, error: error instanceof Error ? error.message : "unknown" });
-      });
+      // 待たずに頼む。DO は呼び出しの後も動いているので、頼んだ物は最後まで走る。頼んだ順に流し、書き残させ終える前に止めない
+      this.#workspaceChain = this.#workspaceChain
+        .then(() => step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId))))
+        .catch((error: unknown) => {
+          // 起きなかった時の通知は WorkspaceBox が出す。ここは呼び出しの失敗を残すだけ
+          log("error", "workspace_call_failed", { staffId, call: name, error: error instanceof Error ? error.message : "unknown" });
+        });
       return Promise.resolve();
     };
     return {
       start: () => request("start", (stub) => stub.start(staffId)),
       stop: () => request("stop", (stub) => stub.stop()),
       wrapUp: () => request("wrapUp", (stub) => stub.wrapUp()),
-      // 作り直した後は、持っているタスクの会話の記録を戻して続きを呼ぶ。止めている間は呼ばない
+      // 作り直した後は、持っているタスクの会話の記録を戻して続きを呼び、記録が無ければ最初から呼ぶ。止めている間は呼ばない
       restart: (now) =>
         request("restart", async (stub) => {
           await stub.restart(staffId);
-          await resumeRun(this.env, staffId, now);
+          await continueRun(this.env, staffId, now);
           return null;
         }),
     };

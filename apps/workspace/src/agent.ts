@@ -1,6 +1,6 @@
 // Claude Agent SDK に渡す呼び出しの形と、設定を読ませずにフックを関数で渡す options を作る (社員が考えるの 3.1、3.2)
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
-import { CONTAINER_CA, type RunInput } from "@know-office/core";
+import { CONTAINER_CA, HAIKU, type RunInput } from "@know-office/core";
 import type { PreToolUseOutput } from "./hooks.ts";
 
 /** 社員が書ける唯一の置き場。タスクのリポジトリを置く */
@@ -26,8 +26,17 @@ export type AgentOptions = {
   settingSources: [];
   /** 動く置き場 */
   cwd: string;
-  /** SDK とそのツールに渡す環境変数 */
-  env: { ANTHROPIC_API_KEY: string; HOME: string; PATH: string; NODE_EXTRA_CA_CERTS: string };
+  /** SDK とそのツールに渡す環境変数。ANTHROPIC_BASE_URL は開発の代わりのワークスペースだけが付ける */
+  env: {
+    ANTHROPIC_API_KEY: string;
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: string;
+    ANTHROPIC_SMALL_FAST_MODEL: string;
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1";
+    HOME: string;
+    PATH: string;
+    NODE_EXTRA_CA_CERTS: string;
+    ANTHROPIC_BASE_URL?: string;
+  };
   /** ツールを使う前のフック。関数で渡し、ファイルから読まない */
   hooks: { PreToolUse: [{ hooks: [(input: unknown) => Promise<PreToolUseOutput>] }] };
   /** MCP の受け手。社員のツールの staff だけを渡す */
@@ -50,8 +59,8 @@ export type AgentCall = {
   onEvent(): void;
 };
 
-/** SDK を 1 回呼び、終わるまで待つ。abortController で止めると投げる。本物は sdk.ts の sdkAgent */
-export type Agent = (call: AgentCall) => Promise<void>;
+/** SDK を 1 回呼び、終わるまで待つ。終われば最後の文を返す。abortController で止めると投げる。本物は sdk.ts の sdkAgent */
+export type Agent = (call: AgentCall) => Promise<string | undefined | void>;
 
 /**
  * SDK の options を作る。作業トークンを ANTHROPIC_API_KEY に入れ、宛先は変えない。ほかの鍵や環境変数は渡さない
@@ -64,6 +73,7 @@ export type Agent = (call: AgentCall) => Promise<void>;
  * @param input.staff 社員のツールの MCP の受け手
  * @param input.abortController 呼び出しを終える口
  * @param input.resume 続きから呼ぶ session
+ * @param input.baseUrl Claude の宛先。開発の代わりのワークスペースだけが渡す
  * @returns SDK の options
  */
 export function agentOptions(input: {
@@ -75,6 +85,7 @@ export function agentOptions(input: {
   staff: McpSdkServerConfigWithInstance;
   abortController: AbortController;
   resume?: string | undefined;
+  baseUrl?: string | undefined;
 }): AgentOptions {
   return {
     model: input.model,
@@ -82,7 +93,19 @@ export function agentOptions(input: {
     systemPrompt: input.systemPrompt,
     settingSources: [],
     cwd: WORK_ROOT,
-    env: { ANTHROPIC_API_KEY: input.ticket, HOME: staffHome(), PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", NODE_EXTRA_CA_CERTS: CONTAINER_CA },
+    env: {
+      ANTHROPIC_API_KEY: input.ticket,
+      // SDK が裏で呼ぶ軽い呼び出し (題を付けるなど) も、プロキシが許す軽いモデルにする
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: HAIKU,
+      ANTHROPIC_SMALL_FAST_MODEL: HAIKU,
+      // 更新の確かめや報告など、作業に要らない外への通信をしない
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      HOME: staffHome(),
+      PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+      NODE_EXTRA_CA_CERTS: CONTAINER_CA,
+      // コンテナでは宛先を変えず、受け手がプロキシに回す。開発の代わりのワークスペースだけが手元の代わりの Claude を渡す
+      ...(input.baseUrl === undefined ? {} : { ANTHROPIC_BASE_URL: input.baseUrl }),
+    },
     hooks: { PreToolUse: [{ hooks: [input.hook] }] },
     mcpServers: { staff: input.staff },
     abortController: input.abortController,

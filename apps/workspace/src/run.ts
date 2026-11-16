@@ -1,16 +1,46 @@
 // タスク 1 件分の SDK の呼び出しを持ち、作業トークンが差し替わったら今の呼び出しを終えて続きから呼び直す。呼び直す前と終わった時に会話の記録の増えを送る (社員が考えるの 3.2、3.6)
-import { AppError, log, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
+import { type AgentEvent, AppError, log, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
 import { type Agent, agentOptions } from "./agent.ts";
 import { type HookDeps, preToolUse } from "./hooks.ts";
+import { SdkFailure } from "./sdk.ts";
 import { staffServer } from "./staff-tools.ts";
 
-/** 作業トークンを差し替えて呼び直す時に、今の呼び出しを止める理由 */
-class TicketRenewed extends Error {
-  override name = "TicketRenewed";
+/** 今の呼び出しを止める理由。ticket は作業トークンの差し替え、message はオーナーの発言、abort は中断。どれもゲートウェイには失敗として伝えない */
+class Interrupt extends Error {
+  override name = "Interrupt";
+  /** 止めた訳 */
+  readonly kind: "ticket" | "message" | "abort";
+
+  /**
+   * 止める理由を作る。コンテナは Node の型を外すだけの読み込みで動くので、引数のプロパティを使わない
+   * @param kind 止めた訳
+   */
+  constructor(kind: "ticket" | "message" | "abort") {
+    super(`${kind} で止めた`);
+    this.kind = kind;
+  }
 }
 
 /** 作業トークンを差し替えて続きから呼び直す時の指示。最初の指示を繰り返さない */
 export const CONTINUE_PROMPT = "作業トークンを差し替えたので呼び直した。前のチェックポイントの続きから進める";
+
+/**
+ * オーナーの発言を足して続きから呼ぶ時の指示を作る
+ * @param bodies 届いた順の発言
+ * @returns 指示
+ */
+export function messagePrompt(bodies: readonly string[]): string {
+  return `オーナーから発言が届いたので、呼び出しを止めて続きから呼び直した。発言を読み、今のタスクの続きに生かす。\n\n${bodies.map((b) => `オーナー: ${b}`).join("\n\n")}`;
+}
+
+/** ゲートウェイに働いた事を届ける口。本物は events.ts の gateReporter */
+export type Reporter = {
+  /** 出来事を作業トークンを付けて送る。送れなくても投げない */
+  report(ticket: string, events: AgentEvent[]): Promise<void>;
+};
+
+/** 届けない口 */
+const NO_REPORTER: Reporter = { report: () => Promise.resolve() };
 
 /** フックの依り所のうち、作業トークンのほか */
 type HookBase = Omit<HookDeps, "token">;
@@ -42,7 +72,16 @@ type Current = {
   ticket: string;
   sessionId: string | undefined;
   controller: AbortController;
-  renewPending: boolean;
+  /** session が分かったら今の呼び出しを止める訳。分かる前に差し替えか発言が来た時に置く */
+  pending: "ticket" | "message" | null;
+  /** まだ指示に入れていないオーナーの発言 */
+  messages: string[];
+  /** 中断を頼まれたか */
+  aborting: boolean;
+  /** 呼び出しが終わった時に解ける */
+  done: Promise<void>;
+  /** done を解く */
+  settle: () => void;
   /** 前に会話の記録を送り始めた時刻 */
   flushedAt: number;
   /** 会話の記録を送っている途中か */
@@ -57,6 +96,8 @@ export class Runner {
   readonly #onFailure: (error: unknown) => void;
   readonly #hookBase: HookBase;
   readonly #transcripts: Transcripts;
+  readonly #reporter: Reporter;
+  readonly #baseUrl: string | undefined;
 
   /**
    * タスクを持つ入れ物を、SDK を呼ぶ関数と失敗の知らせ先と一緒に作る
@@ -64,12 +105,16 @@ export class Runner {
    * @param onFailure SDK の呼び出しが失敗した時に知らせる先
    * @param hookBase フックの依り所。省くとゲートウェイを fetch で呼ぶ
    * @param transcripts 会話の記録を送り、戻す口。省くと送らない。本番は main.ts が TranscriptShipper を渡す
+   * @param reporter 働いた事をゲートウェイに届ける口。省くと届けない。本番は main.ts が gateReporter を渡す
+   * @param baseUrl SDK の Claude の宛先。開発の代わりのワークスペースだけが渡し、本番は省いて宛先を変えない
    */
-  constructor(agent: Agent, onFailure: (error: unknown) => void, hookBase: HookBase = DEFAULT_HOOK, transcripts: Transcripts = NO_TRANSCRIPTS) {
+  constructor(agent: Agent, onFailure: (error: unknown) => void, hookBase: HookBase = DEFAULT_HOOK, transcripts: Transcripts = NO_TRANSCRIPTS, reporter: Reporter = NO_REPORTER, baseUrl?: string) {
     this.#agent = agent;
     this.#onFailure = onFailure;
     this.#hookBase = hookBase;
     this.#transcripts = transcripts;
+    this.#reporter = reporter;
+    this.#baseUrl = baseUrl;
   }
 
   /**
@@ -106,7 +151,22 @@ export class Runner {
    */
   start(input: RunInput): void {
     if (this.#current) throw new AppError("conflict", "実行中の処理がある");
-    const current: Current = { input, ticket: input.ticket, sessionId: input.resume, controller: new AbortController(), renewPending: false, flushedAt: this.#hookBase.clock.now(), flushing: false };
+    const current: Current = {
+      input,
+      ticket: input.ticket,
+      sessionId: input.resume,
+      controller: new AbortController(),
+      pending: null,
+      messages: [],
+      aborting: false,
+      done: Promise.resolve(),
+      settle: () => {},
+      flushedAt: this.#hookBase.clock.now(),
+      flushing: false,
+    };
+    current.done = new Promise((resolve) => {
+      current.settle = resolve;
+    });
     this.#current = current;
     void this.#loop(current);
   }
@@ -119,48 +179,131 @@ export class Runner {
     const current = this.#current;
     if (!current) return;
     current.ticket = ticket;
-    current.renewPending = true;
-    if (current.sessionId !== undefined) current.controller.abort(new TicketRenewed("作業トークンを差し替えた"));
+    this.#interrupt(current, "ticket");
   }
 
   /**
-   * SDK を呼び、作業トークンの差し替えで止まったら新しい作業トークンで続きから呼び直す
+   * 走っている呼び出しにオーナーの発言を足す。送っていない記録を送ってから今の呼び出しを止め、発言を指示に続きから呼ぶ
+   * 止めている途中に届いた発言は、同じ続きにまとめる
+   * @param body 発言
+   * @returns 止めるのを頼んだ所
+   * @throws conflict 走っていない時か、中断している時
+   */
+  async addMessage(body: string): Promise<void> {
+    const current = this.#current;
+    if (!current || current.aborting) throw new AppError("conflict", "実行中の処理がない");
+    const first = current.messages.length === 0 && current.pending === null;
+    current.messages.push(body);
+    // 2 つ目からは、1 つ目が頼んだ続きにまとめる
+    if (!first) return;
+    current.pending = "message";
+    await this.#flush(current);
+    this.#interrupt(current, "message");
+  }
+
+  /**
+   * 走っている呼び出しを止め、送っていない会話の記録を送り終えるまで待つ。終わりもエラーもゲートウェイに送らない
+   * @param reason 止める訳。ログに残す
+   * @returns 止め終わり
+   */
+  async abort(reason: string): Promise<void> {
+    const current = this.#current;
+    if (!current) return;
+    log("info", "run_aborted", { reason: reason.slice(0, 200) });
+    current.aborting = true;
+    if (!current.controller.signal.aborted) current.controller.abort(new Interrupt("abort"));
+    await current.done;
+  }
+
+  /**
+   * 今の呼び出しを止めるのを頼む。session が分かる前なら、分かった所で止める
+   * @param current 今のタスク
+   * @param kind 止める訳
+   */
+  #interrupt(current: Current, kind: "ticket" | "message"): void {
+    current.pending = kind;
+    if (current.sessionId !== undefined && !current.controller.signal.aborted) current.controller.abort(new Interrupt(kind));
+  }
+
+  /**
+   * 次の指示を決める。届いた発言があれば発言を、無ければ作業トークンの差し替えの続きを指示にする
+   * @param current 今のタスク
+   * @returns 指示
+   */
+  #nextPrompt(current: Current): string {
+    if (current.messages.length > 0) return messagePrompt(current.messages.splice(0));
+    return CONTINUE_PROMPT;
+  }
+
+  /**
+   * SDK を呼び、作業トークンの差し替えか発言で止まったら続きから呼び直す。終われば走りを空けてから、終わりか失敗をゲートウェイに送る
    * @param current 今のタスク
    */
   async #loop(current: Current): Promise<void> {
     let prompt = current.input.prompt;
     try {
       for (;;) {
-        current.renewPending = false;
+        current.pending = null;
         const controller = current.controller;
         const hook = preToolUse({ ...this.#hookBase, token: () => this.token() });
-        // MCP の受け手は SDK の呼び出しごとに作る。作業トークンはツールを呼ぶたびに今の物を読む
-        const staff = staffServer({ fetcher: this.#hookBase.fetcher, token: () => this.token() }, current.input.tools);
+        // MCP の受け手は SDK の呼び出しごとに作る。作業トークンはツールを呼ぶたびに今の物を読み、チェックポイントの後に記録を送る
+        const staff = staffServer({ fetcher: this.#hookBase.fetcher, token: () => this.token(), onCheckpoint: () => void this.#flush(current) }, current.input.tools);
+        let text: string | undefined | void;
         try {
-          await this.#agent({
+          text = await this.#agent({
             prompt,
-            options: agentOptions({ ...current.input, ticket: current.ticket, hook, staff, abortController: controller, resume: current.sessionId }),
+            options: agentOptions({ ...current.input, ticket: current.ticket, hook, staff, abortController: controller, resume: current.sessionId, baseUrl: this.#baseUrl }),
             onSession: (sessionId) => {
               current.sessionId = sessionId;
-              if (current.renewPending && !controller.signal.aborted) controller.abort(new TicketRenewed("作業トークンを差し替えた"));
+              const kind = current.pending;
+              if (kind !== null && !controller.signal.aborted) controller.abort(new Interrupt(kind));
             },
             onEvent: () => this.#flushEvery(current),
           });
-          await this.#flush(current);
-          return;
         } catch (error) {
           // 落ちても、そこまでの記録は残す
           await this.#flush(current);
-          if (!(controller.signal.reason instanceof TicketRenewed)) throw error;
+          const reason: unknown = controller.signal.reason;
+          if (current.aborting) return;
+          if (!(reason instanceof Interrupt)) throw error;
           current.controller = new AbortController();
-          prompt = CONTINUE_PROMPT;
+          prompt = this.#nextPrompt(current);
+          continue;
         }
+        await this.#flush(current);
+        if (current.aborting) return;
+        // 終わる間際に届いた発言は捨てず、続きを呼ぶ
+        if (current.messages.length > 0) {
+          current.controller = new AbortController();
+          prompt = this.#nextPrompt(current);
+          continue;
+        }
+        this.#release(current);
+        const said: AgentEvent[] = text ? [{ kind: "message", body: text.slice(0, 20_000) }] : [];
+        await this.#reporter.report(current.ticket, [...said, { kind: "result", nodeId: current.input.nodeId, result: "done" }]);
+        return;
       }
     } catch (error) {
+      this.#release(current);
       this.#onFailure(error);
+      // SDK の文は鍵を含みうるので、自分で付けた種類と文だけを送る
+      const failure = error instanceof SdkFailure ? { name: error.name, message: error.message.slice(0, 200) } : { name: "sdk_failed" as const, message: "SDK の呼び出しが失敗した" };
+      await this.#reporter.report(current.ticket, [
+        { kind: "error", ...failure },
+        { kind: "result", nodeId: current.input.nodeId, result: "handed_back" },
+      ]);
     } finally {
-      this.#current = undefined;
+      this.#release(current);
+      current.settle();
     }
+  }
+
+  /**
+   * 走りを空ける。次のタスクを受けられるよう、ゲートウェイに終わりを送る前に呼ぶ
+   * @param current 今のタスク
+   */
+  #release(current: Current): void {
+    if (this.#current === current) this.#current = undefined;
   }
 
   /**

@@ -4,10 +4,13 @@ import { StaffId } from "../workday.ts";
 import { z } from "../zod.ts";
 import { AskBossTool } from "./ask-boss.ts";
 import { AskOwnerTool } from "./ask-owner.ts";
+import { CheckpointTool } from "./checkpoint.ts";
 import { IdeaAddTool } from "./idea-add.ts";
 import { NodeAssignTool } from "./node-assign.ts";
 import { NodeCreateTool } from "./node-create.ts";
+import { OwnerInfoReadTool } from "./owner-info-read.ts";
 import { PrOpenTool } from "./pr-open.ts";
+import { ReportTool } from "./report.ts";
 import { ReviewSubmitTool } from "./review-submit.ts";
 import { ServiceCloseRequestTool } from "./service-close-request.ts";
 import { StudySubmitTool } from "./study-submit.ts";
@@ -41,4 +44,7 @@ export const STAFF_TOOL_CATALOG: Record<StaffToolName, StaffToolEntry> = {
   idea_add: { description: "サービスの案を足す。オーナーの案と同じくアイデアの段階に並ぶ", shape: IdeaAddTool.shape },
   ask_boss: { description: "上司に次のタスクを求めるか、困った事を上げる", shape: AskBossTool.shape },
   ask_owner: { description: "費用が増える事か新しい外部連携をオーナーに上げる。今のタスクはオーナーの答えを待つ", shape: AskOwnerTool.shape },
+  checkpoint: { description: "テストが通った、コミットした、プルリクエストを出した、経過を書き残した事を伝える。区切りごとに呼ぶ", shape: CheckpointTool.shape },
+  report: { description: "オーナーに伝える事を発言する。オーナーの画面の会話に出る", shape: ReportTool.shape },
+  owner_info_read: { description: "ルールで許したオーナーの情報の 1 項目を読む。読んだ事は記録に残り、外部の文章を読んだタスクでは断られる", shape: OwnerInfoReadTool.shape },
 };

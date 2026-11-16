@@ -68,12 +68,29 @@ describe("ワークスペース", () => {
     expect(runner.token()).toBe("ticket-2");
   });
 
+  it("走っている呼び出しにオーナーの発言を足し、形の違う発言は 422 を返す", async () => {
+    expect((await send("POST", "/v1/messages", { body: "テストも足して" })).status).toBe(204);
+    expect((await send("POST", "/v1/messages", { body: "" })).status).toBe(422);
+    expect((await send("POST", "/v1/messages", { body: "x", extra: 1 })).status).toBe(422);
+    expect((await send("POST", "/v1/messages", { body: "鍵無し" }, null)).status).toBe(401);
+  });
+
   it("形の違う入力は 422 を返し、知らない道は 404 を返す", async () => {
     expect((await send("POST", "/v1/runs", { ...RUN, extra: 1 })).status).toBe(422);
     expect((await send("PUT", "/v1/ticket", { ticket: "" })).status).toBe(422);
     expect((await fetch(`${base}/nothing`, { headers: { authorization: `Bearer ${KEY}` } })).status).toBe(404);
     // 鍵の無い要求には、道の有る無しを見せない
     expect((await fetch(`${base}/nothing`)).status).toBe(401);
+  });
+
+  it("中断すると止め、走っていない時の発言は 409、中断は 204 を返す", async () => {
+    expect((await send("POST", "/v1/abort", { reason: "wrap_up", extra: 1 })).status).toBe(422);
+    expect((await send("POST", "/v1/abort", { reason: "wrap_up" })).status).toBe(204);
+    expect(runner.running).toBe(false);
+    const again = await send("POST", "/v1/messages", { body: "まだいる?" });
+    expect(again.status).toBe(409);
+    expect((await send("POST", "/v1/abort", { reason: "wrap_up" })).status).toBe(204);
+    expect((await send("POST", "/v1/abort", { reason: "wrap_up" }, null)).status).toBe(401);
   });
 
   describe("ワークスペースを分ける", () => {

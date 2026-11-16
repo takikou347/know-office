@@ -4,11 +4,15 @@ import {
   AppError,
   AskBossTool,
   AskOwnerTool,
+  CheckpointTool,
   IdeaAddTool,
   newId,
   NodeAssignTool,
   NodeCreateTool,
+  OWNER_INFO_ITEM,
+  OwnerInfoReadTool,
   PrOpenTool,
+  ReportTool,
   ReviewSubmitTool,
   ServiceCloseRequestTool,
   recordedText,
@@ -35,6 +39,8 @@ import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { announceNotice } from "../live/publish.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
+import { readOwnerData } from "./owner-data.ts";
+import { addStaffMessage, reachCheckpoint } from "./progress.ts";
 import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, updateNode } from "./nodes.ts";
 import { backToTodo, findReview, madeTaskOf, mergeIfReady, repoRefusal } from "./review.ts";
 
@@ -367,6 +373,54 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
   return { merged };
 }
 
+/**
+ * 今のタスクのチェックポイントを伝える。社員 DO と出来事に渡し、残りが 10 分を切った作業トークンを差し替える
+ * @param env バインディング
+ * @param _forge 使わない
+ * @param call 呼び出し
+ * @param input CheckpointTool
+ * @returns 作業トークンを差し替えたか
+ * @throws conflict 今のタスクが無い時
+ */
+async function checkpoint(env: Bindings, _forge: Forge, call: ToolCall, input: CheckpointTool): Promise<{ renewed: boolean }> {
+  const task = await currentTask(env, call);
+  const renewed = await reachCheckpoint(env, call.staffId, { kind: input.kind, nodeId: task.id, ...(input.note === undefined ? {} : { note: input.note }) }, call.now, call.traceId);
+  return { renewed };
+}
+
+/**
+ * オーナーへの発言を会話に足す
+ * @param env バインディング
+ * @param _forge 使わない
+ * @param call 呼び出し
+ * @param input ReportTool
+ * @returns 足した発言の ID
+ * @throws conflict 今のタスクが無い時
+ */
+async function report(env: Bindings, _forge: Forge, call: ToolCall, input: ReportTool): Promise<{ id: string }> {
+  const task = await currentTask(env, call);
+  return { id: await addStaffMessage(env, { staffId: call.staffId, nodeId: task.id, body: input.body }, call.now, call.traceId) };
+}
+
+/**
+ * ルールで許したオーナーの情報の 1 項目を読む。読んだ記録を残し、自動停止の重なった怪しい動きに数える
+ * @param env バインディング
+ * @param _forge 使わない
+ * @param call 呼び出し
+ * @param input OwnerInfoReadTool
+ * @returns 項目と値
+ * @throws conflict 今のタスクが無い時
+ * @throws not_found 項目が無い時
+ */
+async function ownerInfoRead(env: Bindings, _forge: Forge, call: ToolCall, input: OwnerInfoReadTool): Promise<{ item: string; value: string }> {
+  const task = await currentTask(env, call);
+  const [, extId = "", field = ""] = OWNER_INFO_ITEM.exec(input.item) ?? [];
+  const value = await readOwnerData(env.DB, env.MASTER_KEY, { extId, field, staffId: call.staffId, nodeId: task.id }, call.now);
+  await observe(env, { type: "owner_info_read", item: input.item }, call.now, call.guard ?? UNCONNECTED_DEPS, call.traceId);
+  await auditFrom(env, { at: call.now, actor: call.staffId, action: "owner_info.read", target: input.item, scope: task.scope, detail: { nodeId: task.id }, traceId: call.traceId });
+  return { item: input.item, value };
+}
+
 /** ツールの名前から、入力の形と中身 */
 const TOOLS: Record<string, Tool> = {
   node_create: { schema: NodeCreateTool, run: nodeCreate },
@@ -379,6 +433,9 @@ const TOOLS: Record<string, Tool> = {
   idea_add: { schema: IdeaAddTool, run: ideaAdd },
   study_submit: { schema: StudySubmitTool, run: studySubmit },
   service_close_request: { schema: ServiceCloseRequestTool, run: serviceCloseRequest },
+  checkpoint: { schema: CheckpointTool, run: checkpoint },
+  report: { schema: ReportTool, run: report },
+  owner_info_read: { schema: OwnerInfoReadTool, run: ownerInfoRead },
 };
 
 /** 拡張のツールのゲートウェイでの名前。`ext__<拡張 ID>__<ツール>` */

@@ -144,7 +144,7 @@ describe("ワークスペースを分ける", () => {
     expect(options.hooks).toEqual({ PreToolUse: [{ hooks: [hook] }] });
     expect(options.cwd).toBe(WORK_ROOT);
     // SDK に渡す環境変数は、作業トークンと動くのに要る物だけ。ワークスペースの環境変数をそのまま渡さない
-    expect(Object.keys(options.env).toSorted()).toEqual(["ANTHROPIC_API_KEY", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
+    expect(Object.keys(options.env).toSorted()).toEqual(["ANTHROPIC_API_KEY", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "HOME", "NODE_EXTRA_CA_CERTS", "PATH"]);
     expect(options.env.ANTHROPIC_API_KEY).toBe("ticket-1");
   });
 });

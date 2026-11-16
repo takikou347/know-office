@@ -15,6 +15,7 @@ import { problems } from "./openapi.ts";
 import { noContent } from "./respond.ts";
 import { rethrowRpc } from "./rpc.ts";
 import { decisionRoutes } from "./work/decisions.ts";
+import { eventRoutes } from "./work/events.ts";
 import { toolRoutes } from "./work/tool-route.ts";
 import { relayClaude } from "./work/relay.ts";
 import { authenticateTicket, bearer, type Caller, renewTicket, ticketTask } from "./work/ticket.ts";
@@ -142,6 +143,7 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     await staffOf(c.env, staffId).appendTranscript(nodeId, input, now).catch(rethrowRpc);
     return noContent(c);
   });
+  eventRoutes(app, caller);
   decisionRoutes(app, caller, options.extensions ?? INSTALLED);
   toolRoutes(app, caller, options.extensions ?? INSTALLED);
   app.all("*", (c) => {

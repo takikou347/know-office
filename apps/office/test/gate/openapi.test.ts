@@ -82,9 +82,6 @@ const UNBUILT: Record<string, string> = {
   "GET /api/v1/reviews/{nodeId}/lsp": "#110",
   "GET /api/v1/traces/{traceId}": "#111",
   "POST /api/v1/services/{serviceId}/rollback": "#109",
-  "POST /v1/abort": "#105",
-  "POST /v1/messages": "#105",
-  "POST /ws/v1/events": "#105",
 };
 
 /**

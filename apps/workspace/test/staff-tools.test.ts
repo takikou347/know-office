@@ -103,4 +103,18 @@ describe("社員のツールの MCP の受け手", () => {
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain("結果が分からない");
   });
+
+  it("checkpoint のツールが通った時だけ、会話の記録を送らせる", async () => {
+    let flushed = 0;
+    const run = async (reply: () => Response) => {
+      const deps: StaffToolDeps = { fetcher: gateway(reply).fetcher, token: () => "ticket-1", onCheckpoint: () => void (flushed += 1) };
+      const found = staffToolDefinitions(deps, ["checkpoint", "report"]);
+      await found.find((t) => t.name === "checkpoint")?.handler({ kind: "commit" }, {});
+      await found.find((t) => t.name === "report")?.handler({ body: "進んだ" }, {});
+    };
+    await run(OK);
+    expect(flushed).toBe(1);
+    await run(conflict);
+    expect(flushed).toBe(1);
+  });
 });

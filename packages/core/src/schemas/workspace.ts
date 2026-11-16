@@ -1,7 +1,7 @@
 // ワークスペースとゲートウェイ、社員 DO の間でやり取りする形と、作業トークンの中身 (社員が考えるの 1.2、1.3、2 章)
 import { fromBase64 } from "../encoding.ts";
 import { STAFF_TOOL_NAMES } from "../rules/staff-tools.ts";
-import { StaffId } from "./workday.ts";
+import { StaffId, WorkResult } from "./workday.ts";
 import { z } from "./zod.ts";
 
 /** POST /ws/v1/heartbeat の入力。送った時刻 */
@@ -96,3 +96,39 @@ export const WorkTicketClaims = z
 
 /** 作業トークンの中身の型 */
 export type WorkTicketClaims = z.infer<typeof WorkTicketClaims>;
+
+/** POST /ws/v1/events で 1 回に送る出来事の上限 */
+export const AGENT_EVENTS_MAX = 50;
+
+/** ワークスペースが送れるエラーの名前。sdk_auth_failed は Claude の鍵が断られた、sdk_failed はほかの SDK の失敗。ほかの名前は断り、エラーログに好きな文を書かせない */
+export const AGENT_ERROR_NAMES = z.enum(["sdk_auth_failed", "sdk_failed"]);
+
+/** ワークスペースから届く出来事の 1 つ。発言、ツールの結果、チェックポイント、エラー、終わり */
+export const AgentEvent = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("message"), body: z.string().max(20_000) }).strict(),
+  z.object({ kind: z.literal("tool_result"), toolName: z.string().max(200), command: z.string().max(2000), exitCode: z.int(), failedChecks: z.array(z.string().max(100)).max(20) }).strict(),
+  z.object({ kind: z.literal("checkpoint"), nodeId: z.uuid(), checkpoint: z.enum(["test_pass", "commit", "pr", "note"]), note: z.string().max(2000).optional() }).strict(),
+  z.object({ kind: z.literal("error"), name: AGENT_ERROR_NAMES, message: z.string().max(200) }).strict(),
+  z.object({ kind: z.literal("result"), nodeId: z.uuid(), result: WorkResult }).strict(),
+]);
+
+/** ワークスペースから届く出来事の型 */
+export type AgentEvent = z.infer<typeof AgentEvent>;
+
+/** POST /ws/v1/events の入力 */
+export const AgentEventsInput = z.object({ events: z.array(AgentEvent).min(1).max(AGENT_EVENTS_MAX) }).strict().meta({ id: "AgentEventsInput" });
+
+/** ワークスペースから届く出来事の並びの型 */
+export type AgentEventsInput = z.infer<typeof AgentEventsInput>;
+
+/** POST /v1/messages の入力。走っている呼び出しに足すオーナーの発言 */
+export const WorkspaceMessageInput = z.object({ body: z.string().min(1).max(20_000) }).strict().meta({ id: "WorkspaceMessageInput" });
+
+/** オーナーの発言の型 */
+export type WorkspaceMessageInput = z.infer<typeof WorkspaceMessageInput>;
+
+/** 理由だけを持つ入力。POST /v1/abort などが受ける */
+export const ReasonInput = z.object({ reason: z.string() }).strict().meta({ id: "ReasonInput" });
+
+/** 理由だけを持つ入力の型 */
+export type ReasonInput = z.infer<typeof ReasonInput>;

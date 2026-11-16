@@ -8,9 +8,10 @@ import { defineExtension, type ExtensionDefinition } from "../../src/gate/extens
 import { INSTALLED } from "../../src/gate/extensions/installed.ts";
 import { toggleExtension } from "../../src/gate/extensions/state.ts";
 import { finishTask } from "../../src/gate/work/loop.ts";
+import { sealOwnerData } from "../../src/gate/work/owner-data.ts";
 import { issueTicket, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { wrapDb } from "../helpers/github.ts";
-import { advance, api, clockIn, idOf, MINUTE, purposeAndGoal, rows, staffOf, useWork, type WorkWorld } from "../helpers/work.ts";
+import { advance, api, clockIn, idOf, MINUTE, purposeAndGoal, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork();
 
@@ -292,5 +293,70 @@ describe("社員のツールの口", () => {
     const res = await call(world, work, "ext__sample-notes__note_read", {});
     expect(res.status).toBe(200);
     expect(Answer.parse(await res.json()).data.isError).toBe(false);
+  });
+});
+
+/**
+ * オーナーの情報の 1 項目を、項目ごとの鍵で暗号にして置く
+ * @param w テストの物
+ * @param extId 拡張 ID
+ * @param field 項目
+ * @param value 値
+ * @returns 置いた行の ID
+ */
+async function putOwnerData(w: WorkWorld, extId: string, field: string, value: string): Promise<string> {
+  const id = crypto.randomUUID();
+  const sealed = await sealOwnerData(w.gate.env.MASTER_KEY, extId, field, value);
+  await w.gate.env.DB.prepare("INSERT INTO owner_data (id, ext_id, field, ciphertext, iv, updated_at) VALUES (?, ?, ?, ?, ?, 0)").bind(id, extId, field, sealed.ciphertext, sealed.iv).run();
+  return id;
+}
+
+describe("社員のツール checkpoint、report、owner_info_read", () => {
+  it("checkpoint は今のタスクのチェックポイントを社員に渡して出来事に残し、残りが 10 分を切った作業トークンを差し替える", async () => {
+    const work = await builderAtWork(world);
+    await advance(world, world.clock.now() + 51 * MINUTE);
+    const res = await call(world, work, "checkpoint", { kind: "commit", note: "ログインの直しをコミットした" });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(Answer.parse(await res.json()).data.content)).toEqual({ renewed: true });
+    const events = await rows(world.d1.REC_2026, "SELECT detail FROM node_events WHERE node_id = ? AND kind = 'checkpoint'", work.nodeId);
+    expect(events.map((r) => JSON.parse(String(r["detail"])) as unknown)).toEqual([{ kind: "commit", note: "ログインの直しをコミットした" }]);
+    expect(world.gate.workspaces.builder.tickets).toHaveLength(1);
+    // 差し替えた後は前の作業トークンを使えず、形の違うチェックポイントは新しい作業トークンでも 422
+    expect((await call(world, work, "checkpoint", { kind: "commit" })).status).toBe(401);
+    const renewed = world.gate.workspaces.builder.tickets[0] ?? "";
+    expect((await call(world, { ...work, token: renewed }, "checkpoint", { kind: "lunch" })).status).toBe(422);
+  });
+
+  it("report はオーナーへの発言を会話に 1 行足し、2,001 字は 422 で断る", async () => {
+    const work = await builderAtWork(world);
+    const res = await call(world, work, "report", { body: "ログインの直しにテストを足した" });
+    expect(res.status).toBe(200);
+    expect(await rows(world.d1.REC_2026, "SELECT staff_id, node_id, sender, body FROM messages")).toEqual([
+      { staff_id: "builder", node_id: work.nodeId, sender: "staff", body: "ログインの直しにテストを足した" },
+    ]);
+    expect((await call(world, work, "report", { body: "あ".repeat(2001) })).status).toBe(422);
+    expect(await rows(world.d1.REC_2026, "SELECT body FROM messages")).toHaveLength(1);
+  });
+
+  it("owner_info_read はルールで許していない項目を 403 rule_denied で断り、中身を読まない", async () => {
+    const work = await builderAtWork(world);
+    await putOwnerData(world, "career", "address", "東京都");
+    const res = await call(world, work, "owner_info_read", { item: "career.address" });
+    expect(await problem(res)).toEqual({ status: 403, code: "rule_denied" });
+    expect(await rows(world.gate.env.DB, "SELECT * FROM owner_data_reads")).toEqual([]);
+  });
+
+  it("owner_info_read の中身は、項目ごとの鍵で戻し、読んだ記録を残し、無い項目と移した暗号文は戻さない", async () => {
+    const work = await builderAtWork(world);
+    await putOwnerData(world, "career", "timezone", "Asia/Tokyo");
+    const answer = await tool(world, "builder", "owner_info_read", { item: "career.timezone" });
+    expect(JSON.parse(answer.content)).toEqual({ item: "career.timezone", value: "Asia/Tokyo" });
+    expect(await rows(world.gate.env.DB, "SELECT by, ext_id, field, node_id FROM owner_data_reads")).toEqual([{ by: "builder", ext_id: "career", field: "timezone", node_id: work.nodeId }]);
+    await expect(tool(world, "builder", "owner_info_read", { item: "career.phone" })).rejects.toMatchObject({ code: "not_found" });
+    // ほかの項目の暗号文を写しても、項目の名前が合わないので戻さない
+    const other = await sealOwnerData(world.gate.env.MASTER_KEY, "career", "address", "東京都");
+    await world.gate.env.DB.prepare("UPDATE owner_data SET ciphertext = ?, iv = ? WHERE field = 'timezone'").bind(other.ciphertext, other.iv).run();
+    await expect(tool(world, "builder", "owner_info_read", { item: "career.timezone" })).rejects.toMatchObject({ code: "internal" });
+    expect(await rows(world.gate.env.DB, "SELECT field FROM owner_data_reads")).toHaveLength(1);
   });
 });

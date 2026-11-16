@@ -27,6 +27,8 @@ export type TestWorker = {
   liveUrl(query: { session: string; ip: string; at: number }): Promise<string>;
   /** 社員のワークスペースの代わりが受けた呼び出し */
   workspace(staffId: string): Promise<{ method: string; args: unknown[] }[]>;
+  /** 社員のワークスペースの代わりの runs の答え方を決める。busy はもう走っている、down は届かない */
+  workspaceMode(staffId: string, mode: "ok" | "busy" | "down"): Promise<void>;
   /** 止める */
   dispose(): Promise<void>;
 };
@@ -90,6 +92,9 @@ export async function startTestWorker(): Promise<TestWorker> {
       return url.toString();
     },
     workspace: async (staffId) => z.array(z.object({ method: z.string(), args: z.array(z.unknown()) })).parse(await post("/workspace", { staffId })),
+    workspaceMode: async (staffId, mode) => {
+      await post("/workspace-mode", { staffId, mode });
+    },
     dispose: () => worker.dispose(),
   };
 }

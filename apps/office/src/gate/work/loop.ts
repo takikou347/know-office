@@ -98,10 +98,11 @@ async function nextTodo(env: Bindings, staffId: string): Promise<NodeRow | undef
 /**
  * 社員 DO に渡すタスクの形にする
  * @param row タスクの行
+ * @param promptVersion 始めた時の役目の説明文の版
  * @returns StaffTask
  */
-function taskOf(row: NodeRow): StaffTask {
-  return { nodeId: row.id, title: row.title, scope: row.scope };
+function taskOf(row: NodeRow, promptVersion: number | undefined): StaffTask {
+  return { nodeId: row.id, title: row.title, scope: row.scope, ...(promptVersion === undefined ? {} : { promptVersion }) };
 }
 
 /**
@@ -117,17 +118,17 @@ async function start(env: Bindings, staffId: string, row: NodeRow, now: number, 
   // 読んでからオーナーが担当を変えるとバージョンが進むので、先に doing にして取れた時だけ渡す。2 人が同じタスクを取らない
   const claimed = await moveNode(env.DB, row, "doing", now);
   if (!claimed) return false;
+  // 版は渡す前に読み、社員 DO の記憶にタスクと一緒に置く。続きの呼び出しもこの版で呼ぶ
+  const [who] = await drizzle(env.DB).select({ promptVersion: staff.promptVersion }).from(staff).where(eq(staff.id, staffId)).limit(1);
   let handed = false;
   try {
-    handed = await hand(taskOf(claimed));
+    handed = await hand(taskOf(claimed, who?.promptVersion));
   } finally {
     if (!handed) await revertNode(env.DB, claimed.id, "doing", "todo", now);
   }
   if (!handed) return false;
-  const orm = drizzle(env.DB);
-  const [who] = await orm.select({ promptVersion: staff.promptVersion }).from(staff).where(eq(staff.id, staffId)).limit(1);
   // 承認を待って戻ったタスクは、直近の答え (承認か差し戻しと理由) をタスクの文脈に入れ、社員が読んで続ける
-  const [answer] = await orm
+  const [answer] = await drizzle(env.DB)
     .select({ id: approvals.id, kind: approvals.kind, status: approvals.status, reason: approvals.reason })
     .from(approvals)
     .where(and(sql`json_extract(${approvals.payload}, '$.nodeId') = ${row.id}`, inArray(approvals.status, ["approved", "rejected"])))
@@ -233,13 +234,15 @@ export async function leaveTask(env: Bindings, staffId: string, result: WorkResu
  * @param staffId 社員 ID
  * @param nodeId タスク ID
  * @param now 今の時刻
- * @throws conflict 社員の今のタスクでない時
+ * @throws conflict 社員の今のタスクでない時、同時に終えて書けなかった時
  */
 export async function finishTask(env: Bindings, staffId: string, nodeId: string, now: number): Promise<void> {
   const status = await staffDo(env, staffId).status(now);
   if (status.nodeId !== nodeId) throw new AppError("conflict", "今のタスクと違う");
   const row = await findNode(env.DB, nodeId);
-  await moveNode(env.DB, row, "done", now);
+  if (row.status !== "doing") throw new AppError("conflict", "タスクはもう変わった");
+  // 同時の 2 回の終わりでは、先に書けた方だけが出来事を残して次を取る
+  if ((await moveNode(env.DB, row, "done", now)) === null) throw new AppError("conflict", "タスクはもう変わった");
   await appendNodeEvent(env, { nodeId, staffId, kind: "finished", detail: {} }, { by: staffId, now });
   await leaveTask(env, staffId, "done", now);
 }

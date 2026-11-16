@@ -1,7 +1,7 @@
-// ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替え、会話の記録の復元を受ける (社員が考えるの 1.3、3.6)
+// ワークスペースの Node のサーバー。社員 DO だけがコンテナの番号から呼び、起動確認、タスクの開始、作業トークンの差し替え、オーナーの発言、中断、会話の記録の復元を受ける (社員が考えるの 1.3、3.6、3.7)
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { AppError, health, log, PROBLEMS, RESTORE_BODY_BYTES, RestoreInput, RunInput, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
+import { AppError, health, log, PROBLEMS, ReasonInput, RESTORE_BODY_BYTES, RestoreInput, RunInput, TicketInput, WORKSPACE_KEY_ENV, WorkspaceMessageInput } from "@know-office/core";
 import type { Runner } from "./run.ts";
 
 /** 受ける本文の上限 (1MB) */
@@ -89,7 +89,7 @@ async function readJson(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<u
  * @throws unauthenticated ゲートウェイの鍵が無い、違う時
  * @throws not_found 無い道の時
  * @throws validation_failed 入力の形が違う時
- * @throws conflict もう走っている時
+ * @throws conflict もう走っている時、走っていない時の発言
  */
 async function handle(runner: Runner, key: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const route = `${req.method ?? ""} ${req.url ?? ""}`;
@@ -114,6 +114,21 @@ async function handle(runner: Runner, key: string, req: IncomingMessage, res: Se
     const input = TicketInput.safeParse(await readJson(req));
     if (!input.success) throw new AppError("validation_failed", "作業トークンの形が違う");
     runner.replaceTicket(input.data.ticket);
+    send(res, 204);
+    return;
+  }
+  if (route === "POST /v1/messages") {
+    const input = WorkspaceMessageInput.safeParse(await readJson(req));
+    if (!input.success) throw new AppError("validation_failed", "発言の形が違う");
+    await runner.addMessage(input.data.body);
+    send(res, 204);
+    return;
+  }
+  if (route === "POST /v1/abort") {
+    const input = ReasonInput.safeParse(await readJson(req));
+    if (!input.success) throw new AppError("validation_failed", "理由の形が違う");
+    // 送っていない会話の記録を送り終えてから返す。社員 DO はこの後にコンテナを止める
+    await runner.abort(input.data.reason);
     send(res, 204);
     return;
   }

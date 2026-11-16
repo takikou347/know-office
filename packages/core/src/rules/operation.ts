@@ -193,11 +193,12 @@ export function toOperation(toolName: string, toolInput: unknown): Operation {
   if (toolName.startsWith("mcp__staff__ext__")) return op("unknown", toolName);
   const staff = STAFF_TOOL.exec(toolName)?.[1];
   if (staff !== undefined) {
+    // オーナーの情報は社員のツールの一覧にもあるが、役で通さず、許した項目と外部の文章の印で判断するので先に分ける
+    if (staff === "owner_info_read") return op("owner_info.read", text(input, "item"));
     // 決めた名前の社員のツールは、名前の頭 (staff_request の staff) で鍵や社員を触る試みと取り違えない。役で使えるかは decide が見る
     if (isStaffTool(staff)) return op("office.tool", staff);
     const hit = sensitive(staff, "");
     if (hit) return op(hit, staff);
-    if (staff === "owner_info_read") return op("owner_info.read", text(input, "item"));
     return op("unknown", staff);
   }
   switch (toolName) {

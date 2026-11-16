@@ -1,5 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
+  // コンテナは Node が型を外すだけで読むので、外すだけで消えない書き方 (enum、引数のプロパティなど) を断る
+  "compilerOptions": { "lib": ["ES2023"], "types": ["node"], "erasableSyntaxOnly": true },
   "include": ["src", "test"]
 }

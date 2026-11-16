@@ -23,6 +23,8 @@ export type StaffToolDeps = {
   token: () => string;
   /** 答えを待つ長さ。省くと 60 秒 */
   timeoutMs?: number;
+  /** checkpoint のツールが通った時に呼ぶ。会話の記録を送る */
+  onCheckpoint?: () => void;
 };
 
 /** SDK に返すツールの答え */
@@ -86,7 +88,12 @@ async function callGate(deps: StaffToolDeps, name: StaffToolName, toolInput: Rec
 export function staffToolDefinitions(deps: StaffToolDeps, names: readonly StaffToolName[]): SdkMcpToolDefinition[] {
   return names.map((name) => {
     const entry = STAFF_TOOL_CATALOG[name];
-    return tool(name, entry.description, entry.shape, (args) => callGate(deps, name, args));
+    return tool(name, entry.description, entry.shape, async (args) => {
+      const result = await callGate(deps, name, args);
+      // チェックポイントは作業の区切りなので、そこまでの会話の記録を送る
+      if (name === "checkpoint" && !result.isError) deps.onCheckpoint?.();
+      return result;
+    });
   });
 }
 

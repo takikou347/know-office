@@ -38,7 +38,7 @@ function fakeContainer(healthy = true, runningAtFirst = false): { container: Con
         seen.headers.push(new Headers(init?.headers));
         if (!healthy) return Promise.reject(new Error("まだ起きていない"));
         if (url.endsWith("/v1/runs")) return Promise.resolve(new Response(null, { status: 202 }));
-        if (url.endsWith("/v1/ticket") || url.endsWith("/v1/restore")) return Promise.resolve(new Response(null, { status: 204 }));
+        if (url.endsWith("/v1/ticket") || url.endsWith("/v1/restore") || url.endsWith("/v1/abort")) return Promise.resolve(new Response(null, { status: 204 }));
         return Promise.resolve(Response.json({ data: { ok: true, part: "workspace" }, meta: { traceId: "t" } }));
       },
     }),
@@ -294,6 +294,28 @@ describe("ワークスペースを分ける", () => {
     await box.stop();
     await box.start();
     expect(seen.started).toHaveLength(2);
+  });
+
+  it("止まったコンテナの鍵が記憶に残っていても、タスクの開始は起こしてから送る", async () => {
+    const { container, seen } = fakeContainer();
+    const keys = fakeKeys();
+    keys.value = "f".repeat(64);
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps([], keys));
+    await box.run(RUN);
+    expect(seen.started).toHaveLength(1);
+    expect(seen.headers.at(-1)?.get("authorization")).toBe(`Bearer ${String(seen.started[0]?.env?.WORKSPACE_KEY)}`);
+  });
+
+  it("経過を書き残させる中断は、動いているコンテナにだけ鍵を付けて送り、止まっているコンテナは起こさない", async () => {
+    const { container, seen } = fakeContainer();
+    const box = new WorkspaceBox(container, egressFor, { staffId: "builder", workspaceId: "ws-builder" }, boxDeps());
+    await box.abort("wrap_up");
+    expect(seen.started).toHaveLength(0);
+    expect(seen.fetched).toEqual([]);
+    await box.start();
+    await box.abort("wrap_up");
+    expect(seen.fetched.at(-1)).toBe("http://workspace/v1/abort");
+    expect(seen.headers.at(-1)?.get("authorization")).toBe(`Bearer ${String(seen.started[0]?.env?.WORKSPACE_KEY)}`);
   });
 
   it("起こしている途中に止めたら、起こし終えてから止める", async () => {

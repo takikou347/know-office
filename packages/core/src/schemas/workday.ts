@@ -73,6 +73,8 @@ export const StaffTask = z
     nodeId: z.uuid(),
     title: z.string().min(1),
     scope: z.string().min(1),
+    /** 始めた時の役目の説明文の版。続きもこの版で呼ぶ */
+    promptVersion: z.number().int().positive().optional(),
   })
   .strict();
 

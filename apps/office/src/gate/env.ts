@@ -72,8 +72,14 @@ export interface Staff extends Rpc.DurableObjectBranded {
   take(task: unknown, medianMs: number | null, now: number): Promise<{ taken: boolean }>;
   /** 今のタスクを離れる */
   finish(result: unknown, now: number): Promise<null>;
-  /** 勤務中で手が空いていれば、自分の山から次のタスクを取る */
+  /** 勤務中で手が空いていれば、自分の山から次のタスクを取り、取ったら呼び出しを始める */
   pull(now: number): Promise<{ taken: boolean; nodeId: string | null }>;
+  /** alarm が無ければ掛け、持っているタスクの呼び出しが始まっていなければ始める */
+  arm(now: number): Promise<{ alarm: number | null }>;
+  /** 今のタスクの呼び出しの様子 */
+  runState(nodeId: string): Promise<{ promptVersion: number | null; started: boolean; failures: number }>;
+  /** 呼び出しの様子を書き、失敗の回数を返す */
+  markRun(nodeId: string, mark: "started" | "failed" | "done"): Promise<{ failures: number }>;
   /** その日だけの指示を受ける */
   order(order: unknown, now: number): Promise<null>;
   /** 時間外に呼び出す */
@@ -142,7 +148,7 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   stop(): Promise<null>;
   /** コンテナを止めて起こし直す */
   restart(staffId: string): Promise<null>;
-  /** 経過を書き残させる */
+  /** 経過を書き残させる。走っている呼び出しを止め、送っていない会話の記録を送らせる */
   wrapUp(): Promise<null>;
   /** タスク 1 件分の SDK の呼び出しを始めさせる */
   run(input: unknown): Promise<null>;

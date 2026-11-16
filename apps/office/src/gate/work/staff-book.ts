@@ -297,6 +297,16 @@ export class StaffBook {
   }
 
   /**
+   * 今持っているタスクの、始めた時の役目の説明文の版を返す。記憶を変えない
+   * @param nodeId タスク ID
+   * @returns 版。そのタスクを持っていないか、版が無ければ null
+   */
+  async promptVersionOf(nodeId: string): Promise<number | null> {
+    const task = (await this.#load()).m.task;
+    return task?.nodeId === nodeId ? (task.promptVersion ?? null) : null;
+  }
+
+  /**
    * 今のタスクの働いた時間を返す。止められていた間と待っていた間を入れない。記憶を変えない
    * @param now 今の時刻
    * @returns タスク ID と働いた時間。タスクを持っていなければ null

@@ -1,6 +1,6 @@
 // DO を本物の workerd で試すための入口。テストだけが使う
 import { DurableObject } from "cloudflare:workers";
-import { toBase64 } from "@know-office/core";
+import { AppError, toBase64 } from "@know-office/core";
 import { z } from "zod";
 import { GuardDO } from "../../src/gate/do/guard.ts";
 import { LiveDO } from "../../src/gate/do/live.ts";
@@ -83,8 +83,32 @@ export class RecordingWorkspace extends DurableObject<Bindings> implements Works
    * @param input RunInput
    * @returns 無し
    */
-  run(input: unknown): Promise<null> {
-    return this.#push("run", input);
+  async run(input: unknown): Promise<null> {
+    await this.#push("run", input);
+    // テストが決めた答え方。busy はもう走っている、down は届かない
+    const mode = await this.ctx.storage.get("mode");
+    if (mode === "busy") throw new AppError("conflict", "ワークスペースがもう走っている");
+    if (mode === "down") throw new AppError("unavailable", "ワークスペースに届かない");
+    return null;
+  }
+
+  /**
+   * runs の答え方を決める
+   * @param mode ok、busy、down
+   * @returns 無し
+   */
+  async setMode(mode: string): Promise<null> {
+    await this.ctx.storage.put("mode", mode);
+    return null;
+  }
+
+  /**
+   * 中断させる
+   * @param reason 理由
+   * @returns 無し
+   */
+  abort(reason: string): Promise<null> {
+    return this.#push("abort", reason);
   }
 
   /**
@@ -116,6 +140,8 @@ const StaffCall = z.object({
   staffId: z.enum(["president", "builder", "reviewer"]),
   method: z.enum([
     "wake",
+    "pull",
+    "arm",
     "status",
     "heartbeat",
     "checkpoint",
@@ -226,6 +252,7 @@ export default {
         if (method === "appendTranscript") return Response.json(await stub.appendTranscript(z.string().parse(args[0]), args[1], num(2)));
         if (method === "loadTranscript") return Response.json(await stub.loadTranscript(z.string().parse(args[0])));
         if (method === "halt" || method === "taskClock") return Response.json(await stub[method](num(0)));
+        if (method === "pull" || method === "arm") return Response.json(await stub[method](num(0)));
         if (method === "wake" || method === "heartbeat" || method === "waitEnd" || method === "stop" || method === "resume") return Response.json(await stub[method](num(0)));
         return Response.json(await stub[method](args[0], num(1)));
       } catch (error) {
@@ -243,6 +270,11 @@ export default {
         files.push({ key: object.key, body: got ? toBase64(await got.arrayBuffer()) : null });
       }
       return Response.json(files);
+    }
+    if (path === "/workspace-mode") {
+      const { staffId, mode } = z.object({ staffId: z.string(), mode: z.enum(["ok", "busy", "down"]) }).parse(body);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      return Response.json(await (env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)) as unknown as RecordingWorkspace).setMode(mode));
     }
     if (path === "/workspace") {
       const { staffId } = z.object({ staffId: z.string() }).parse(body);
