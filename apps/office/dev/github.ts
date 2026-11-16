@@ -1,7 +1,7 @@
 // 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、プルリクエストのレビューと行のコメント、Git の API のコミットを GitHub と同じ形で持つ
 import { generateKeyPairSync } from "node:crypto";
 import { Hono } from "hono";
-import { flowRoutes } from "./github-flows.ts";
+import { type FakeFailures, failureTaker, flowRoutes } from "./github-flows.ts";
 import { renewAppKey } from "./github-keys.ts";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
@@ -38,15 +38,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const state = { gitStatus: null as number | null, nextMint: null as FakeGitHub["nextMint"] };
   const visibility = new Map<string, boolean>();
   const sent: FakeGitHub["sent"] = [];
-  const failures = new Map<string, { status: number; left: number }>();
-  // 置いた失敗を 1 度返す。画面の通しは、開発の画面が読み込みを 2 度走らせるので 2 度置ける
-  const takeFailure = (route: string): Response | null => {
-    const failure = failures.get(route);
-    if (failure === undefined) return null;
-    if (failure.left > 1) failures.set(route, { ...failure, left: failure.left - 1 });
-    else failures.delete(route);
-    return new Response(JSON.stringify({ message: "fake failure" }), { status: failure.status, headers: { "content-type": "application/json" } });
-  };
+  const failures: FakeFailures = new Map();
+  const takeFailure = failureTaker(failures);
   const heads = new Map<string, string>();
   const trees = new Map<string, FakeTreeEntry[]>();
   const posted: FakePosted = { reviews: [], comments: [] };
