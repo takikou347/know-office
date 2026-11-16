@@ -4,6 +4,7 @@ import { Alert, Link, List, type Tone } from "knowidea-ui";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type Api, ApiContext } from "../api.ts";
 import { jstTime } from "../format.ts";
+import { revealFocus } from "./focus.ts";
 import { markReloader, useLive } from "./live.tsx";
 
 /** 配信が切れている間に通知を読み直す間。起きてから 5 分以内に画面に出すので、それより短くする */
@@ -268,16 +269,6 @@ export function LiveNoticeBar() {
       <NoticeBar notices={notices} onRead={markRead} />
     </div>
   );
-}
-
-/**
- * 中身 (main) の中で focus している物を、隠れないよう見える所へ寄せる。中身の外の focus (帯の「読んだ」など) は動かさない
- * @param doc 画面の文書
- */
-export function revealFocus(doc: Document): void {
-  const focused = doc.activeElement;
-  if (!(focused instanceof HTMLElement) || !focused.closest("main")) return;
-  focused.scrollIntoView({ block: "nearest" });
 }
 
 /**

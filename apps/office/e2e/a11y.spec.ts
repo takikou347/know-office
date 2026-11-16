@@ -144,6 +144,11 @@ test.describe("使いやすさ", () => {
     const h1 = (name: string) => page.getByRole("heading", { level: 1, name });
     const main = page.getByRole("main");
     await stubReview(page);
+    // 同じ入口に並んで流れる攻撃の通しが断った要求の通知を出し、帯が途中で出て形が変わるので、通知は空で返す。帯と focus は下の 2 つの通しで確かめる
+    await page.route(
+      (url) => url.pathname === "/api/v1/notices",
+      (route) => route.fulfill({ json: { data: [], meta: { ...META, next: null } } }),
+    );
     await page.goto("/");
     await expect(h1("ダッシュボード")).toBeVisible();
     // ダッシュボードは入口から読んだ物を承認を待つ物の上に足すので、読み終えて形が落ち着いてから Tab で進む
@@ -207,6 +212,34 @@ test.describe("使いやすさ", () => {
     await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
     await expect(page.getByText("後から出た通知")).toBeVisible();
     await expect.poll(() => focusProblem(page)).toBeNull();
+  });
+
+  test("Tab で入った物が中身の下の端で切れていても、全部を見える所へ寄せる", async ({ page }) => {
+    await stubReview(page);
+    await page.goto(REVIEW_PATH);
+    await expect(page.getByText("const empty = 0;")).toBeVisible();
+    const comment = page.getByLabel("判断の一言");
+    // 1 つ前の物に focus を置き、入力欄の上の端だけが中身の段の下の端に見える所まで送る。ブラウザーは少しでも見えている物には Tab で送らない
+    await comment.evaluate((el) => el.focus({ preventScroll: true }));
+    await page.keyboard.press("Shift+Tab");
+    await comment.evaluate((el) => {
+      const main = el.closest("main");
+      if (!main) throw new Error("入力欄が main の中に無い");
+      main.scrollTop += el.getBoundingClientRect().top - (main.getBoundingClientRect().bottom - 24);
+    });
+    await page.keyboard.press("Tab");
+    await expect(comment).toBeFocused();
+    await expect
+      .poll(() =>
+        comment.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const m = el.closest("main")?.getBoundingClientRect();
+          // 送りの量は画素の整数に丸まり、中身の段の端は小数になるので、1 画素までの差は許す
+          return m !== undefined && r.top >= m.top - 1 && r.bottom <= m.bottom + 1;
+        }),
+      )
+      .toBe(true);
+    expect(await focusProblem(page)).toBeNull();
   });
 
   // 1 ページに 2 秒ほど掛かり、14 ページを 1 つの test で回すと 5 秒を超えるので、ページごとに分ける

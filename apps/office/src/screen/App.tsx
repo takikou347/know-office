@@ -2,6 +2,7 @@ import type { Extension, Health } from "@know-office/core";
 import { AppBar, AppShell } from "knowidea-ui";
 import { withScreens } from "./extensions.ts";
 import { type Navigate, Page, type ToggleExtension } from "./pages.tsx";
+import { useRevealFocus } from "./parts/focus.ts";
 import { LiveProvider } from "./parts/live.tsx";
 import { LiveNoticeBar, NoticeHold, NoticeProvider } from "./parts/notices.tsx";
 import { bottomCurrentOf, bottomItems, headingOf, morePath, screenOf, sideItemsWith } from "./routes.ts";
@@ -23,6 +24,7 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
   const more = pathname === morePath;
   const shown = withScreens(extensions);
   const screen = screenOf(pathname, shown);
+  useRevealFocus();
   return (
     <LiveProvider>
       <NoticeProvider>

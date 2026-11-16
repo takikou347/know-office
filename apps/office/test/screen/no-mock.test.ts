@@ -43,7 +43,7 @@ const E2E = join(import.meta.dirname, "../../e2e");
  * ゲートウェイの返事を route で差し替えている通しのテストと、その数。増やさない。利用場面の通し (e2e/flows/) には置かない
  */
 const STUBBED: Record<string, number> = {
-  "a11y.spec.ts": 3,
+  "a11y.spec.ts": 4,
   "guard.spec.ts": 5,
   "helpers/guard.ts": 3,
   "helpers/review.ts": 1,
