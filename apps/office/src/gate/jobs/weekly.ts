@@ -23,6 +23,16 @@ const WEEKLY_CRONS = new Map<string, BatchKind[]>([
   [FINDINGS_CRON, ["findings", "ideas"]],
 ]);
 
+/**
+ * 週のバッチ処理の種類ごとの、開く設定と上限。費用が出るので設定の初期値は off で、オーナーの はい の範囲で本番の値を on にする。
+ * perRun は 1 回に送る要求 (原因か案) の数、perWeek は 1 週に送るバッチの数。どれも週に 1 回なので、1 日の上限も perWeek を超えない
+ */
+export const WEEKLY_LIMITS = {
+  distill: { flag: "DISTILL_BATCH", perRun: 10, perWeek: 1 },
+  findings: { flag: "FINDINGS_BATCH", perRun: 20, perWeek: 1 },
+  ideas: { flag: "IDEA_BATCH", perRun: 1, perWeek: 1 },
+} as const satisfies Record<Exclude<BatchKind, "urgent">, { flag: keyof Bindings; perRun: number; perWeek: number }>;
+
 /** 始めた印を、送れずに残った物とみなすまでの間 */
 const STALE_PENDING_MS = 30 * 60_000;
 
@@ -56,9 +66,10 @@ export type WeeklyJob = {
    * 前の週の記録から送る物を作る。送る物が無ければ null
    * @param env バインディング
    * @param range 前の週
+   * @param maxRequests 送る要求の数の上限
    * @returns 送る要求と、結果を入れる時に使う中身
    */
-  prepare(env: Bindings, range: WeekRange): Promise<{ requests: BatchRequest[]; detail: unknown } | null>;
+  prepare(env: Bindings, range: WeekRange, maxRequests: number): Promise<{ requests: BatchRequest[]; detail: unknown } | null>;
   /**
    * 終わったバッチの結果を入れる。batches の行を applied にするのと同じ 1 回で書き、先に入れた方だけが続きを行う
    * @param env バインディング
@@ -98,7 +109,7 @@ function clockOf(now: number): Clock {
 }
 
 /**
- * 前の週のバッチ処理を始める。送る物が無い週、もう始めた週は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
+ * 前の週のバッチ処理を始める。種類の設定が on でない時、送る物が無い週、もう始めた週は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
  * @param env バインディング
  * @param kind 種類
  * @param deps 外へ頼む口
@@ -106,10 +117,14 @@ function clockOf(now: number): Clock {
  * @returns 始めた batches の行の ID。始めなかった時は null
  */
 export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDeps, now: number): Promise<string | null> {
+  // 急ぐ故障は週に始めず、pollBatches が URGENT_SCAN と日の上限で送る
+  if (kind === "urgent") return null;
+  const limit = WEEKLY_LIMITS[kind];
+  if (env[limit.flag] !== "on") return null;
   const range = previousWeek(now);
-  const prepared = await JOBS[kind].prepare(env, range);
+  const prepared = await JOBS[kind].prepare(env, range, limit.perRun);
   if (!prepared || prepared.requests.length === 0) return null;
-  return submitOnce(env, kind, range.week, prepared, deps, now);
+  return submitOnce(env, kind, range.week, prepared, deps, now, { prefix: range.week, max: limit.perWeek });
 }
 
 /**

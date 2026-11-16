@@ -1,4 +1,4 @@
-// アイデア出しの週のバッチ処理。今のサービスと見送った案を社長のモデルに送り、返った案をアイデアの段階に足す。費用が出るので IDEA_BATCH が on の時だけ送る (サービスと拡張の 3.1、3.6)
+// アイデア出しの週のバッチ処理。今のサービスと見送った案を社長のモデルに送り、返った案をアイデアの段階に足す。費用が出るので IDEA_BATCH が on の時だけ送る (weekly.ts の WEEKLY_LIMITS) (サービスと拡張の 3.1、3.6)
 import { IdeaProposal, IdeasAnswer, newId, OPUS } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
@@ -6,7 +6,7 @@ import { clockAt } from "../work/attendance.ts";
 import { answerJson, type BatchRequest, type BatchResult, recordBatchUsage } from "./claude-batch.ts";
 import type { BatchRow, WeekRange, WeeklyDeps, WeeklyJob } from "./weekly.ts";
 
-/** 1 回のバッチで足す案の上限。週に 1 回なので、1 日にもこれを超えない */
+/** 1 回のバッチで足す案の上限。要求は 1 件で、週に 1 回なので、1 日にもこれを超えない */
 export const IDEAS_PER_BATCH = 3;
 
 /** 社長のモデルに渡す今のサービスの上限。新しい物から渡す */
@@ -26,14 +26,14 @@ const SYSTEM = [
 const ServiceLine = z.object({ name: z.string(), kind: z.string(), stage: z.string(), aim: z.string().nullable(), dropped_reason: z.string().nullable() });
 
 /**
- * 今のサービスと見送った案を 1 件の要求にする。IDEA_BATCH が on でなければ送らない
+ * 今のサービスと見送った案を 1 件の要求にする。IDEA_BATCH が on でない時は startBatch が呼ばない
  * @param env バインディング
  * @param _range 前の週。案は週の記録によらず今のサービスから考える
+ * @param maxRequests 送る要求の数の上限。0 なら送らない
  * @returns 1 件の要求。送らない時は null
  */
-async function prepare(env: Bindings, _range: WeekRange): Promise<{ requests: BatchRequest[]; detail: null } | null> {
-  // 費用が出るので、オーナーが見込みの額を見て はい と言った後に on にする
-  if (env.IDEA_BATCH !== "on") return null;
+async function prepare(env: Bindings, _range: WeekRange, maxRequests: number): Promise<{ requests: BatchRequest[]; detail: null } | null> {
+  if (maxRequests < 1) return null;
   const { results } = await env.DB.prepare("SELECT name, kind, stage, aim, dropped_reason FROM services ORDER BY id DESC LIMIT ?").bind(MAX_SERVICES).all();
   const lines = z.array(ServiceLine).parse(results);
   const prompt = [

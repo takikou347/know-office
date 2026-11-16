@@ -160,14 +160,15 @@ function signalEntry(s: Signal, customId: string): { group: DetailGroup; lines: 
  * 前の週のエラー (f)、遅い所 (s)、無駄な費用 (c) を原因ごとにまとめ、送る物を作る
  * @param env バインディング
  * @param range 前の週
+ * @param maxRequests 送る原因の数の上限。エラー、遅い所、無駄な費用の順に、多い物から送る
  * @returns 原因ごとの要求と、custom_id から原因への対応。どれも無ければ null
  */
-async function prepare(env: Bindings, range: WeekRange): Promise<{ requests: BatchRequest[]; detail: z.input<typeof Detail> } | null> {
+async function prepare(env: Bindings, range: WeekRange, maxRequests: number): Promise<{ requests: BatchRequest[]; detail: z.input<typeof Detail> } | null> {
   const entries = [
     ...(await errorGroups(env, range.from, range.to)).map((g, i) => errorEntry(g, `f${String(i)}`)),
     ...(await slowSignals(env, range)).map((s, i) => signalEntry(s, `s${String(i)}`)),
     ...(await costSignals(env, range)).map((s, i) => signalEntry(s, `c${String(i)}`)),
-  ];
+  ].slice(0, maxRequests);
   if (entries.length === 0) return null;
   return { requests: entries.map((e) => requestOf(e.group, e.lines, false)), detail: { urgent: false, groups: entries.map((e) => e.group) } };
 }

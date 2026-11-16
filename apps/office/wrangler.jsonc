@@ -11,8 +11,8 @@
   // Access を掛ける前に開いても、ゲートウェイは Access の証明の無い要求を 401 で断る
   "workers_dev": true,
   "preview_urls": true,
-  // 開発環境は .dev.vars で development に替える。無い時は本物の宛先を使う。URGENT_SCAN (急ぐ故障の調べ) と IDEA_BATCH (週のアイデア出し) は Claude の費用が出るので、オーナーの はい の後に on にする
-  "vars": { "ENVIRONMENT": "production", "URGENT_SCAN": "off", "IDEA_BATCH": "off" },
+  // 開発環境は .dev.vars で development に替える。無い時は本物の宛先を使う。URGENT_SCAN (急ぐ故障の調べ)、DISTILL_BATCH (週の蒸留)、FINDINGS_BATCH (週の見つけて直す調べ)、IDEA_BATCH (週のアイデア出し) は Claude の費用が出るので、オーナーの はい の範囲でデプロイの時に on にする
+  "vars": { "ENVIRONMENT": "production", "URGENT_SCAN": "off", "DISTILL_BATCH": "off", "FINDINGS_BATCH": "off", "IDEA_BATCH": "off" },
   // D1 の置き場。database_id は Cloudflare に作った時 (#144) に本物に替える。手元では名前だけで動く
   "d1_databases": [
     { "binding": "DB", "database_name": "know-office", "database_id": "local-db", "migrations_dir": "migrations/main" },
@@ -48,7 +48,7 @@
   // プルリクエストごとのプレビュー (wrangler preview --name pr-<番号>)。D1 と R2 は既定で本番と共有されるので、プレビュー用の置き場に替える。
   // 年ごとの記録の置き場はプレビューでは 1 つにまとめる。DO はプレビューごとに分けた名前空間で動く。ワークスペースはプレビューでは起こさない (技術とインフラの 4 章)
   "previews": {
-    "vars": { "ENVIRONMENT": "preview", "URGENT_SCAN": "off", "IDEA_BATCH": "off" },
+    "vars": { "ENVIRONMENT": "preview", "URGENT_SCAN": "off", "DISTILL_BATCH": "off", "FINDINGS_BATCH": "off", "IDEA_BATCH": "off" },
     "d1_databases": [
       { "binding": "DB", "database_name": "know-office-preview", "migrations_dir": "migrations/main" },
       { "binding": "REC_2026", "database_name": "know-office-preview-rec", "migrations_dir": "migrations/ledger" },

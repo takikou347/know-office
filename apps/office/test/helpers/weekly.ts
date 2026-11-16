@@ -13,12 +13,14 @@ import { useWork, type WorkWorld } from "./work.ts";
 export const DAY = 24 * 60 * 60_000;
 
 /**
- * useWork に加えて、テストごとに REC_2026 と REC_2027 を空にする。週のバッチは前の週の記録を全部読むので、前のテストの記録を残さない
+ * useWork に加えて、テストごとに REC_2026 と REC_2027 を空にする。週のバッチは前の週の記録を全部読むので、前のテストの記録を残さない。
+ * 蒸留と見つけて直す調べの設定は on にして始める。off の振る舞いは switches.test.ts が確かめる
  * @returns テストの物
  */
 export function useWeekly(): WorkWorld {
   const world = useWork();
   beforeEach(async () => {
+    Object.assign(world.gate.env, { DISTILL_BATCH: "on", FINDINGS_BATCH: "on" });
     await resetLedger(world.d1.REC_2026);
     await resetLedger(world.d1.REC_2027);
   }, 30_000);

@@ -42,9 +42,10 @@ const StopLine = z.object({
  * 前の週の止めた記録と近かった記録を、シグナルごとにまとめて送る物を作る
  * @param env バインディング
  * @param range 前の週
+ * @param maxRequests 送る原因の数の上限。記録の多い原因から送る
  * @returns 原因ごとの要求と、custom_id から原因と元の記録への対応。記録が無ければ null
  */
-async function prepare(env: Bindings, range: WeekRange): Promise<{ requests: BatchRequest[]; detail: z.infer<typeof Detail> } | null> {
+async function prepare(env: Bindings, range: WeekRange, maxRequests: number): Promise<{ requests: BatchRequest[]; detail: z.infer<typeof Detail> } | null> {
   const { results } = await env.DB.prepare(
     `SELECT s.id, s.at, s.kind, s.scope, s.target, s.signal, s.measured, s.threshold,
        (SELECT group_concat(u.verdict || ':' || coalesce(u.reason, ''), ' / ') FROM stop_updates u WHERE u.stop_id = s.id AND u.kind = 'verdict') AS verdicts
@@ -56,7 +57,10 @@ async function prepare(env: Bindings, range: WeekRange): Promise<{ requests: Bat
   if (lines.length === 0) return null;
   const bySignal = new Map<string, z.infer<typeof StopLine>[]>();
   for (const line of lines) bySignal.set(line.signal, [...(bySignal.get(line.signal) ?? []), line]);
-  const groups = [...bySignal.entries()].map(([cause, items], i) => ({ customId: `c${String(i)}`, cause, items }));
+  const groups = [...bySignal.entries()]
+    .toSorted(([ca, a], [cb, b]) => b.length - a.length || ca.localeCompare(cb))
+    .slice(0, maxRequests)
+    .map(([cause, items], i) => ({ customId: `c${String(i)}`, cause, items }));
   return {
     requests: groups.map((g) => ({
       customId: g.customId,
