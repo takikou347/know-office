@@ -52,6 +52,18 @@ describe("開発の通しで社員の退勤した日の印を消す", () => {
     expect((await world.gate.staff.builder.book.status(world.clock.now())).state).toBe("working");
   });
 
+  it("印を消して出勤した社員は、始まりの時刻の alarm と同じく、手が空いていれば自分のタスクを取る", async () => {
+    await builderLeftToday();
+    const nodeId = "0190f4a8-0000-7000-8000-0000000001a1";
+    await world.gate.env.DB.prepare(
+      "INSERT INTO nodes (id, kind, parent_id, scope, title, status, priority, assignee, task_kind, created_by, created_at, updated_at) VALUES (?, 'task', NULL, 'office', '続きのタスク', 'todo', 1, 'builder', 'build', 'president', 0, 0)",
+    )
+      .bind(nodeId)
+      .run();
+    expect((await route(world.gate.env, "/__dev/staff/builder/forget-day"))?.status).toBe(204);
+    expect(await world.gate.staff.builder.book.status(world.clock.now())).toMatchObject({ state: "working", nodeId });
+  });
+
   it("知らない社員と POST でない要求は 404 で断る", async () => {
     await builderLeftToday();
     expect((await route(world.gate.env, "/__dev/staff/nobody/forget-day"))?.status).toBe(404);

@@ -7,7 +7,7 @@ import type { Bindings } from "../env.ts";
 const FORGET_DAY = /^\/__dev\/staff\/([^/]+)\/forget-day$/;
 
 /**
- * 開発の通しが送った、社員の退勤した日の印を消す要求を受ける。同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して同じ日に流し直す通しがこれで出勤させる
+ * 開発の通しが送った、社員の退勤した日の印を消す要求を受ける。同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して同じ日に流し直す通しがこれで出勤させ、手が空いていれば自分のタスクを取らせる
  * @param request 入口に届いた要求
  * @param env バインディング
  * @param options 時刻
@@ -25,7 +25,11 @@ export function devStaffRoute(request: Request, env: Bindings, options: { clock:
   }
   const staffId = StaffId.safeParse(match[1]);
   if (!staffId.success || request.method !== "POST") return Promise.resolve(new Response(null, { status: 404 }));
-  return env.STAFF.get(env.STAFF.idFromName(staffId.data))
-    .forgetDay(options.clock.now())
+  const target = env.STAFF.get(env.STAFF.idFromName(staffId.data));
+  const now = options.clock.now();
+  // 始まりの時刻の alarm と同じく、出勤したら手が空いていれば自分のタスクを取る
+  return target
+    .forgetDay(now)
+    .then(() => target.pull(now))
     .then(() => new Response(null, { status: 204 }));
 }
