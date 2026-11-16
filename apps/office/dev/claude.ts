@@ -14,11 +14,35 @@ export const ScriptedMessage = z.object({
 /** 積む返事の型 */
 export type ScriptedMessage = z.infer<typeof ScriptedMessage>;
 
-/** 外から積む返事。staffId を付けると、その社員の作業トークンの呼び出しにだけ返す。同じ時に動くほかの社員の SDK に取られないようにする */
-const ScriptedInput = ScriptedMessage.extend({ staffId: StaffId.optional() });
+/**
+ * 外から積む返事。staffId を付けると、その社員の作業トークンの呼び出しにだけ返す。同じ時に動くほかの社員の SDK に取られないようにする
+ * delay_ms を付けると、積んでからその間が過ぎるまで返さずに待つ。待つ間に呼び出しが切れたら返さず、積んだ物の先頭に戻す。SDK が待ち切れずに呼び直しても、積んだ時から数えるので待ちは延びない (勤務の終わりの時刻を過ぎるまで社員を作業の途中に置く通しに使う)
+ */
+const ScriptedInput = ScriptedMessage.extend({ staffId: StaffId.optional(), delay_ms: z.number().int().min(0).max(600_000).optional() });
 
-/** 積んだ返事か失敗と、渡す社員。null はどの呼び出しにも渡す */
-type Queued = { item: ScriptedMessage | ScriptedError; staffId: StaffId | null };
+/** 積んだ返事か失敗と、渡す社員と返してよい時刻。staffId が null ならどの呼び出しにも渡す */
+type Queued = { item: ScriptedMessage | ScriptedError; staffId: StaffId | null; notBefore?: number };
+
+/**
+ * 待つ。呼び出しが切れたら待つのをやめる
+ * @param ms ミリ秒
+ * @param signal 呼び出しの signal
+ * @returns 待ち終えたら true、切れたら false
+ */
+function waitUnlessGone(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", gone);
+      resolve(true);
+    }, ms);
+    const gone = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    signal.addEventListener("abort", gone, { once: true });
+  });
+}
 
 /**
  * 鍵が作業トークン (JWT) なら、その社員 ID (sub) を読む。署名は確かめず、積んだ返事の渡し先を選ぶのにだけ使う
@@ -160,7 +184,12 @@ export function createFakeClaude(): FakeClaude {
       // 渡し先を決めずに積んだ物と、この社員に積んだ物のうち、先に積んだ物を返す
       const staffId = staffOfKey(c.req.header("x-api-key"));
       const at = queue.findIndex((q) => q.staffId === null || q.staffId === staffId);
-      const next = at === -1 ? undefined : queue.splice(at, 1)[0]?.item;
+      const queued = at === -1 ? undefined : queue.splice(at, 1)[0];
+      if (queued?.notBefore !== undefined && !(await waitUnlessGone(Math.max(0, queued.notBefore - Date.now()), c.req.raw.signal))) {
+        queue.unshift(queued);
+        return new Response(null, { status: 499 });
+      }
+      const next = queued?.item;
       if (!next) {
         return c.json({ type: "error", error: { type: "api_error", message: "代わりの Claude API に返事が積まれていない" } }, 500);
       }
@@ -189,8 +218,8 @@ export function createFakeClaude(): FakeClaude {
     .post("/__fake/responses", async (c) => {
       const input = ScriptedInput.safeParse(await c.req.json().catch(() => null));
       if (!input.success) return c.json({ type: "error", error: { type: "invalid_request_error", message: "積む返事の形が違う" } }, 400);
-      const { staffId, ...message } = input.data;
-      queue.push({ item: message, staffId: staffId ?? null });
+      const { staffId, delay_ms: delayMs, ...message } = input.data;
+      queue.push({ item: message, staffId: staffId ?? null, ...(delayMs === undefined ? {} : { notBefore: Date.now() + delayMs }) });
       return c.body(null, 204);
     })
     .get("/__fake/requests", (c) => c.json(requests));

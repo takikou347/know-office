@@ -77,6 +77,25 @@ describe("開発環境の代わりの物", () => {
     expect((await call(ticket("builder"))).status).toBe(200);
   });
 
+  it("待ちを付けて積んだ返事は、積んでからその間が過ぎるまで返さず、待つ間に呼び出しが切れたら次の呼び出しに残す", async () => {
+    const claude = createFakeClaude();
+    await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", delay_ms: 200, content: [{ type: "text", text: "待ってから" }] }) });
+    const call = (signal?: AbortSignal) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": ticket("reviewer") }, body: BODY, ...(signal ? { signal } : {}) });
+    // 待つ間に切れた呼び出しには返さず、積んだ物を先頭に戻す
+    const gone = new AbortController();
+    const first = Promise.resolve(call(gone.signal)).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    gone.abort();
+    await first;
+    // 呼び直しは、積んでから 200 ミリ秒が過ぎた所で返り、待ちは延びない
+    const began = performance.now();
+    const res = await call();
+    const waited = performance.now() - began;
+    expect(waited).toBeGreaterThanOrEqual(100);
+    expect(waited).toBeLessThan(190);
+    expect(await res.json()).toMatchObject({ content: [{ type: "text", text: "待ってから" }] });
+  });
+
   it("社員の形でない渡し先を付けて積もうとすると 400 で断る", async () => {
     const claude = createFakeClaude();
     const res = await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "nobody", content: [{ type: "text", text: "x" }] }) });
