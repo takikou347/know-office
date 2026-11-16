@@ -19,13 +19,18 @@ const BOOT_TIMEOUT_MS = 10_000;
 type DevFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
+ * 起こした代わりのワークスペース。社員 DO の入れ物が作り直されても、代わりのワークスペースは前の鍵で動き続けるので、入れ物の外 (この開発のサーバーの中) に覚える。
+ * 開発のサーバーを起こし直すと代わりのワークスペースも消えるので、DO の記憶には置かない
+ */
+const RUNNING = new Set<string>();
+
+/**
  * 開発のコンテナの代わり。外向きの通信の受け手は付けない (代わりのワークスペースはゲートウェイの受け手を通らない)
  * 代わりのワークスペースの SDK は、代わりの物の置き場の Claude API だけを呼ぶ
  */
 export class DevContainer<F = unknown> implements ContainerLike<F> {
   /** 受け手を作らない。代わりのワークスペースはゲートウェイの受け手を通らない */
   readonly intercepts = false;
-  #running = false;
   /** 起こしている途中の物。Node のサーバーへの要求はこれを待つ */
   #booting: Promise<void> = Promise.resolve();
 
@@ -42,11 +47,19 @@ export class DevContainer<F = unknown> implements ContainerLike<F> {
   ) {}
 
   /**
+   * 起こした物を覚える名前
+   * @returns 置き場と社員 ID
+   */
+  get #id(): string {
+    return `${this.base}/${this.staffId}`;
+  }
+
+  /**
    * 動いているか
    * @returns 起こしてから止めていなければ true
    */
   get running(): boolean {
-    return this.#running;
+    return RUNNING.has(this.#id);
   }
 
   /**
@@ -55,7 +68,7 @@ export class DevContainer<F = unknown> implements ContainerLike<F> {
    * @param options.env 環境変数
    */
   start(options: { enableInternet: boolean; env?: Record<string, string> }): void {
-    this.#running = true;
+    RUNNING.add(this.#id);
     const key = options.env?.[WORKSPACE_KEY_ENV] ?? "";
     this.#booting = this.#post("boot", { key });
   }
@@ -94,7 +107,7 @@ export class DevContainer<F = unknown> implements ContainerLike<F> {
    * 代わりのワークスペースを止める
    */
   async destroy(): Promise<void> {
-    this.#running = false;
+    RUNNING.delete(this.#id);
     await this.#booting.catch(() => undefined);
     await this.#post("stop", {});
   }

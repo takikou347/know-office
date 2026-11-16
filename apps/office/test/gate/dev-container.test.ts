@@ -76,6 +76,19 @@ describe("開発のコンテナの代わり", () => {
     expect(sent).toEqual(["http://localhost:5199/workspace/builder/boot", "http://localhost:5199/workspace/builder/v1/health"]);
   });
 
+  it("DO が入れ物を作り直しても、起こした代わりのワークスペースは動いていると覚え、止めた後は動いていないとする", async () => {
+    const { fetcher } = recorder();
+    const env = { ENVIRONMENT: "development", ACCESS_TEAM: "dev", DEV_FAKES_URL: "http://localhost:5199" };
+    const first = containerFor(env, undefined, "reviewer", fetcher);
+    expect(first.running).toBe(false);
+    first.start({ enableInternet: false, env: { WORKSPACE_KEY: "k" } });
+    // 作り直した DO の入れ物も、前の鍵のハートビートを受けるために動いていると見る
+    const again = containerFor(env, undefined, "reviewer", fetcher);
+    expect(again.running).toBe(true);
+    await again.destroy();
+    expect(containerFor(env, undefined, "reviewer", fetcher).running).toBe(false);
+  });
+
   it("印の無い本物と同じ形の入れ物には、受け手を付けてから起こす", async () => {
     const seen: string[] = [];
     const real: ContainerLike<string> = {
