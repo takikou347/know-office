@@ -3,7 +3,7 @@ import type { Notice } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Api, createApi } from "../../src/screen/api.ts";
-import { fetchNotices, NOTICE_POLL_MS, NoticeBar, NoticeList, watchNotices } from "../../src/screen/parts/notices.tsx";
+import { fetchNotices, holdNotices, NOTICE_HOLD_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, watchNotices } from "../../src/screen/parts/notices.tsx";
 
 /**
  * 通知を作る
@@ -113,5 +113,46 @@ describe("通知を読み直す", () => {
     view.show(false);
     await vi.advanceTimersByTimeAsync(0);
     expect(reads()).toBe(2);
+  });
+});
+
+describe("開いた時に中身を隠す長さ", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("初めの通知が届いたら、その時に 1 度だけ中身を出す", () => {
+    const release = vi.fn<() => void>();
+    const hold = holdNotices(release);
+    vi.advanceTimersByTime(NOTICE_HOLD_MS / 2);
+    expect(release).not.toHaveBeenCalled();
+    hold.settled();
+    expect(release).toHaveBeenCalledTimes(1);
+    // 後の読み直しや上限の時が来ても、もう呼ばない
+    hold.settled();
+    vi.advanceTimersByTime(NOTICE_HOLD_MS);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("通知が届かなくても、上限の時に中身を出す", () => {
+    const release = vi.fn<() => void>();
+    holdNotices(release);
+    vi.advanceTimersByTime(NOTICE_HOLD_MS - 1);
+    expect(release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("止めた後は呼ばない", () => {
+    const release = vi.fn<() => void>();
+    const hold = holdNotices(release);
+    hold.stop();
+    expect(vi.getTimerCount()).toBe(0);
+    hold.settled();
+    vi.advanceTimersByTime(NOTICE_HOLD_MS);
+    expect(release).not.toHaveBeenCalled();
   });
 });

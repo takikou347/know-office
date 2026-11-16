@@ -64,6 +64,38 @@ export function watchNotices(pull: () => void, view: NoticeView | null): () => v
   };
 }
 
+/** 中身を隠すのを止める時を決める物 */
+export type NoticeHoldTimer = {
+  /** 初めの通知が届いた (読めなかった時も含む) */
+  settled: () => void;
+  /** 待つのを止める。もう release を呼ばない */
+  stop: () => void;
+};
+
+/**
+ * 初めの通知が届くか、ms が過ぎるかの早い方で、1 度だけ release を呼ぶ
+ * @param release 中身を出す関数
+ * @param ms 待つ長さの上限
+ * @returns 届いた事を伝える関数と、止める関数
+ */
+export function holdNotices(release: () => void, ms: number = NOTICE_HOLD_MS): NoticeHoldTimer {
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    release();
+  };
+  const timer = setTimeout(once, ms);
+  return {
+    settled: once,
+    stop: () => {
+      done = true;
+      clearTimeout(timer);
+    },
+  };
+}
+
 const NoticesContext = createContext<NoticesState>({ notices: [], state: "loading", markRead: () => {}, holding: false });
 
 export interface NoticeProviderProps {
@@ -83,20 +115,20 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
   const [holding, setHolding] = useState(api !== null);
   useEffect(() => {
     let live = true;
+    const hold = holdNotices(() => setHolding(false));
     const pull = () => {
       if (!api) return;
       void fetchNotices(api).then((value) => {
         if (!live) return;
         setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
-        setHolding(false);
+        hold.settled();
       });
     };
     const stop = watchNotices(pull, typeof document === "undefined" ? null : document);
-    const hold = setTimeout(() => setHolding(false), NOTICE_HOLD_MS);
     return () => {
       live = false;
       stop();
-      clearTimeout(hold);
+      hold.stop();
     };
   }, [api]);
   const markRead = useCallback(
