@@ -128,7 +128,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 500 本ほどの通しを 2 並びで流すと 9 分を超える。止まった時だけ切れるよう、流れる長さの倍に取る
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
