@@ -1,10 +1,11 @@
-// 目的と組織図の画面。目的からタスクまでの木と進み具合、組織図、役目の説明文を入口から読み、説明文を直す (タスクとレビューの 3.1)
+// 目的と組織図の画面。目的からタスクまでの木と進み具合、組織図、役目の説明文を入口から読み、説明文を直し、タスクを足して頼む (タスクとレビューの 3.1)
 import type { NodeStatus, NodeTree, OrgStaff } from "@know-office/core";
 import { StaffId } from "@know-office/core";
 import { Alert, Badge, Button, Card, Field, Progress, Stack, Textarea } from "knowidea-ui";
 import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { z } from "zod";
 import { ApiContext } from "../../api.ts";
+import { AddTask, ChangeTask, roleOf } from "./TaskDialogs.tsx";
 
 const Failure = z.object({ code: z.string(), traceId: z.string() }).loose();
 
@@ -93,21 +94,43 @@ function Part({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+/** 木の中でタスクを足し、頼む先を変えるのに使う物 */
+type Edit = {
+  /** 頼む先に選べる社員。組織図を読めるまでは空 */
+  staff: OrgStaff[];
+  /** 変えた後に木を読み直す */
+  reload: () => void;
+};
+
 /**
  * プロジェクトとタスクの入れ子の一覧
- * @param props 子
+ * @param props 子と、変えるのに使う物
  * @param props.items 子の並び
+ * @param props.edit 頼む先に選べる社員と読み直す関数
  * @returns 入れ子の一覧
  */
-function Branches({ items }: { items: NodeTree[] }) {
+function Branches({ items, edit }: { items: NodeTree[]; edit: Edit }) {
   if (items.length === 0) return <p>まだ分けていない</p>;
   return (
     <ul>
       {items.map((n) => (
         <li key={n.id}>
           {KIND_LABEL[n.kind]}: {n.title}{" "}
-          {n.kind === "task" ? <Badge>{STATUS_LABEL[n.status]}</Badge> : <span>({Math.round(n.progress * 100)}%)</span>}
-          {n.children.length > 0 ? <Branches items={n.children} /> : null}
+          {n.kind === "task" ? (
+            <>
+              <Badge>{STATUS_LABEL[n.status]}</Badge> <span>頼む先: {roleOf(edit.staff, n.assignee)}</span>{" "}
+              {/* 版が変われば頼む先の欄を今の値から始め直す */}
+              <ChangeTask key={n.version} task={n} staff={edit.staff} onDone={edit.reload} />
+            </>
+          ) : (
+            <span>({Math.round(n.progress * 100)}%)</span>
+          )}
+          {n.kind === "project" ? (
+            <div>
+              <AddTask project={n} staff={edit.staff} onDone={edit.reload} />
+            </div>
+          ) : null}
+          {n.children.length > 0 ? <Branches items={n.children} edit={edit} /> : null}
         </li>
       ))}
     </ul>
@@ -116,11 +139,12 @@ function Branches({ items }: { items: NodeTree[] }) {
 
 /**
  * 根 1 つ分の木。目的は区切り、目標はカード、その下を入れ子の一覧で出す
- * @param props 根
+ * @param props 根と、変えるのに使う物
  * @param props.root 目的か、受け付けのプロジェクト
+ * @param props.edit 頼む先に選べる社員と読み直す関数
  * @returns 根の木
  */
-function Root({ root }: { root: NodeTree }) {
+function Root({ root, edit }: { root: NodeTree; edit: Edit }) {
   const goals = root.kind === "purpose" ? root.children : [root];
   return (
     <Part title={`${KIND_LABEL[root.kind]}: ${root.title}`}>
@@ -130,7 +154,12 @@ function Root({ root }: { root: NodeTree }) {
         <Card key={g.id} title={`${KIND_LABEL[g.kind]}: ${g.title}`}>
           <Stack gap={2}>
             {g.kind === root.kind ? null : <Progress label={`${g.title}の進み具合`} value={Math.round(g.progress * 100)} max={100} />}
-            <Branches items={g.children} />
+            {g.kind === "project" ? (
+              <div>
+                <AddTask project={g} staff={edit.staff} onDone={edit.reload} />
+              </div>
+            ) : null}
+            <Branches items={g.children} edit={edit} />
           </Stack>
         </Card>
       ))}
@@ -242,15 +271,16 @@ export function GoalsPage() {
     () => (api ? api.api.v1.org.$get({ query: {} }).then(async (res): Promise<Loaded<OrgStaff[]>> => (res.ok ? { state: "ok", data: (await res.json()).data } : failureOf(res))) : null),
     [api],
   );
-  const [trees] = useLoad(loadTrees);
+  const [trees, reloadTrees] = useLoad(loadTrees);
   const [org, reloadOrg] = useLoad(loadOrg);
+  const edit: Edit = { staff: org.state === "ok" ? org.data : [], reload: reloadTrees };
   const top = org.state === "ok" ? org.data.filter((p) => p.bossId === null || !StaffId.safeParse(p.bossId).success) : [];
   return (
     <>
       {trees.state === "loading" ? <p>目的からタスクまでを読んでいます</p> : null}
       {trees.state === "failed" ? <LoadFailed what="目的からタスクまで" failed={trees} /> : null}
       {trees.state === "ok" && trees.data.length === 0 ? <p>目的はまだ無い</p> : null}
-      {trees.state === "ok" ? trees.data.map((root) => <Root key={root.id} root={root} />) : null}
+      {trees.state === "ok" ? trees.data.map((root) => <Root key={root.id} root={root} edit={edit} />) : null}
       <Part title="組織図と役目">
         {org.state === "loading" ? <p>組織図を読んでいます</p> : null}
         {org.state === "failed" ? <LoadFailed what="組織図" failed={org} /> : null}

@@ -124,14 +124,14 @@ export type NewNode = {
  * @param input 作る物
  * @param actor 誰がいつ
  * @returns 足す行
- * @throws validation_failed タスクでない物に種類、担当、優先度を付けた時、タスクに種類が無い時
+ * @throws validation_failed タスクでない物に種類、担当、優先度、リポジトリを付けた時、タスクに種類が無い時
  * @throws not_found 親が無い時
  * @throws conflict 親の種類が階層に合わない時、レビューのタスクを作った社員と同じモデルか、作った社員の分からないレビューのタスクを割り振る時
  */
 export async function newNodeRow(env: Bindings, input: NewNode, actor: Actor): Promise<NodeRow> {
   const isTask = input.kind === "task";
-  if (!isTask && (input.taskKind !== undefined || input.assignee !== undefined || input.priority !== undefined)) {
-    throw new AppError("validation_failed", "種類、担当、優先度を持てるのはタスクだけ");
+  if (!isTask && (input.taskKind !== undefined || input.assignee !== undefined || input.priority !== undefined || input.repo !== undefined)) {
+    throw new AppError("validation_failed", "種類、担当、優先度、リポジトリを持てるのはタスクだけ");
   }
   if (isTask && input.taskKind === undefined) throw new AppError("validation_failed", "タスクには種類が要る");
   if (input.source !== "intake") await checkParent(env.DB, input.kind, input.parentId, input.scope);

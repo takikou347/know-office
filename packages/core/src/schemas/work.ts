@@ -1,5 +1,6 @@
 // タスクの木、組織図、オーナーの承認の返す形と入力 (タスクとレビューの 1 章と 2 章、データの 2.2 と 2.5)
 import { Meta } from "./common.ts";
+import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";
 import { z } from "./zod.ts";
 
@@ -83,7 +84,7 @@ export const NodeDetail = z
 /** タスクの詳細の型 */
 export type NodeDetail = z.infer<typeof NodeDetail>;
 
-/** 目的、目標、プロジェクト、タスクを作る入力。taskKind、assignee、priority はタスクだけが持つ */
+/** 目的、目標、プロジェクト、タスクを作る入力。taskKind、assignee、priority、repo はタスクだけが持つ */
 export const CreateNodeInput = z
   .object({
     kind: NodeKind,
@@ -94,6 +95,7 @@ export const CreateNodeInput = z
     taskKind: z.enum(["build", "content", "fix"]).optional(),
     assignee: StaffParam.optional(),
     priority: z.number().int().min(0).max(1000).optional(),
+    repo: RepoName.optional(),
   })
   .strict()
   .meta({ id: "CreateNodeInput" });

@@ -283,7 +283,7 @@ export class StaffBook {
   }
 
   /**
-   * 自動停止で止めたタスクを離れ、した仕事を結果 stopped で残す。社員は止まらず、次のタスクを取れる
+   * 自動停止で止めたタスクを離れ、した仕事を結果 stopped で残す。社員は止まらず、次のタスクを取れる。呼び出しの途中なら退勤する
    * @param nodeId 止めたタスクの ID
    * @param now 今の時刻
    * @returns 無し
@@ -293,6 +293,8 @@ export class StaffBook {
     // 時刻で決まる出来事は次の alarm に任せる。ここでは止めたタスクを離れる事だけを行う
     if (s.m.task?.nodeId !== nodeId) return;
     s.closeTask(now, "stopped");
+    // 呼び出しはそのタスクのためだけなので、finish と同じく退勤する。残すと次の割り振りで呼び出せない
+    if (s.m.state === "wrapping" || s.m.state === "called") await this.#clockOut(s, now);
     await this.#save(s, now);
   }
 
