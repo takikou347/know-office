@@ -76,6 +76,28 @@ describe("開発のコンテナの代わり", () => {
     expect(sent).toEqual(["http://localhost:5199/workspace/builder/boot", "http://localhost:5199/workspace/builder/v1/health"]);
   });
 
+  it("印の無い本物と同じ形の入れ物には、受け手を付けてから起こす", async () => {
+    const seen: string[] = [];
+    const real: ContainerLike<string> = {
+      running: false,
+      start: () => void seen.push("start"),
+      interceptOutboundHttp: (host, fetcher) => Promise.resolve(void seen.push(`http ${host} ${fetcher}`)),
+      interceptOutboundHttps: (host, fetcher) => Promise.resolve(void seen.push(`https ${host} ${fetcher}`)),
+      getTcpPort: () => ({ fetch: () => Promise.resolve(Response.json({ data: { ok: true, part: "workspace" } })) }),
+      destroy: () => Promise.resolve(),
+    };
+    let key: string | undefined;
+    const deps = { wait: () => Promise.resolve(), keys: { get: () => Promise.resolve(key), put: (k: string) => Promise.resolve(void (key = k)) }, notifyDown: () => Promise.resolve() };
+    await new WorkspaceBox(real, (caller) => `egress:${caller.staffId}`, { staffId: "builder", workspaceId: "ws-builder" }, deps).start();
+    expect(seen).toEqual([
+      "http gate.internal egress:builder",
+      "https api.anthropic.com egress:builder",
+      "https api.github.com egress:builder",
+      "https github.com egress:builder",
+      "start",
+    ]);
+  });
+
   it("本物のコンテナがあればそれを使う", () => {
     const { fetcher } = recorder();
     const real: ContainerLike = {
