@@ -30,6 +30,8 @@ describe("鍵を伏せる", () => {
     ["名前=値の値の中のエスケープした引用符", 'secret="v1x\\"v2y v3z" next', ["v1x", "v2y", "v3z"]],
     ["値の途中から始まる引用符", "password=v1x'v2y v3z' next", ["v1x", "v2y", "v3z"]],
     ["引用符の中の Bearer の値", '{"api_key": "Bearer v1x v2y"}', ["v1x", "v2y"]],
+    ["二重にして逃がした単引用符", "key='v1x''v2y v3z'", ["v1x", "v2y", "v3z"]],
+    ["\\ で逃がした空白", "api_key=v1x\\ v2y next", ["v1x", "v2y"]],
   ])("%s を最後まで伏せる", (_, text, parts) => {
     const out = redactText(text);
     for (const part of parts) expect(out).not.toContain(part);
@@ -41,6 +43,11 @@ describe("鍵を伏せる", () => {
     expect(redactText("token='v1x v2y' next")).toBe("token='[伏せた]' next");
     expect(redactText('{"password":"v1x\\"v2y v3z","x":1}')).toBe('{"password":"[伏せた]","x":1}');
     expect(redactText("password=v1x'v2y v3z' next")).toBe("password=[伏せた] next");
+    expect(redactText("key='' next")).toBe("key='[伏せた]' next");
+  });
+
+  it("値の途中の閉じない引用符は空白で止め、後ろの項目を残す", () => {
+    expect(redactText("password=v1x'v2y next other=1")).toBe("password=[伏せた] next other=1");
   });
 
   it("鍵らしい語を含むだけの普通の文は変えない", () => {
@@ -48,9 +55,12 @@ describe("鍵を伏せる", () => {
     expect(redactText(text)).toBe(text);
   });
 
-  it("閉じない引用符の長い文でも 50ms 以内に伏せる", () => {
-    // 閉じない引用符の中にエスケープした引用符が続く 50,000 字
-    const text = `password="${"v1\\\" ".repeat(12_500)}`;
+  // 閉じない引用符の中にエスケープした引用符が続く物、途中の引用符が続く物、閉じない途中の引用符が続く物。どれも 50,000 字
+  it.each([
+    ["閉じない引用符の中のエスケープ", `password="${"v1\\\" ".repeat(12_500)}`],
+    ["途中の引用符の続き", `password=v1${"'b".repeat(25_000)}`],
+    ["閉じない途中の引用符の続き", `password=v1${'"\\'.repeat(25_000)}`],
+  ])("%s の長い文でも 50ms 以内に伏せる", (_, text) => {
     const start = performance.now();
     const out = redactText(text);
     expect(performance.now() - start).toBeLessThan(50);

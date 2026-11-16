@@ -1,11 +1,12 @@
 // 1 行の JSON のログ。Workers Logs に残る。鍵や作業トークンは伏せる (ログインと記録の 3.6)
 const SECRET_KEY = /authorization|cookie|token|secret|key|password/i;
-// 名前=値、名前: 値、JSON の "名前":"値" の値。引用符で囲んだ値は、エスケープした引用符と空白を含めて閉じる引用符まで (閉じなければ行の終わりまで) を 1 つの値とし、
-// 囲まない値は区切りまでを取り、途中から始まる引用符はその引用符の閉じまでを値に含める。どの枝も頭の 1 字で分かれるので、長い入力でも戻りが増えない
+// 名前=値、名前: 値、JSON の "名前":"値" の値。どの枝も頭の 1 字で分かれる。
+// 引用符で始まる値は、エスケープした引用符 (\" と '') と空白を含めて閉じる引用符まで、閉じなければ行の終わりまでを 1 つの値とする。
+// 囲まない値は空白か区切りまで。\ で逃がした字と、途中で始まって閉じる引用符の中は値に含め、閉じない引用符はただの字として扱う
 const NAMED_SECRET = new RegExp(
   [
     String.raw`(\b[\w-]*(?:token|secret|key|password)[\w-]*"?\s*[:=]\s*)(?!"?\[伏せた\])`,
-    String.raw`(?:"(?:\\.|[^"\\\n])*"?|'[^'\n]*'?|(?:[^\s"',;&}]|'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?)+)`,
+    String.raw`(?:"(?:\\.|[^"\\\n])*"?|'(?:''(?=[^\s'",;&}])|[^'\n])*'?|(?:\\.|[^\s"',;&}\\]|'(?:''(?=[^\s'",;&}])|[^'\n])*'|"(?:\\.|[^"\\\n])*"|["'\\])+)`,
   ].join(""),
   "gi",
 );
@@ -22,12 +23,10 @@ function maskNamed(match: string, name: string): string {
   return `${name}${quote}[伏せた]${quote && value.length > 1 && value.endsWith(quote) ? quote : ""}`;
 }
 
-// 文の中に混じった鍵らしい物。上から順に置き換える。値だけを伏せ、何を伏せたかは名前で分かるようにする
-const SECRET_TEXT: [RegExp, string | ((match: string, name: string) => string)][] = [
-  // ヘッダーの行は値に空白や ; を含むので、行の終わりまで伏せる
-  [/\b(authorization|proxy-authorization|cookie|set-cookie)("?\s*[:=]\s*)[^\n]*/gi, "$1$2[伏せた]"],
-  // 名前の付いた値は、中の Bearer や JWT より先に値ごと伏せる
-  [NAMED_SECRET, maskNamed],
+// ヘッダーの行は値に空白や ; を含むので、行の終わりまで伏せる
+const HEADER_LINE = /\b(authorization|proxy-authorization|cookie|set-cookie)("?\s*[:=]\s*)[^\n]*/gi;
+// 名前の付いた値の後に、名前の無い鍵らしい物を上から順に置き換える。値だけを伏せ、何を伏せたかは名前で分かるようにする
+const SECRET_TEXT: [RegExp, string][] = [
   [/\bBearer\s+[\w.~+/=-]+/gi, "Bearer [伏せた]"],
   // 作業トークン (JWT)。署名の無い 2 つの部分だけでも伏せる
   [/eyJ[\w-]+\.[\w-]+(?:\.[\w-]*)?/g, "[伏せた]"],
@@ -41,7 +40,9 @@ const SECRET_TEXT: [RegExp, string | ((match: string, name: string) => string)][
  * @returns 伏せた文
  */
 export function redactText(text: string): string {
-  return SECRET_TEXT.reduce((out, [pattern, replacement]) => (typeof replacement === "string" ? out.replace(pattern, replacement) : out.replace(pattern, replacement)), text);
+  // 名前の付いた値は、中の Bearer や JWT より先に値ごと伏せる
+  const named = text.replace(HEADER_LINE, "$1$2[伏せた]").replace(NAMED_SECRET, maskNamed);
+  return SECRET_TEXT.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), named);
 }
 
 // 外 (GitHub の Issue) に出す文で、鍵に加えて伏せる物。上から順に置き換える
