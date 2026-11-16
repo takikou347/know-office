@@ -6,6 +6,7 @@ import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe, verifyWorkToken } from "../guard/observe.ts";
+import { newTraceId } from "../trace.ts";
 
 /** 作業トークンの JWT の typ。ほかの用途の JWT と取り違えない */
 export const TICKET_TYP = "ko-ticket+jwt";
@@ -24,6 +25,8 @@ export type TicketClaims = {
   jti: string;
   /** 期限 */
   expiresAt: number;
+  /** 呼び出しを始めた要求の traceId。前の版で発行した物には無い */
+  traceId: string | null;
 };
 
 /** 要求を送ったワークスペース。コンテナの外向きの通信の受け手が、送ったコンテナから決める */
@@ -71,10 +74,11 @@ async function ticketKey(env: Bindings, clock: Clock): Promise<Uint8Array<ArrayB
  * @param staffId 社員 ID
  * @param jti 作業トークン ID
  * @param detail 中身
+ * @param traceId 呼び出しを始めた要求の traceId
  */
-async function record(env: Bindings, at: number, action: "ticket.issue" | "ticket.revoke", staffId: StaffId, jti: string, detail: Record<string, string | number>): Promise<void> {
+async function record(env: Bindings, at: number, action: "ticket.issue" | "ticket.revoke", staffId: StaffId, jti: string, detail: Record<string, string | number>, traceId?: string | null): Promise<void> {
   const recorder = env.RECORDER.get(env.RECORDER.idFromName("recorder"));
-  await recorder.append({ at, actor: "system", action, target: jti, scope: "office", detail: { staffId, ...detail } });
+  await recorder.append({ at, actor: "system", action, target: jti, scope: "office", detail: { staffId, ...detail }, ...(traceId ? { traceId } : {}) });
 }
 
 /**
@@ -85,7 +89,7 @@ async function record(env: Bindings, at: number, action: "ticket.issue" | "ticke
  * @returns JWT
  */
 async function sign(env: Bindings, claims: TicketClaims, issuedAt: number): Promise<string> {
-  return new SignJWT({ node: claims.nodeId, ws: claims.workspaceId })
+  return new SignJWT({ node: claims.nodeId, ws: claims.workspaceId, ...(claims.traceId === null ? {} : { trc: claims.traceId }) })
     .setProtectedHeader({ alg: TICKET_ALG, typ: TICKET_TYP })
     .setSubject(claims.staffId)
     .setJti(claims.jti)
@@ -101,13 +105,14 @@ async function sign(env: Bindings, claims: TicketClaims, issuedAt: number): Prom
  * @param staffId 社員 ID
  * @param nodeId タスク ID
  * @param now 今の時刻
+ * @param traceId 呼び出しを始めた要求の traceId。無ければ新しく作り、1 本の呼び出しの要求を 1 つの流れにまとめる
  * @returns 作業トークン、ID、期限
  */
-export async function issueTicket(env: Bindings, staffId: StaffId, nodeId: string, now: number): Promise<{ token: string; jti: string; expiresAt: number }> {
+export async function issueTicket(env: Bindings, staffId: StaffId, nodeId: string, now: number, traceId: string = newTraceId()): Promise<{ token: string; jti: string; expiresAt: number }> {
   const workspaceId = workspaceIdOf(env, staffId);
-  const { jti, expiresAt } = await staffOf(env, staffId).issueToken(nodeId, workspaceId, now);
-  const token = await sign(env, { staffId, nodeId, workspaceId, jti, expiresAt }, now);
-  await record(env, now, "ticket.issue", staffId, jti, { nodeId, expiresAt });
+  const { jti, expiresAt } = await staffOf(env, staffId).issueToken(nodeId, workspaceId, now, traceId);
+  const token = await sign(env, { staffId, nodeId, workspaceId, jti, expiresAt, traceId }, now);
+  await record(env, now, "ticket.issue", staffId, jti, { nodeId, expiresAt }, traceId);
   return { token, jti, expiresAt };
 }
 
@@ -165,7 +170,7 @@ export async function authenticateTicket(env: Bindings, token: string, caller: C
   const expiresAt = claims.exp * 1000;
   if (expiresAt <= now) throw new AppError("unauthenticated", "作業トークンの期限が切れた");
   await verifyWorkToken(env, claims.sub, claims.jti, caller.workspaceId, now, deps);
-  return { staffId: claims.sub, nodeId: claims.node, workspaceId: claims.ws, jti: claims.jti, expiresAt };
+  return { staffId: claims.sub, nodeId: claims.node, workspaceId: claims.ws, jti: claims.jti, expiresAt, traceId: claims.trc ?? null };
 }
 
 /**
@@ -218,8 +223,8 @@ export async function renewTicket(env: Bindings, staffId: StaffId, nodeId: strin
   const staff = staffOf(env, staffId);
   const renewed = await staff.renewToken(nodeId, workspaceId, now);
   if (!renewed) return false;
-  const token = await sign(env, { staffId, nodeId, workspaceId, jti: renewed.jti, expiresAt: renewed.expiresAt }, now);
-  await record(env, now, "ticket.issue", staffId, renewed.jti, { nodeId, expiresAt: renewed.expiresAt });
+  const token = await sign(env, { staffId, nodeId, workspaceId, jti: renewed.jti, expiresAt: renewed.expiresAt, traceId: renewed.traceId }, now);
+  await record(env, now, "ticket.issue", staffId, renewed.jti, { nodeId, expiresAt: renewed.expiresAt }, renewed.traceId);
   try {
     await env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)).replaceTicket(token);
   } catch (error) {

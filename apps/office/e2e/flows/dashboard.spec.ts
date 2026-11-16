@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { part } from "./helpers/screen.ts";
-import { seedMain } from "./helpers/seed.ts";
+import { useOwnerPasskey } from "./helpers/passkey.ts";
+import { runLocalD1, seedMain } from "./helpers/seed.ts";
 
 // ダッシュボードと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。承認待ちとタスクは種に置き、応答を差し替えない (ルートの一覧の 1.4 と 1.12)
 
@@ -59,5 +60,30 @@ test.describe("記録", () => {
     }).toPass({ timeout: 15_000 });
     await expect(uptime.getByText(/^\d+\.\d{2}$/)).toBeVisible();
     await expect(uptime.getByText(/目安 99\.9%/)).toBeVisible();
+  });
+
+  test("新しいエラーログを出し、その要求をパスキーで確かめてたどる", async ({ page }) => {
+    await useOwnerPasskey(page);
+    // エラーログは追記だけで消せないので、通しごとに別の ID と traceId で置く
+    const now = Date.now();
+    const id = `019a7b00-0000-7000-8000-${now.toString(16).padStart(12, "0").slice(-12)}`;
+    const traceId = `e2e0${now.toString(16).padStart(28, "0")}`.slice(0, 32);
+    const year = new Intl.DateTimeFormat("en", { timeZone: "Asia/Tokyo", year: "numeric" }).format(new Date(now));
+    runLocalD1([
+      "exec",
+      "wrangler",
+      "d1",
+      "execute",
+      `REC_${year}`,
+      "--local",
+      `--command=INSERT INTO error_events (id, at, source, level, code, message, route, status, fingerprint, trace_id) VALUES ('${id}', ${String(now)}, 'job', 'error', 'storage_check_failed', '通しで置いたエラー', NULL, NULL, '${"e".repeat(64)}', '${traceId}')`,
+    ]);
+    await page.goto("/records");
+    const log = part(page, "エラーログ");
+    await log.getByRole("row", { name: /通しで置いたエラー/ }).getByRole("link", { name: "storage_check_failed の要求をたどる" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`/records\\?trace=${traceId}$`));
+    const trail = part(page, "要求をたどる");
+    await trail.getByRole("button", { name: "パスキーで確かめて記録を開く" }).click();
+    await expect(trail.getByRole("region", { name: "要求の記録" }).getByRole("row", { name: /エラー.*job の error storage_check_failed: 通しで置いたエラー/ })).toBeVisible();
   });
 });

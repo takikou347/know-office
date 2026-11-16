@@ -23,6 +23,7 @@ import { noticeRoutes } from "./routes/notices.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { passkeyRoutes } from "./routes/passkeys.ts";
 import { recordRoutes } from "./routes/records.ts";
+import { traceRoutes } from "./routes/traces.ts";
 import { reviewReadRoutes } from "./routes/review-reads.ts";
 import { reviewRoutes } from "./routes/reviews.ts";
 import { serviceRoutes } from "./routes/services.ts";
@@ -42,7 +43,7 @@ import { system } from "./routes/system.ts";
  * @returns ゲートウェイ
  */
 export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: GuardDeps; extensions?: readonly ExtensionDefinition[]; github?: GitHubAccess; githubTokens?: TokenCache } = {}) {
-  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", guardRoutes).route("/", guardTuningRoutes).route("/", guardKeyRoutes).route("/", attendanceRoutes)
+  const app = createApp(options).route("/", system).route("/", sessionRoutes).route("/", passkeyRoutes).route("/", recordRoutes).route("/", traceRoutes).route("/", guardRoutes).route("/", guardTuningRoutes).route("/", guardKeyRoutes).route("/", attendanceRoutes)
     .route("/", nodeRoutes)
     .route("/", reviewRoutes)
     .route("/", reviewReadRoutes)

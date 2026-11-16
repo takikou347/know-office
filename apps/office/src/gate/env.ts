@@ -75,7 +75,7 @@ export interface Staff extends Rpc.DurableObjectBranded {
   /** 今のタスクを離れる */
   finish(result: unknown, now: number): Promise<null>;
   /** 勤務中で手が空いていれば、自分の山から次のタスクを取り、取ったら呼び出しを始める */
-  pull(now: number): Promise<{ taken: boolean; nodeId: string | null }>;
+  pull(now: number, traceId?: string): Promise<{ taken: boolean; nodeId: string | null }>;
   /** alarm が無ければ掛け、持っているタスクの呼び出しが始まっていなければ始める */
   arm(now: number): Promise<{ alarm: number | null }>;
   /** 今のタスクの呼び出しの様子 */
@@ -85,7 +85,7 @@ export interface Staff extends Rpc.DurableObjectBranded {
   /** その日だけの指示を受ける */
   order(order: unknown, now: number): Promise<null>;
   /** 時間外に呼び出す */
-  call(task: unknown, now: number): Promise<null>;
+  call(task: unknown, now: number, traceId?: string): Promise<null>;
   /** API の上限で待ち始める */
   waitStart(reason: unknown, now: number): Promise<null>;
   /** API の上限の待ちを解き、待っていた時間を返す */
@@ -109,7 +109,7 @@ export interface Staff extends Rpc.DurableObjectBranded {
   /** タスクが読んだ外部の文章の出所 */
   externalSources(nodeId: string): Promise<string[]>;
   /** タスクの作業トークンを発行する */
-  issueToken(nodeId: string, workspaceId: string, now: number): Promise<IssuedTicket>;
+  issueToken(nodeId: string, workspaceId: string, now: number, traceId?: string | null): Promise<IssuedTicket>;
   /** 残りが 10 分を切った作業トークンを発行し直す */
   renewToken(nodeId: string, workspaceId: string, now: number): Promise<RenewedTicket | null>;
   /** 作業トークンを ID で失効させる */

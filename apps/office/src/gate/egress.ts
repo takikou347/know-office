@@ -138,6 +138,8 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
         const token = ticketOf(c.req.raw.headers, host);
         if (token === "") throw new AppError("unauthenticated", "作業トークンが無い");
         const ticket = await authenticateTicket(c.env, token, caller, c.var.clock.now(), c.var.guard);
+        // 1 本の呼び出しの要求は、呼び出しを始めた要求の traceId で記録する。ワークスペースが付けた traceparent より作業トークンを信じる (ログインと記録の 3.8)
+        if (ticket.traceId !== null) c.set("traceId", ticket.traceId);
         // Claude のプロキシは Anthropic の形のままで、ゲートウェイのルートに入れない (社員が考えるの 1.2)
         if (host === "api.anthropic.com") return relayClaude(c, ticket);
         if (host === "github.com") return relayGit(c, ticket);

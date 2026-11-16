@@ -529,6 +529,112 @@ components:
         - ratio
         - checks
       additionalProperties: false
+    ErrorEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID v7
+        at:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum:
+            - gate
+            - staff_do
+            - recorder_do
+            - guard_do
+            - live_do
+            - workspace
+            - job
+        level:
+          type: string
+          enum:
+            - error
+            - warn
+        code:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+        message:
+          type: string
+        route:
+          type:
+            - string
+            - "null"
+        status:
+          type:
+            - integer
+            - "null"
+        staffId:
+          type:
+            - string
+            - "null"
+        nodeId:
+          type:
+            - string
+            - "null"
+        traceId:
+          type:
+            - string
+            - "null"
+        fingerprint:
+          type: string
+      required:
+        - id
+        - at
+        - source
+        - level
+        - code
+        - message
+        - route
+        - status
+        - staffId
+        - nodeId
+        - traceId
+        - fingerprint
+      additionalProperties: false
+    Trace:
+      type: object
+      properties:
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{32}$
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              at:
+                type: string
+                format: date-time
+              kind:
+                type: string
+                enum:
+                  - error
+                  - audit
+                  - tool_call
+                  - usage
+                  - node_event
+                  - message
+              summary:
+                type: string
+                description: 誰が何をしたかの 1 行。会話は頭の 80 字まで
+              id:
+                type: string
+                format: uuid
+                description: UUID v7
+            required:
+              - at
+              - kind
+              - summary
+              - id
+            additionalProperties: false
+      required:
+        - traceId
+        - items
+      additionalProperties: false
     GuardState:
       type: object
       properties:
@@ -3001,107 +3107,6 @@ components:
         - transcript
         - nextSeq
       additionalProperties: false
-    ErrorEvent:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-          description: UUID v7
-        at:
-          type: string
-          format: date-time
-        source:
-          type: string
-          enum:
-            - gate
-            - staff_do
-            - recorder_do
-            - guard_do
-            - live_do
-            - workspace
-            - job
-        level:
-          type: string
-          enum:
-            - error
-            - warn
-        code:
-          $ref: "#/components/schemas/ErrorCode"
-        message:
-          type: string
-        route:
-          type:
-            - string
-            - "null"
-        status:
-          type:
-            - integer
-            - "null"
-        staffId:
-          type:
-            - string
-            - "null"
-        nodeId:
-          type:
-            - string
-            - "null"
-        traceId:
-          type: string
-        fingerprint:
-          type: string
-      required:
-        - id
-        - at
-        - source
-        - level
-        - code
-        - message
-        - route
-        - status
-        - staffId
-        - nodeId
-        - traceId
-        - fingerprint
-      additionalProperties: false
-    Trace:
-      type: object
-      properties:
-        traceId:
-          type: string
-        items:
-          type: array
-          items:
-            type: object
-            properties:
-              at:
-                type: string
-                format: date-time
-              kind:
-                type: string
-                enum:
-                  - error
-                  - audit
-                  - tool_call
-                  - usage
-                  - node_event
-                  - message
-              summary:
-                type: string
-              id:
-                type: string
-                format: uuid
-                description: UUID v7
-            required:
-              - at
-              - kind
-              - summary
-              - id
-            additionalProperties: false
-      required:
-        - traceId
-        - items
-      additionalProperties: false
   parameters:
     Cursor:
       schema:
@@ -3978,6 +3983,171 @@ paths:
 
         1. 日本時間の指定月の `health_checks` の件数と、通った件数を 1 つの SQL で数える
         2. 通った割合を `ratio` で返す。確かめが 1 件も無い月は `null`
+      security: *a1
+  /api/v1/errors:
+    get:
+      operationId: listErrors
+      tags:
+        - system
+      summary: エラーログ一覧
+      description: |-
+        D1 の error_events を新しい順に返す。スタックトレースは含めず、Workers Logs で traceId から確認する。
+
+        処理の流れ:
+
+        1. 指定期間の年のデータベースを新しい年から選ぶ
+        2. `error_events` を期間、`source`、`code` で絞り込み、新しい順に取得する
+
+        このルート固有のエラー:
+
+        - 422 `validation_failed`: `from` が `to` より後
+      x-steps:
+        - 指定期間の年のデータベースを新しい年から選ぶ
+        - "`error_events` を期間、`source`、`code` で絞り込み、新しい順に取得する"
+      x-errors:
+        - "422 `validation_failed`: `from` が `to` より後"
+      parameters:
+        - schema:
+            type: string
+            format: date
+            description: 日本時間の日付 YYYY-MM-DD
+          required: false
+          description: 日本時間の日付 YYYY-MM-DD
+          name: from
+          in: query
+        - schema:
+            type: string
+            format: date
+            description: 日本時間の日付 YYYY-MM-DD
+          required: false
+          description: 日本時間の日付 YYYY-MM-DD
+          name: to
+          in: query
+        - schema:
+            type: string
+            enum:
+              - gate
+              - staff_do
+              - recorder_do
+              - guard_do
+              - live_do
+              - workspace
+              - job
+          required: false
+          name: source
+          in: query
+        - schema:
+            type: string
+            pattern: ^[a-z][a-z0-9_]{0,63}$
+          required: false
+          name: code
+          in: query
+        - schema:
+            type: string
+            format: uuid
+            description: 前のレスポンスの meta.next
+          required: false
+          description: 前のレスポンスの meta.next
+          name: cursor
+          in: query
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ErrorEvent"
+                  meta:
+                    $ref: "#/components/schemas/ListMeta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security: *a1
+  /api/v1/traces/{traceId}:
+    get:
+      operationId: getTrace
+      tags:
+        - system
+      summary: traceId でリクエストを追跡する
+      description: |-
+        同じ traceId を持つエラー、監査ログ、ツール呼び出し、使用量、タスクのイベント、メッセージを時刻順に返す。15 分以内のパスキーの確認が必要。
+
+        処理の流れ:
+
+        1. パスキーの確認を求める
+        2. 今年と前年のデータベースから、`error_events`、`audit_log`、`tool_calls`、`usage`、`node_events`、`messages` を `trace_id` のインデックスで取得する
+        3. 時刻順に並べ、追跡を閲覧したことを監査ログに記録して返す
+
+        このルート固有のエラー:
+
+        - 401 `step_up_required`: パスキーの確認がない
+        - 422 `validation_failed`: traceId が 32 桁の 16 進数ではない
+        - 404 `not_found`: 該当するレコードがない
+      x-steps:
+        - パスキーの確認を求める
+        - 今年と前年のデータベースから、`error_events`、`audit_log`、`tool_calls`、`usage`、`node_events`、`messages` を `trace_id` のインデックスで取得する
+        - 時刻順に並べ、追跡を閲覧したことを監査ログに記録して返す
+      x-errors:
+        - "401 `step_up_required`: パスキーの確認がない"
+        - "422 `validation_failed`: traceId が 32 桁の 16 進数ではない"
+        - "404 `not_found`: 該当するレコードがない"
+      x-step-up: true
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[0-9a-f]{32}$
+            description: traceparent ヘッダーの trace-id と同じ 32 桁の 16 進数
+          required: true
+          description: traceparent ヘッダーの trace-id と同じ 32 桁の 16 進数
+          name: traceId
+          in: path
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Trace"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
       security: *a1
   /api/v1/guard/state:
     get:
@@ -9258,147 +9428,6 @@ paths:
         このルート固有のエラー:
 
         - 409 `conflict`: 実行中の処理がある
-  /api/v1/errors:
-    get:
-      operationId: listErrors
-      tags:
-        - system
-      summary: エラーログ一覧
-      description: |-
-        D1 の error_events を新しい順に返す。スタックトレースは含めず、Workers Logs で traceId から確認する。
-
-        処理の流れ:
-
-        1. 指定期間に対応するデータベースを選ぶ
-        2. `error_events` を `source` と `code` で絞り込み、新しい順に取得する
-      x-steps:
-        - 指定期間に対応するデータベースを選ぶ
-        - "`error_events` を `source` と `code` で絞り込み、新しい順に取得する"
-      parameters:
-        - schema:
-            type: string
-            format: date
-            description: 日本時間の日付 YYYY-MM-DD
-          required: false
-          description: 日本時間の日付 YYYY-MM-DD
-          name: from
-          in: query
-        - schema:
-            type: string
-            format: date
-            description: 日本時間の日付 YYYY-MM-DD
-          required: false
-          description: 日本時間の日付 YYYY-MM-DD
-          name: to
-          in: query
-        - schema:
-            type: string
-          required: false
-          name: source
-          in: query
-        - schema:
-            $ref: "#/components/schemas/ErrorCode"
-          required: false
-          name: code
-          in: query
-        - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
-      responses:
-        "200":
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/ErrorEvent"
-                  meta:
-                    $ref: "#/components/schemas/ListMeta"
-                required:
-                  - data
-                  - meta
-                additionalProperties: false
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "422":
-          $ref: "#/components/responses/UnprocessableContent"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
-        "500":
-          $ref: "#/components/responses/InternalError"
-      security: *a1
-  /api/v1/traces/{traceId}:
-    get:
-      operationId: getTrace
-      tags:
-        - system
-      summary: traceId でリクエストを追跡する
-      description: |-
-        同じ traceId を持つエラー、監査ログ、ツール呼び出し、使用量、タスクのイベント、メッセージを時刻順に返す。15 分以内のパスキーの確認が必要。
-
-        処理の流れ:
-
-        1. パスキーの確認を求める
-        2. 今年と前年のデータベースから、`error_events`、`audit_log`、`tool_calls`、`usage`、`node_events`、`messages` を `trace_id` のインデックスで取得する
-        3. 時刻順に並べて返す
-
-        このルート固有のエラー:
-
-        - 422 `validation_failed`: traceId が 32 桁の 16 進数ではない
-        - 404 `not_found`: 該当するレコードがない
-      x-steps:
-        - パスキーの確認を求める
-        - 今年と前年のデータベースから、`error_events`、`audit_log`、`tool_calls`、`usage`、`node_events`、`messages` を `trace_id` のインデックスで取得する
-        - 時刻順に並べて返す
-      x-errors:
-        - "422 `validation_failed`: traceId が 32 桁の 16 進数ではない"
-        - "404 `not_found`: 該当するレコードがない"
-      x-step-up: true
-      parameters:
-        - schema:
-            type: string
-            pattern: ^[0-9a-f]{32}$
-            description: traceparent ヘッダーの trace-id と同じ 32 桁の 16 進数
-          required: true
-          description: traceparent ヘッダーの trace-id と同じ 32 桁の 16 進数
-          name: traceId
-          in: path
-      responses:
-        "200":
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/Trace"
-                  meta:
-                    $ref: "#/components/schemas/Meta"
-                required:
-                  - data
-                  - meta
-                additionalProperties: false
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "422":
-          $ref: "#/components/responses/UnprocessableContent"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
-        "500":
-          $ref: "#/components/responses/InternalError"
-      security: *a1
   /api/v1/reviews/{nodeId}/lsp:
     get:
       operationId: openReviewLsp

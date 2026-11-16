@@ -107,12 +107,13 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   /**
    * 勤務中で手が空いていれば、自分の山から優先度の順に次のタスクを取る。山が空なら上司に次を求める
    * @param now 今の時刻
+   * @param traceId 取らせた要求の traceId。呼び出しの作業トークンが持ち、ワークスペースの要求を同じ流れで追える
    * @returns 取ったか。nodeId は取ったか、もう持っていたタスク
    */
-  async pull(now: number): Promise<Pulled> {
+  async pull(now: number, traceId?: string): Promise<Pulled> {
     const pulled = await this.#serial((book) => pullNext(this.env, book, now), now);
     // 呼び出しは鎖の外で始める。作業トークンの発行がこの DO の鎖を通るので、鎖の中で待つと止まる
-    if (pulled.taken) this.#begin("start", now);
+    if (pulled.taken) this.#begin("start", now, traceId);
     return pulled;
   }
 
@@ -171,10 +172,11 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * 持っているタスクの呼び出しを、待たずに始める。失敗は log に残し、次の arm がもう一度見る
    * @param how start は最初から、continue は記録があれば続きから
    * @param now 今の時刻
+   * @param traceId 呼び出しを始めさせた要求の traceId。無ければ作業トークンを出す時に新しく作る
    */
-  #begin(how: "start" | "continue", now: number): void {
+  #begin(how: "start" | "continue", now: number, traceId?: string): void {
     void this.#open()
-      .then((book) => (how === "start" ? startRun(this.env, book.staffId, now) : continueRun(this.env, book.staffId, now)))
+      .then((book) => (how === "start" ? startRun(this.env, book.staffId, now, traceId) : continueRun(this.env, book.staffId, now)))
       .catch((error: unknown) => log("error", "run_begin_failed", { how, error: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
   }
 
@@ -192,11 +194,12 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * 時間外に呼び出す
    * @param task StaffTask
    * @param now 今の時刻
+   * @param traceId 呼び出した要求の traceId
    * @returns 無し
    */
-  async call(task: unknown, now: number): Promise<null> {
+  async call(task: unknown, now: number, traceId?: string): Promise<null> {
     await this.#run((book) => book.call(task, now), now);
-    this.#begin("start", now);
+    this.#begin("start", now, traceId);
     return null;
   }
 
@@ -316,10 +319,11 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param nodeId タスク ID
    * @param workspaceId 渡すワークスペースの ID
    * @param now 今の時刻
-   * @returns 作業トークン ID と期限
+   * @param traceId 呼び出しを始めた要求の traceId
+   * @returns 作業トークン ID と期限と traceId
    */
-  issueToken(nodeId: string, workspaceId: string, now: number): Promise<IssuedTicket> {
-    return this.#serial(() => this.#guardOf().then((g) => g.issueToken(nodeId, workspaceId, now)));
+  issueToken(nodeId: string, workspaceId: string, now: number, traceId: string | null = null): Promise<IssuedTicket> {
+    return this.#serial(() => this.#guardOf().then((g) => g.issueToken(nodeId, workspaceId, now, traceId)));
   }
 
   /**

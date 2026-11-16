@@ -102,7 +102,7 @@ export const nodeRoutes = router
     const now = c.var.clock.now();
     const row = await createNode(c.env, c.req.valid("json"), { by: "owner", now, traceId: c.var.traceId });
     // オーナーが頼んだタスクは、勤務時間外の社員を呼び出してでも進める
-    if (row.assignee !== null) await notifyStaff(c.env, row.assignee, now, true);
+    if (row.assignee !== null) await notifyStaff(c.env, row.assignee, now, true, c.var.traceId);
     return created(c, toNode(row, 0), `/api/v1/nodes/${row.id}`);
   })
   .openapi(getNodeRoute, async (c) => {
@@ -113,7 +113,7 @@ export const nodeRoutes = router
     const { version, ...change } = c.req.valid("json");
     const now = c.var.clock.now();
     const row = await updateNode(c.env, c.req.valid("param").nodeId, version, change, { by: "owner", now, traceId: c.var.traceId });
-    if (row.assignee !== null && (change.assignee !== undefined || change.status === "todo")) await notifyStaff(c.env, row.assignee, now, true);
+    if (row.assignee !== null && (change.assignee !== undefined || change.status === "todo")) await notifyStaff(c.env, row.assignee, now, true, c.var.traceId);
     const { node } = await loadDetail(c.env, row.id);
     return ok(c, node);
   });

@@ -1,10 +1,11 @@
-// 記録の画面。今月の稼働率を入口の /records/uptime から、office 全体の勤怠を /records/attendance から新しい日から読み、サービスごとと社員ごとの内訳を並べる (ルートの一覧の 1.4)
+// 記録の画面。今月の稼働率を入口の /records/uptime から、office 全体の勤怠を /records/attendance から新しい日から読み、サービスごとと社員ごとの内訳と新しいエラーログを並べ、クエリの trace の要求をたどる (ルートの一覧の 1.4、ログインと記録の 3.8)
 import { DaySummary, jstDay, StaffOverview, systemClock, Uptime } from "@know-office/core";
 import { Grid, Stat, Table } from "knowidea-ui";
 import { z } from "zod";
 import { duration, jstTime } from "../../format.ts";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part, Section } from "../../parts/section.tsx";
+import { ErrorLog, TraceView } from "./ErrorTrail.tsx";
 import { RecordBreakdown } from "./RecordBreakdown.tsx";
 
 /** 勤怠を読む日の数。今日から前へ数える */
@@ -71,13 +72,24 @@ function OfficeAttendance() {
   );
 }
 
+export interface RecordsPageProps {
+  /** 道のクエリ。trace があれば、その要求をたどる所を頭に出す */
+  query: URLSearchParams;
+}
+
 /**
  * 記録の画面
  * @returns 画面
  */
-export function RecordsPage() {
+export function RecordsPage({ query }: RecordsPageProps) {
+  const trace = query.get("trace");
   return (
     <Section>
+      {trace === null ? null : (
+        <Part title="要求をたどる">
+          <TraceView key={trace} traceId={trace} />
+        </Part>
+      )}
       <Part title="稼働率">
         <MonthUptime />
       </Part>
@@ -86,6 +98,9 @@ export function RecordsPage() {
       </Part>
       <Part title="内訳">
         <RecordBreakdown />
+      </Part>
+      <Part title="エラーログ">
+        <ErrorLog />
       </Part>
     </Section>
   );

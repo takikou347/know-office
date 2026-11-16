@@ -171,21 +171,22 @@ export async function pullNext(env: Bindings, book: TaskBook, now: number): Prom
  * @param staffId 社員 ID
  * @param now 今の時刻
  * @param call 勤務時間外なら呼び出すか。オーナーが頼んだ時だけ true
+ * @param traceId 頼んだ要求の traceId。始めた呼び出しを同じ流れで追える
  */
-export async function notifyStaff(env: Bindings, staffId: string, now: number, call: boolean): Promise<void> {
+export async function notifyStaff(env: Bindings, staffId: string, now: number, call: boolean, traceId?: string): Promise<void> {
   const id = StaffId.safeParse(staffId);
   if (!id.success) return;
   const target = staffDo(env, id.data);
   const status = await target.status(now);
   if (status.state === "working" && status.nodeId === null) {
-    await target.pull(now);
+    await target.pull(now, traceId);
     return;
   }
   if (status.state !== "off" || !call) return;
   const row = await nextTodo(env, id.data);
   if (!row) return;
   await start(env, id.data, row, now, async (task) => {
-    await target.call(task, now);
+    await target.call(task, now, traceId);
     return true;
   });
 }

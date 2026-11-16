@@ -12,7 +12,7 @@ export { log, redact, redactPublic, redactText } from "./log.ts";
 export { jstClock, jstDay, jstDayStart, jstYear } from "./time.ts";
 export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
 export { AuditInput, AuditRow, AuditVerification, VerifyAuditInput } from "./schemas/audit.ts";
-export { ERROR_SOURCES, ErrorEvent, Trace } from "./schemas/trace.ts";
+export { ERROR_SOURCES, ErrorEvent, ErrorEventCode, Trace, TraceId } from "./schemas/trace.ts";
 export { Notice, NoticeLevel, NoticeLink } from "./schemas/notices.ts";
 export { codePoints, CreateMessageInput, headChars, LiveEvent, LiveTicket, Message, MESSAGE_INLINE_CHARS, MESSAGE_MAX_CHARS } from "./schemas/conversation.ts";
 export { StorageUse } from "./schemas/storage.ts";

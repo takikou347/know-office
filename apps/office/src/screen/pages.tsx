@@ -55,7 +55,7 @@ export function Page({ screen, pathname, query, health, navigate, extensions, to
     case "guard":
       return <GuardPage />;
     case "records":
-      return <RecordsPage />;
+      return <RecordsPage query={query} />;
     case "settings":
       return <SettingsPage extensions={extensions} toggleExtension={toggleExtension} />;
     case "more":

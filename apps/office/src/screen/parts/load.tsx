@@ -111,7 +111,12 @@ export function FailedAlert({ title, failure }: FailedAlertProps) {
   return (
     <Alert tone="error" title={title} live>
       {REASON[failure.code] ?? `理由: ${failure.code}。`}
-      {failure.traceId ? ` 問い合わせの番号: ${failure.traceId}` : null}
+      {failure.traceId ? (
+        <>
+          {` 問い合わせの番号: ${failure.traceId} `}
+          <a href={`/records?trace=${failure.traceId}`}>この要求をたどる</a>
+        </>
+      ) : null}
     </Alert>
   );
 }

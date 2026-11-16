@@ -1,10 +1,11 @@
 // 作業トークンの署名、期限、発行した先、失効と、チェックポイントでの差し替えを確かめる (社員が考えるの 2 章、3.2、3.3、4 章)
 import { AppError } from "@know-office/core";
 import { SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { rotateVaultKeys, vaultKey } from "../../src/gate/auth/vault.ts";
 import { routeEgress, type Caller } from "../../src/gate/egress.ts";
 import { authenticateTicket, issueTicket, TICKET_TYP, workspaceIdOf } from "../../src/gate/work/ticket.ts";
+import { resetLedger } from "../helpers/d1.ts";
 import { jst, MINUTE, NODE, NODE2, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
 
 const w = useGuardWorld();
@@ -170,6 +171,54 @@ describe("チェックポイントの受け方", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: "conflict" });
     expect(w.gate.workspaces.builder.tickets).toEqual([]);
+  });
+});
+
+/**
+ * ルールの判断を聞いた記録の traceId を読む。2030 年の置き場に当てた手元の 1 つから読む
+ * @returns tool_calls の trace_id
+ */
+async function tracesOfDecisions(): Promise<unknown[]> {
+  return (await w.d1.REC_2026.prepare("SELECT trace_id FROM tool_calls ORDER BY rowid").all<{ trace_id: string }>()).results.map((r) => r.trace_id);
+}
+
+describe("1 本の流れで追う", () => {
+  const TRACE = "c".repeat(32);
+  // テストの時刻は 2030 年なので、その年の記録の置き場に手元の 1 つを当てる
+  beforeEach(async () => {
+    await resetLedger(w.d1.REC_2026);
+    w.gate.env.REC_2030 = w.d1.REC_2026;
+  });
+
+  it("ワークスペースからの要求は、呼び出しを始めた要求の traceId で記録に残り、差し替えた作業トークンも同じ traceId を持つ", async () => {
+    await startWork(w, "builder");
+    const { token, jti } = await issueTicket(w.gate.env, "builder", NODE, jst(9), TRACE);
+    // ワークスペースが別の traceparent を付けても、作業トークンの traceId に合わせる
+    const spoofed = `00-${"d".repeat(32)}-${"1".repeat(16)}-01`;
+    const res = await fromWorkspace("/ws/v1/decisions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json", traceparent: spoofed },
+      body: JSON.stringify({ toolName: "Read", toolInput: { file_path: "/work/a.ts" } }),
+    });
+    expect(res.status).toBe(200);
+    expect(await tracesOfDecisions()).toEqual([TRACE]);
+    expect(w.gate.audits.find((a) => a.action === "ticket.issue" && a.target === jti)?.traceId).toBe(TRACE);
+    w.clock.advance(jst(9, 51) - w.clock.now());
+    expect((await checkpoint()).status).toBe(204);
+    const [renewed] = w.gate.workspaces.builder.tickets;
+    if (renewed === undefined) throw new Error("新しい作業トークンが届かない");
+    expect((await decide(renewed)).status).toBe(200);
+    expect(await tracesOfDecisions()).toEqual([TRACE, TRACE]);
+  });
+
+  it("traceId を渡さずに発行した作業トークンも、1 本の呼び出しの要求を 1 つの traceId にまとめる", async () => {
+    await startWork(w, "builder");
+    const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9));
+    expect((await decide(token)).status).toBe(200);
+    expect((await decide(token)).status).toBe(200);
+    const [first, second] = await tracesOfDecisions();
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(second).toBe(first);
   });
 });
 

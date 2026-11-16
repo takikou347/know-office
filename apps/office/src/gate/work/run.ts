@@ -136,9 +136,10 @@ export type RunStart = "started" | "skipped" | "blocked" | "busy" | "failed";
  * @param env バインディング
  * @param staffId 社員 ID
  * @param now 今の時刻
+ * @param traceId 呼び出しを始めさせた要求の traceId。作業トークンが持ち、ワークスペースからの要求を同じ流れで記録する
  * @returns 始めた結果
  */
-export async function startRun(env: Bindings, staffId: StaffId, now: number): Promise<RunStart> {
+export async function startRun(env: Bindings, staffId: StaffId, now: number, traceId?: string): Promise<RunStart> {
   const target = staffOf(env, staffId);
   const { state, nodeId } = await target.status(now);
   if (nodeId === null || !RUNNABLE.has(state)) return "skipped";
@@ -148,7 +149,7 @@ export async function startRun(env: Bindings, staffId: StaffId, now: number): Pr
   if (row.status !== "doing" || row.assignee !== staffId) return "skipped";
   const { promptVersion } = await target.runState(nodeId);
   const base = await runBase(env, staffId, nodeId, promptVersion);
-  const { token, jti } = await issueTicket(env, staffId, nodeId, now);
+  const { token, jti } = await issueTicket(env, staffId, nodeId, now, traceId);
   try {
     await env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)).run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: taskPrompt(row) }));
   } catch (error) {

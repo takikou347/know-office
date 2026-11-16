@@ -29,6 +29,19 @@ const Runs = z.array(z.object({ staffId: z.string(), nodeId: z.string() }));
 const Staff = z.object({ data: z.array(z.object({ id: z.string(), state: z.string() }).loose()) });
 const State = z.object({ data: z.object({ stopped: z.array(z.object({ scope: z.string(), stopId: z.string() })) }) });
 
+/** パスキーの仮想の認証器を入れたページ。Chrome は 1 つのページに内蔵の認証器を 1 つしか入れられない */
+const withPasskey = new WeakSet<Page>();
+
+/**
+ * ページにオーナーのパスキーを 1 度だけ入れる
+ * @param page 画面を開くページ
+ */
+async function ownerPasskey(page: Page): Promise<void> {
+  if (withPasskey.has(page)) return;
+  await useOwnerPasskey(page);
+  withPasskey.add(page);
+}
+
 /**
  * 前の通しが止めたままにした社員を再開する。止まった社員はタスクを取らない
  * @param page 画面を開いたページ
@@ -88,7 +101,7 @@ async function clockInReviewer(page: Page): Promise<() => Promise<void>> {
     await expect.poll(() => reviewerState(page), { timeout: 30_000 }).not.toMatch(/^(waiting|stopped)$/);
   }
   if ((await reviewerState(page)) === "working") return () => Promise.resolve();
-  await useOwnerPasskey(page);
+  await ownerPasskey(page);
   const box = await scheduleCard(page);
   const was = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
   const restore = () => setSchedule(page, was.start, was.end);
@@ -224,6 +237,44 @@ test("オーナーが画面で頼んだタスクを社員が取り、発言と�
   } finally {
     await restore();
   }
+});
+
+const Created = z.object({ data: z.object({ id: z.string() }).loose(), meta: z.object({ traceId: z.string() }).loose() }).loose();
+
+test.describe("気付く", () => {
+  test("1 本の流れで追う", async ({ page }) => {
+    // オーナーが頼んだタスクを社員が取り、ワークスペースが発言して終えるまでを待ち、記録の画面で頼んだ要求をたどる
+    test.slow();
+    await ownerPasskey(page);
+    await openTree(page);
+    const restore = await clockInReviewer(page);
+    try {
+      const said = `流れを追う発言 ${String(Date.now())}`;
+      await scriptWork(page, said);
+      const title = `流れを追うタスク ${String(Date.now())}`;
+      // オーナーの操作をゲートウェイの API に送り、返事の meta から traceId を読む。画面からの足し方は上の通しで確かめる (仮想の認証器を入れたページは、画面の要求の本文を読めない)
+      const res = await page.request.post("/api/v1/nodes", {
+        headers: { Origin: new URL(page.url()).origin },
+        data: { kind: "task", parentId: PROJECT, scope: "office", title, body: "流れを追う", taskKind: "build", assignee: "reviewer", repo: "example/know-office" },
+      });
+      expect(res.status()).toBe(201);
+      const created = Created.parse(await res.json());
+      const nodeId = created.data.id;
+      const traceId = created.meta.traceId;
+      await finishedBy(page, nodeId);
+
+      await page.goto(`/records?trace=${traceId}`);
+      const trail = part(page, "要求をたどる");
+      await trail.getByRole("button", { name: "パスキーで確かめて記録を開く" }).click();
+      const table = trail.getByRole("region", { name: "要求の記録" }).getByRole("table");
+      // ゲートウェイ (オーナーが足した)、社員 DO (呼び出しの作業トークンを出した)、ワークスペース (社員の発言) が 1 つの流れに並ぶ
+      await expect(table.getByRole("row", { name: new RegExp(`監査ログ.*owner が node\\.create \\(${nodeId}\\)`) })).toBeVisible();
+      await expect(table.getByRole("row", { name: /監査ログ.*system が ticket\.issue/ })).toBeVisible();
+      await expect(table.getByRole("row", { name: new RegExp(`会話.*reviewer の発言: ${said}`) })).toBeVisible();
+    } finally {
+      await restore();
+    }
+  });
 });
 
 test("オーナーが画面でタスクを取り消し、頼む先を後から変える", async ({ page }) => {

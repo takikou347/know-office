@@ -126,6 +126,8 @@ export const WorkTicketClaims = z
     jti: z.string().min(1),
     iat: z.number().int().nonnegative(),
     exp: z.number().int().positive(),
+    // 呼び出しを始めた要求の traceId。ゲートウェイはワークスペースからの要求をこの traceId で記録する
+    trc: z.string().regex(/^[0-9a-f]{32}$/).optional(),
   })
   .strict();
 

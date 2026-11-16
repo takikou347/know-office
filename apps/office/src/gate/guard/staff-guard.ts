@@ -33,15 +33,16 @@ export const RENEW_BEFORE_MS = 10 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** 発行した作業トークン。ID と発行した先と期限だけを持ち、署名はゲートウェイが vault の鍵で付ける */
-const Ticket = z.object({ jti: z.string(), nodeId: z.string(), workspaceId: z.string(), expiresAt: z.number() }).strict();
+// traceId は呼び出しを始めた要求の物。前の版で残した行には無い
+const Ticket = z.object({ jti: z.string(), nodeId: z.string(), workspaceId: z.string(), expiresAt: z.number(), traceId: z.string().optional() }).strict();
 const Tickets = z.array(Ticket);
 const RecentOps = z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /** 作業トークンを確かめた答え。misuse は発行した先と違うワークスペースから使われた */
 export type TicketCheck = "ok" | "revoked" | "expired" | "misuse";
 
-/** 発行した作業トークンの ID と期限 */
-export type IssuedTicket = { jti: string; expiresAt: number };
+/** 発行した作業トークンの ID と期限と、呼び出しを始めた要求の traceId */
+export type IssuedTicket = { jti: string; expiresAt: number; traceId: string | null };
 
 /** チェックポイントで発行し直した作業トークンと、渡し終えたら失効させる前の作業トークン */
 export type RenewedTicket = IssuedTicket & { replaces: string[] };
@@ -150,14 +151,15 @@ export class StaffGuard {
    * @param nodeId タスク ID
    * @param workspaceId 渡すワークスペースの ID
    * @param now 今の時刻
-   * @returns 作業トークン ID と期限
+   * @param traceId 呼び出しを始めた要求の traceId。差し替えた作業トークンも同じ物を持つ
+   * @returns 作業トークン ID と期限と traceId
    */
-  async issueToken(nodeId: string, workspaceId: string, now: number): Promise<IssuedTicket> {
+  async issueToken(nodeId: string, workspaceId: string, now: number, traceId: string | null = null): Promise<IssuedTicket> {
     const jti = newId(clockAt(now));
     const expiresAt = now + TICKET_MS;
     const live = (await this.#tickets()).filter((t) => t.expiresAt > now);
-    await this.storage.put("tickets", [...live, { jti, nodeId, workspaceId, expiresAt }]);
-    return { jti, expiresAt };
+    await this.storage.put("tickets", [...live, { jti, nodeId, workspaceId, expiresAt, ...(traceId === null ? {} : { traceId }) }]);
+    return { jti, expiresAt, traceId };
   }
 
   /**
@@ -172,7 +174,9 @@ export class StaffGuard {
     // 止めて失効させたタスクには発行し直さない
     if (current.length === 0) return null;
     if (Math.max(...current.map((t) => t.expiresAt)) - now > RENEW_BEFORE_MS) return null;
-    return { ...(await this.issueToken(nodeId, workspaceId, now)), replaces: current.map((t) => t.jti) };
+    // 1 本の呼び出しを 1 つの流れで追えるよう、いちばん新しい作業トークンの traceId を引き継ぐ
+    const traceId = current.toSorted((a, b) => b.expiresAt - a.expiresAt)[0]?.traceId ?? null;
+    return { ...(await this.issueToken(nodeId, workspaceId, now, traceId)), replaces: current.map((t) => t.jti) };
   }
 
   /**
