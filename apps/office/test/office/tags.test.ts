@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type TagBox, spreadTags } from "../../src/screen/pages/office/tags.ts";
+import { type TagBox, createTagSizer, spreadTags } from "../../src/screen/pages/office/tags.ts";
 
 // 名札が重ならないように、上にずらす。画面の 3.4
 
@@ -48,5 +48,51 @@ describe("名札をずらす", () => {
 
   it("横にちょうど触れるだけなら重ならない", () => {
     expect(spreadTags([tag("a", 0, 100), tag("b", 60, 100)])).toEqual({ a: 0, b: 0 });
+  });
+});
+
+/**
+ * 測った回数を数える、名札の大きさを測る関数を作る
+ * @returns 測る関数と、id ごとの測った回数
+ */
+const counter = () => {
+  const counts: Record<string, number> = {};
+  const measure = (id: string) => {
+    counts[id] = (counts[id] ?? 0) + 1;
+    return { width: 60, height: 20 };
+  };
+  return { measure, counts };
+};
+
+describe("名札の大きさ", () => {
+  it("同じ字の名札は、描くたびに測り直さない", () => {
+    const { measure, counts } = counter();
+    const sizer = createTagSizer(measure);
+    for (let frame = 0; frame < 3; frame++) {
+      expect(sizer.sizeOf("a", "社長 働いている")).toEqual({ width: 60, height: 20 });
+      sizer.sizeOf("b", "作る役 待っている");
+    }
+    expect(counts).toEqual({ a: 1, b: 1 });
+  });
+
+  it("字が変わった名札だけを測り直す", () => {
+    const { measure, counts } = counter();
+    const sizer = createTagSizer(measure);
+    sizer.sizeOf("a", "社長 働いている");
+    sizer.sizeOf("b", "作る役 待っている");
+    sizer.sizeOf("a", "社長 止めた");
+    sizer.sizeOf("b", "作る役 待っている");
+    expect(counts).toEqual({ a: 2, b: 1 });
+  });
+
+  it("字の形が変わったら、全部を測り直す", () => {
+    const { measure, counts } = counter();
+    const sizer = createTagSizer(measure);
+    sizer.sizeOf("a", "社長 働いている");
+    sizer.sizeOf("b", "作る役 待っている");
+    sizer.reset();
+    sizer.sizeOf("a", "社長 働いている");
+    sizer.sizeOf("b", "作る役 待っている");
+    expect(counts).toEqual({ a: 2, b: 2 });
   });
 });

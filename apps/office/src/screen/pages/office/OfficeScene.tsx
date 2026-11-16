@@ -7,7 +7,7 @@ import { type Loop, browserClock, createLoop } from "./loop.ts";
 import type { EventBatch } from "./OfficePage.tsx";
 import { planMotions } from "./plan.ts";
 import { type ColorResolver, type Room, createRoom } from "./room.ts";
-import { spreadTags } from "./tags.ts";
+import { type TagSizer, createTagSizer, spreadTags } from "./tags.ts";
 import { OFFICE_THEME, themeOf } from "./themes.ts";
 
 export interface OfficeSceneProps {
@@ -27,8 +27,8 @@ export interface OfficeSceneProps {
 interface Control {
   room: Room;
   loop: Loop;
-  /** 動かす時で、画面が見えていて、部屋が画面の中にある時だけ描き続ける */
-  sync: () => void;
+  /** 動かすかを受け、動かす時で、画面が見えていて、部屋が画面の中にある時だけ描き続ける */
+  sync: (moves: boolean) => void;
   /** リンクと名札を姿に重ねる */
   place: () => void;
 }
@@ -57,16 +57,18 @@ function colorResolver(host: HTMLElement): ColorResolver {
  * 社員のリンクと名札を、姿を覆う箱に重ねる関数を作る。名札は重ならないようにずらし、変わった時だけ style を書く
  * @param room 部屋
  * @param links 社員の id ごとのリンク
+ * @param sizer 名札の大きさを覚えて返す物。字が変わった時だけ測る
  * @returns 重ねる関数
  */
-function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>): () => void {
+function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, sizer: TagSizer): () => void {
   const written = new Map<string, string>();
   return () => {
     const boxes = room.boxes();
     const tags = boxes.flatMap((b) => {
       const tag = links.get(b.id)?.firstElementChild;
       if (!(tag instanceof HTMLElement)) return [];
-      return [{ id: b.id, x: b.left + b.width / 2, bottom: b.top, width: tag.offsetWidth, height: tag.offsetHeight }];
+      const { width, height } = sizer.sizeOf(b.id, tag.textContent);
+      return [{ id: b.id, x: b.left + b.width / 2, bottom: b.top, width, height }];
     });
     const shift = spreadTags(tags);
     for (const b of boxes) {
@@ -96,7 +98,7 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
   // 部屋は開いた時に 1 回だけ組む。後の変わりは出来事の動きで見せるので、組む時は初めに受けた出来事の前の状態から始める
   const first = useRef(batch?.before.staff ?? people);
   // 組む時の動かすかの初めの値。後の変わりは下の effect で部屋に伝え、組み直さない
-  const moving = useRef(moves);
+  const initialMoves = useRef(moves);
 
   useEffect(() => {
     const box = frame.current;
@@ -108,26 +110,38 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
     let room: Room;
     try {
       const seats = first.current.map((s) => ({ id: s.id, state: s.state }));
-      room = createRoom(el, seats, themeOf(OFFICE_THEME), colorResolver(box), { moves: moving.current, onLost: onFail });
+      room = createRoom(el, seats, themeOf(OFFICE_THEME), colorResolver(box), { moves: initialMoves.current, onLost: onFail });
     } catch {
       el.remove();
       onFail();
       return undefined;
     }
-    const place = placer(room, links.current);
+    // 名札は字が変わった時だけ測る。字の形を変える字体の読み込みと画面の大きさの変わりでは測り直す
+    const sizer = createTagSizer((id) => {
+      const tag = links.current.get(id)?.firstElementChild;
+      return tag instanceof HTMLElement ? { width: tag.offsetWidth, height: tag.offsetHeight } : { width: 0, height: 0 };
+    });
+    const place = placer(room, links.current, sizer);
     const loop = createLoop((t) => {
       room.render(t);
       place();
     }, browserClock());
     let inView = true;
-    const sync = () => {
+    let moving = initialMoves.current;
+    const sync = (next = moving) => {
+      moving = next;
       const shown = document.visibilityState === "visible";
-      if (moving.current && shown && inView) loop.start();
+      if (moving && shown && inView) loop.start();
       else loop.pause();
     };
     control.current = { room, loop, sync, place };
     const fit = () => {
+      sizer.reset();
       room.resize(el.clientWidth, el.clientHeight);
+      place();
+    };
+    const refont = () => {
+      sizer.reset();
       place();
     };
     const resized = new ResizeObserver(fit);
@@ -137,11 +151,14 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
       sync();
     });
     seen.observe(el);
-    document.addEventListener("visibilitychange", sync);
+    const visible = () => sync();
+    document.addEventListener("visibilitychange", visible);
+    document.fonts.addEventListener("loadingdone", refont);
     fit();
     sync();
     return () => {
-      document.removeEventListener("visibilitychange", sync);
+      document.fonts.removeEventListener("loadingdone", refont);
+      document.removeEventListener("visibilitychange", visible);
       seen.disconnect();
       resized.disconnect();
       loop.stop();
@@ -152,11 +169,10 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
   }, [onFail]);
 
   useEffect(() => {
-    moving.current = moves;
     const c = control.current;
     if (!c) return;
     c.room.setMoving(moves);
-    c.sync();
+    c.sync(moves);
     c.place();
   }, [moves]);
 
@@ -165,10 +181,10 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
     const c = control.current;
     if (!c || !batch || batch.id === played.current) return;
     played.current = batch.id;
-    for (const e of batch.events) c.room.play(planMotions(e, c.room.actors(), { walks: moving.current }));
+    for (const e of batch.events) c.room.play(planMotions(e, c.room.actors(), { walks: moves }));
     c.room.setStates(people.map((s) => ({ id: s.id, state: s.state })));
     c.place();
-  }, [batch, people]);
+  }, [batch, people, moves]);
 
   useEffect(() => {
     const c = control.current;

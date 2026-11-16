@@ -39,3 +39,36 @@ export function spreadTags(tags: readonly TagBox[]): Record<string, number> {
   }
   return shift;
 }
+
+/** 名札の幅と高さ (CSS のピクセル) */
+export interface TagSize {
+  width: number;
+  height: number;
+}
+
+/** 名札の大きさを覚えて返す物 */
+export interface TagSizer {
+  /** 名札の大きさを返す。字が前と同じなら測らずに覚えた大きさを返す */
+  sizeOf: (id: string, text: string) => TagSize;
+  /** 覚えた大きさを捨てる。字の形 (字体の読み込み、画面の大きさ) が変わった時に呼ぶ */
+  reset: () => void;
+}
+
+/**
+ * 名札の大きさを、字が変わった時と字の形が変わった時だけ測る物を作る。描くたびに測ると、そのたびに画面の並べ直しが走る
+ * @param measure 社員の id の名札を測る関数
+ * @returns 名札の大きさを覚えて返す物
+ */
+export function createTagSizer(measure: (id: string) => TagSize): TagSizer {
+  const known = new Map<string, { text: string; size: TagSize }>();
+  return {
+    sizeOf: (id, text) => {
+      const hit = known.get(id);
+      if (hit?.text === text) return hit.size;
+      const size = measure(id);
+      known.set(id, { text, size });
+      return size;
+    },
+    reset: () => known.clear(),
+  };
+}
