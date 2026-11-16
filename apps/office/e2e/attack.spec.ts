@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { type APIRequestContext, expect, test } from "@playwright/test";
 import { parse } from "yaml";
 import { z } from "zod";
+import { WITHOUT_SESSION } from "../src/gate/auth/without-session.ts";
 import { STEP_UP_NOT_BUILT } from "../test/helpers/step-up.ts";
 
 // ブラウザーを使わないので、playwright.config.ts の attack のプロジェクトで 1 度だけ流す
@@ -23,8 +24,6 @@ const routes = Object.entries(v1.paths)
       }),
   );
 const writes = routes.filter((r) => r.method !== "GET");
-/** ログインセッションを確かめないルート。セッションを作る所と稼働確認と、SameSite=Strict のクッキーが付かない GitHub からの戻り */
-const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health", "GET /api/v1/github/callback", "GET /api/v1/github/installed"]);
 
 type Route = (typeof routes)[number];
 /** 1 つの要求の答え。状態コードと、problem+json の code (無ければ空) */

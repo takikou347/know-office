@@ -6,6 +6,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { Problem } from "@know-office/core";
 import { stepUpGate } from "../../src/gate/auth/passkey.ts";
+import { WITHOUT_SESSION } from "../../src/gate/auth/without-session.ts";
 import { MAX_BODY_BYTES } from "../../src/gate/body.ts";
 import gate from "../../src/gate/index.ts";
 import { fixedClock } from "../helpers/clock.ts";
@@ -58,8 +59,6 @@ const writeRoutes = apiRoutes.filter((r) => !SAFE.has(r.method));
 /** 本文を受けるメソッドのルート。DELETE は本文を読まない */
 const bodyRoutes = apiRoutes.filter((r) => ["POST", "PUT", "PATCH"].includes(r.method));
 
-/** ログインセッションを確かめないルート。middleware.ts の WITHOUT_SESSION と同じ。GitHub から戻る 2 つは SameSite=Strict のクッキーが付かないので、Access の証明と state か installation_id で確かめる */
-const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health", "GET /api/v1/github/callback", "GET /api/v1/github/installed"]);
 
 /**
  * パスの変数を埋めた URL を作る
@@ -152,6 +151,11 @@ describe("WAF が無い時の守り", () => {
 
   it("どのルートも、ログインの証明の無い要求を 401 で断る", async () => {
     expect(await statuses(codeRoutes, () => ({ headers: { Origin: ORIGIN } }))).toEqual(every(codeRoutes, 401));
+  });
+
+  it("ログインセッションを確かめないルートは、どれもコードにある /api/ のルート", () => {
+    const keys = new Set(apiRoutes.map((r) => r.key));
+    expect([...WITHOUT_SESSION].filter((key) => !keys.has(key))).toEqual([]);
   });
 
   it("どのルートも、壊れたクッキーを 401 で断る", async () => {

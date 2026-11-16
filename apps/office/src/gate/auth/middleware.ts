@@ -11,6 +11,7 @@ import { verifyAccess } from "./access.ts";
 import type { RateBucket } from "./guard-book.ts";
 import { readSession, SESSION_COOKIE, signingKey } from "./session.ts";
 import { vaultKey } from "./vault.ts";
+import { WITHOUT_SESSION } from "./without-session.ts";
 
 /** ログインセッションの開始とパスキーのパス。1 分 10 回に絞る (API の決まりの 4.5 の 2) */
 const AUTH_PATHS = /^\/api\/v1\/(sessions$|me\/step-up$|passkeys(\/options)?$)/;
@@ -104,12 +105,6 @@ export const accessProof = createMiddleware<GateEnv>(async (c, next) => {
   }
   await next();
 });
-
-/**
- * ログインセッションを確かめないルート。セッションを作る所、D1 が止まっても答える稼働確認、GitHub から戻る所
- * ログインセッションのクッキーは SameSite=Strict なので、github.com から戻る時には付かない。戻る所は Access と、署名した state か GitHub への問い合わせで確かめる
- */
-const WITHOUT_SESSION = new Set(["POST /api/v1/sessions", "GET /api/v1/health", "GET /api/v1/github/callback", "GET /api/v1/github/installed"]);
 
 /**
  * ログインセッションのクッキーを確かめ、今のセッションを置く
