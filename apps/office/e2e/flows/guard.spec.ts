@@ -14,6 +14,8 @@ const Thresholds = z.object({ data: z.object({ version: z.number(), values: z.re
  */
 async function openGuard(page: Page): Promise<void> {
   await page.goto("/guard");
+  // 開いた時は初めの通知を待つ間 (長くて 1 秒) 中身を隠し、隠れた「読んでいます」は数に入らないので、出てから読み終わりを待つ
+  await expect(part(page, "止めている物").getByRole("heading", { level: 2 })).toBeVisible();
   await expect(part(page, "止めている物").getByRole("status")).toHaveCount(0);
   const state = State.parse(await (await page.request.get("/api/v1/guard/state")).json());
   const left = state.data.stopped.filter((s) => s.scope === "staff");
