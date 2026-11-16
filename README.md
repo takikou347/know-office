@@ -4,7 +4,6 @@ KNOW IDEA の社内の管理アプリ。AI 社員が自分でタスクを見つ�
 
 | 置き場 | 中身 |
 | --- | --- |
-| `openspec/` | 仕様(OpenSpec)。要件はここが正本 |
 | `packages/core/` | ゲートウェイ、ワークスペース、画面が共に使う型と判断 |
 | `apps/office/` | 画面(Vite と React)とゲートウェイ(Hono)。1 つの Worker にまとめて配る |
 | `apps/workspace/` | ワークスペース。Node.js で動くコンテナの中身 |
@@ -14,4 +13,4 @@ KNOW IDEA の社内の管理アプリ。AI 社員が自分でタスクを見つ�
 
 手元で動かす時は `pnpm dev` で、http://localhost:5173 に画面とゲートウェイが Cloudflare と同じ仕組み(workerd)で立つ。ビルドの成果物、手元の Cloudflare の状態、e2e の結果は `pnpm clean` で消す。
 
-仕様は `openspec/changes/build-office/` にあり、作っている所は `tasks.md` の印で分かる。
+作っている所と残りは [Issues](https://github.com/takikou347/know-office/issues) で分かる。

@@ -10,7 +10,7 @@
   "preview_urls": false,
   // 開発環境は .dev.vars で development に替える。無い時は本物の宛先を使う。URGENT_SCAN (急ぐ故障の調べ) は Claude の費用が出るので、オーナーの はい の後に on にする
   "vars": { "ENVIRONMENT": "production", "URGENT_SCAN": "off" },
-  // D1 の置き場。database_id は Cloudflare に作った時 (tasks.md の 4.8) に本物に替える。手元では名前だけで動く
+  // D1 の置き場。database_id は Cloudflare に作った時 (#144) に本物に替える。手元では名前だけで動く
   "d1_databases": [
     { "binding": "DB", "database_name": "know-office", "database_id": "local-db", "migrations_dir": "migrations/main" },
     { "binding": "REC_2026", "database_name": "know-office-rec-2026", "database_id": "local-rec-2026", "migrations_dir": "migrations/ledger" },
@@ -20,7 +20,7 @@
     { "binding": "REC_2030", "database_name": "know-office-rec-2030", "database_id": "local-rec-2030", "migrations_dir": "migrations/ledger" },
     { "binding": "REC_2031", "database_name": "know-office-rec-2031", "database_id": "local-rec-2031", "migrations_dir": "migrations/ledger" }
   ],
-  // 会話の記録、社員が作ったファイル、D1 の毎日の写しの置き場。バケットは Cloudflare に作った時 (tasks.md の 4.8) に同じ名前で作る。手元では名前だけで動く
+  // 会話の記録、社員が作ったファイル、D1 の毎日の写しの置き場。バケットは Cloudflare に作った時 (#144) に同じ名前で作る。手元では名前だけで動く
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "know-office-files" }],
   "durable_objects": {
     "bindings": [

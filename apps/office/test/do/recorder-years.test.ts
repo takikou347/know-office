@@ -1,4 +1,4 @@
-// 1 年分の記録を流し込み、置き場ごとの使った量と、年をまたいだハッシュチェーンを本物の workerd で確かめる (ログインと記録の 3.5、tasks.md の 4.10)
+// 1 年分の記録を流し込み、置き場ごとの使った量と、年をまたいだハッシュチェーンを本物の workerd で確かめる (ログインと記録の 3.5)
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { startTestWorker, type TestWorker } from "../helpers/worker.ts";

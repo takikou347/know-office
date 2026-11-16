@@ -73,21 +73,54 @@ export function e2ePortFor(root: string): number {
 }
 
 /**
+ * git の共通の置き場 (メインのチェックアウトの .git) を聞く
+ * @param root know-office の置き場
+ * @returns 共通の置き場の絶対の道。git で聞けなければ undefined
+ */
+function gitCommonDir(root: string): string | undefined {
+  const run = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: root, encoding: "utf8" });
+  return run.status === 0 ? run.stdout.trim() : undefined;
+}
+
+/**
+ * knowidea の置き場を決める。作業ツリーの中からでも、メインのチェックアウトの隣を見る
+ * @param root know-office の置き場
+ * @param env 環境変数。`KNOWIDEA_DIR` があればそれを先に使う
+ * @param commonDir git の共通の置き場を聞く関数
+ * @returns knowidea の置き場
+ */
+export function knowideaDir(
+  root: string,
+  env: Readonly<Record<string, string | undefined>>,
+  commonDir: (root: string) => string | undefined = gitCommonDir,
+): string {
+  if (env.KNOWIDEA_DIR) return resolve(env.KNOWIDEA_DIR);
+  const common = commonDir(root);
+  const main = common === undefined ? root : dirname(resolve(root, common));
+  return join(dirname(main), "knowidea");
+}
+
+/**
  * 走らせる手順を並べる
  * @param root know-office の置き場
  * @param argv 命令の引数。`--e2e` で画面のテストを足す
- * @param env 環境変数。`KNOWIDEA_DIR` で knowidea の置き場を渡す。無ければ隣の knowidea
+ * @param env 環境変数。`KNOWIDEA_DIR` で knowidea の置き場を渡す。無ければメインのチェックアウトの隣の knowidea
+ * @param commonDir git の共通の置き場を聞く関数
  * @returns 走らせる手順
  */
-export function stepsFor(root: string, argv: readonly string[], env: Readonly<Record<string, string | undefined>>): ShellStep[] {
-  const knowidea = resolve(env.KNOWIDEA_DIR ?? join(root, "..", "knowidea"));
+export function stepsFor(
+  root: string,
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  commonDir: (root: string) => string | undefined = gitCommonDir,
+): ShellStep[] {
+  const knowidea = knowideaDir(root, env, commonDir);
   const check = join(knowidea, "tools", "check.py");
   const steps: ShellStep[] = [
     { name: "lint", cmd: "pnpm lint", cwd: root },
     { name: "typecheck", cmd: "pnpm typecheck", cwd: root },
     { name: "test", cmd: "pnpm test", cwd: root },
     { name: "build", cmd: "pnpm build", cwd: root },
-    { name: "openspec", cmd: "npx -y @fission-ai/openspec@1.16.0 validate --all --strict", cwd: root },
     existsSync(check)
       ? { name: "check.py", cmd: `python3 ${JSON.stringify(check)} ${JSON.stringify(root)}`, cwd: dirname(knowidea) }
       : { name: "check.py", cmd: `echo "knowidea が ${knowidea} に無い。KNOWIDEA_DIR で置き場を渡す" && exit 1`, cwd: root },

@@ -1,4 +1,4 @@
-// 見つけて直す仕組みが GitHub の Issue を作り、書き足し、閉じる口と、渡す前に文を伏せる包み。GitHub の連携 (tasks.md の 8.4) でつなぐまでは断る (サービスと拡張の 3.7)
+// 見つけて直す仕組みが GitHub の Issue を作り、書き足し、閉じる口と、渡す前に文を伏せる包み。GitHub の連携 (#147) でつなぐまでは断る (サービスと拡張の 3.7)
 import { AppError, redactPublic } from "@know-office/core";
 
 /** GitHub の Issue を扱う口。テストは代わりの物を渡す */

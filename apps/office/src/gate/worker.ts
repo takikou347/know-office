@@ -17,7 +17,7 @@ export { WorkspaceDO, WorkspaceEgress } from "./do/workspace.ts";
 // Workers の fetch は this を持たずに呼ぶと落ちるので、包んで渡す
 const fetcher: Fetcher = (input, init) => fetch(input, init);
 
-// Issue の口は GitHub の連携 (tasks.md の 8.4) までつながず、見つけた物は数えるだけにする
+// Issue の口は GitHub の連携 (#147) までつながず、見つけた物は数えるだけにする
 const weekly: WeeklyDeps = { fetch: fetcher, tracker: UNCONNECTED_TRACKER };
 
 export default {

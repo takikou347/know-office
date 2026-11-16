@@ -2,7 +2,7 @@
 // node:test の describe と it は Promise を返すが、node:test が待つので void で示す
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { e2ePortFor, runSteps, stepsFor, summarize, type Step } from "./verify.ts";
+import { e2ePortFor, knowideaDir, runSteps, stepsFor, summarize, type Step } from "./verify.ts";
 
 void describe("push の前のチェックを短い出力で走らせる", () => {
   void it("通った手順は名前だけを 1 行で出す", () => {
@@ -72,5 +72,30 @@ void describe("走らせる手順を並べる", () => {
       assert.equal(port % 2, 0);
       assert.ok(port >= 5200 && port <= 5798);
     }
+  });
+});
+
+void describe("knowidea の置き場を決める", () => {
+  const worktree = "/home/claude/know-office/.claude/worktrees/152-x";
+
+  void it("KNOWIDEA_DIR があればそれを使う", () => {
+    assert.equal(knowideaDir(worktree, { KNOWIDEA_DIR: "/srv/knowidea" }, () => "/home/claude/know-office/.git"), "/srv/knowidea");
+  });
+
+  void it("作業ツリーからは、メインのチェックアウトの隣の knowidea を見る", () => {
+    assert.equal(knowideaDir(worktree, {}, () => "/home/claude/know-office/.git"), "/home/claude/knowidea");
+  });
+
+  void it("メインのチェックアウトからは、その隣の knowidea を見る", () => {
+    assert.equal(knowideaDir("/home/claude/know-office", {}, () => "/home/claude/know-office/.git"), "/home/claude/knowidea");
+  });
+
+  void it("git の置き場が分からない時は、隣の knowidea を見る", () => {
+    assert.equal(knowideaDir("/repo/know-office", {}, () => undefined), "/repo/knowidea");
+  });
+
+  void it("並べた手順は、作業ツリーからでもメインの隣の knowidea の check.py を呼ぶ", () => {
+    const step = stepsFor(worktree, [], {}, () => "/home/claude/know-office/.git").find((s) => s.name === "routes");
+    assert.match(step?.cmd ?? "", /^python3 "\/home\/claude\/knowidea\/tools\/routes_md\.py"/);
   });
 });
