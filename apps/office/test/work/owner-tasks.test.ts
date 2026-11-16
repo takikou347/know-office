@@ -1,6 +1,6 @@
 // オーナーが画面から作るタスク。題、本文、種類、頼む先と一緒に、直すリポジトリを付けられる (ルートの一覧の 1.7)
 import { describe, expect, it } from "vitest";
-import { advance, api, at, idOf, purposeAndGoal, REPO, rows, useWork } from "../helpers/work.ts";
+import { advance, api, at, clockIn, idOf, purposeAndGoal, REPO, rows, useWork } from "../helpers/work.ts";
 
 const world = useWork();
 
@@ -43,5 +43,34 @@ describe("オーナーが画面からタスクを作る", () => {
     expect(await world.gate.staff.builder.book.status(world.clock.now())).toMatchObject({ state: "off", nodeId: null });
     const second = await make("次の直し");
     expect(await world.gate.staff.builder.book.status(world.clock.now())).toMatchObject({ state: "called", nodeId: second });
+  });
+
+  it("終わりの時刻の後の延長の途中でタスクを止めると、チェックポイントを待たずに退勤する", async () => {
+    const parentId = await project();
+    await clockIn(world, "builder");
+    const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId, scope: "office", title: "勤怠の表", taskKind: "build", assignee: "builder" }, 201));
+    const book = world.gate.staff.builder.book;
+    expect(await book.status(world.clock.now())).toMatchObject({ state: "working", nodeId: task });
+    await advance(world, at(17));
+    await book.wake(at(17));
+    expect(await book.status(at(17))).toMatchObject({ state: "wrapping", nodeId: task });
+    await api(world, "POST", "/api/v1/guard/stops", { scope: "task", target: task, reason: "延長の途中で止める" }, 201);
+    expect(await book.status(at(17))).toMatchObject({ state: "off", nodeId: null });
+  });
+
+  it("止めたタスクをもう一度離れても、次に頼んだタスクを持ったまま何も変えない", async () => {
+    const parentId = await project();
+    await advance(world, at(21));
+    const make = async (title: string) => idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId, scope: "office", title, taskKind: "fix", assignee: "builder" }, 201));
+    const first = await make("急ぎの直し");
+    await api(world, "POST", "/api/v1/guard/stops", { scope: "task", target: first, reason: "頼み直す" }, 201);
+    const second = await make("次の直し");
+    const book = world.gate.staff.builder.book;
+    const before = await book.status(world.clock.now());
+    expect(before).toMatchObject({ state: "called", nodeId: second });
+    // 止めた知らせが 2 度届いた時に、後から取ったタスクを離さない
+    await book.drop(first, world.clock.now());
+    expect(await book.status(world.clock.now())).toEqual(before);
+    expect(await rows(world.gate.env.DB, "SELECT node_id, result FROM work_entries")).toEqual([{ node_id: first, result: "stopped" }]);
   });
 });

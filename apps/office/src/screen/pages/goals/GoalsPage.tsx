@@ -100,16 +100,19 @@ type Edit = {
   staff: OrgStaff[];
   /** 変えた後に木を読み直す */
   reload: () => void;
+  /** ほかで先に変わっていた時に、知らせを出して木を読み直す */
+  conflicted: () => void;
 };
 
 /**
  * プロジェクトとタスクの入れ子の一覧
  * @param props 子と、変えるのに使う物
+ * @param props.parent 子の親。プロジェクトの親の目標の名前を、タスクを足すボタンに入れる
  * @param props.items 子の並び
  * @param props.edit 頼む先に選べる社員と読み直す関数
  * @returns 入れ子の一覧
  */
-function Branches({ items, edit }: { items: NodeTree[]; edit: Edit }) {
+function Branches({ parent, items, edit }: { parent: NodeTree; items: NodeTree[]; edit: Edit }) {
   if (items.length === 0) return <p>まだ分けていない</p>;
   return (
     <ul>
@@ -120,17 +123,17 @@ function Branches({ items, edit }: { items: NodeTree[]; edit: Edit }) {
             <>
               <Badge>{STATUS_LABEL[n.status]}</Badge> <span>頼む先: {roleOf(edit.staff, n.assignee)}</span>{" "}
               {/* 版が変われば頼む先の欄を今の値から始め直す */}
-              <ChangeTask key={n.version} task={n} staff={edit.staff} onDone={edit.reload} />
+              <ChangeTask key={n.version} task={n} staff={edit.staff} onDone={edit.reload} onConflict={edit.conflicted} />
             </>
           ) : (
             <span>({Math.round(n.progress * 100)}%)</span>
           )}
           {n.kind === "project" ? (
             <div>
-              <AddTask project={n} staff={edit.staff} onDone={edit.reload} />
+              <AddTask project={n} goal={parent.kind === "goal" ? parent : undefined} staff={edit.staff} onDone={edit.reload} />
             </div>
           ) : null}
-          {n.children.length > 0 ? <Branches items={n.children} edit={edit} /> : null}
+          {n.children.length > 0 ? <Branches parent={n} items={n.children} edit={edit} /> : null}
         </li>
       ))}
     </ul>
@@ -159,7 +162,7 @@ function Root({ root, edit }: { root: NodeTree; edit: Edit }) {
                 <AddTask project={g} staff={edit.staff} onDone={edit.reload} />
               </div>
             ) : null}
-            <Branches items={g.children} edit={edit} />
+            <Branches parent={g} items={g.children} edit={edit} />
           </Stack>
         </Card>
       ))}
@@ -273,10 +276,26 @@ export function GoalsPage() {
   );
   const [trees, reloadTrees] = useLoad(loadTrees);
   const [org, reloadOrg] = useLoad(loadOrg);
-  const edit: Edit = { staff: org.state === "ok" ? org.data : [], reload: reloadTrees };
+  const [stale, setStale] = useState(false);
+  const edit: Edit = {
+    staff: org.state === "ok" ? org.data : [],
+    reload: () => {
+      setStale(false);
+      reloadTrees();
+    },
+    conflicted: () => {
+      setStale(true);
+      reloadTrees();
+    },
+  };
   const top = org.state === "ok" ? org.data.filter((p) => p.bossId === null || !StaffId.safeParse(p.bossId).success) : [];
   return (
     <>
+      {stale ? (
+        <Alert tone="warn" live onClose={() => setStale(false)} closeLabel="知らせを閉じる">
+          ほかで先に変わっていたので読み直しました。今の頼む先と状態を確かめてから、もう一度変えてください。
+        </Alert>
+      ) : null}
       {trees.state === "loading" ? <p>目的からタスクまでを読んでいます</p> : null}
       {trees.state === "failed" ? <LoadFailed what="目的からタスクまで" failed={trees} /> : null}
       {trees.state === "ok" && trees.data.length === 0 ? <p>目的はまだ無い</p> : null}

@@ -76,8 +76,8 @@ async function openTree(page: Page): Promise<void> {
  */
 async function addTask(page: Page, title: string, assignee: string): Promise<string> {
   const tree = part(page, "目的: 社員の仕事の通し");
-  await tree.getByRole("button", { name: "通しのタスクにタスクを足す" }).click();
-  const dialog = page.getByRole("dialog", { name: "通しのタスクにタスクを足す" });
+  await tree.getByRole("button", { name: "「社員がタスクを始める」の「通しのタスク」にタスクを足す" }).click();
+  const dialog = page.getByRole("dialog", { name: "「社員がタスクを始める」の「通しのタスク」にタスクを足す" });
   await dialog.getByRole("textbox", { name: "題" }).fill(title);
   await dialog.getByRole("textbox", { name: "本文" }).fill("通しで足したタスク");
   await dialog.getByRole("radiogroup", { name: "種類" }).getByRole("radio", { name: "作る" }).click();

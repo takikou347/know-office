@@ -54,6 +54,8 @@ function staffOf(value: string): StaffId | undefined {
 interface AddTaskProps {
   /** タスクを足すプロジェクト */
   project: NodeTree;
+  /** プロジェクトの親の目標。受け付けのプロジェクトには無い。同じ名前のプロジェクトを見分けるのに使う */
+  goal?: NodeTree | undefined;
   /** 頼む先に選べる社員 */
   staff: OrgStaff[];
   /** 足した後に呼ぶ。木を読み直すのに使う */
@@ -61,7 +63,7 @@ interface AddTaskProps {
 }
 
 /** プロジェクトの下にタスクを足すボタンとダイアログ。題、本文、種類、頼む先、リポジトリを入れる */
-export function AddTask({ project, staff, onDone }: AddTaskProps) {
+export function AddTask({ project, goal, staff, onDone }: AddTaskProps) {
   const api = useContext(ApiContext);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -71,7 +73,7 @@ export function AddTask({ project, staff, onDone }: AddTaskProps) {
   const [repo, setRepo] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failed>();
-  const name = `${project.title}にタスクを足す`;
+  const name = goal === undefined ? `「${project.title}」にタスクを足す` : `「${goal.title}」の「${project.title}」にタスクを足す`;
   const repoBad = repo.trim() !== "" && !RepoName.safeParse(repo.trim()).success;
 
   const reset = () => {
@@ -169,12 +171,14 @@ interface ChangeTaskProps {
   task: NodeTree;
   /** 頼む先に選べる社員 */
   staff: OrgStaff[];
-  /** 変えた後と、ほかで先に変わっていた時に呼ぶ。木を読み直すのに使う */
+  /** 変えた後に呼ぶ。木を読み直すのに使う */
   onDone: () => void;
+  /** ほかで先に変わっていた (409) 時に呼ぶ。木を読み直すとこのダイアログは閉じるので、知らせは呼ぶ側が出す */
+  onConflict: () => void;
 }
 
 /** タスクの頼む先を変える、タスクを取り消すボタンとダイアログ。作業中のタスクには出さない */
-export function ChangeTask({ task, staff, onDone }: ChangeTaskProps) {
+export function ChangeTask({ task, staff, onDone, onConflict }: ChangeTaskProps) {
   const api = useContext(ApiContext);
   const [open, setOpen] = useState(false);
   const [assignee, setAssignee] = useState(task.assignee ?? NOBODY);
@@ -191,9 +195,13 @@ export function ChangeTask({ task, staff, onDone }: ChangeTaskProps) {
     const sent = await send(api, () => api.api.v1.nodes[":nodeId"].$patch({ param: { nodeId: task.id }, json: { version: task.version, ...change } }));
     setBusy(false);
     if (!sent.ok) {
+      // ほかで先に変わっていたら、今の木を読み直して版を合わせる。読み直すとこのダイアログは作り直されるので、知らせは木の上に出す
+      if (sent.failure.code === "conflict") {
+        setOpen(false);
+        onConflict();
+        return;
+      }
       setFailure(sent.failure);
-      // ほかで先に変わっていたら、今の木を読み直して版を合わせる
-      if (sent.failure.code === "conflict") onDone();
       return;
     }
     setOpen(false);
@@ -214,7 +222,7 @@ export function ChangeTask({ task, staff, onDone }: ChangeTaskProps) {
         </Button>
       }
       title={name}
-      description={`今の頼む先: ${roleOf(staff, task.assignee)}`}
+      description={`今の頼む先: ${roleOf(staff, task.assignee)}。タスクを取り消すと見送りになり、戻せません。`}
       actions={
         <>
           <DialogClose variant="secondary" disabled={busy}>
