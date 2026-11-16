@@ -1,7 +1,7 @@
 // 画面の通知。配信の印で読み直すのを速い道にし、印を取りこぼしても 5 分ごとに (配信が切れている間は 1 分ごとに) 読む。上部の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5、社員と自動の 3.7)
 import { type Notice, type NoticeLevel, systemClock } from "@know-office/core";
 import { Alert, Link, List, type Tone } from "knowidea-ui";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type Api, ApiContext } from "../api.ts";
 import { jstTime } from "../format.ts";
 import { markReloader, useLive } from "./live.tsx";
@@ -253,7 +253,31 @@ export function NoticeList({ notices, state }: NoticeListProps) {
  */
 export function LiveNoticeBar() {
   const { notices, markRead } = useContext(NoticesContext);
-  return <NoticeBar notices={notices} onRead={markRead} />;
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const band = ref.current;
+    if (!band || typeof ResizeObserver === "undefined") return () => {};
+    // 帯は中身の上の段にあり、通知は配信でいつでも届く。帯が出たり高くなったりすると中身の段が縮み、focus した物が下へ押し出されて
+    // 隠れる (WCAG 2.2 の 2.4.11)。帯の高さが変わるたびに、中身にある focus した物を見える所へ戻す
+    const observer = new ResizeObserver(() => revealFocus(band.ownerDocument));
+    observer.observe(band);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref}>
+      <NoticeBar notices={notices} onRead={markRead} />
+    </div>
+  );
+}
+
+/**
+ * 中身 (main) の中で focus している物を、隠れないよう見える所へ寄せる。中身の外の focus (帯の「読んだ」など) は動かさない
+ * @param doc 画面の文書
+ */
+export function revealFocus(doc: Document): void {
+  const focused = doc.activeElement;
+  if (!(focused instanceof HTMLElement) || !focused.closest("main")) return;
+  focused.scrollIntoView({ block: "nearest" });
 }
 
 /**

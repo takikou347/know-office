@@ -179,6 +179,36 @@ test.describe("使いやすさ", () => {
     await expect(page.getByText("承認を出し、GitHub にも写しました")).toBeVisible();
   });
 
+  test("通知の帯が後から出ても、focus した物を隠さない", async ({ page }) => {
+    await stubReview(page);
+    await page.goto(REVIEW_PATH);
+    await expect(page.getByText("const empty = 0;")).toBeVisible();
+    // 中身の下の端にある入力欄に focus を置く。帯が後から出て中身の段が縮むと、下へ押し出される
+    const comment = page.getByLabel("判断の一言");
+    await comment.focus();
+    await comment.evaluate((el) => el.scrollIntoView({ block: "end" }));
+    expect(await focusProblem(page)).toBeNull();
+    // 配信の印と同じく、タブが見えた時の読み直しで新しい未読の通知を受け、帯を後から出す。入口の返事は境目のモックで返し、長い中身で帯を何行にもする
+    const notice = {
+      id: "0193a000-0000-7000-8000-000000000001",
+      at: new Date().toISOString(),
+      level: "warn",
+      kind: "e2e_band",
+      title: "後から出た通知",
+      body: "帯の高さを変える長い中身。".repeat(12),
+      scope: "office",
+      readAt: null,
+      link: null,
+    };
+    await page.route(
+      (url) => url.pathname === "/api/v1/notices",
+      (route) => route.fulfill({ json: { data: [notice], meta: { ...META, next: null } } }),
+    );
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(page.getByText("後から出た通知")).toBeVisible();
+    await expect.poll(() => focusProblem(page)).toBeNull();
+  });
+
   // 1 ページに 2 秒ほど掛かり、14 ページを 1 つの test で回すと 5 秒を超えるので、ページごとに分ける
   test.describe("自動のチェック", () => {
     for (const p of pages) {
