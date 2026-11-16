@@ -5374,16 +5374,19 @@ paths:
       description: '処理の流れ:
 
 
-        1. 指定月の `health_checks` から、部分ごとの成功率を計算する'
+        1. 日本時間の指定月の `health_checks` の件数と、通った件数を 1 つの SQL で数える
+
+        2. 通った割合を `ratio` で返す。確かめが 1 件も無い月は `null`'
       x-steps:
-      - 指定月の `health_checks` から、部分ごとの成功率を計算する
+      - 日本時間の指定月の `health_checks` の件数と、通った件数を 1 つの SQL で数える
+      - 通った割合を `ratio` で返す。確かめが 1 件も無い月は `null`
       parameters:
       - name: month
         in: query
         required: true
         schema:
           type: string
-          pattern: ^\d{4}-\d{2}$
+          pattern: ^\d{4}-(0[1-9]|1[0-2])$
       security:
       - accessJwt: []
         session: []
@@ -9240,10 +9243,15 @@ components:
       properties:
         month:
           type: string
+          description: 日本時間の月 YYYY-MM
         ratio:
-          type: number
+          type:
+          - number
+          - 'null'
+          description: 通った割合。確かめが無い月は null
         checks:
           type: integer
+          description: 確かめた件数
       required:
       - month
       - ratio

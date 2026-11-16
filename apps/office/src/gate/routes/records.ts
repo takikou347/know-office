@@ -1,6 +1,6 @@
-// 記録: 年ごとの置き場から読む監査ログとハッシュチェーンの確かめ、置き場ごとの使った量 (ログインと記録の 3.4、3.5)
+// 記録: 年ごとの置き場から読む監査ログとハッシュチェーンの確かめ、置き場ごとの使った量、月の稼働率 (ログインと記録の 3.4、3.5、サービスと拡張の 3.5)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, AuditRow, AuditVerification, jstDayStart, jstYear, RecordGroup, RecordSummary, StorageUse, VerifyAuditInput } from "@know-office/core";
+import { AppError, AuditRow, AuditVerification, jstDayStart, jstYear, RecordGroup, RecordSummary, StorageUse, Uptime, UptimeQuery, VerifyAuditInput } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { and, desc, gte, lt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -11,6 +11,7 @@ import { auditLog } from "../db/records.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 import { observe } from "../guard/observe.ts";
 import { storageUses } from "../ledger/storage.ts";
+import { monthUptime } from "../ledger/uptime.ts";
 import { type RecordDb, type SummaryRange, summarize, summaryCsv } from "../ledger/summary.ts";
 import { audit } from "../ledger/record.ts";
 import { listQuery, listResponse, okResponse, problems } from "../openapi.ts";
@@ -76,6 +77,16 @@ const exportRecordSummaryRoute = createRoute({
   tags: ["records"],
   request: { query: SummaryQuery },
   responses: { 200: { description: "CSV", content: { "text/csv": { schema: z.string() } } }, ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+const getUptimeRoute = createRoute({
+  method: "get",
+  path: "/api/v1/records/uptime",
+  operationId: "getUptime",
+  tags: ["records"],
+  summary: "月間の稼働率",
+  request: { query: UptimeQuery },
+  responses: { 200: okResponse(Uptime), ...problems(400, 401, 403, 422, 429, 500) },
 });
 
 /**
@@ -174,4 +185,5 @@ export const recordRoutes = router
     const { from, to, group } = c.req.valid("query");
     const summary = await summarize(c.env.DB, boundRecords(c.env), group, rangeOf(from, to));
     return c.body(summaryCsv(summary), 200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="records-${group}.csv"` });
-  });
+  })
+  .openapi(getUptimeRoute, async (c) => ok(c, await monthUptime(c.env, c.req.valid("query").month)));

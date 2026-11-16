@@ -1,4 +1,4 @@
-// 5 分ごとの定期ジョブ。社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
+// 5 分ごとの定期ジョブ。部分ごとの稼働を残し、社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
 import { type Clock, newId, StaffId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -12,6 +12,7 @@ import { checkOverruns, checkThresholds } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import { announceNotice } from "../live/publish.ts";
 import { STORAGE_LIMIT_BYTES, storageUses } from "../ledger/storage.ts";
+import { checkHealth } from "../ledger/uptime.ts";
 import { pollBatches, type WeeklyDeps } from "./weekly.ts";
 
 /** 上限に対してこの割合に届いたら通知を出す */
@@ -82,6 +83,8 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
     const deps = { ...UNCONNECTED_DEPS, rollback: connectRollback(env, forge, () => clock.now()) };
     ctx.waitUntil(collectMetrics(env, UNCONNECTED_ANALYTICS, clock.now(), deps).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "service_metrics_failed", error }, clock)));
   }
+  // 部分ごとに通るかを残し、月の稼働率のもとにする。書けない時は checkHealth がエラーログに残す
+  ctx.waitUntil(checkHealth(env, clock));
   ctx.waitUntil(
     checkStorage(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "storage_check_failed", error }, clock)),
   );

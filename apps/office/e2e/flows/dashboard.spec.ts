@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { part } from "./helpers/screen.ts";
 import { seedMain } from "./helpers/seed.ts";
 
-// ダッシュボードと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance で通す。承認待ちとタスクは種に置き、応答を差し替えない (ルートの一覧の 1.4 と 1.12)
+// ダッシュボードと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。承認待ちとタスクは種に置き、応答を差し替えない (ルートの一覧の 1.4 と 1.12)
 
 const NODE = "019a7b00-0000-7000-8000-0000000000ea";
 const APPROVAL = "019a7b00-0000-7000-8000-0000000000eb";
@@ -40,5 +41,23 @@ test.describe("記録", () => {
     const row = table.getByRole("row", { name: new RegExp(`${day}.*レビュー担当`) });
     await expect(row).toBeVisible();
     await expect(row.getByText("1 時間 30 分")).toBeVisible();
+  });
+
+  test("5 分ごとの確かめから出した今月の稼働率を出す", async ({ page }) => {
+    await page.goto("/records");
+    const uptime = part(page, "稼働率");
+    // 確かめの行は追記だけで消せないので、前の通しが残した件数を読み、Cron の 1 回で 6 つの部分の分が増える事を確かめる
+    const counted = uptime.getByText(/確かめた \d+ 件/);
+    await expect(counted).toBeVisible();
+    const before = Number(/確かめた (\d+) 件/.exec(await counted.innerText())?.[1]);
+    // 入口は 5 分ごとの Cron。開発の入口は scheduled を /cdn-cgi/local/scheduled で呼べる
+    const fired = await page.request.get(`/cdn-cgi/local/scheduled?cron=${encodeURIComponent("*/5 * * * *")}`);
+    expect(fired.ok()).toBe(true);
+    await expect(async () => {
+      await page.reload();
+      await expect(uptime.getByText(`確かめた ${String(before + 6)} 件`)).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 15_000 });
+    await expect(uptime.getByText(/^\d+\.\d{2}$/)).toBeVisible();
+    await expect(uptime.getByText(/目安 99\.9%/)).toBeVisible();
   });
 });

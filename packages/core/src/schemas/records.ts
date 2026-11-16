@@ -69,3 +69,22 @@ export const Dashboard = z
 
 /** ダッシュボードの型 */
 export type Dashboard = z.infer<typeof Dashboard>;
+
+/** 日本時間の月 YYYY-MM。月は 01 から 12 */
+export const Month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
+/** GET /api/v1/records/uptime のクエリ */
+export const UptimeQuery = z.object({ month: Month.openapi({ param: { name: "month", in: "query", required: true } }) }).strict();
+
+/** 月の稼働率。ratio は health_checks の通った割合で、確かめが無い月は null */
+export const Uptime = z
+  .object({
+    month: z.string().meta({ description: "日本時間の月 YYYY-MM" }),
+    ratio: z.number().nullable().meta({ description: "通った割合。確かめが無い月は null" }),
+    checks: z.number().int().meta({ description: "確かめた件数" }),
+  })
+  .strict()
+  .meta({ id: "Uptime" });
+
+/** 月の稼働率の型 */
+export type Uptime = z.infer<typeof Uptime>;

@@ -1,6 +1,6 @@
-// 記録の画面。office 全体の勤怠を入口の /records/attendance から新しい日から読み、サービスごとと社員ごとの内訳を並べる (ルートの一覧の 1.4)
-import { DaySummary, jstDay, StaffOverview, systemClock } from "@know-office/core";
-import { Table } from "knowidea-ui";
+// 記録の画面。今月の稼働率を入口の /records/uptime から、office 全体の勤怠を /records/attendance から新しい日から読み、サービスごとと社員ごとの内訳を並べる (ルートの一覧の 1.4)
+import { DaySummary, jstDay, StaffOverview, systemClock, Uptime } from "@know-office/core";
+import { Grid, Stat, Table } from "knowidea-ui";
 import { z } from "zod";
 import { duration, jstTime } from "../../format.ts";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
@@ -12,6 +12,33 @@ const ATTENDANCE_DAYS = 30;
 
 /** 1 日のミリ秒 */
 const DAY_MS = 86_400_000;
+
+/** 稼働率の目安。月の稼働率をこの割合と並べて出す */
+const UPTIME_TARGET = 0.999;
+
+/**
+ * 今月 (日本時間) の稼働率。5 分ごとの確かめの通った割合を、目安の 99.9% と並べて出す
+ * @returns 稼働率の数字
+ */
+function MonthUptime() {
+  const month = jstDay(systemClock.now()).slice(0, 7);
+  const loaded = useLoad(Uptime, (a) => a.api.v1.records.uptime.$get({ query: { month } }));
+  if (loaded.state === "failed") return <FailedAlert title="稼働率を読めませんでした" failure={loaded} />;
+  if (loaded.state === "loading") return <p role="status">稼働率を読んでいます</p>;
+  const { ratio, checks } = loaded.data;
+  const target = `目安 ${(UPTIME_TARGET * 100).toFixed(1)}%`;
+  return (
+    <Grid minItemWidth={200}>
+      <Stat
+        label={`${month} の稼働率`}
+        icon="chart-bar"
+        value={ratio === null ? "まだ無い" : (Math.floor(ratio * 10_000) / 100).toFixed(2)}
+        unit={ratio === null ? undefined : "%"}
+        sub={`${target}、確かめた ${String(checks)} 件`}
+      />
+    </Grid>
+  );
+}
 
 /**
  * office 全体の勤怠の表。社員の役の名前は /staff から読む
@@ -51,6 +78,9 @@ function OfficeAttendance() {
 export function RecordsPage() {
   return (
     <Section>
+      <Part title="稼働率">
+        <MonthUptime />
+      </Part>
       <Part title="勤怠">
         <OfficeAttendance />
       </Part>
