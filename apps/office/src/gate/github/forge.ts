@@ -19,6 +19,7 @@ import {
   GitHubRuleset,
   GitHubRulesets,
   mainRuleset,
+  OWNER_APPROVAL_CONTEXT,
   RepoName,
   RULESET_NAME,
 } from "@know-office/core";
@@ -271,6 +272,11 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
     postComment: async (repo, pr, comment) => {
       const posted = await call(repo, writePulls, { method: "POST", path: `/pulls/${String(pr)}/comments` }, GitHubPosted, { body: comment.body, commit_id: comment.commitId, path: comment.path, line: comment.line, side: comment.side });
       return posted.id;
+    },
+    postStatus: async (repo, sha, status) => {
+      // GitHub の POST /repos/{owner}/{repo}/statuses/{sha}。説明は 140 字まで、同じ sha と名前で 1,000 件まで
+      const body = { state: status.state, context: OWNER_APPROVAL_CONTEXT, description: status.description.slice(0, 140) };
+      return (await call(repo, { statuses: "write" }, { method: "POST", path: `/statuses/${sha}` }, GitHubPosted, body)).id;
     },
     commitFile: async (repo, branch, change) => {
       const parent = await call(repo, readContents, { method: "GET", path: `/git/commits/${change.parent}` }, GitHubGitCommit);

@@ -103,6 +103,8 @@ export {
   languageOfPath,
   MirrorCommentPayload,
   MirrorReviewPayload,
+  MirrorStatusPayload,
+  OWNER_APPROVAL_CONTEXT,
   NoteSide,
   OwnerVerdict,
   RepoPath,

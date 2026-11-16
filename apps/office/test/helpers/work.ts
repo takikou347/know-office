@@ -32,7 +32,7 @@ export type FakeForge = Forge & {
   /** main に入れたブランチ */
   merged: string[];
   /** 出したレビューと行のコメント */
-  posted: { repo: string; pr: number; kind: "review" | "comment"; body: unknown }[];
+  posted: { repo: string; pr: number; kind: "review" | "comment" | "status"; body: unknown }[];
   /** 動かした workflow */
   dispatched: { repo: string; workflow: string; inputs: Record<string, string> }[];
   /** 確かめたコミットのチェックの今 */
@@ -77,6 +77,7 @@ function fakeForge(): FakeForge {
     },
     postReview: (repo, pr, review) => Promise.resolve(forge.posted.push({ repo, pr, kind: "review", body: review })),
     postComment: (repo, pr, comment) => Promise.resolve(forge.posted.push({ repo, pr, kind: "comment", body: comment })),
+    postStatus: (repo, sha, status) => Promise.resolve(forge.posted.push({ repo, pr: 0, kind: "status", body: { sha, ...status } })),
     commitFile: () => Promise.resolve("c".repeat(40)),
     findMirror: () => Promise.resolve(null),
     pullFiles: () => Promise.resolve([]),

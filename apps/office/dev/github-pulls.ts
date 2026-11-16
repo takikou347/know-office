@@ -10,6 +10,8 @@ const BlobRequest = z.object({ content: z.string(), encoding: z.enum(["utf-8", "
 const TreeRequest = z.object({ base_tree: z.string(), tree: z.array(z.object({ path: z.string(), mode: z.string(), type: z.string(), sha: z.string() }).loose()) }).loose();
 const CommitRequest = z.object({ message: z.string(), tree: z.string(), parents: z.array(z.string()) }).loose();
 const RefRequest = z.object({ sha: z.string(), force: z.boolean().optional() }).loose();
+/** コミットのステータスを出す要求。GitHub の POST /repos/{o}/{r}/statuses/{sha}。説明は 140 字まで */
+const StatusRequest = z.object({ state: z.enum(["error", "failure", "pending", "success"]), context: z.string().min(1).optional(), description: z.string().max(140).optional(), target_url: z.string().optional() }).strict();
 /** workflow を動かす要求。GitHub の POST /repos/{o}/{r}/actions/workflows/{file}/dispatches */
 const DispatchRequest = z.object({ ref: z.string().min(1), inputs: z.record(z.string(), z.string()).optional() }).strict();
 
@@ -160,6 +162,12 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
         if (!deps.allows(token, repo, "pull_requests", "read")) return forbidden();
         const posts = what === "reviews" ? deps.posted.reviews : deps.posted.comments;
         return Response.json(posts.filter((p) => p.repo === repo && p.pr === Number(num)).map((p) => p.payload));
+      }
+      const status = /^POST \/repos\/([^/]+\/[^/]+)\/statuses\/([0-9a-f]{40})$/.exec(route);
+      if (status) {
+        if (!deps.allows(token, status[1] ?? "", "statuses", "write")) return forbidden();
+        const input = StatusRequest.safeParse(body);
+        return input.success ? Response.json({ id: 7000 + deps.next(), ...input.data, context: input.data.context ?? "default" }, { status: 201 }) : invalid();
       }
       const dispatch = /^POST \/repos\/([^/]+\/[^/]+)\/actions\/workflows\/[^/]+\/dispatches$/.exec(route);
       if (dispatch) {

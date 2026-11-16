@@ -36,7 +36,7 @@ const TOKEN_MARGIN_MS = 10 * 60_000;
 const APP_JWT_S = { back: 60, ahead: 540 };
 
 /** App の権限。非公開で、workflows の権限は持たない。actions の書きは戻しの rollback.yml を動かすのに、deployments の読みは deployment_status の通知を受けるのに使う (タスクとレビューの 3.2 の 2、サービスと拡張の 3.2) */
-export const APP_PERMISSIONS = { contents: "write", pull_requests: "write", issues: "write", checks: "read", statuses: "read", administration: "write", metadata: "read", actions: "write", deployments: "read" } as const;
+export const APP_PERMISSIONS = { contents: "write", pull_requests: "write", issues: "write", checks: "read", statuses: "write", administration: "write", metadata: "read", actions: "write", deployments: "read" } as const;
 /** App が受ける通知の種類 (タスクとレビューの 3.5)。installation は App に必ず届く */
 const APP_EVENTS = ["check_run", "check_suite", "pull_request", "pull_request_review", "pull_request_review_comment", "issues", "push", "deployment_status", "workflow_run"];
 
@@ -543,6 +543,7 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
     connected: async () => (await load()).connected(),
     postReview: async (repo, pr, review) => (await load()).postReview(repo, pr, review),
     postComment: async (repo, pr, comment) => (await load()).postComment(repo, pr, comment),
+    postStatus: async (repo, sha, status) => (await load()).postStatus(repo, sha, status),
     commitFile: async (repo, branch, change) => (await load()).commitFile(repo, branch, change),
     findMirror: async (repo, pr, kind, marker) => (await load()).findMirror(repo, pr, kind, marker),
     pullFiles: async (repo, pr) => (await load()).pullFiles(repo, pr),

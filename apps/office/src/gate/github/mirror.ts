@@ -1,6 +1,6 @@
 // know-office の中のレビューを GitHub のプルリクエストに写す。書く時に順番待ちに入れ、すぐに送り、送れなければエラーログに残して 5 分ごとに送り直す (タスクとレビューの 3.6)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
-import { AppError, type Clock, MirrorCommentPayload, MirrorReviewPayload, newId } from "@know-office/core";
+import { AppError, type Clock, MirrorCommentPayload, MirrorReviewPayload, MirrorStatusPayload, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import type { Forge } from "../work/loop.ts";
@@ -12,8 +12,11 @@ export const MIRROR_ATTEMPTS = 12;
 /** 1 回の送り直しで送る数の上限 */
 const RETRY_BATCH = 20;
 
-/** 写す物 1 つ。review は可か不可のレビュー、comment は行のコメント */
-export type Mirror = { kind: "review"; payload: MirrorReviewPayload } | { kind: "comment"; payload: MirrorCommentPayload };
+/** 写す物 1 つ。review は可か不可のレビュー、comment は行のコメント、status はオーナーの判断のコミットのステータス */
+export type Mirror = { kind: "review"; payload: MirrorReviewPayload } | { kind: "comment"; payload: MirrorCommentPayload } | { kind: "status"; payload: MirrorStatusPayload };
+
+/** オーナーの判断のステータスに添える説明 */
+const STATUS_DESCRIPTION = { success: "オーナーが承認した", failure: "オーナーが差し戻した" } as const;
 
 /**
  * 順番待ちに 1 つ足す文を作る。写す元 (判断か指摘) と同じバッチに入れ、片方だけ残さない
@@ -109,13 +112,18 @@ export function mirrorMarker(id: string): string {
  */
 async function post(forge: Forge, claimed: Claimed): Promise<number> {
   if (claimed.repo === null || claimed.pr_number === null) throw new Error("写す先のレビューが無い");
+  const raw: unknown = JSON.parse(claimed.payload);
+  // ステータスは同じ sha と名前なら GitHub が新しい物を今の値にするので、送り直しても目印で探さずにそのまま出す
+  if (claimed.kind === "status") {
+    const status = MirrorStatusPayload.parse(raw);
+    return forge.postStatus(claimed.repo, status.commitId, { state: status.state, description: STATUS_DESCRIPTION[status.state] });
+  }
   const marker = mirrorMarker(claimed.id);
   const kind = claimed.kind === "review" ? "review" : "comment";
   if (claimed.attempts > 1) {
     const found = await forge.findMirror(claimed.repo, claimed.pr_number, kind, marker);
     if (found !== null) return found;
   }
-  const raw: unknown = JSON.parse(claimed.payload);
   if (kind === "review") {
     const review = MirrorReviewPayload.parse(raw);
     return forge.postReview(claimed.repo, claimed.pr_number, { ...review, body: `${review.body}\n\n${marker}` });

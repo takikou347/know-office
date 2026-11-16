@@ -29,6 +29,8 @@ export type Forge = {
   connected(): Promise<boolean>;
   /** プルリクエストに可か不可のレビューを出し、GitHub のレビューの ID を返す。App が出したプルリクエストで GitHub が断る時は、判断を本文の頭に書いたコメントにする */
   postReview(repo: string, pr: number, review: { event: "APPROVE" | "REQUEST_CHANGES"; body: string; commitId: string }): Promise<number>;
+  /** コミットに know-office のオーナーの判断のステータスを出し、GitHub のステータスの ID を返す。同じ名前のステータスは GitHub が新しい物を今の値にする */
+  postStatus(repo: string, sha: string, status: { state: "success" | "failure"; description: string }): Promise<number>;
   /** プルリクエストの 1 行にコメントを付け、GitHub のコメントの ID を返す。side は LEFT (前) か RIGHT (後) */
   postComment(repo: string, pr: number, comment: { body: string; path: string; line: number; side: "LEFT" | "RIGHT"; commitId: string }): Promise<number>;
   /** 本文に目印を含む、know-office が写したレビューか行のコメントを GitHub の一覧から探し、その ID を返す。無ければ null */
@@ -57,6 +59,7 @@ export const UNCONNECTED_FORGE: Forge = {
   connected: () => Promise.resolve(false),
   postReview: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   postComment: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  postStatus: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   commitFile: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   findMirror: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   pullFiles: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),

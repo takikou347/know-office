@@ -93,6 +93,15 @@ export const MirrorReviewPayload = z.object({ event: z.enum(["APPROVE", "REQUEST
 /** GitHub に写すレビューの中身の型 */
 export type MirrorReviewPayload = z.infer<typeof MirrorReviewPayload>;
 
+/** オーナーの判断を出すコミットのステータスの名前。GitHub は App が自分で出した PR に可と不可を付ける事を断るので、判断はこの名前のステータスで出す */
+export const OWNER_APPROVAL_CONTEXT = "know-office/owner-approval";
+
+/** GitHub に写すコミットのステータスの中身。state は GitHub のステータスの success (承認) と failure (差し戻し) */
+export const MirrorStatusPayload = z.object({ state: z.enum(["success", "failure"]), commitId: CommitSha }).strict();
+
+/** GitHub に写すコミットのステータスの中身の型 */
+export type MirrorStatusPayload = z.infer<typeof MirrorStatusPayload>;
+
 /** GitHub に写す行のコメントの中身。side は GitHub の LEFT (前) と RIGHT (後) */
 export const MirrorCommentPayload = z
   .object({ noteId: Uuid, path: RepoPath, line: z.number().int().positive(), side: z.enum(["LEFT", "RIGHT"]), body: z.string().min(1).max(65_536), commitId: CommitSha })

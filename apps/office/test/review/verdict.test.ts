@@ -19,7 +19,10 @@ describe("know-office の中で確認する", () => {
       { event: "COMMENT", body: marked("[承認] オーナー: 表の作りはよい"), commit_id: HEAD },
     ]);
     expect(await rows(world.d1.DB, "SELECT owner_verdict FROM reviews WHERE node_id = ?", task)).toEqual([{ owner_verdict: "approve" }]);
-    expect(await rows(world.d1.DB, "SELECT kind, sent_at IS NOT NULL AS sent, github_id IS NOT NULL AS has_id FROM github_mirrors")).toEqual([{ kind: "review", sent: 1, has_id: 1 }]);
+    expect(await rows(world.d1.DB, "SELECT kind, sent_at IS NOT NULL AS sent, github_id IS NOT NULL AS has_id FROM github_mirrors")).toEqual([
+      { kind: "review", sent: 1, has_id: 1 },
+      { kind: "status", sent: 1, has_id: 1 },
+    ]);
     expect(world.gate.audits.find((a) => a.action === "review.verdict")).toMatchObject({ actor: "owner", target: task, detail: { verdict: "approve" } });
   });
 

@@ -272,3 +272,34 @@ describe("GitHub に写す", () => {
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM review_notes")).toEqual([{ n: 0 }]);
   });
 });
+
+describe("know-office の中で確認する", () => {
+  it("GitHub にオーナーの判断を出す", async () => {
+    const { task } = await openReview(world);
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "approve", body: "よい", baseSha: HEAD });
+    const posts = world.gate.github.requests.filter((r) => r.route === `POST /repos/${REPO}/statuses/${HEAD}`);
+    expect(posts.map((p) => p.body)).toEqual([{ state: "success", context: "know-office/owner-approval", description: "オーナーが承認した" }]);
+    // ステータスは、そのリポジトリの statuses の書きだけに絞った鍵で出す
+    const t = world.gate.github.tokens.get(posts[0]?.token ?? "");
+    expect(t?.repos).toEqual([REPO]);
+    expect(t?.permissions).toEqual({ statuses: "write" });
+  });
+
+  it("オーナーの差し戻しは、不可のステータスとして出す", async () => {
+    const { task } = await openReview(world);
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "直す", baseSha: HEAD });
+    const posts = world.gate.github.requests.filter((r) => r.route === `POST /repos/${REPO}/statuses/${HEAD}`);
+    expect(posts.map((p) => p.body)).toEqual([{ state: "failure", context: "know-office/owner-approval", description: "オーナーが差し戻した" }]);
+  });
+
+  it("ステータスを出せなければ、5 分ごとのジョブが出し直す", async () => {
+    const { task, forge } = await openReview(world);
+    world.gate.github.failNext(`POST /repos/${REPO}/statuses/${HEAD}`, 502);
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "approve", body: "よい", baseSha: HEAD });
+    expect(await rows(world.d1.DB, "SELECT kind, sent_at IS NULL AS waiting FROM github_mirrors WHERE kind = 'status'")).toEqual([{ kind: "status", waiting: 1 }]);
+    world.clock.advance(5 * MINUTE);
+    expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 1, failed: 0 });
+    expect(await rows(world.d1.DB, "SELECT sent_at IS NULL AS waiting FROM github_mirrors WHERE kind = 'status'")).toEqual([{ waiting: 0 }]);
+    expect(world.gate.github.requests.filter((r) => r.route === `POST /repos/${REPO}/statuses/${HEAD}`)).toHaveLength(2);
+  });
+});

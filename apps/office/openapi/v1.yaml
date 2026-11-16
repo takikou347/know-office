@@ -5651,10 +5651,11 @@ paths:
 
         処理の流れ:
 
-        1. `baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く
+        1. `baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) へのレビューとコミットのステータスの追加を 1 回のバッチで書く
         2. App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストのレビュー (承認は APPROVE、差し戻しは REQUEST_CHANGES、本文の頭に「オーナー」) として写す。App が出したプルリクエストで GitHub が 422 を返した時は、判断を本文の頭に書いた COMMENT のレビューにする。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す
-        3. 承認の場合はマージの条件を確認して main を進め、差し戻しの場合はタスクを `todo` に戻す
-        4. 監査ログに `review.verdict` を記録する
+        3. App の statuses の書きに絞った鍵で、`baseSha` のコミットに `know-office/owner-approval` のステータス (承認は success、差し戻しは failure) を出す。GitHub は App が自分で出した PR に可を付けさせないので、オーナーの判断はこのステータスで GitHub に出る
+        4. 承認の場合はマージの条件を確認して main を進め、差し戻しの場合はタスクを `todo` に戻す
+        5. 監査ログに `review.verdict` を記録する
 
         このルート固有のエラー:
 
@@ -5663,8 +5664,9 @@ paths:
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: main を進める時に GitHub がエラーを返した
       x-steps:
-        - "`baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く"
+        - "`baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) へのレビューとコミットのステータスの追加を 1 回のバッチで書く"
         - App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストのレビュー (承認は APPROVE、差し戻しは REQUEST_CHANGES、本文の頭に「オーナー」) として写す。App が出したプルリクエストで GitHub が 422 を返した時は、判断を本文の頭に書いた COMMENT のレビューにする。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す
+        - App の statuses の書きに絞った鍵で、`baseSha` のコミットに `know-office/owner-approval` のステータス (承認は success、差し戻しは failure) を出す。GitHub は App が自分で出した PR に可を付けさせないので、オーナーの判断はこのステータスで GitHub に出る
         - 承認の場合はマージの条件を確認して main を進め、差し戻しの場合はタスクを `todo` に戻す
         - 監査ログに `review.verdict` を記録する
       x-errors:

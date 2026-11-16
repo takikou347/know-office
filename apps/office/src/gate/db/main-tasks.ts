@@ -85,7 +85,7 @@ export const githubMirrors = sqliteTable(
   {
     id: id(),
     reviewId: text("review_id").notNull(),
-    kind: text("kind", { enum: ["review", "comment"] }).notNull(),
+    kind: text("kind", { enum: ["review", "comment", "status"] }).notNull(),
     payload: json("payload").notNull(),
     createdAt: time("created_at").notNull(),
     attempts: integer("attempts").notNull().default(0),

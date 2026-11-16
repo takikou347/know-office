@@ -33,8 +33,9 @@ const submitReviewVerdictRoute = createRoute({
   summary: "承認または差し戻し",
   description: "GitHub に写せない時も判断は残し、写し直しを待つ。",
   "x-steps": [
-    "`baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く",
+    "`baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) へのレビューとコミットのステータスの追加を 1 回のバッチで書く",
     "App の pull_requests の書きに絞った鍵で、GitHub のプルリクエストのレビュー (承認は APPROVE、差し戻しは REQUEST_CHANGES、本文の頭に「オーナー」) として写す。App が出したプルリクエストで GitHub が 422 を返した時は、判断を本文の頭に書いた COMMENT のレビューにする。写せなければエラーログに残し、5 分ごとの定期ジョブが写し直す",
+    "App の statuses の書きに絞った鍵で、`baseSha` のコミットに `know-office/owner-approval` のステータス (承認は success、差し戻しは failure) を出す。GitHub は App が自分で出した PR に可を付けさせないので、オーナーの判断はこのステータスで GitHub に出る",
     "承認の場合はマージの条件を確認して main を進め、差し戻しの場合はタスクを `todo` に戻す",
     "監査ログに `review.verdict` を記録する",
   ],
@@ -104,7 +105,9 @@ export const reviewRoutes = router
     // 確かめた先のままの時だけ、判断、写す順番待ち、差し戻しならタスクを todo に戻す事を 1 回のバッチで書く。間に push が届いていればどれも書かない
     const when = { sql: "EXISTS (SELECT 1 FROM reviews WHERE id = ? AND head_sha = ?)", args: [review.id, input.baseSha] };
     const mirror = enqueueMirror(c.env, review.id, { kind: "review", payload: { event, body: `${OWNER_PREFIX}${input.body}`, commitId: input.baseSha } }, c.var.clock, when);
-    const statements = [db.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ? AND head_sha = ?").bind(input.verdict, review.id, input.baseSha), mirror.statement];
+    // App が出した PR には GitHub が可と不可を付けさせないので、判断はコミットのステータスでも出す
+    const status = enqueueMirror(c.env, review.id, { kind: "status", payload: { state: input.verdict === "approve" ? "success" : "failure", commitId: input.baseSha } }, c.var.clock, when);
+    const statements = [db.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ? AND head_sha = ?").bind(input.verdict, review.id, input.baseSha), mirror.statement, status.statement];
     if (input.verdict === "request_changes") statements.push(backToTodo(db, nodeId, now, when));
     const [updated] = await db.batch(statements);
     if ((updated?.meta.changes ?? 0) === 0) throw new AppError("conflict", "確かめた後に変更が足された");
@@ -125,6 +128,7 @@ export const reviewRoutes = router
     }
     // 写せなければ記録に残し、5 分ごとの定期ジョブが写し直す
     await sendMirror(c.env, c.var.forge, mirror.id, c.var.clock);
+    await sendMirror(c.env, c.var.forge, status.id, c.var.clock);
     await audit(c, "review.verdict", nodeId, { verdict: input.verdict, merged });
     return ok(c, { nodeId, ownerVerdict: input.verdict });
   })
