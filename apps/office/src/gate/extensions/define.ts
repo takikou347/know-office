@@ -17,8 +17,8 @@ export type ExtensionStore = {
 export type OwnerDataStore = {
   /** 項目を読む。無ければ null。読めたら読んだ記録を残す */
   get(field: string): Promise<string | null>;
-  /** 項目を置き換える */
-  put(field: string, value: string): Promise<void>;
+  /** 渡した項目をまとめて置き換える。全部を 1 回のバッチで書き、途中で落ちても一部だけを残さない */
+  put(values: Readonly<Record<string, string>>): Promise<void>;
 };
 
 /** 拡張のルートとツールが受ける物。鍵、D1、DO、社員の DO は渡さない */

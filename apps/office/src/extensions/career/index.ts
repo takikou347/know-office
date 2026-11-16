@@ -50,8 +50,7 @@ export default defineExtension({
       body: UpdateCareerProfileInput,
       response: CareerProfile,
       run: async (ctx, body: UpdateCareerProfileInput) => {
-        const store = ownerDataOf(ctx);
-        for (const field of CAREER_FIELDS) await store.put(field, body[field]);
+        await ownerDataOf(ctx).put(body);
         return body;
       },
     },

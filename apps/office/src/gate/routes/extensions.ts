@@ -50,7 +50,7 @@ function contextOf(c: Context<GateEnv>, ext: ExtensionDefinition): ExtensionCont
   const ownerData = ext.ownerData
     ? {
         get: (field: string) => openOwnerData(c.env.DB, c.env.MASTER_KEY, { extId: ext.id, field, by: "owner", nodeId: null }, now),
-        put: (field: string, value: string) => putOwnerData(c.env.DB, c.env.MASTER_KEY, { extId: ext.id, field, value }, now),
+        put: (values: Readonly<Record<string, string>>) => putOwnerData(c.env.DB, c.env.MASTER_KEY, ext.id, values, now),
       }
     : null;
   return { now, store: extensionStore(c.env.FILES, ext.id), ownerData };

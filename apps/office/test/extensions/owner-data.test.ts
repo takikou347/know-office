@@ -78,6 +78,17 @@ describe("オーナーの情報を扱う拡張のセキュリティ", () => {
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM owner_data WHERE ext_id = 'career'")).toEqual([{ n: 3 }]);
   });
 
+  it("置き換えの途中で 1 項目を書けなければ、どの項目も前の値のまま", async () => {
+    await careerWithProfile(world);
+    await world.d1.DB.prepare("CREATE TRIGGER career_skills_fails BEFORE INSERT ON owner_data WHEN NEW.field = 'skills' BEGIN SELECT RAISE(ABORT, 'test'); END").run();
+    try {
+      await api(world, "PUT", "/api/v1/ext/career/profile", { summary: "新しい自己紹介", history: "新しい経歴", skills: "新しいできる事" }, 500);
+    } finally {
+      await world.d1.DB.prepare("DROP TRIGGER career_skills_fails").run();
+    }
+    expect(await api(world, "GET", "/api/v1/ext/career/profile")).toEqual(PROFILE);
+  });
+
   it("書く時もパスキーの確認を求め、切った拡張は確かめても 404", async () => {
     await careerWithProfile(world);
     await stepDown(world);

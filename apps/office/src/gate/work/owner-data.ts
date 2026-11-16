@@ -36,22 +36,23 @@ export async function sealOwnerData(master: string, extId: string, field: string
 }
 
 /**
- * オーナーの情報の 1 項目を暗号にして置き換える。同じ拡張と項目の前の行を消して足すのを 1 回のバッチで書き、同時に置いても 1 行にする
+ * オーナーの情報の項目を暗号にして置き換える。項目ごとに前の行を消して足すのを、全部の項目で 1 回のバッチで書く。同時に置いても項目ごとに 1 行で、途中で落ちても一部だけを残さない
  * @param db 今の状態の D1
  * @param master MASTER_KEY
- * @param item 拡張 ID と項目と値
- * @param item.extId 拡張 ID
- * @param item.field 項目
- * @param item.value 値
+ * @param extId 拡張 ID
+ * @param values 項目から値への対応
  * @param now 今の時刻
  */
-export async function putOwnerData(db: D1Database, master: string, item: { extId: string; field: string; value: string }, now: number): Promise<void> {
-  const { ciphertext, iv } = await sealOwnerData(master, item.extId, item.field, item.value);
+export async function putOwnerData(db: D1Database, master: string, extId: string, values: Readonly<Record<string, string>>, now: number): Promise<void> {
+  const entries = Object.entries(values);
+  if (entries.length === 0) return;
+  const sealed = await Promise.all(entries.map(async ([field, value]) => ({ field, ...(await sealOwnerData(master, extId, field, value)) })));
   const orm = drizzle(db);
-  await orm.batch([
-    orm.delete(ownerData).where(and(eq(ownerData.extId, item.extId), eq(ownerData.field, item.field))),
-    orm.insert(ownerData).values({ id: newId(clockAt(now)), extId: item.extId, field: item.field, ciphertext, iv, updatedAt: now }),
+  const [first, ...rest] = sealed.flatMap(({ field, ciphertext, iv }) => [
+    orm.delete(ownerData).where(and(eq(ownerData.extId, extId), eq(ownerData.field, field))),
+    orm.insert(ownerData).values({ id: newId(clockAt(now)), extId, field, ciphertext, iv, updatedAt: now }),
   ]);
+  if (first) await orm.batch([first, ...rest]);
 }
 
 /**
