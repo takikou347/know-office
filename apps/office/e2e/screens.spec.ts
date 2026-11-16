@@ -201,7 +201,7 @@ test("ハッシュだけが違う同じ道へ移っても中身に移り、そ�
   await page.locator("nav:visible").getByRole("link", { name: "社員と仕事" }).click();
   await expect(page).toHaveURL(/\/staff$/);
   await expect(main).toBeFocused();
-  await main.getByRole("link", { name: /作る役/ }).first().click();
+  await main.getByRole("link", { name: /開発担当/ }).first().click();
   await expect(main).toBeFocused();
   const tab = page.getByRole("tab", { name: "仕事の山" });
   await tab.click();

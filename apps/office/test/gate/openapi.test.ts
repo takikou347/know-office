@@ -77,20 +77,11 @@ function withoutDescription(value: unknown): unknown {
  * v1.yaml にあってコードにまだ無いルートと、受け持つ Issue。作ったら消す。デプロイの前に空にする
  */
 const UNBUILT: Record<string, string> = {
-  "DELETE /api/v1/staff/{staffId}/orders/{orderId}": "#107",
-  "GET /api/v1/dashboard": "#76",
   "GET /api/v1/errors": "#111",
-  "GET /api/v1/live": "#76",
-  "GET /api/v1/records/attendance": "#107",
   "GET /api/v1/records/uptime": "#107",
   "GET /api/v1/reviews/{nodeId}/lsp": "#110",
-  "GET /api/v1/staff": "#107",
-  "GET /api/v1/staff/{staffId}/messages": "#107",
   "GET /api/v1/traces/{traceId}": "#111",
-  "POST /api/v1/live/tickets": "#76",
   "POST /api/v1/services/{serviceId}/rollback": "#109",
-  "POST /api/v1/staff/{staffId}/messages": "#107",
-  "POST /api/v1/staff/{staffId}/orders": "#107",
   "POST /v1/abort": "#105",
   "POST /v1/messages": "#105",
   "POST /ws/v1/events": "#105",

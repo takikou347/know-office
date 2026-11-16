@@ -146,6 +146,9 @@ test.describe("使いやすさ", () => {
     await stubReview(page);
     await page.goto("/");
     await expect(h1("ダッシュボード")).toBeVisible();
+    // ダッシュボードは入口から読んだ物を承認を待つ物の上に足すので、読み終えて形が落ち着いてから Tab で進む
+    await expect(main.getByRole("heading", { name: "社員の様子" })).toBeVisible();
+    await expect(main.getByText("承認を待つ物を読んでいます")).toHaveCount(0);
 
     // 切り替えから社員と仕事へ移る。今いる所に印が付く
     await tabTo(page, page.locator("nav:visible").getByRole("link", { name: "社員と仕事" }), webkit);
