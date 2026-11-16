@@ -6,7 +6,7 @@ import type { Bindings, Staff, WorkspaceContainer } from "../env.ts";
 import type { Observed } from "../guard/deps.ts";
 import { type IssuedTicket, type RenewedTicket, StaffGuard, type TicketCheck } from "../guard/staff-guard.ts";
 import { type Pulled, pullNext } from "../work/loop.ts";
-import { announce } from "../live/publish.ts";
+import { announce, announceNotice } from "../live/publish.ts";
 import { StaffBook, type Workspace } from "../work/staff-book.ts";
 import { appendTranscript, loadTranscript, resumeRun, type TranscriptStore } from "../work/transcript.ts";
 
@@ -419,7 +419,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
     if (named !== undefined) await this.ctx.storage.put("staffId", named);
     const parsed = StaffId.safeParse(named ?? (await this.ctx.storage.get("staffId")));
     if (!parsed.success) throw new AppError("internal", "社員 DO の社員 ID が分からない");
-    this.#book = new StaffBook(parsed.data, this.ctx.storage, this.env.DB, this.#workspace(parsed.data));
+    this.#book = new StaffBook(parsed.data, this.ctx.storage, this.env.DB, this.#workspace(parsed.data), (noticeId) => announceNotice(this.env, noticeId, systemClock));
     return this.#book;
   }
 }

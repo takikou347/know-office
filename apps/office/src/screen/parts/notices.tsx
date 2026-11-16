@@ -1,4 +1,4 @@
-// 画面の通知。配信の印で読み直し、配信が切れている間だけ 1 分ごとに読む。上部の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5、社員と自動の 3.7)
+// 画面の通知。配信の印で読み直すのを速い道にし、印を取りこぼしても 5 分ごとに (配信が切れている間は 1 分ごとに) 読む。上部の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5、社員と自動の 3.7)
 import { type Notice, type NoticeLevel, systemClock } from "@know-office/core";
 import { Alert, Link, List, type Tone } from "knowidea-ui";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
@@ -8,6 +8,18 @@ import { markReloader, useLive } from "./live.tsx";
 
 /** 配信が切れている間に通知を読み直す間。起きてから 5 分以内に画面に出すので、それより短くする */
 export const NOTICE_POLL_MS = 60_000;
+
+/** 配信がつながっている間に通知を読み直す間。印で届くのが速い道で、印を配り忘れた種類の通知もこの長さのうちに出す */
+export const NOTICE_LIVE_POLL_MS = 300_000;
+
+/**
+ * 通知を読み直す間を、配信がつながっているかで決める
+ * @param connected 配信がつながっているか
+ * @returns 読み直す間
+ */
+export function noticePollMs(connected: boolean): number {
+  return connected ? NOTICE_LIVE_POLL_MS : NOTICE_POLL_MS;
+}
 
 /** 開いた時に、初めの通知を待って画面を描かずにおく長さの上限。帯が後から差し込まれて、押そうとした物がずれないようにする */
 export const NOTICE_HOLD_MS = 1_000;
@@ -47,17 +59,18 @@ export async function fetchNotices(api: Api): Promise<Notice[] | null> {
 export type NoticeView = Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
 
 /**
- * 今読み、その後は NOTICE_POLL_MS ごとに読む。タブが見えない間は読まず、見えた時に 1 回読む
+ * 今読み、その後は ms ごとに読む。タブが見えない間は読まず、見えた時に 1 回読む
  * @param pull 読む関数
  * @param view タブの見え方。無ければ見えている事にする
+ * @param ms 読み直す間
  * @returns 読むのを止める関数
  */
-export function watchNotices(pull: () => void, view: NoticeView | null): () => void {
+export function watchNotices(pull: () => void, view: NoticeView | null, ms: number = NOTICE_POLL_MS): () => void {
   const tick = () => {
     if (!view?.hidden) pull();
   };
   tick();
-  const timer = setInterval(tick, NOTICE_POLL_MS);
+  const timer = setInterval(tick, ms);
   view?.addEventListener("visibilitychange", tick);
   return () => {
     clearInterval(timer);
@@ -129,8 +142,8 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
     const unsubscribe = subscribe((event) => {
       if (event.type === "notice") onMark(event.notice.id);
     });
-    // つながっている間は印で読み直し、つながった時に 1 回読んで切れていた間の通知を拾う。切れている間だけ間をおいて読む
-    const stop = connected ? (void pull(), () => {}) : watchNotices(() => void pull(), typeof document === "undefined" ? null : document);
+    // 印で読み直すのが速い道。つながった時と切れた時に 1 回読んで間の通知を拾い、印を取りこぼしても読み直す間のうちに出す
+    const stop = watchNotices(() => void pull(), typeof document === "undefined" ? null : document, noticePollMs(connected));
     return () => {
       live = false;
       unsubscribe();

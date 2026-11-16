@@ -160,6 +160,9 @@ export function overlapNoticeId(staffId: StaffId, day: string): Promise<string> 
   return keyedId(jstDayStart(day), `attendance_overlap:${staffId}:${day}`);
 }
 
+/** D1 の書き込みの返事のうち、足した行の数 */
+const Inserted = z.object({ meta: z.object({ changes: z.number() }).loose() }).loose();
+
 /**
  * 日ごとの集計を attendance から作り直す。区分が重なっていれば通知を出す。通知の ID は社員と日から決まるので、何度作り直しても 1 件
  * @param db D1 の DB
@@ -170,13 +173,13 @@ export function overlapNoticeId(staffId: StaffId, day: string): Promise<string> 
  * @param base.out 退勤したか
  * @param base.reasons 行に出ない理由 (早い退勤、休み)。前の集計の理由に足す
  * @param now 今の時刻
- * @returns 無し
+ * @returns 区分の重なりの通知を新しく足した時はその ID。足さなかった時 (重なりが無い、もう足してある) は null
  */
 export async function rebuildDailyTotals(
   db: D1Database,
   base: { staffId: StaffId; day: string; clockIn: number | null; out: boolean; reasons: string[] },
   now: number,
-): Promise<void> {
+): Promise<string | null> {
   const orm = drizzle(db);
   const rows = await orm.select().from(attendance).where(and(eq(attendance.staffId, base.staffId), eq(attendance.day, base.day)));
   const [before] = await orm.select({ reasons: dailyTotals.reasons }).from(dailyTotals).where(and(eq(dailyTotals.staffId, base.staffId), eq(dailyTotals.day, base.day)));
@@ -185,14 +188,14 @@ export async function rebuildDailyTotals(
   const upsert = orm.insert(dailyTotals).values(totals).onConflictDoUpdate({ target: [dailyTotals.staffId, dailyTotals.day], set: rest });
   if (overlap) {
     const body = `${base.staffId} の ${base.day} の勤怠で、同じ時刻が 2 つの区分に入っている`;
-    const notice = orm
-      .insert(notices)
-      .values({ id: await overlapNoticeId(base.staffId, base.day), at: now, level: "warn", kind: "attendance_overlap", title: "勤怠の区分が重なっている", body, scope: "office" })
-      .onConflictDoNothing();
-    await orm.batch([upsert, notice]);
-    return;
+    const id = await overlapNoticeId(base.staffId, base.day);
+    const notice = orm.insert(notices).values({ id, at: now, level: "warn", kind: "attendance_overlap", title: "勤怠の区分が重なっている", body, scope: "office" }).onConflictDoNothing();
+    const results: readonly unknown[] = await orm.batch([upsert, notice]);
+    // ID は社員と日で決まるので、足せたのは初めの 1 回だけ
+    return Inserted.parse(results[1]).meta.changes === 1 ? id : null;
   }
   await upsert;
+  return null;
 }
 
 /**
@@ -201,15 +204,15 @@ export async function rebuildDailyTotals(
  * @param staffId 社員 ID
  * @param day 日本時間の日
  * @param now 今の時刻
- * @returns 無し
+ * @returns 区分の重なりの通知を新しく足した時はその ID。ほかは null
  */
-export async function rebuildStoredDay(db: D1Database, staffId: StaffId, day: string, now: number): Promise<void> {
+export async function rebuildStoredDay(db: D1Database, staffId: StaffId, day: string, now: number): Promise<string | null> {
   const orm = drizzle(db);
   const [before] = await orm.select({ clockIn: dailyTotals.clockIn, clockOut: dailyTotals.clockOut }).from(dailyTotals).where(and(eq(dailyTotals.staffId, staffId), eq(dailyTotals.day, day)));
   const [row] = await orm.select({ id: attendance.id }).from(attendance).where(and(eq(attendance.staffId, staffId), eq(attendance.day, day))).limit(1);
-  if (!before && !row) return;
+  if (!before && !row) return null;
   // 日をまたいで働いている間は退勤の時刻が無いので、退勤していない形のまま作り直す
-  await rebuildDailyTotals(db, { staffId, day, clockIn: before?.clockIn ?? null, out: typeof before?.clockOut === "number", reasons: [] }, now);
+  return rebuildDailyTotals(db, { staffId, day, clockIn: before?.clockIn ?? null, out: typeof before?.clockOut === "number", reasons: [] }, now);
 }
 
 /** D1 の work_entries の 1 行 */

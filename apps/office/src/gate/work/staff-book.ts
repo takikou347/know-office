@@ -55,14 +55,24 @@ export class StaffBook {
    * @param storage 記憶と alarm の入れ物
    * @param db D1 の DB。勤怠、日ごとの集計、した仕事を書く
    * @param workspace ワークスペースを動かす口
+   * @param announce 新しく足した通知を配信の印で配る。無ければ配らない
    */
   constructor(
     readonly staffId: StaffId,
     private readonly storage: StaffStorage,
     private readonly db: D1Database,
     private readonly workspace: Workspace,
+    private readonly announce: (noticeId: string) => Promise<void> = () => Promise.resolve(),
   ) {
     this.#orm = drizzle(db);
+  }
+
+  /**
+   * 区分の重なりの通知を新しく足した時だけ、配信の印で配る
+   * @param noticeId 足した通知の ID。足さなかった時は null
+   */
+  async #announced(noticeId: string | null): Promise<void> {
+    if (noticeId !== null) await this.announce(noticeId);
   }
 
   /**
@@ -322,7 +332,7 @@ export class StaffBook {
   async rebuildDay(day: unknown, now: number): Promise<void> {
     const parsed = z.iso.date().safeParse(day);
     if (!parsed.success) throw new AppError("validation_failed", "日の形が違う");
-    await rebuildStoredDay(this.db, this.staffId, parsed.data, now);
+    await this.#announced(await rebuildStoredDay(this.db, this.staffId, parsed.data, now));
   }
 
   /**
@@ -353,7 +363,7 @@ export class StaffBook {
         await this.#clockIn(s, now, plan.day, "working", extended ? "extension" : "scheduled", extended ? "owner_instruction" : "schedule");
         return true;
       }
-      await rebuildDailyTotals(this.db, { staffId: this.staffId, day: plan.day, clockIn: null, out: false, reasons: [...m.reasons, "off:owner_instruction"] }, now);
+      await this.#announced(await rebuildDailyTotals(this.db, { staffId: this.staffId, day: plan.day, clockIn: null, out: false, reasons: [...m.reasons, "off:owner_instruction"] }, now));
       m.reasons = [];
       await this.#refresh(s, now);
       return true;
@@ -424,7 +434,7 @@ export class StaffBook {
     s.clockIn(now, day, state, kind, reason);
     await this.workspace.start();
     await this.#commit(s);
-    await rebuildDailyTotals(this.db, { staffId: this.staffId, day, clockIn: now, out: false, reasons: [] }, now);
+    await this.#announced(await rebuildDailyTotals(this.db, { staffId: this.staffId, day, clockIn: now, out: false, reasons: [] }, now));
   }
 
   /**
@@ -453,7 +463,7 @@ export class StaffBook {
     await this.storage.put("memory", s.m);
     const [first, ...rest] = statements;
     if (first) await this.#orm.batch([first, ...rest]);
-    for (const t of totals) await rebuildDailyTotals(this.db, { staffId: this.staffId, day: t.day, clockIn: null, out: true, reasons: t.reasons }, t.at);
+    for (const t of totals) await this.#announced(await rebuildDailyTotals(this.db, { staffId: this.staffId, day: t.day, clockIn: null, out: true, reasons: t.reasons }, t.at));
     s.m.pending = { attendance: [], work: [], totals: [] };
   }
 

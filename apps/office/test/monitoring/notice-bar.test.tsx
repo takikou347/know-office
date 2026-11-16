@@ -3,7 +3,7 @@ import type { Notice } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Api, createApi } from "../../src/screen/api.ts";
-import { fetchNotices, holdNotices, NOTICE_HOLD_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, watchNotices } from "../../src/screen/parts/notices.tsx";
+import { fetchNotices, holdNotices, NOTICE_HOLD_MS, NOTICE_LIVE_POLL_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, noticePollMs, watchNotices } from "../../src/screen/parts/notices.tsx";
 
 /**
  * 通知を作る
@@ -101,6 +101,22 @@ describe("通知を読み直す", () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(NOTICE_POLL_MS * 3);
     expect(reads()).toBe(2);
+  });
+
+  it("配信がつながっている間も、印を取りこぼした時のために 5 分ごとに読み直す", async () => {
+    // 切れている間は 1 分ごと、つながっている間は印が先に届くので 5 分ごと。どちらも 5 分を超えない
+    expect(noticePollMs(false)).toBe(NOTICE_POLL_MS);
+    expect(noticePollMs(true)).toBe(NOTICE_LIVE_POLL_MS);
+    expect(NOTICE_LIVE_POLL_MS).toBe(5 * 60_000);
+    const { api, reads } = fakeGate();
+    const stop = watchNotices(() => void fetchNotices(api), new FakeView(), noticePollMs(true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(NOTICE_LIVE_POLL_MS - 1);
+    expect(reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reads()).toBe(2);
+    stop();
   });
 
   it("タブが見えない間は読まず、見えた時に 1 回読む", async () => {

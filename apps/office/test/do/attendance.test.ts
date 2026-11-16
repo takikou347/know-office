@@ -1,6 +1,6 @@
 // 勤怠の訂正。元の行を残し、訂正の行を足して集計を作り直す。社員と勤怠の 3.6
 import { describe, expect, it } from "vitest";
-import { rebuildDailyTotals } from "../../src/gate/work/attendance.ts";
+import { overlapNoticeId, rebuildDailyTotals } from "../../src/gate/work/attendance.ts";
 import { DAY, hire, type Hired, HOUR, jst, MINUTE, rows, run, startDay, TASK, testDb, totals, useD1 } from "../helpers/staff.ts";
 
 /**
@@ -104,5 +104,21 @@ describe("勤怠は書き換えない", () => {
     await rebuildDailyTotals(testDb(), { ...base, out: true }, jst(24, 5));
     await rebuildDailyTotals(testDb(), { ...base, out: true }, jst(25));
     expect(await rows("SELECT kind, level FROM notices")).toEqual([{ kind: "attendance_overlap", level: "warn" }]);
+  });
+
+  it("区分が重なった通知は、足した 1 度だけ配信の印で配る", async () => {
+    await testDb().batch([
+      testDb()
+        .prepare("INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, created_at) VALUES ('0190f4a8-0000-7000-8000-0000000000c3', 'builder', ?, 'scheduled', ?, ?, 'schedule', ?)")
+        .bind(DAY, jst(9), jst(17), jst(17)),
+      testDb()
+        .prepare("INSERT INTO attendance (id, staff_id, day, kind, started_at, ended_at, reason, created_at) VALUES ('0190f4a8-0000-7000-8000-0000000000c4', 'builder', ?, 'call', ?, ?, 'owner_instruction', ?)")
+        .bind(DAY, jst(12), jst(13), jst(13)),
+      testDb().prepare("INSERT INTO daily_totals (staff_id, day, clock_in, clock_out, worked_ms, extension_ms, call_ms, stopped_ms, waiting_ms, reasons) VALUES ('builder', ?, ?, ?, 0, 0, 0, 0, 0, '[]')").bind(DAY, jst(9), jst(17)),
+    ]);
+    const s = hire();
+    await s.book.rebuildDay(DAY, jst(24, 5));
+    await s.book.rebuildDay(DAY, jst(25));
+    expect(s.announced).toEqual([await overlapNoticeId("builder", DAY)]);
   });
 });

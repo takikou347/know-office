@@ -27,6 +27,8 @@ export type Hired = {
   book: StaffBook;
   storage: StaffStorage & { alarm: number | null };
   workspace: string[];
+  /** 配信の印で配った通知の ID */
+  announced: string[];
   /** 最後にハートビートを送った時刻。ハートビートを止めて進めた時は進めた先 */
   at: number;
 };
@@ -99,7 +101,9 @@ export function hire(staffId: StaffId = "builder", storage?: Hired["storage"]): 
     wrapUp: () => Promise.resolve(void calls.push("wrapUp")),
     restart: () => Promise.resolve(void calls.push("restart")),
   };
-  return { book: new StaffBook(staffId, store, d1.DB, workspace), storage: store, workspace: calls, at: jst(0) };
+  const announced: string[] = [];
+  const announce = (noticeId: string) => Promise.resolve(void announced.push(noticeId));
+  return { book: new StaffBook(staffId, store, d1.DB, workspace, announce), storage: store, workspace: calls, announced, at: jst(0) };
 }
 
 /** ワークスペースが送るハートビートの間。本物は 30 秒だが、90 秒の途切れに掛からない範囲で往復を減らす */

@@ -9,8 +9,6 @@ const SCREEN = join(import.meta.dirname, "../../src/screen");
  * まだ仮のデータを読んでいる画面のファイルと、受け持つ Issue。API につないだら消す。デプロイの前に空にする
  */
 const STILL_MOCK: Record<string, string> = {
-  "pages/dashboard/DashboardPage.tsx": "#107",
-  "pages/ledger/RecordsPage.tsx": "#107",
   "pages/office/OfficePage.tsx": "#87",
   "pages/office/OfficeScene.tsx": "#87",
   "pages/office/events.ts": "#87",
@@ -19,10 +17,6 @@ const STILL_MOCK: Record<string, string> = {
   "pages/office/motion.ts": "#87",
   "pages/office/room.ts": "#87",
   "pages/services/ServicesPage.tsx": "#109",
-  "pages/staff/StaffPage.tsx": "#107",
-  "pages/staff/TaskReview.tsx": "#107",
-  "parts/staff-status.tsx": "#107",
-  "parts/tasks.ts": "#107",
 };
 
 /** 画面のソースの拡張子 */
