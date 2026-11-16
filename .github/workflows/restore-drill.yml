@@ -1,0 +1,45 @@
+# 毎月 1 回、プレビュー用の記録の D1 を D1 の時点の戻しで 1 日前に戻し、1 日前より古い行の数が合うかを確かめ、元の時点へ戻し直す (ログインと記録の 3.6)。
+# Cloudflare の鍵が無い間は飛ばさず、流す手順だけを出す。手順と比べ方は scripts/restore-drill.test.ts が代わりの D1 で確かめる
+name: Restore drill
+
+on:
+  schedule:
+    # 協定世界時の 1 日 20 時は、日本時間の 2 日 5 時。毎日 4 時の写しと重ねない
+    - cron: "0 20 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # secrets は if で読めないので、有無だけを出す。値は出さない
+      - id: keys
+        run: |
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "ok=false" >> "$GITHUB_OUTPUT"; fi
+      - name: 鍵が無い間は手順だけを出す
+        if: steps.keys.outputs.ok != 'true'
+        run: |
+          echo "::notice::Cloudflare の鍵が無いので、戻す練習の手順だけを出す"
+          node scripts/restore-drill.ts --dry-run
+      - if: steps.keys.outputs.ok == 'true'
+        run: corepack enable && pnpm install --frozen-lockfile
+      - name: 1 日前に戻して確かめ、元に戻す
+        if: steps.keys.outputs.ok == 'true'
+        run: node scripts/restore-drill.ts
