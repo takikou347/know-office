@@ -223,6 +223,16 @@ describe("最初のサービスは knowidea-ui", () => {
     expect(await statusOf(world, UI_ID)).toMatchObject({ usedBy: [{ serviceId: OFFICE_ID, version: "0.12.1", behind: true }] });
   });
 
+  it("公開の時に使う側を読めなくても、公開は 1 つ残り、エラーログに残して落ちない", async () => {
+    const link = await linked(world);
+    // 既定のブランチの先のコミットを読む問いを落とす
+    world.gate.github.failNext(`GET /repos/${OFFICE_REPO}/git/ref/heads/main`, 500);
+    expect((await pushUi(world, link, 1, "0.13.0")).status).toBe(204);
+    expect(await rows(world.d1.DB, "SELECT id FROM service_events WHERE service_id = ? AND kind = 'release'", UI_ID)).toHaveLength(1);
+    expect(await rows(world.d1.REC_2026, "SELECT level FROM error_events WHERE code = 'service_uses_unread'")).toEqual([{ level: "warn" }]);
+    expect(await bumpTasks(world)).toEqual([]);
+  });
+
   it("同じ版を同時に 2 つ push しても、公開は 1 つ", async () => {
     const link = await linked(world);
     for (const n of [1, 2]) for (const [path, name] of Object.entries(UI_MANIFESTS)) world.gate.github.contents.set(`${sha(n)}:${path}`, JSON.stringify({ name, version: "0.13.0" }));
