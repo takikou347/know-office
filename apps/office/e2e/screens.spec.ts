@@ -168,8 +168,11 @@ test("ダッシュボードに、承認を待つ物、今日の仕事、今月�
 test("サービスを選ぶと、その様子と記録と設定が出る", async ({ page }) => {
   await page.goto("/services");
   await page.getByRole("main").getByRole("link", { name: "knowidea-ui" }).click();
+  await expect(page.getByText("公開した版")).toBeVisible();
   await page.getByRole("tab", { name: "設定" }).click();
-  await expect(page.getByText("版を上げたら npm に出す")).toBeVisible();
+  // 登録した時から本番にデプロイする条件を変えてある
+  await expect(page.getByRole("heading", { level: 3, name: "本番にデプロイする条件" })).toBeVisible();
+  await expect(page.getByText("初期値から変えている")).toBeVisible();
 });
 
 test("画面を移ると、題が変わり、中身に移る", async ({ page }) => {

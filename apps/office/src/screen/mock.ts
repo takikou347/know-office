@@ -77,28 +77,6 @@ export const messages: Record<string, { id: string; from: "self" | "other"; auth
   reviewer: [],
 };
 
-export type Stage = "アイデア" | "選んだ" | "作る" | "運用";
-export const stages: readonly Stage[] = ["アイデア", "選んだ", "作る", "運用"];
-
-export const ideas: { id: string; title: string; stage: Stage; summary: string; settings: string[] }[] = [
-  {
-    id: "knowidea-ui",
-    title: "knowidea-ui",
-    stage: "運用",
-    summary: "画面の部品のライブラリ。takikou347/knowidea-ui。0.11.0 を npm に出している",
-    settings: ["本番に出す条件はチェックとレビュー担当の承認", "版を上げたら npm に出す", "部品を足したら 1 部品 1 ページ"],
-  },
-  { id: "know-office", title: "know-office", stage: "作る", summary: "AI 社員を管理する Web アプリ。takikou347/know-office。モックを作っている", settings: [] },
-];
-
-export const serviceLog: Record<string, { time: string; text: string }[]> = {
-  "knowidea-ui": [
-    { time: "11/14 13:20", text: "CodeEditor のページを足す の可を待っている" },
-    { time: "11/14 10:40", text: "DiffView の行番号を直した" },
-  ],
-  "know-office": [{ time: "11/14 17:10", text: "勤怠の表の画面の経過を残した" }],
-};
-
 export const monthCost = { used: 11.4, budget: 15 };
 
 export const flows: Record<string, { id: string; time: string; title: string; text: string }[]> = {

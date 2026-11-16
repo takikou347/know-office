@@ -1,0 +1,118 @@
+// サービスの段階を移す欄。移れる先を選び、理由を書いて送る。作ると決める時は担当の社員と、GitHub の触れるリポジトリを選ぶ (サービスと拡張の 3.1)
+import { AdvanceInput, NEXT_STAGES, Repo, type ServiceCard, ServiceStage, StaffId } from "@know-office/core";
+import { Alert, Button, Field, Select, Stack, TextField } from "knowidea-ui";
+import { useContext, useState } from "react";
+import { z } from "zod";
+import { ApiContext } from "../../api.ts";
+import { type Failed, FailedAlert, send, useLoad } from "../../parts/load.tsx";
+import { STAFF_LABEL } from "../guard/labels.ts";
+import { MOVE_LABEL } from "./labels.ts";
+
+interface RepoPickerProps {
+  /** 選んでいるリポジトリ */
+  value: string | null;
+  /** 選び直した時に呼ぶ */
+  onChange: (repo: string) => void;
+}
+
+/** GitHub の触れるリポジトリから 1 つ選ぶ。つないでいなければ、つなぐよう伝える */
+export function RepoPicker({ value, onChange }: RepoPickerProps) {
+  const repos = useLoad(z.array(Repo), (a) => a.api.v1.github.repos.$get({ query: { limit: "100" } }));
+  if (repos.state === "failed") {
+    return (
+      <Alert tone="warn" title="リポジトリを選べません">
+        設定の画面で GitHub とつなぐと選べます
+      </Alert>
+    );
+  }
+  return (
+    <Field label="リポジトリ">
+      <Select
+        aria-label="リポジトリ"
+        loading={repos.state === "loading"}
+        value={value}
+        placeholder="選ぶ"
+        options={repos.state === "ok" ? repos.data.map((r) => ({ value: r.fullName, label: r.fullName })) : []}
+        onValueChange={(v) => {
+          if (v !== null) onChange(v);
+        }}
+      />
+    </Field>
+  );
+}
+
+export interface StageActionsProps {
+  /** 移すサービス */
+  service: ServiceCard;
+  /** 移した後に呼ぶ */
+  onMoved: () => void;
+}
+
+/** 段階を移す欄。移れる先が無ければ出さない */
+export function StageActions({ service, onMoved }: StageActionsProps) {
+  const api = useContext(ApiContext);
+  const next = NEXT_STAGES[service.stage];
+  const [to, setTo] = useState<ServiceStage | null>(next[0] ?? null);
+  const [reason, setReason] = useState("");
+  const [staffId, setStaffId] = useState<StaffId>("builder");
+  const [repo, setRepo] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<Failed>();
+  if (next.length === 0) return null;
+
+  const prototype = to === "prototype";
+  const input = AdvanceInput.safeParse({ to, reason: reason.trim(), ...(prototype ? { staffId, repo: repo ?? undefined } : {}) });
+
+  const move = async () => {
+    if (!api || !input.success) return;
+    setBusy(true);
+    setFailure(undefined);
+    const sent = await send(api, () => api.api.v1.services[":serviceId"].advance.$post({ param: { serviceId: service.id }, json: input.data }));
+    setBusy(false);
+    if (!sent.ok) {
+      setFailure(sent.failure);
+      return;
+    }
+    setReason("");
+    onMoved();
+  };
+
+  return (
+    <Stack gap={3}>
+      <Field label="移す先">
+        <Select
+          aria-label="移す先"
+          value={to}
+          options={next.map((s) => ({ value: s, label: MOVE_LABEL[s] }))}
+          onValueChange={(v) => {
+            const stage = ServiceStage.safeParse(v);
+            if (stage.success) setTo(stage.data);
+          }}
+        />
+      </Field>
+      {prototype ? (
+        <>
+          <Field label="担当の社員">
+            <Select
+              aria-label="担当の社員"
+              value={staffId}
+              options={StaffId.options.map((s) => ({ value: s, label: STAFF_LABEL[s] }))}
+              onValueChange={(v) => {
+                const staff = StaffId.safeParse(v);
+                if (staff.success) setStaffId(staff.data);
+              }}
+            />
+          </Field>
+          <RepoPicker value={repo} onChange={setRepo} />
+        </>
+      ) : null}
+      <TextField label="移す理由" value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} />
+      <Stack direction="row" gap={2}>
+        <Button variant={to === "dropped" || to === "closed" ? "danger" : "primary"} loading={busy} disabled={!input.success} onClick={() => void move()}>
+          {to ? MOVE_LABEL[to] : "移す"}
+        </Button>
+      </Stack>
+      {failure ? <FailedAlert title="段階を移せませんでした" failure={failure} /> : null}
+    </Stack>
+  );
+}

@@ -37,7 +37,8 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   { name: "社員の勤怠", path: "/staff/builder?tab=attendance&day=2026-11-13", heading: "社員と仕事", ready: "出勤 9:00" },
   // 入口にあるレビューは、境目のモックの返事で最初のファイルの変更を読み終えてから掛ける
   { name: "入口のレビュー", path: REVIEW_PATH, heading: "社員と仕事", ready: "const empty = 0;", mock: async (page) => void (await stubReview(page)) },
-  { name: "サービスの様子", path: "/services/knowidea-ui", heading: "アイデアとサービス" },
+  // サービスの様子は、入口から読み終えてから掛ける
+  { name: "サービスの様子", path: "/services/00000000-0000-7000-8000-000000000101", heading: "アイデアとサービス", ready: "公開した版" },
   // 木と組織図は records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
   // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
   { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },

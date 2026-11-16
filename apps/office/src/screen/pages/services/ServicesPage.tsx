@@ -1,85 +1,69 @@
-// アイデアとサービスの画面。段階ごとの案と、サービスの様子、記録、設定。仮のデータで、足した案は画面の中だけに残る
-import { Badge, Button, EmptyState, List, ListDetail, Stack, Tabs } from "knowidea-ui";
+// アイデアとサービスの画面。段階ごとの一覧と案を足す欄、選んだサービスの詳細 (サービスと拡張の 3.1 から 3.3)
+import { ServiceCard, ServiceStage } from "@know-office/core";
+import { EmptyState, List, ListDetail, Stack } from "knowidea-ui";
 import { useState } from "react";
-import { ideas, serviceLog, stages } from "../../mock.ts";
+import { z } from "zod";
+import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import type { Navigate } from "../../parts/navigate.ts";
 import { Part } from "../../parts/section.tsx";
+import { IdeaForm } from "./IdeaForm.tsx";
+import { KIND_LABEL, STAGE_LABEL } from "./labels.ts";
+import { ServiceView } from "./ServiceView.tsx";
 
-export function ServicesPage({ pathname, navigate }: { pathname: string; navigate: Navigate }) {
-  const id = pathname.split("/")[2];
-  const [added, setAdded] = useState<string[]>([]);
-  const selected = ideas.find((i) => i.id === id);
-  const list = (
-    <Stack gap={4}>
-      {stages.map((stage) => {
-        const here = ideas.filter((i) => i.stage === stage);
-        const extra = stage === "アイデア" ? added : [];
-        return (
-          <Part key={stage} title={stage}>
+export interface ServicesPageProps {
+  /** 今の道。`/services/<サービス ID>` なら詳細を出す */
+  pathname: string;
+  /** 道を移す */
+  navigate: Navigate;
+}
+
+/** アイデアとサービスの画面 */
+export function ServicesPage({ pathname, navigate }: ServicesPageProps) {
+  const id = z.uuid().safeParse(pathname.split("/")[2]);
+  const [tick, setTick] = useState(0);
+  const loaded = useLoad(z.array(ServiceCard), (a) => a.api.v1.services.$get({ query: { limit: "100" } }), tick);
+  const reload = () => setTick((t) => t + 1);
+
+  let lists = <p role="status">サービスを読んでいます</p>;
+  if (loaded.state === "failed") lists = <FailedAlert title="サービスを読めませんでした" failure={loaded} />;
+  if (loaded.state === "ok") {
+    lists = (
+      <>
+        {ServiceStage.options.map((stage) => (
+          <Part key={stage} title={STAGE_LABEL[stage]}>
             <List
-              label={stage}
-              items={[
-                ...here.map((i) => ({ id: i.id, title: i.title, href: `/services/${i.id}`, meta: i.summary })),
-                ...extra.map((t, n) => ({ id: `new-${n}`, title: t, meta: "足した案" })),
-              ]}
+              label={STAGE_LABEL[stage]}
+              items={loaded.data.filter((s) => s.stage === stage).map((s) => ({ id: s.id, title: s.name, href: `/services/${s.id}`, meta: [KIND_LABEL[s.kind], s.repo].filter(Boolean).join("、") }))}
               emptyText="まだ無い"
             />
           </Part>
-        );
-      })}
-      <Button variant="secondary" onClick={() => setAdded((a) => [...a, `新しい案 ${a.length + 1}`])}>
-        案を足す
-      </Button>
+        ))}
+      </>
+    );
+  }
+  const list = (
+    <Stack gap={4}>
+      <Part title="案を足す">
+        <IdeaForm
+          onAdded={(card) => {
+            reload();
+            navigate(`/services/${card.id}`);
+          }}
+        />
+      </Part>
+      {lists}
     </Stack>
   );
   return (
     <ListDetail
       listLabel="アイデアとサービス"
       detailLabel="サービスの様子"
-      showDetail={Boolean(selected)}
+      showDetail={id.success}
       onBack={() => navigate("/services")}
       backLabel="一覧へ戻る"
       list={list}
-      detail={
-        selected ? (
-          <Stack gap={4}>
-            <Stack direction="row" gap={2} align="center" wrap>
-              <h2>{selected.title}</h2>
-              <Badge>{selected.stage}</Badge>
-            </Stack>
-            <Tabs
-              label={`${selected.title}の様子`}
-              defaultValue="state"
-              items={[
-                { value: "state", label: "様子", content: <p>{selected.summary}</p> },
-                {
-                  value: "log",
-                  label: "記録",
-                  content: (
-                    <List
-                      label={`${selected.title}の記録`}
-                      items={(serviceLog[selected.id] ?? []).map((l, n) => ({ id: String(n), title: l.text, meta: l.time }))}
-                      emptyText="記録はまだ無い"
-                    />
-                  ),
-                },
-                {
-                  value: "settings",
-                  label: "設定",
-                  content: (
-                    <List
-                      label={`${selected.title}だけの設定`}
-                      items={selected.settings.map((t, n) => ({ id: String(n), title: t }))}
-                      emptyText="このサービスだけの設定は無い"
-                    />
-                  ),
-                },
-              ]}
-            />
-          </Stack>
-        ) : undefined
-      }
-      empty={<EmptyState title="サービスを選ぶ">選ぶと、その様子と記録と設定が出ます</EmptyState>}
+      detail={id.success ? <ServiceView key={id.data} serviceId={id.data} tick={tick} onChanged={reload} /> : undefined}
+      empty={<EmptyState title="サービスを選ぶ">選ぶと、その様子と元の案と記録と設定が出ます</EmptyState>}
     />
   );
 }
