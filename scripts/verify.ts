@@ -27,7 +27,12 @@ export function summarize(result: Step & StepResult): string {
     return `ok   ${result.name}${took}`;
   }
   const head = `FAIL ${result.name}${took} (exit ${result.code})`;
-  const output = result.output.trimEnd();
+  // 画面の通しの開発サーバーの出力 ([WebServer]) は失敗の理由を押し流すので外す
+  const output = result.output
+    .split("\n")
+    .filter((line) => !line.startsWith("[WebServer]"))
+    .join("\n")
+    .trimEnd();
   return output === "" ? head : [head, ...output.split("\n").slice(-TAIL)].join("\n");
 }
 

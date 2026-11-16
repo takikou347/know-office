@@ -1,7 +1,7 @@
 // CI の Check が、依存の弱点のチェックを依存を変えた PR と週に 1 度の main で、動く入口への自動の攻撃のチェックを PR ごとに回す事を確かめる (セキュリティの「弱点のチェック」)
 // node:test の describe と it は Promise を返すが、node:test が待つので void で示す
 import { strict as assert } from "node:assert";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -53,5 +53,13 @@ void describe("弱点のチェック", () => {
     // 攻撃はセッションを作るので、D1 のマイグレーション (records) の後に流す
     assert.match(playwright, /\{ name: "attack", testMatch: \/attack\\\.spec\\\.ts\/, dependencies: \["records", \.\.\.screenProjects\.map\(\(p\) => p\.name\)\] \}/);
     assert.ok(existsSync(join(root, "apps", "office", "e2e", "attack.spec.ts")));
+  });
+
+  void it("画面の通しは代わりの物のポートを決め打ちせず、.dev.vars から読む", () => {
+    // 作業ツリーごとにポートを変えて同時に流すので、決まった番号を書くとほかの作業ツリーの代わりの物に届く
+    const dir = join(root, "apps", "office", "e2e");
+    const files = readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((name) => name.endsWith(".ts"));
+    const fixed = files.filter((name) => /:(5174|5199)\b/.test(readFileSync(join(dir, name), "utf8")));
+    assert.deepEqual(fixed, []);
   });
 });

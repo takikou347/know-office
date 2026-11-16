@@ -4,9 +4,7 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { seedMain } from "./helpers/seed.ts";
 import { post } from "./helpers/screen.ts";
-
-/** 代わりの物の置き場。.dev.vars.example の DEV_FAKES_URL と同じ番号 */
-const FAKES = "http://127.0.0.1:5199";
+import { FAKES } from "../helpers/fakes.ts";
 
 /** 通しの置き場の木。目的と組織図の画面の見本の木と分け、見本の進み具合を変えない */
 const PURPOSE = "019a7b00-0000-7000-8000-0000000000e1";

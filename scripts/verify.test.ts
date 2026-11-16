@@ -24,6 +24,11 @@ void describe("push の前のチェックを短い出力で走らせる", () => 
     assert.equal(lines[40], "line 99");
   });
 
+  void it("落ちた手順の出力から開発サーバーの行を外す", () => {
+    const output = ["1 failed", ...Array.from({ length: 60 }, () => "[WebServer] noise"), "flows/a.spec.ts:3"].join("\n");
+    assert.equal(summarize({ name: "e2e", code: 1, output }), "FAIL e2e (exit 1)\n1 failed\nflows/a.spec.ts:3");
+  });
+
   void it("どの手順が落ちても最後まで走らせ、落ちた数を返す", () => {
     const ran: string[] = [];
     const exec = (step: Step) => {
