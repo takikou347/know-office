@@ -104,6 +104,8 @@ describe("know-office の中で確認する", () => {
       restore();
     }
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
+    // 判断を書けなかった時は、GitHub に写すレビューもステータスも積まない
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM github_mirrors")).toEqual([{ n: 0 }]);
   });
 });
 

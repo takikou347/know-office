@@ -27,6 +27,23 @@ const ask = async (app: Hono, path: string, init: RequestInit = {}) => {
   return app.request(path, { ...init, headers });
 };
 
+/**
+ * 代わりの GitHub に App を作って入れ、リポジトリ 1 つと権限を絞った 1 時間の鍵を作る
+ * @param github 代わりの GitHub
+ * @param permissions 鍵の権限
+ * @returns 鍵
+ */
+async function mintToken(github: ReturnType<typeof createFakeGitHub>, permissions: Record<string, string>): Promise<string> {
+  const manifest = { name: "ko", url: "http://localhost", redirect_url: "http://localhost/cb", setup_url: "http://localhost/installed", hook_attributes: { url: "http://localhost/hooks" }, public: false, default_permissions: { contents: "write", pull_requests: "write", statuses: "write", metadata: "read" }, default_events: [] };
+  const made = await ask(github.app, "/web/settings/apps/new?state=s1", { method: "POST", body: new URLSearchParams({ manifest: JSON.stringify(manifest) }) });
+  const code = new URL(made.headers.get("location") ?? "").searchParams.get("code") ?? "";
+  const conversion = z.object({ id: z.number(), slug: z.string(), pem: z.string() }).loose().parse(await (await ask(github.app, `/app-manifests/${code}/conversions`, { method: "POST" })).json());
+  const installation = new URL((await ask(github.app, `/web/apps/${conversion.slug}/installations/new`)).headers.get("location") ?? "").searchParams.get("installation_id") ?? "";
+  const jwt = await new SignJWT({}).setProtectedHeader({ alg: "RS256" }).setIssuer(String(conversion.id)).setIssuedAt().setExpirationTime("9m").sign(createPrivateKey(conversion.pem));
+  const minted = await ask(github.app, `/app/installations/${installation}/access_tokens`, { method: "POST", headers: { authorization: `Bearer ${jwt}` }, body: JSON.stringify({ repositories: ["knowidea-ui"], permissions }) });
+  return z.object({ token: z.string() }).loose().parse(await minted.json()).token;
+}
+
 describe("開発環境の代わりの物", () => {
   it("代わりの GitHub は User-Agent の無い API と git の要求を 403 で断る", async () => {
     const github = createFakeGitHub();
@@ -93,6 +110,17 @@ describe("開発環境の代わりの物", () => {
     expect((await ask(github.app, "/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(500);
     expect((await ask(github.app, "/__fake/failures", { method: "DELETE" })).status).toBe(204);
     expect((await ask(github.app, "/installation/repositories", { headers: { authorization: "Bearer ghs_x" } })).status).toBe(401);
+  });
+
+  it("代わりの GitHub はステータスを statuses の書きの鍵でだけ受け、140 字を超える説明を断る", async () => {
+    const github = createFakeGitHub();
+    const sha = "a".repeat(40);
+    const send = (token: string, description: string) =>
+      ask(github.app, `/repos/example/knowidea-ui/statuses/${sha}`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ state: "success", context: "know-office/owner-approval", description }) });
+    expect((await send(await mintToken(github, { pull_requests: "write" }), "よい")).status).toBe(403);
+    const writer = await mintToken(github, { statuses: "write" });
+    expect((await send(writer, "よい")).status).toBe(201);
+    expect((await send(writer, "あ".repeat(141))).status).toBe(422);
   });
 
   it("代わりの GitHub は積んだ返事を返し、無い物は 404 で返す", async () => {

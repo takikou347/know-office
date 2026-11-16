@@ -275,7 +275,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
     },
     postStatus: async (repo, sha, status) => {
       // GitHub の POST /repos/{owner}/{repo}/statuses/{sha}。説明は 140 字まで、同じ sha と名前で 1,000 件まで
-      const body = { state: status.state, context: OWNER_APPROVAL_CONTEXT, description: status.description.slice(0, 140) };
+      const body = { state: status.state, context: OWNER_APPROVAL_CONTEXT, description: status.description };
       return (await call(repo, { statuses: "write" }, { method: "POST", path: `/statuses/${sha}` }, GitHubPosted, body)).id;
     },
     commitFile: async (repo, branch, change) => {

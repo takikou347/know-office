@@ -15,6 +15,9 @@ const RETRY_BATCH = 20;
 /** 写す物 1 つ。review は可か不可のレビュー、comment は行のコメント、status はオーナーの判断のコミットのステータス */
 export type Mirror = { kind: "review"; payload: MirrorReviewPayload } | { kind: "comment"; payload: MirrorCommentPayload } | { kind: "status"; payload: MirrorStatusPayload };
 
+/** オーナーの判断から、出すステータス */
+const VERDICT_STATE: Partial<Record<string, "success" | "failure">> = { approve: "success", request_changes: "failure" };
+
 /** オーナーの判断のステータスに添える説明 */
 const STATUS_DESCRIPTION = { success: "オーナーが承認した", failure: "オーナーが差し戻した" } as const;
 
@@ -43,7 +46,7 @@ export function enqueueMirror(env: Bindings, reviewId: string, mirror: Mirror, c
 }
 
 /** 取った順番待ちの行と、写す先のプルリクエスト */
-type Claimed = { id: string; kind: string; payload: string; attempts: number; repo: string | null; pr_number: number | null };
+type Claimed = { id: string; kind: string; payload: string; attempts: number; repo: string | null; pr_number: number | null; head_sha: string | null; owner_verdict: string | null };
 
 /**
  * 順番待ちの 1 つを GitHub に送る。送る者の印を 1 文で取れた時だけ送るので、同時に 2 つ走っても 1 度だけ送る
@@ -63,9 +66,11 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
     .bind(claim, id, MIRROR_ATTEMPTS, now)
     .first<{ review_id: string; kind: string; payload: string; attempts: number }>();
   if (!row) return "skipped";
-  const target = await env.DB.prepare("SELECT repo, pr_number FROM reviews WHERE id = ?").bind(row.review_id).first<{ repo: string; pr_number: number }>();
-  const claimed: Claimed = { ...row, id, repo: target?.repo ?? null, pr_number: target?.pr_number ?? null };
-  let githubId: number;
+  const target = await env.DB.prepare("SELECT repo, pr_number, head_sha, owner_verdict FROM reviews WHERE id = ?")
+    .bind(row.review_id)
+    .first<{ repo: string; pr_number: number; head_sha: string; owner_verdict: string | null }>();
+  const claimed: Claimed = { ...row, id, repo: target?.repo ?? null, pr_number: target?.pr_number ?? null, head_sha: target?.head_sha ?? null, owner_verdict: target?.owner_verdict ?? null };
+  let githubId: number | null;
   try {
     githubId = await post(forge, claimed);
   } catch (error) {
@@ -106,17 +111,20 @@ export function mirrorMarker(id: string): string {
  * 2 回目からは、前の回が GitHub に送れた後に印を書けずに落ちたかもしれないので、先に GitHub の一覧で目印を探し、あればその ID を返して送らない
  * @param forge GitHub
  * @param claimed 取った行
- * @returns GitHub のレビューかコメントの ID
+ * @returns GitHub のレビューかコメントかステータスの ID。出す物が無くなったステータスは null
  * @throws Error 中身の形が違う時、レビューが無い時
  * @throws upstream_failed GitHub が失敗を返した時、一覧を読み切れない時
  */
-async function post(forge: Forge, claimed: Claimed): Promise<number> {
+async function post(forge: Forge, claimed: Claimed): Promise<number | null> {
   if (claimed.repo === null || claimed.pr_number === null) throw new Error("写す先のレビューが無い");
   const raw: unknown = JSON.parse(claimed.payload);
-  // ステータスは同じ sha と名前なら GitHub が新しい物を今の値にするので、送り直しても目印で探さずにそのまま出す
+  // ステータスは同じ sha と名前なら GitHub が最後に受けた物を今の値にする。出し直しが後の判断より遅れて届いても今の判断に合うよう、
+  // 積んだ時の判断でなく送る時のレビューの判断を出し、先が進んだか判断が消えていれば出さない
   if (claimed.kind === "status") {
     const status = MirrorStatusPayload.parse(raw);
-    return forge.postStatus(claimed.repo, status.commitId, { state: status.state, description: STATUS_DESCRIPTION[status.state] });
+    const state = VERDICT_STATE[claimed.owner_verdict ?? ""];
+    if (claimed.head_sha !== status.commitId || state === undefined) return null;
+    return forge.postStatus(claimed.repo, status.commitId, { state, description: STATUS_DESCRIPTION[state] });
   }
   const marker = mirrorMarker(claimed.id);
   const kind = claimed.kind === "review" ? "review" : "comment";

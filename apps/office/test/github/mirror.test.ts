@@ -1,5 +1,6 @@
 // know-office のレビューと GitHub のプルリクエストのレビューを互いに写す。自分が写した物の通知は写し返さず、写せない時は記録に残して 5 分ごとに写し直す (タスクとレビューの 3.5、3.6)
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { retryMirrors } from "../../src/gate/github/mirror.ts";
 import { runScheduled } from "../../src/gate/jobs/health.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
@@ -290,6 +291,29 @@ describe("know-office の中で確認する", () => {
     await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "直す", baseSha: HEAD });
     const posts = world.gate.github.requests.filter((r) => r.route === `POST /repos/${REPO}/statuses/${HEAD}`);
     expect(posts.map((p) => p.body)).toEqual([{ state: "failure", context: "know-office/owner-approval", description: "オーナーが差し戻した" }]);
+  });
+
+  it("前の判断のステータスを出し直す時も、今の判断を出す", async () => {
+    const { task, forge } = await openReview(world);
+    world.gate.github.failNext(`POST /repos/${REPO}/statuses/${HEAD}`, 502);
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "approve", body: "よい", baseSha: HEAD });
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "request_changes", body: "やはり直す", baseSha: HEAD });
+    world.clock.advance(5 * MINUTE);
+    await retryMirrors(world.gate.env, forge, world.clock);
+    const states = world.gate.github.requests.filter((r) => r.route === `POST /repos/${REPO}/statuses/${HEAD}`).map((r) => z.object({ state: z.string() }).loose().parse(r.body).state);
+    // 最後に出た物が GitHub の今の値になる
+    expect(states.at(-1)).toBe("failure");
+  });
+
+  it("先が進んだ後は、前の先へのステータスを出さない", async () => {
+    const { task, forge } = await openReview(world);
+    world.gate.github.failNext(`POST /repos/${REPO}/statuses/${HEAD}`, 502);
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "approve", body: "よい", baseSha: HEAD });
+    await world.d1.DB.prepare("UPDATE reviews SET head_sha = ?, owner_verdict = NULL WHERE node_id = ?").bind("e".repeat(40), task).run();
+    world.clock.advance(5 * MINUTE);
+    expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 1, failed: 0 });
+    expect(world.gate.github.requests.filter((r) => r.route === `POST /repos/${REPO}/statuses/${HEAD}`)).toHaveLength(1);
+    expect(await rows(world.d1.DB, "SELECT sent_at IS NOT NULL AS done, github_id FROM github_mirrors WHERE kind = 'status'")).toEqual([{ done: 1, github_id: null }]);
   });
 
   it("ステータスを出せなければ、5 分ごとのジョブが出し直す", async () => {
