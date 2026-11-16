@@ -10,9 +10,7 @@
       "Bash(pnpm test)",
       "Bash(pnpm build)",
       "Bash(pnpm e2e)",
-      "Bash(pnpm --filter * exec vitest run *)",
-      "Bash(npx @fission-ai/openspec@1.16.0 validate *)",
-      "Bash(npx -y @fission-ai/openspec@1.16.0 validate *)"
+      "Bash(pnpm --filter * exec vitest run *)"
     ],
     "deny": [
       "Read(./.env)",
