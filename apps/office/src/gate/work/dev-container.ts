@@ -23,6 +23,8 @@ type DevFetch = (url: string, init?: RequestInit) => Promise<Response>;
  * 代わりのワークスペースの SDK は、代わりの物の置き場の Claude API だけを呼ぶ
  */
 export class DevContainer<F = unknown> implements ContainerLike<F> {
+  /** 受け手を作らない。代わりのワークスペースはゲートウェイの受け手を通らない */
+  readonly intercepts = false;
   #running = false;
   /** 起こしている途中の物。Node のサーバーへの要求はこれを待つ */
   #booting: Promise<void> = Promise.resolve();

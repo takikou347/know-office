@@ -77,6 +77,8 @@ function newWorkspaceKey(): string {
 export type ContainerLike<F = unknown> = {
   /** 動いているか */
   readonly running: boolean;
+  /** 外向きの通信を受け手に回すか。開発のコンテナの代わりだけが false で、受け手を作らない。無ければ回す */
+  readonly intercepts?: false;
   /** 起こす */
   start(options: { enableInternet: boolean; env?: Record<string, string> }): void;
   /** その宛先の HTTP を受け手に回す */
@@ -231,9 +233,12 @@ export class WorkspaceBox<F = unknown> {
    * 社員はサーバーと同じ uid で動き、/proc とメモリから鍵を読めるので、防ぐのは鍵を知らずに 8080 番を直に呼ぶ事だけ
    */
   async #boot(): Promise<void> {
-    const fetcher = this.egress(this.caller);
-    for (const host of WORKSPACE_EGRESS.http) await this.container.interceptOutboundHttp(host, fetcher);
-    for (const host of WORKSPACE_EGRESS.https) await this.container.interceptOutboundHttps(host, fetcher);
+    // 開発のコンテナの代わりは受け手を通らない。手元の開発のサーバーは起こした直後に ctx.exports の受け手をまだ持たないので、作らずに起こす
+    if (this.container.intercepts !== false) {
+      const fetcher = this.egress(this.caller);
+      for (const host of WORKSPACE_EGRESS.http) await this.container.interceptOutboundHttp(host, fetcher);
+      for (const host of WORKSPACE_EGRESS.https) await this.container.interceptOutboundHttps(host, fetcher);
+    }
     // ゲートウェイの鍵は渡さない。作業トークンは /v1/runs で渡す
     const key = newWorkspaceKey();
     await this.deps.keys.put(key);

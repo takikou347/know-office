@@ -1,7 +1,7 @@
 // 開発環境のコンテナの代わりが、development で手元の代わりの物がある時だけ使われ、Node のワークスペースへ要求を回す事を確かめる (ログインと記録の 3.9、社員が考えるの 3.1)
 import { describe, expect, it } from "vitest";
 import { containerFor, DevContainer } from "../../src/gate/work/dev-container.ts";
-import type { ContainerLike } from "../../src/gate/work/workspace-box.ts";
+import { type ContainerLike, WorkspaceBox } from "../../src/gate/work/workspace-box.ts";
 
 /** 代わりのワークスペースに届いた要求 */
 type Sent = { url: string; body: string | null };
@@ -17,6 +17,14 @@ function recorder(): { fetcher: (url: string, init?: RequestInit) => Promise<Res
     return Promise.resolve(new Response(null, { status: url.endsWith("/v1/runs") ? 202 : 204 }));
   };
   return { fetcher, sent };
+}
+
+/**
+ * 手元の開発のサーバーを起こした直後の受け手。サーバーは起こした直後は入口の出す物を wrangler.jsonc からしか知らず、ctx.exports に受け手がまだ無い
+ * @returns 返さない
+ */
+function missingEgress(): never {
+  throw new TypeError("this.ctx.exports.WorkspaceEgress is not a function");
 }
 
 describe("開発のコンテナの代わり", () => {
@@ -52,6 +60,20 @@ describe("開発のコンテナの代わり", () => {
     const { fetcher, sent } = recorder();
     expect(() => containerFor({ ENVIRONMENT: "development", ACCESS_TEAM: "dev", DEV_FAKES_URL: url }, undefined, "builder", fetcher)).toThrow(expect.objectContaining({ code: "internal" }));
     expect(sent).toEqual([]);
+  });
+
+  it("開発のサーバーを起こした直後で受け手がまだ無くても、代わりのワークスペースを起こす", async () => {
+    const sent: string[] = [];
+    const fetcher = (url: string) => {
+      sent.push(url);
+      return Promise.resolve(url.endsWith("/v1/health") ? Response.json({ data: { ok: true, part: "workspace" } }) : new Response(null, { status: 204 }));
+    };
+    const container = containerFor({ ENVIRONMENT: "development", ACCESS_TEAM: "dev", DEV_FAKES_URL: "http://localhost:5199" }, undefined, "builder", fetcher);
+    let key: string | undefined;
+    const deps = { wait: () => Promise.resolve(), keys: { get: () => Promise.resolve(key), put: (k: string) => Promise.resolve(void (key = k)) }, notifyDown: () => Promise.resolve() };
+    await new WorkspaceBox(container, missingEgress, { staffId: "builder", workspaceId: "ws-builder" }, deps).start();
+    expect(container.running).toBe(true);
+    expect(sent).toEqual(["http://localhost:5199/workspace/builder/boot", "http://localhost:5199/workspace/builder/v1/health"]);
   });
 
   it("本物のコンテナがあればそれを使う", () => {
