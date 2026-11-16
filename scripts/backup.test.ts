@@ -62,6 +62,31 @@ void describe("毎日の D1 の写し", () => {
     assert.ok(prune.every((a) => !a[3]?.includes("2026-10-19") && !a[3]?.includes("2026-11-17")));
   });
 
+  void it("readonly の過去の年の写しは、新しい写しを置くまで消さず、最新の 1 つを必ず残す", () => {
+    const pastKeys = (day: string) =>
+      prunePlan(config, day)
+        .map((a) => a[3] ?? "")
+        .filter((k) => k.includes("/backups/REC_2026/"));
+    // 2 月 5 日は 1 月 1 日が消す幅に入るが、過去の年は月の 1 日の写しを日の幅では消さない
+    assert.ok(pastKeys("2027-02-05").every((k) => !k.endsWith("-01.sql")));
+    // 今の年と DB は同じ日でも消す
+    assert.ok(prunePlan(config, "2027-02-05").some((a) => a[3] === "know-office-files/backups/DB/2027-01-01.sql"));
+    // 2 月 1 日は、その日の写しを置いた後に、前の月までの 1 日の写しを消す。その日の写しは消さない
+    const onFirst = pastKeys("2027-02-01");
+    assert.ok(onFirst.includes("know-office-files/backups/REC_2026/2027-01-01.sql"));
+    assert.ok(onFirst.includes("know-office-files/backups/REC_2026/2026-12-01.sql"));
+    assert.ok(!onFirst.includes("know-office-files/backups/REC_2026/2027-02-01.sql"));
+    // 新しい写しを置けなければ、消す手順まで進まない
+    const seen: string[] = [];
+    const failingPut = (args: string[]) => {
+      seen.push(args[2] ?? "");
+      if (args[2] === "put" && args[3]?.includes("REC_2026")) throw new Error("put に失敗");
+      return "";
+    };
+    assert.throws(() => runBackup(failingPut, backupPlan(config, "2027-02-01", "/tmp/w"), prunePlan(config, "2027-02-01")), /put に失敗/);
+    assert.ok(!seen.includes("delete"));
+  });
+
   void it("古い写しを消すのに落ちても、その日の写しは先に置き終え、落ちた数を返す", () => {
     const seen: string[] = [];
     const wrangler = (args: string[]) => {

@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 20
     env:
       # CLOUDFLARE_DRILL_TOKEN の権限: D1 の編集 (Time Travel の戻しに要る) だけで、使うのはプレビューの記録の D1 の know-office-preview-rec だけ。R2 と本番の Workers の権限は付けない
+      # Cloudflare の API トークンの D1 の権限は DB ごとに絞れないので、戻す相手は scripts/restore-drill.ts の DRILL_DATABASE の固定と scripts/restore-drill.test.ts で守る
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DRILL_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:

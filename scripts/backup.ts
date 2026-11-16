@@ -128,19 +128,49 @@ export function backupPlan(config: Config, day: string, dir: string): string[][]
   });
 }
 
+/** 過去の年の、前の月の 1 日の写しを消し直す月の数 */
+const PAST_MONTHS = 12;
+
+/**
+ * 結び目が readonly になった過去の年の記録か
+ * @param binding 結び目
+ * @param day 日本時間の日
+ * @returns 過去の年なら true
+ */
+function isPastYear(binding: string, day: string): boolean {
+  const year = RECORD.exec(binding)?.[1];
+  return year !== undefined && year < day.slice(0, 4);
+}
+
+/**
+ * 月の 1 日を n か月戻す
+ * @param day YYYY-MM-DD
+ * @param n 戻す月の数
+ * @returns YYYY-MM-01
+ */
+function firstOfMonthsBefore(day: string, n: number): string {
+  const at = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1 - n, 1));
+  return at.toISOString().slice(0, 10);
+}
+
 /**
  * 残す日数より古い写しを消す手順を作る。キーは日で決まるので、残す日数の次の日から PRUNE_WINDOW_DAYS 日分を消す
+ * readonly の過去の年は月の 1 日にしか写さないので、日の幅では消さず、月の 1 日に新しい写しを置いた後で前の月までの写しを消す。最新の 1 つは必ず残る
+ * 消す手順は runBackup がその日の写しを全部置けた後にだけ流す
  * @param config wrangler.jsonc
  * @param day 日本時間の日
  * @returns wrangler の引数の並び
  */
 export function prunePlan(config: Config, day: string): string[][] {
   const bucket = bucketOf(config);
-  const days = Array.from({ length: PRUNE_WINDOW_DAYS }, (_, i) => daysBefore(day, BACKUP_RETENTION_DAYS + i));
-  return databases(config).flatMap((d) =>
+  const window = Array.from({ length: PRUNE_WINDOW_DAYS }, (_, i) => daysBefore(day, BACKUP_RETENTION_DAYS + i));
+  const pastMonths = day.endsWith("-01") ? Array.from({ length: PAST_MONTHS }, (_, i) => firstOfMonthsBefore(day, i + 1)) : [];
+  return databases(config).flatMap((d) => {
+    const past = isPastYear(d.binding, day);
+    const days = past ? [...window.filter((old) => !old.endsWith("-01")), ...pastMonths] : window;
     // https://developers.cloudflare.com/workers/wrangler/commands/r2/ の r2 object delete。R2 に object の一覧のコマンドは無いので、日で決まるキーを消す
-    days.map((old) => ["r2", "object", "delete", `${bucket}/backups/${d.binding}/${old}.sql`, "--remote"]),
-  );
+    return days.map((old) => ["r2", "object", "delete", `${bucket}/backups/${d.binding}/${old}.sql`, "--remote"]);
+  });
 }
 
 /**
