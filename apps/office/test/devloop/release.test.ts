@@ -5,6 +5,7 @@ import { AppError } from "@know-office/core";
 import { REPO } from "../helpers/docs.ts";
 import { child, issuesOf, pacedForge, plan, planOf, withDocs } from "../helpers/issues.ts";
 import { advance, clockIn, rows, tool, useWork } from "../helpers/work.ts";
+import { fakeTracker } from "../helpers/weekly.ts";
 import { runScheduled } from "../../src/gate/jobs/health.ts";
 import { isReady, settleParent } from "../../src/gate/devloop/release.ts";
 import type { DevIssues } from "../../src/gate/devloop/dev-issues.ts";
@@ -58,6 +59,15 @@ async function settle(number: number, issues: DevIssues = pacedForge(world).issu
   await settleParent(world.gate.env, issues, REPO, number, world.clock.now());
 }
 
+/** @returns 後で解く Promise。解く関数は初めから入っている */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  const slot: { resolve: () => void } = { resolve: () => undefined };
+  const promise = new Promise<void>((done) => {
+    slot.resolve = done;
+  });
+  return { promise, resolve: () => slot.resolve() };
+}
+
 describe("リリースと運用につなぐ", () => {
   it("親が閉じる", async () => {
     const { parent, kids } = await planned();
@@ -105,7 +115,7 @@ describe("リリースと運用につなぐ", () => {
     const { parent, kids } = await planned();
     await closeKids(kids);
     // 1 つ目の呼びが GitHub の親を閉じる所で待つ間に、2 つ目の呼びが閉じて通知を足し、オーナーが読む。1 つ目の閉じる文は取れず、通知を足さない
-    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: release } = deferred();
     const real = pacedForge(world).issues;
     const first = settle(kids[0] ?? 0, {
       ...real,
@@ -142,7 +152,7 @@ describe("リリースと運用につなぐ", () => {
     // 5 分ごとの定期ジョブの入り口から通す
     const pending: Promise<unknown>[] = [];
     await advance(world, world.clock.now() + 5 * 60_000);
-    runScheduled(world.gate.env, { waitUntil: (p) => void pending.push(p) }, world.clock, { fetch: world.gate.fetch, tracker: world.gate.tracker });
+    runScheduled(world.gate.env, { waitUntil: (p) => void pending.push(p) }, world.clock, { fetch: world.gate.fetch, tracker: fakeTracker() });
     await Promise.allSettled(pending);
     expect(await parentNow(parent)).toEqual({ github: ["closed", "completed"], row: ["closed", "completed"] });
     expect(await readyNotices()).toBe(1);
