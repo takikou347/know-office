@@ -253,6 +253,7 @@ export { StudySubmitTool } from "./schemas/tools/study-submit.ts";
 export { NodeAssignTool } from "./schemas/tools/node-assign.ts";
 export { NodeCreateTool } from "./schemas/tools/node-create.ts";
 export { PrOpenTool } from "./schemas/tools/pr-open.ts";
+export { DocsPrOpenTool } from "./schemas/tools/docs-pr-open.ts";
 export { ReviewSubmitTool } from "./schemas/tools/review-submit.ts";
 export { StaffRequestTool } from "./schemas/tools/staff-request.ts";
 export { CheckpointTool } from "./schemas/tools/checkpoint.ts";

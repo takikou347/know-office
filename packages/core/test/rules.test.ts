@@ -109,9 +109,9 @@ function asRole(role: keyof typeof ROLE_TOOLS, name: string) {
 
 describe("社員のツールは役ごとに通す", () => {
   it.each([
-    { role: "president", allow: ["node_create", "node_assign", "staff_request", "study_submit", "service_close_request"], deny: ["pr_open", "review_submit"] },
-    { role: "builder", allow: ["pr_open", "service_close_request"], deny: ["node_create", "node_assign", "staff_request", "study_submit", "review_submit"] },
-    { role: "reviewer", allow: ["review_submit"], deny: ["pr_open", "staff_request", "node_create", "service_close_request"] },
+    { role: "president", allow: ["node_create", "node_assign", "staff_request", "study_submit", "service_close_request"], deny: ["pr_open", "docs_pr_open", "review_submit"] },
+    { role: "builder", allow: ["pr_open", "docs_pr_open", "service_close_request"], deny: ["node_create", "node_assign", "staff_request", "study_submit", "review_submit"] },
+    { role: "reviewer", allow: ["review_submit"], deny: ["pr_open", "docs_pr_open", "staff_request", "node_create", "service_close_request"] },
   ] as const)("$role は役のツールだけを通す", ({ role, allow, deny }) => {
     expect(allow.map((name) => [name, asRole(role, name).decision.allow])).toEqual(allow.map((name) => [name, true]));
     expect(deny.map((name) => [name, asRole(role, name).op.kind, asRole(role, name).decision.allow])).toEqual(deny.map((name) => [name, "office.tool", false]));

@@ -9,6 +9,7 @@ export const STAFF_TOOL_NAMES = [
   "issue_plan",
   "service_close_request",
   "pr_open",
+  "docs_pr_open",
   "review_submit",
   "idea_add",
   "ask_boss",
@@ -24,7 +25,7 @@ export type StaffToolName = (typeof STAFF_TOOL_NAMES)[number];
 /** 役ごとに使える社員のツール。ここに無いツールはルールの判断が断り、ゲートウェイも not_found で断る */
 export const ROLE_TOOLS = {
   president: ["node_create", "node_assign", "staff_request", "study_submit", "issue_plan", "idea_add", "service_close_request", "ask_boss", "ask_owner", "checkpoint", "report", "owner_info_read"],
-  builder: ["pr_open", "idea_add", "service_close_request", "ask_boss", "ask_owner", "checkpoint", "report", "owner_info_read"],
+  builder: ["pr_open", "docs_pr_open", "idea_add", "service_close_request", "ask_boss", "ask_owner", "checkpoint", "report", "owner_info_read"],
   reviewer: ["review_submit", "idea_add", "ask_boss", "ask_owner", "checkpoint", "report", "owner_info_read"],
 } as const satisfies Record<string, readonly StaffToolName[]>;
 
