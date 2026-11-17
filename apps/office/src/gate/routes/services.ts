@@ -1,12 +1,13 @@
 // サービス: アイデアから運用まで。案を足し、一覧と詳細を読み、オーナーが段階を移す (API の services、サービスと拡張の 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AdvanceInput, AppError, CreateIdeaInput, Deployment, RollbackInput, ServiceCard, ServiceDetail, ServiceStage } from "@know-office/core";
+import { AdvanceInput, AppError, CreateIdeaInput, Deployment, RollbackInput, ServiceCard, ServiceDetail, ServiceIssues, ServiceStage } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { audit } from "../ledger/record.ts";
 import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { accepted, created, list, ok } from "../respond.ts";
 import { rollbackService } from "../services/rollback.ts";
+import { loadServiceIssues } from "../services/issues.ts";
 import { advanceService, createIdea, listServices, loadService, toCard } from "../services/flow.ts";
 
 const router = createRouter();
@@ -52,6 +53,24 @@ const getServiceRoute = createRoute({
   "x-errors": ["404 `not_found`: サービスが存在しない"],
   request: { params: ServiceParam },
   responses: { 200: okResponse(ServiceDetail), ...problems(401, 403, 404, 429, 500) },
+});
+
+const getServiceIssuesRoute = createRoute({
+  method: "get",
+  path: "/api/v1/services/{serviceId}/issues",
+  operationId: "getServiceIssues",
+  tags: ["services"],
+  summary: "サービスの Issue の木",
+  description: "親 Issue と子 Issue、子と同じ番号の開発担当のタスク、設計書の PR、サービスに進められるかを返す。子は番号の若い方から 500 件までで、運用の子が積み重なっても返事が大きくなり過ぎないようにする。",
+  "x-steps": [
+    "サービスを取得する。設計書より前の段階では、親が無い空の木を返す",
+    "`dev_issues` のそのサービスの親と子 (番号の若い方から 500 件まで) を読み、子と同じ番号の `nodes` のタスクの状態と PR の番号を付ける",
+    "設計書を書くタスクの PR と、同じ時に直す設計書の PR (`task_docs`) を並べる",
+    "`ready` は、機能の親 (運用の親と子が 0 件の親を除く) がすべて閉じていて、入れて閉じた親が 1 つ以上ある事。サービスに進められる通知と同じ条件で読む",
+  ],
+  "x-errors": ["404 `not_found`: サービスが存在しない"],
+  request: { params: ServiceParam },
+  responses: { 200: okResponse(ServiceIssues), ...problems(401, 403, 404, 429, 500) },
 });
 
 const advanceServiceRoute = createRoute({
@@ -118,6 +137,9 @@ export const serviceRoutes = router
   })
   .openapi(getServiceRoute, async (c) => {
     return ok(c, await loadService(c.env, c.req.valid("param").serviceId, c.var.clock.now()));
+  })
+  .openapi(getServiceIssuesRoute, async (c) => {
+    return ok(c, await loadServiceIssues(c.env, c.req.valid("param").serviceId));
   })
   .openapi(advanceServiceRoute, async (c) => {
     const { serviceId } = c.req.valid("param");

@@ -6833,6 +6833,202 @@ paths:
 
         - 404 `not_found`: サービスが存在しない
       security: *a1
+  /api/v1/services/{serviceId}/issues:
+    get:
+      operationId: getServiceIssues
+      tags:
+        - services
+      summary: サービスの Issue の木
+      description: |-
+        親 Issue と子 Issue、子と同じ番号の開発担当のタスク、設計書の PR、サービスに進められるかを返す。子は番号の若い方から 500 件までで、運用の子が積み重なっても返事が大きくなり過ぎないようにする。
+
+        処理の流れ:
+
+        1. サービスを取得する。設計書より前の段階では、親が無い空の木を返す
+        2. `dev_issues` のそのサービスの親と子 (番号の若い方から 500 件まで) を読み、子と同じ番号の `nodes` のタスクの状態と PR の番号を付ける
+        3. 設計書を書くタスクの PR と、同じ時に直す設計書の PR (`task_docs`) を並べる
+        4. `ready` は、機能の親 (運用の親と子が 0 件の親を除く) がすべて閉じていて、入れて閉じた親が 1 つ以上ある事。サービスに進められる通知と同じ条件で読む
+
+        このルート固有のエラー:
+
+        - 404 `not_found`: サービスが存在しない
+      x-steps:
+        - サービスを取得する。設計書より前の段階では、親が無い空の木を返す
+        - "`dev_issues` のそのサービスの親と子 (番号の若い方から 500 件まで) を読み、子と同じ番号の `nodes` のタスクの状態と PR の番号を付ける"
+        - 設計書を書くタスクの PR と、同じ時に直す設計書の PR (`task_docs`) を並べる
+        - "`ready` は、機能の親 (運用の親と子が 0 件の親を除く) がすべて閉じていて、入れて閉じた親が 1 つ以上ある事。サービスに進められる通知と同じ条件で読む"
+      x-errors:
+        - "404 `not_found`: サービスが存在しない"
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            description: UUID v7
+          required: true
+          description: UUID v7
+          name: serviceId
+          in: path
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      ready:
+                        type: boolean
+                      docsPrs:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            repo:
+                              type: string
+                            number:
+                              type: integer
+                              exclusiveMinimum: 0
+                            kind:
+                              type: string
+                              enum:
+                                - design
+                                - together
+                            task:
+                              type: object
+                              properties:
+                                id:
+                                  type: string
+                                  format: uuid
+                                status:
+                                  type: string
+                                  enum:
+                                    - todo
+                                    - doing
+                                    - review
+                                    - done
+                                    - stopped
+                                    - waiting_owner
+                                    - dropped
+                              required:
+                                - id
+                                - status
+                              additionalProperties: false
+                          required:
+                            - repo
+                            - number
+                            - kind
+                            - task
+                          additionalProperties: false
+                      parents:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            number:
+                              type: integer
+                              exclusiveMinimum: 0
+                            feature:
+                              type: string
+                            state:
+                              type: string
+                              enum:
+                                - open
+                                - closed
+                            operations:
+                              type: boolean
+                            children:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  number:
+                                    type: integer
+                                    exclusiveMinimum: 0
+                                  requirement:
+                                    type:
+                                      - string
+                                      - "null"
+                                  kind:
+                                    type:
+                                      - string
+                                      - "null"
+                                    enum:
+                                      - bug
+                                      - feature
+                                      - chore
+                                      - null
+                                  state:
+                                    type: string
+                                    enum:
+                                      - open
+                                      - closed
+                                  task:
+                                    type:
+                                      - object
+                                      - "null"
+                                    properties:
+                                      id:
+                                        type: string
+                                        format: uuid
+                                      status:
+                                        type: string
+                                        enum:
+                                          - todo
+                                          - doing
+                                          - review
+                                          - done
+                                          - stopped
+                                          - waiting_owner
+                                          - dropped
+                                      prNumber:
+                                        type:
+                                          - integer
+                                          - "null"
+                                        exclusiveMinimum: 0
+                                    required:
+                                      - id
+                                      - status
+                                      - prNumber
+                                    additionalProperties: false
+                                required:
+                                  - number
+                                  - requirement
+                                  - kind
+                                  - state
+                                  - task
+                                additionalProperties: false
+                          required:
+                            - number
+                            - feature
+                            - state
+                            - operations
+                            - children
+                          additionalProperties: false
+                    required:
+                      - ready
+                      - docsPrs
+                      - parents
+                    additionalProperties: false
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security: *a1
   /api/v1/services/{serviceId}/advance:
     post:
       operationId: advanceService
