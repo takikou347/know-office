@@ -2,13 +2,18 @@
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, prototypeService, REPO } from "./helpers/dev-loop.ts";
+import { findTaskId, giveBackBuilderTasks, prototypeService, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
 import { restoreSeedServices, seedMain } from "./helpers/seed.ts";
-import { openTree, scriptReply } from "./helpers/staff-work.ts";
+import { clockInStaff, openTree, scriptReply } from "./helpers/staff-work.ts";
+
+/** 通しの間だけ開発担当から外したタスクの ID。後始末で戻す */
+const state = { aside: "" };
 
 test.afterEach(() => {
   forgetGitHub();
   restoreSeedServices();
+  giveBackBuilderTasks(state.aside);
+  state.aside = "";
 });
 
 /** 代わりの GitHub への要求に付ける見出し */
@@ -21,6 +26,10 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
   test.slow();
   const { docs, serviceId } = await prototypeService(page, "設計書と入れる案");
   const origin = new URL(page.url()).origin;
+  // 前の通しが残した読んでいない鍵と上限の通知は、どの社員の呼び出しも止めるので、先に読んだ事にする
+  seedMain(`UPDATE notices SET read_at = ${String(Date.now())} WHERE kind IN ('sdk_auth_failed', 'claude_spend_limit') AND read_at IS NULL`);
+  // 前の通しが開発担当に残したタスクは、先に取られて積んだ返事を使われるので、通しの間だけ開発担当から外す
+  state.aside = await setAsideBuilderTasks(page);
   // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
   const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
   expect(stopped.status()).toBe(201);
@@ -74,7 +83,9 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
     `INSERT INTO dev_issues (id, service_id, repo, number, issue_id, kind, feature, requirement, req_hash, issue_kind, paths, heads, mark_key, state, created_at) VALUES ('${ids.dev}', '${serviceId}', '${REPO}', ${String(issue)}, ${String(issue)}, 'child', '1-video', '動画を作る', 'e2e', 'feature', '["src/a.ts"]', '["src/a.ts"]', '${mark}', 'open', ${now})`,
   );
 
+  let restoreSchedule: (() => Promise<void>) | null = null;
   try {
+    restoreSchedule = await clockInStaff(page, "builder");
     await put(REPO, "main", codeBase);
     await put(REPO, codeBranch, codeHead);
     await put(docs, "main", docsBase);
@@ -129,7 +140,11 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
       const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
       await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: origin }, data: { version, status: "dropped" } });
     }
-    seedMain(`DELETE FROM dev_issues WHERE id = '${ids.dev}'`);
-    seedMain(`DELETE FROM task_docs WHERE node_id = '${ids.task}'`);
+    try {
+      seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM task_docs WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
+    } finally {
+      // 後始末が落ちても勤務の時刻を戻す。外したタスクを開発担当に戻すのはその後 (afterEach)
+      await restoreSchedule?.();
+    }
   }
 });

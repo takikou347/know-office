@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, prototypeService, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
+import { findTaskId, giveBackBuilderTasks, prototypeService, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
 import { clockInStaff, openTree, scriptReply } from "./helpers/staff-work.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { freeRepoNames, restoreSeedServices, seedMain } from "./helpers/seed.ts";
