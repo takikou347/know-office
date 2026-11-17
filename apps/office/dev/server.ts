@@ -5,6 +5,7 @@ import { createFakeAccess, type FakeAccess, type FakeAccessOptions } from "./acc
 import { createFakeClaude, type FakeClaude } from "./claude.ts";
 import { createFakeGitHub, type FakeGitHub } from "./github.ts";
 import { createDevWorkspaces, type DevWorkspaces } from "./workspace.ts";
+import { devUpgrade } from "./workspace-upgrade.ts";
 
 /** 立てた代わりの物 */
 export type RunningFakes = {
@@ -34,6 +35,8 @@ export async function startFakes(options: FakeAccessOptions & { port: number; ga
   const workspaces = createDevWorkspaces(options.gateBase);
   const app = new Hono().route("/access", access.app).route("/anthropic", claude.app).route("/github", github.app).route("/codeload", github.codeload).route("/workspace", workspaces.app);
   const server = serve({ fetch: app.fetch, port: options.port, hostname: "127.0.0.1" });
+  // 補完の切り替えは Hono を通らないので、upgrade を受けて Node のワークスペースへ TCP で渡す
+  server.on("upgrade", devUpgrade(workspaces));
   return {
     access,
     claude,

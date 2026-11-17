@@ -2,8 +2,11 @@
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 import type { AgentCall } from "../src/agent.ts";
 import { DEV_EVENTS_MAX, rememberEvents, startDevWorkspace } from "../src/dev.ts";
+import { NODE, parse, SHA } from "./helpers/relay.ts";
+import { tarGz } from "./helpers/tar.ts";
 
 const KEY = "a".repeat(64);
 const GATE = "http://localhost:5174/__dev/workspace/builder";
@@ -79,4 +82,35 @@ describe("開発の代わりのワークスペース", () => {
     expect(kept).toHaveLength(DEV_EVENTS_MAX);
     expect(kept[0]?.[0]?.body).toBe("20");
   });
+
+  it("補完の木を受けて今の先を答え、本物の tsc を利用者を落とさずに起こして補完の口を開く", async () => {
+    const dev = await startDevWorkspace({ key: KEY, gateUrl: GATE, agent: () => Promise.resolve("終えた") });
+    const http = `http://127.0.0.1:${String(dev.port)}`;
+    const auth = { authorization: `Bearer ${KEY}` };
+    try {
+      const tree = tarGz([
+        { name: "top/", type: "dir" },
+        { name: "top/src/a.ts", body: "export const a = 1;\n" },
+      ]);
+      expect((await fetch(`${http}/v1/lsp/trees/${NODE}/${SHA}`, { method: "PUT", headers: { ...auth, "content-type": "application/gzip" }, body: new Uint8Array(tree) })).status).toBe(204);
+      expect(await (await fetch(`${http}/v1/lsp/trees/${NODE}`, { headers: auth })).json()).toMatchObject({ data: { sha: SHA } });
+      const socket = new WebSocket(`ws://127.0.0.1:${String(dev.port)}/v1/lsp?nodeId=${NODE}&sha=${SHA}`, { headers: auth });
+      const answer = new Promise<Record<string, unknown>>((resolve, reject) => {
+        socket.on("message", (data: Buffer) => {
+          const message = parse(data.toString("utf8"));
+          if (message.id === 1) resolve(message);
+        });
+        socket.once("error", reject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        socket.once("open", () => resolve());
+        socket.once("unexpected-response", (_req, res) => reject(new Error(`開けない ${String(res.statusCode)}`)));
+      });
+      socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { processId: 1, rootUri: "file:///work", capabilities: {} } }));
+      expect(await answer).toHaveProperty("result.capabilities");
+      socket.close();
+    } finally {
+      await dev.close();
+    }
+  }, 20_000);
 });

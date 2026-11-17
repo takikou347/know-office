@@ -1,14 +1,19 @@
 // 開発環境の代わりのワークスペース。本物と同じサーバーと Runner を手元の空いた番号で起こし、出来事と SDK の Claude の呼び出しはゲートウェイの開発の道に送る (ログインと記録の 3.9、社員が考えるの 3.2)
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type AgentEvent, AppError, type Fetcher, log, systemClock } from "@know-office/core";
 import type { Agent } from "./agent.ts";
 import { gateReporter } from "./events.ts";
 import { GATE_ORIGIN } from "./hooks.ts";
+import { LspHub } from "./lsp-hub.ts";
+import { tscSpawner } from "./lsp-tsc.ts";
 import { Runner } from "./run.ts";
 import { sdkAgent } from "./sdk.ts";
 import { createWorkspaceServer } from "./server.ts";
+import { TreeStore } from "./tree.ts";
 
 /** ゲートウェイの開発の道 (/__dev/workspace/<社員 ID>)。これでない宛先には出来事を送らない */
 const LOCAL_GATE = /^http:\/\/(localhost|127\.0\.0\.1):\d+\/__dev\/workspace\/[a-z]+$/;
@@ -66,7 +71,8 @@ export async function startDevWorkspace(options: { key: string; gateUrl: string;
   const root = await mkdtemp(join(tmpdir(), "know-office-workspace-"));
   const cwd = join(root, "work");
   const home = join(root, "home");
-  await Promise.all([mkdir(cwd), mkdir(home)]);
+  const review = join(root, "review");
+  await Promise.all([mkdir(cwd), mkdir(home), mkdir(review)]);
   const runner = new Runner(
     options.agent ?? sdkAgent(),
     (error) => log("warn", "dev_run_failed", { error: error instanceof Error ? error.name : "unknown" }),
@@ -80,7 +86,13 @@ export async function startDevWorkspace(options: { key: string; gateUrl: string;
     },
     { baseUrl: `${options.gateUrl}/anthropic`, cwd, home },
   );
-  const server = createWorkspaceServer(runner, options.key);
+  // 補完の木は一時の置き場に置き、本物と同じく apps/workspace の依存を型の束にする。手元は root でないので、tsc は利用者を落とさずに起こす
+  const lsp = new LspHub({
+    trees: new TreeStore({ root: review, bundle: realpathSync(fileURLToPath(new URL("../node_modules", import.meta.url))), clock: systemClock }),
+    spawnTsc: tscSpawner(undefined, { asLsp: false }),
+    typesRoots: [realpathSync(fileURLToPath(new URL("../../../node_modules", import.meta.url)))],
+  });
+  const server = createWorkspaceServer(runner, options.key, lsp);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new AppError("internal", "代わりのワークスペースの番号が分からない");

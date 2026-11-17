@@ -44,6 +44,20 @@ describe("開発のコンテナの代わり", () => {
     expect(container.running).toBe(false);
   });
 
+  it("補完の切り替えは、クエリと Upgrade: websocket をそのまま代わりのワークスペースへ出す", async () => {
+    const seen: { url: string; upgrade: string | null }[] = [];
+    const fetcher = (url: string, init?: RequestInit) => {
+      seen.push({ url, upgrade: new Headers(init?.headers).get("upgrade") });
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+    const container = containerFor({ ENVIRONMENT: "development", ACCESS_TEAM: "dev", DEV_FAKES_URL: "http://localhost:5199" }, undefined, "builder", fetcher);
+    container.start({ enableInternet: false, env: { WORKSPACE_KEY: "k".repeat(64) } });
+    const query = `nodeId=0190f4a8-0000-7000-8000-000000000101&sha=${"a".repeat(40)}`;
+    await container.getTcpPort(8080).fetch(`http://workspace/v1/lsp?${query}`, { headers: { upgrade: "websocket" } });
+    expect(seen.at(-1)).toEqual({ url: `http://localhost:5199/workspace/builder/v1/lsp?${query}`, upgrade: "websocket" });
+    await container.destroy();
+  });
+
   it.each([
     ["ENVIRONMENT が無い", undefined],
     ["本番", "production"],

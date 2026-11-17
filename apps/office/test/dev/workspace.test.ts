@@ -1,9 +1,11 @@
 // 開発の代わりのワークスペースの置き場が、起こし、Node のサーバーへ要求を回し、受けたタスクの開始を残す事を確かめる (ログインと記録の 3.9)
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
+import { connect, type Socket } from "node:net";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createDevWorkspaces, type StartDevWorkspace } from "../../dev/workspace.ts";
+import { devUpgrade } from "../../dev/workspace-upgrade.ts";
 
 const KEY = "b".repeat(64);
 const NODE = "0190f4a8-0000-7000-8000-000000000101";
@@ -29,6 +31,72 @@ function stubStart(): { start: StartDevWorkspace; seen: string[]; booted: { key:
     return { port, events: [], close: () => new Promise<void>((resolve) => server.close(() => resolve(void closed.push(1)))) };
   };
   return { start, seen, booted, closed };
+}
+
+const SHA = "a".repeat(40);
+
+/** 補完の木と切り替えを受ける代わりのワークスペースが受けた物 */
+type LspSeen = { trees: { url: string; type: string; body: Buffer }[]; upgrades: string[] };
+
+/**
+ * 補完の木の本文を並べ、切り替えを 101 で受けて送られた物を返す代わりのワークスペースを起こす関数を作る
+ * @returns 起こす関数と受けた物
+ */
+function lspStart(): { start: StartDevWorkspace; seen: LspSeen } {
+  const seen: LspSeen = { trees: [], upgrades: [] };
+  const start: StartDevWorkspace = async () => {
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        seen.trees.push({ url: `${req.method ?? ""} ${req.url ?? ""}`, type: req.headers["content-type"] ?? "", body: Buffer.concat(chunks) });
+        res.writeHead(req.method === "PUT" ? 204 : 200).end();
+      });
+    });
+    server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
+      seen.upgrades.push(`${req.url ?? ""} ${req.headers.authorization ?? ""} ${req.headers.upgrade ?? ""}`);
+      socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+      // 送られた物をそのまま返す
+      socket.pipe(socket);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("番号が分からない");
+    return {
+      port: address.port,
+      events: [],
+      close: () =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    };
+  };
+  return { start, seen };
+}
+
+/**
+ * 開発のサーバーに切り替えを送り、返ってきた物を読む
+ * @param port 開発のサーバーの番号
+ * @param path 道
+ * @param send 切り替えの後に送る物
+ * @returns 返ってきた物
+ */
+function upgradeThrough(port: number, path: string, send: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1");
+    let got = "";
+    socket.on("data", (chunk: Buffer) => {
+      got += chunk.toString();
+      if (got.includes("\r\n\r\n") && got.startsWith("HTTP/1.1 101") && !got.endsWith(send)) socket.write(send);
+      if (got.endsWith(send) || !got.startsWith("HTTP/1.1 101")) {
+        socket.destroy();
+        resolve(got);
+      }
+    });
+    socket.on("error", reject);
+    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nAuthorization: Bearer ${KEY}\r\n\r\n`);
+  });
 }
 
 describe("開発の代わりのワークスペースの置き場", () => {
@@ -127,6 +195,53 @@ describe("開発の代わりのワークスペースの置き場", () => {
     expect((await ws.app.request("/nobody/boot", { method: "POST", body: JSON.stringify({ key: KEY }) })).status).toBe(400);
     expect((await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: "short" }) })).status).toBe(400);
     expect(booted).toEqual([]);
+    await ws.close();
+  });
+
+  it("補完の木の道で Node のサーバーを起こし、tarball の本文と形をそのまま回す", async () => {
+    const { start, seen } = lspStart();
+    const ws = createDevWorkspaces(() => "http://localhost:5198", start);
+    await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) });
+    const gz = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0xff, 0x00, 0x80]);
+    const auth = { authorization: `Bearer ${KEY}` };
+    expect((await ws.app.request(`/builder/v1/lsp/trees/${NODE}`, { headers: auth })).status).toBe(200);
+    expect((await ws.app.request(`/builder/v1/lsp/trees/${NODE}/${SHA}`, { method: "PUT", headers: { ...auth, "content-type": "application/gzip" }, body: gz })).status).toBe(204);
+    expect(seen.trees.map((t) => t.url)).toEqual([`GET /v1/lsp/trees/${NODE}`, `PUT /v1/lsp/trees/${NODE}/${SHA}`]);
+    expect(seen.trees[1]?.type).toBe("application/gzip");
+    expect([...(seen.trees[1]?.body ?? [])]).toEqual([...gz]);
+    await ws.close();
+  });
+
+  it("起こした回数を /__fake/boots で読む", async () => {
+    const { start } = stubStart();
+    const ws = createDevWorkspaces(() => "http://localhost:5198", start);
+    expect(await (await ws.app.request("/__fake/boots")).json()).toEqual({});
+    await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) });
+    await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) });
+    await ws.app.request("/reviewer/boot", { method: "POST", body: JSON.stringify({ key: KEY }) });
+    expect(await (await ws.app.request("/__fake/boots")).json()).toEqual({ builder: 2, reviewer: 1 });
+    await ws.close();
+  });
+
+  it("補完の切り替えは /workspace/<社員 ID>/v1/lsp を起こした Node のサーバーへ TCP でそのまま渡し、起こしていない社員は 502 で断る", async () => {
+    const { start, seen } = lspStart();
+    const ws = createDevWorkspaces(() => "http://localhost:5198", start);
+    const front = createServer((_req, res) => res.writeHead(404).end());
+    front.on("upgrade", devUpgrade(ws));
+    await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
+    const address = front.address();
+    if (address === null || typeof address === "string") throw new Error("番号が分からない");
+    const query = `nodeId=${NODE}&sha=${SHA}`;
+    expect(await upgradeThrough(address.port, `/workspace/builder/v1/lsp?${query}`, "x")).toMatch(/^HTTP\/1\.1 502/);
+    await ws.app.request("/builder/boot", { method: "POST", body: JSON.stringify({ key: KEY }) });
+    const got = await upgradeThrough(address.port, `/workspace/builder/v1/lsp?${query}`, "ping");
+    expect(got).toMatch(/^HTTP\/1\.1 101/);
+    expect(got.endsWith("ping")).toBe(true);
+    expect(seen.upgrades).toEqual([`/v1/lsp?${query} Bearer ${KEY} websocket`]);
+    // ほかの道は渡さない
+    expect(await upgradeThrough(address.port, "/workspace/builder/v1/runs", "x")).toMatch(/^HTTP\/1\.1 404/);
+    front.closeAllConnections();
+    await new Promise<void>((resolve) => front.close(() => resolve()));
     await ws.close();
   });
 });

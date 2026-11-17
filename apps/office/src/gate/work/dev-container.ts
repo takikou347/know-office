@@ -99,8 +99,9 @@ export class DevContainer<F = unknown> implements ContainerLike<F> {
     return {
       fetch: async (url, init) => {
         await this.#booting;
-        const { pathname } = new URL(url);
-        return this.fetcher(`${this.base}/${this.staffId}${pathname}`, init);
+        // 補完の切り替えは木の名前をクエリで渡し、Upgrade: websocket のまま出す。workerd の fetch は 101 を受けると webSocket を返す
+        const { pathname, search } = new URL(url);
+        return this.fetcher(`${this.base}/${this.staffId}${pathname}${search}`, init);
       },
     };
   }

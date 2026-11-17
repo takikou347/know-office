@@ -16,12 +16,14 @@ export type ReceivedRun = { staffId: StaffId; nodeId: string };
 
 /** 代わりのワークスペースの置き場 */
 export type DevWorkspaces = {
-  /** /:staffId/boot、/:staffId/stop、/:staffId/v1/*、/__fake/runs を持つ Hono */
+  /** /:staffId/boot、/:staffId/stop、/:staffId/v1/*、/__fake/runs、/__fake/boots を持つ Hono */
   app: Hono;
   /** 受けたタスクの開始 */
   runs: ReceivedRun[];
   /** 起こした物をすべて止める */
   close(): Promise<void>;
+  /** 起こした社員の Node のサーバーの番号。サーバーがまだ無ければ起こす。起こしていない社員は null */
+  serverPort(staffId: string): Promise<number | null>;
 };
 
 /** ハートビートを送る間。本物のワークスペース (apps/workspace/src/heartbeat.ts) と同じ 30 秒 */
@@ -75,6 +77,8 @@ export function createDevWorkspaces(gateBase: () => string, start?: StartDevWork
   // 起こした社員の鍵、ハートビートを止める関数、起こした Node のサーバー。サーバーと SDK は最初の /v1/runs か /v1/restore まで読み込まない
   const booted = new Map<StaffId, { key: string; stopBeat: () => void; server?: Promise<DevWorkspace> }>();
   const runs: ReceivedRun[] = [];
+  // 起こした回数。通しが「読むだけ」の操作で起こしていない事を確かめる
+  const boots = new Map<StaffId, number>();
   const fetcher = heartbeat.fetcher ?? ((url: string, init?: RequestInit) => fetch(url, init));
   const every =
     heartbeat.every ??
@@ -121,11 +125,13 @@ export function createDevWorkspaces(gateBase: () => string, start?: StartDevWork
   };
   const app = new Hono()
     .get("/__fake/runs", (c) => c.json(runs))
+    .get("/__fake/boots", (c) => c.json(Object.fromEntries(boots)))
     .post("/:staffId/boot", async (c) => {
       const staffId = StaffId.safeParse(c.req.param("staffId"));
       const body = Boot.safeParse(await c.req.json().catch(() => null));
       if (!staffId.success || !body.success) return c.body(null, 400);
       await stop(staffId.data);
+      boots.set(staffId.data, (boots.get(staffId.data) ?? 0) + 1);
       booted.set(staffId.data, { key: body.data.key, stopBeat: startBeat(staffId.data, body.data.key) });
       return c.body(null, 204);
     })
@@ -149,16 +155,18 @@ export function createDevWorkspaces(gateBase: () => string, start?: StartDevWork
         if (c.req.header("authorization") !== `Bearer ${held.key}`) return c.body(null, 401);
         if (route === "POST /v1/abort" || route === "PUT /v1/ticket") return c.body(null, 204);
         if (route === "POST /v1/messages") return c.body(null, 409);
-        if (route !== "POST /v1/runs" && route !== "POST /v1/restore") return c.body(null, 404);
+        // 補完の木の道でも、本物と同じくサーバーを起こす
+        if (route !== "POST /v1/runs" && route !== "POST /v1/restore" && !path.startsWith("/v1/lsp/")) return c.body(null, 404);
       }
       const server = await serverOf(staffId.data, held);
-      const body = c.req.method === "GET" ? undefined : await c.req.text();
-      const headers: Record<string, string> = { "content-type": "application/json" };
+      // 補完の木は tar.gz なので、本文をバイトのまま、形を付けたまま回す
+      const body = c.req.method === "GET" ? undefined : await c.req.arrayBuffer();
+      const headers: Record<string, string> = { "content-type": c.req.header("content-type") ?? "application/json" };
       const auth = c.req.header("authorization");
       if (auth !== undefined) headers["authorization"] = auth;
       const res = await fetch(`http://127.0.0.1:${String(server.port)}${path}`, { method: c.req.method, headers, ...(body === undefined ? {} : { body }) });
       if (path === "/v1/runs" && res.status === 202) {
-        const run = RunBody.safeParse(JSON.parse(body ?? "null"));
+        const run = RunBody.safeParse(JSON.parse(body === undefined ? "null" : new TextDecoder().decode(body)));
         if (run.success) runs.push({ staffId: staffId.data, nodeId: run.data.nodeId });
       }
       return new Response(res.body, { status: res.status, headers: res.headers });
@@ -168,6 +176,12 @@ export function createDevWorkspaces(gateBase: () => string, start?: StartDevWork
     runs,
     close: async () => {
       await Promise.all([...booted.keys()].map(stop));
+    },
+    serverPort: async (id) => {
+      const staffId = StaffId.safeParse(id);
+      const held = staffId.success ? booted.get(staffId.data) : undefined;
+      if (!staffId.success || !held) return null;
+      return (await serverOf(staffId.data, held)).port;
     },
   };
 }
