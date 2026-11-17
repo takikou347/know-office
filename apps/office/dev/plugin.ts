@@ -79,6 +79,23 @@ export function upgradeAccess(req: IncomingMessage, token: string): void {
   gatewayCookie(req);
 }
 
+/** 画面の通しが、文書の返事に本番の CSP を付けるよう頼むヘッダー (e2e/csp.spec.ts) */
+export const PRODUCTION_CSP_HEADER = "x-know-office-production-csp";
+
+/**
+ * 頼まれた文書の返事に、本番の画面のファイルに付く CSP (public/_headers) を付ける。開発の入口は CSP を付けないため、通しで本番の CSP の断りを見る時だけ使う。
+ * 開発の入口は React の差し替えの準備を文書の中の <script> で書くので、script-src に 'unsafe-inline' だけ足す。eval と style は本番と同じに断る
+ * @param req 要求
+ * @param res 返事
+ * @param headers public/_headers の中身
+ */
+export function productionCsp(req: IncomingMessage, res: ServerResponse, headers: string): void {
+  if (req.headers[PRODUCTION_CSP_HEADER] === undefined || req.headers["sec-fetch-dest"] !== "document") return;
+  const csp = /Content-Security-Policy:\s*(.+)/.exec(headers)?.[1]?.trim();
+  if (!csp) throw new Error("public/_headers に Content-Security-Policy が無い");
+  res.setHeader("Content-Security-Policy", csp.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'"));
+}
+
 /**
  * 開発の入口は http://localhost なので、Secure のクッキーを受けないブラウザー (Linux の WebKit など) がある。API への要求だけ、
  * ログインセッションのクッキーを Secure の無い開発の名前でブラウザーに渡し、受けた時は本物の名前に戻してゲートウェイへ渡す。ゲートウェイは本物と同じ __Host- の名前だけを見る
@@ -160,7 +177,9 @@ export function devFakes(): Plugin {
       });
       // cloudflare のプラグインより先に切り替えの要求を受ける
       server.httpServer?.prependListener("upgrade", (req: IncomingMessage) => upgradeAccess(req, token));
+      const headers = readFileSync(join(server.config.root, "public", "_headers"), "utf8");
       server.middlewares.use((req, res, next) => {
+        productionCsp(req, res, headers);
         localSessionCookie(req, res);
         attachAccess(req, fakes.access.sign).then(() => next(), next);
       });
