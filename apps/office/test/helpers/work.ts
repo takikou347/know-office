@@ -95,6 +95,8 @@ function fakeForge(): FakeForge {
       forge.main = String(forge.merged.length).padEnd(40, "m");
       return "merged";
     },
+    fastForwardable: () => Promise.resolve(true),
+    pullOf: () => Promise.resolve(null),
     inMain: (_repo, sha) => Promise.resolve(forge.landed.has(sha)),
     postReview: (repo, pr, review) => Promise.resolve(forge.posted.push({ repo, pr, kind: "review", body: review })),
     postComment: (repo, pr, comment) => Promise.resolve(forge.posted.push({ repo, pr, kind: "comment", body: comment })),

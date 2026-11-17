@@ -112,7 +112,18 @@ export async function isFirstDocs(forge: Forge, repo: string, name: string): Pro
 }
 
 /**
- * 設計書を書くタスク (source が design:<サービス ID>) が変えてよい置き場の名前を出す。そのサービスの `services/<リポジトリの名前を小文字にした物>/`
+ * サービスの設計書の置き場の名前を出す。そのサービスの `services/<リポジトリの名前を小文字にした物>/`
+ * @param db 今の状態の D1
+ * @param serviceId サービス ID
+ * @returns 名前。サービスかリポジトリが無ければ空文字 (どの名前にも合わない)
+ */
+export async function docsNameOf(db: D1Database, serviceId: string): Promise<string> {
+  const [owner] = await drizzle(db).select({ repo: services.repo }).from(services).where(eq(services.id, serviceId)).limit(1);
+  return owner?.repo?.split("/")[1]?.toLowerCase() ?? "";
+}
+
+/**
+ * 設計書を書くタスク (source が design:<サービス ID>) が変えてよい置き場の名前を出す
  * @param db 今の状態の D1
  * @param task タスクの範囲と出どころ
  * @param task.scope タスクの範囲。設計書を書くタスクではサービス ID
@@ -120,9 +131,7 @@ export async function isFirstDocs(forge: Forge, repo: string, name: string): Pro
  * @returns 設計書を書くタスクでなければ undefined。分からなければ空文字 (どの名前にも合わない)
  */
 export async function expectedDocsName(db: D1Database, task: { scope: string; source: string | null }): Promise<string | undefined> {
-  if (task.source?.startsWith("design:") !== true) return undefined;
-  const [owner] = await drizzle(db).select({ repo: services.repo }).from(services).where(eq(services.id, task.scope)).limit(1);
-  return owner?.repo?.split("/")[1]?.toLowerCase() ?? "";
+  return task.source?.startsWith("design:") === true ? docsNameOf(db, task.scope) : undefined;
 }
 
 /**
@@ -134,12 +143,13 @@ export async function expectedDocsName(db: D1Database, task: { scope: string; so
  * @param task.scope タスクの範囲。設計書を書くタスクではサービス ID
  * @param task.source タスクの出どころ
  * @param head ブランチの先として固定したコミット
+ * @param expected 期待する置き場の名前。コードのタスクが結ぶ設計書の PR は、そのサービスの名前を渡す。無ければタスクの出どころから決める
  * @throws validation_failed 設計書の形が違う時、設計書を書くタスクが別のサービスの置き場を変える時
  * @throws upstream_failed 設計書の木を読み切れない時、GitHub から読めない時
  */
-export async function assertDocsPr(db: D1Database, forge: Forge, task: { repo: string | null; scope: string; source: string | null }, head: string): Promise<void> {
+export async function assertDocsPr(db: D1Database, forge: Forge, task: { repo: string | null; scope: string; source: string | null }, head: string, expected?: string): Promise<void> {
   if (task.repo === null) throw new AppError("internal", "設計書のタスクにリポジトリが無い");
-  const shape = await verifyDocsPr(forge, task.repo, head, undefined, await expectedDocsName(db, task));
+  const shape = await verifyDocsPr(forge, task.repo, head, undefined, expected ?? (await expectedDocsName(db, task)));
   if (shape.kind === "refused") throw new AppError("validation_failed", shape.reason, { errors: shape.errors });
   if (shape.kind === "waiting") throw new AppError("upstream_failed", shape.reason);
 }

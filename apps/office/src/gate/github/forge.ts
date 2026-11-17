@@ -25,7 +25,7 @@ import {
   RepoName,
   RULESET_NAME,
 } from "@know-office/core";
-import type { output, ZodType } from "zod";
+import { z, type output, type ZodType } from "zod";
 import type { DevIssues } from "../devloop/dev-issues.ts";
 import type { ChangedFile, Forge } from "../work/loop.ts";
 import { GITHUB_USER_AGENT, githubRetryAfter } from "./app.ts";
@@ -408,6 +408,18 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
       const state = (await call(repo, readContents, { method: "GET", path: `/compare/main...${commitSha(head.sha)}` }, GitHubCompare)).status;
       if (state === "diverged" || state === "behind") return "behind";
       throw new AppError("upstream_failed", "GitHub が main を進める更新を断った");
+    },
+    fastForwardable: async (repo, sha) => {
+      // main からコミットまでが ahead (main がコミットの祖先) か identical なら、fast-forward で進められる
+      const state = (await call(repo, readContents, { method: "GET", path: `/compare/main...${commitSha(sha)}` }, GitHubCompare)).status;
+      return state === "ahead" || state === "identical";
+    },
+    pullOf: async (repo, branch) => {
+      // GET /repos/{o}/{r}/pulls は head に `<owner>:<ブランチ>` を取り、state=open で開いた PR だけを返す (GitHub の REST API の List pull requests)。同じブランチの開いた PR は 1 本なので 2 件読めば足りる
+      const owner = repo.split("/")[0] ?? "";
+      const list = await call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=open&per_page=2` }, z.array(GitHubPull));
+      const [pull] = list;
+      return pull === undefined ? null : { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };
     },
     inMain: async (repo, sha) => {
       // main が確かめたコミットを含めば、main はコミットから見て ahead か identical
