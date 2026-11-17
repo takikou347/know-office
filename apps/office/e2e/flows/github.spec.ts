@@ -4,7 +4,7 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { seedMain } from "./helpers/seed.ts";
-import { FAKES } from "../helpers/fakes.ts";
+import { createClaudeKey, FAKES } from "../helpers/fakes.ts";
 
 /** 開発の代わりの GitHub。.dev.vars の DEV_FAKES_URL */
 const FAKE_GITHUB = `${FAKES}/github`;
@@ -76,7 +76,9 @@ async function resumeOffice(page: Page, slug: string | null): Promise<void> {
   if (!office) return;
   seedMain(`UPDATE sessions SET step_up_until = ${String(Date.now() + 10 * 60_000)} WHERE ended_at IS NULL`);
   const headers = { Origin: new URL(page.url()).origin };
-  await page.request.put("/api/v1/guard/keys/claude", { headers, data: { apiKey: `sk-ant-cleanup-${crypto.randomUUID()}` } });
+  const apiKey = `sk-ant-cleanup-${crypto.randomUUID()}`;
+  await createClaudeKey(page.request, apiKey);
+  await page.request.put("/api/v1/guard/keys/claude", { headers, data: { apiKey } });
   if (slug !== null) {
     const pem = await (await page.request.post(`${FAKE_GITHUB}/web/settings/apps/${slug}/keys`)).text();
     await page.request.put("/api/v1/guard/keys/github-app", { headers, data: { privateKey: pem, webhookSecret: "cleanup-webhook-secret" } });
@@ -178,7 +180,10 @@ test.describe("全体を止める", () => {
     await main.getByLabel("新しい秘密鍵 (PEM)").fill(pem);
     await main.getByLabel("新しい Webhook secret").fill("e2e-webhook-secret-0001");
     await main.getByRole("button", { name: "GitHub App の鍵を入れる" }).click();
-    await main.getByLabel("新しい API の鍵").fill(`sk-ant-e2e-${crypto.randomUUID()}`);
+    // Anthropic の画面で鍵を作り直してから入れる
+    const apiKey = `sk-ant-e2e-${crypto.randomUUID()}`;
+    await createClaudeKey(page.request, apiKey);
+    await main.getByLabel("新しい API の鍵").fill(apiKey);
     await main.getByRole("button", { name: "Claude の鍵を入れる" }).click();
     // 手順の文にも「入れ直した」があるので、印の言葉だけをちょうどで数える
     await expect(main.getByText("入れ直した", { exact: true })).toHaveCount(2);

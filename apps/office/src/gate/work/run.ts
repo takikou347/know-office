@@ -16,7 +16,7 @@ import { extensionToolSpecs } from "./tools.ts";
 /** 続けてこの回数だけ始められないか失敗したら、タスクを todo に戻さずオーナーの答えを待たせる */
 export const RUN_FAILURE_LIMIT = 3;
 
-/** Claude の鍵が断られた時の通知の種類。読むまでどの社員も呼び出しを始めない */
+/** Claude の鍵が断られた時の通知の種類。読むまでどの社員も呼び出しを始めず、週のバッチ処理も送らない */
 export const AUTH_FAILED_NOTICE = "sdk_auth_failed";
 
 /** Claude の API が使用の上限に届いた時の通知の種類。読むまでどの社員も呼び出しを始めない (サービスと拡張の 3.5) */
@@ -52,6 +52,15 @@ export async function noticeOnce(env: Bindings, notice: { kind: string; title: s
     .run();
   // 足した時だけ画面に配る。画面は印を受けて通知を読み直す
   if (res.meta.changes === 1) await announceNotice(env, id, clockAt(now));
+}
+
+/**
+ * Claude の鍵が断られた事を 1 件だけ知らせる。社員の呼び出しと週のバッチ処理のどちらで断られても同じ 1 件にする
+ * @param env バインディング
+ * @param now 今の時刻
+ */
+export async function noticeAuthFailed(env: Bindings, now: number): Promise<void> {
+  await noticeOnce(env, { kind: AUTH_FAILED_NOTICE, title: "Claude の鍵が断られた", body: "社員と週のバッチ処理は Claude を呼べない。設定で鍵を確かめ、この通知を読むと続きを始める" }, now);
 }
 
 /**

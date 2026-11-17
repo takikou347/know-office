@@ -1,13 +1,15 @@
 // 週に 1 度のバッチ処理 (蒸留、見つけて直す調べ、アイデア出し) と、見つけた時に調べる急ぐ故障のバッチ処理。記録をまとめて Claude のバッチ処理に送り、5 分ごとに終わりを見て結果を入れる (サービスと拡張の 3.1、3.6、3.7)
-import { type Clock, type Fetcher, jstDay, jstDayStart, newId } from "@know-office/core";
+import { AppError, type Clock, type Fetcher, jstDay, jstDayStart, newId } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
 import { FINDINGS_JOB, syncIssues, URGENT_JOB, URGENT_PER_DAY, urgentBatches } from "../findings/scan.ts";
 import type { IssueTracker } from "../findings/tracker.ts";
 import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
+import { claudeBlocked, noticeAuthFailed } from "../work/run.ts";
+import { BATCH_DEADLINE_MS, countNotFound, failBatch, recordAnswerFailures } from "./batch-giveup.ts";
 import { IDEAS_JOB } from "./ideas.ts";
-import { batchEnded, type BatchRequest, type BatchResult, batchResults, submitBatch } from "./claude-batch.ts";
+import { batchEnded, type BatchRequest, type BatchResult, batchResults, submitBatch, UNKNOWN_SUBMIT } from "./claude-batch.ts";
 
 /** 日本時間の月曜 3 時。Cron は協定世界時で書くので日曜の 18 時になる。蒸留を始める */
 export const DISTILL_CRON = "0 18 * * 0";
@@ -33,7 +35,7 @@ export const WEEKLY_LIMITS = {
   ideas: { flag: "IDEA_BATCH", perRun: 1, perWeek: 1 },
 } as const satisfies Record<Exclude<BatchKind, "urgent">, { flag: keyof Bindings; perRun: number; perWeek: number }>;
 
-/** 始めた印を、送れずに残った物とみなすまでの間 */
+/** 始めた印を、送ったか分からない物とみなすまでの間 */
 const STALE_PENDING_MS = 30 * 60_000;
 
 /** バッチ処理の種類。urgent は急ぐ故障で、週でなく日と原因ごとに 1 つ */
@@ -83,7 +85,15 @@ export type WeeklyJob = {
 
 const JOBS: Record<BatchKind, WeeklyJob> = { distill: DISTILL_JOB, findings: FINDINGS_JOB, ideas: IDEAS_JOB, urgent: URGENT_JOB };
 
-const Pending = z.object({ id: z.string(), kind: z.enum(["distill", "findings", "ideas", "urgent"]), week: z.string(), batch_id: z.string(), detail: z.string().nullable(), created_at: z.number() });
+const Pending = z.object({
+  id: z.string(),
+  kind: z.enum(["distill", "findings", "ideas", "urgent"]),
+  week: z.string(),
+  batch_id: z.string(),
+  detail: z.string().nullable(),
+  created_at: z.number(),
+  failures: z.number(),
+});
 
 /**
  * 今の時刻から前の週を出す。今が月曜でなくても、今の週の前の週を返す
@@ -109,7 +119,7 @@ function clockOf(now: number): Clock {
 }
 
 /**
- * 前の週のバッチ処理を始める。種類の設定が on でない時、送る物が無い週、もう始めた週は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
+ * 前の週のバッチ処理を始める。種類の設定が on でない時、Claude の鍵が断られた通知を読んでいない時、送る物が無い週、もう始めた週は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
  * @param env バインディング
  * @param kind 種類
  * @param deps 外へ頼む口
@@ -121,6 +131,7 @@ export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDep
   if (kind === "urgent") return null;
   const limit = WEEKLY_LIMITS[kind];
   if (env[limit.flag] !== "on") return null;
+  if (await claudeBlocked(env.DB)) return null;
   const range = previousWeek(now);
   const prepared = await JOBS[kind].prepare(env, range, limit.perRun);
   if (!prepared || prepared.requests.length === 0) return null;
@@ -128,7 +139,8 @@ export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDep
 }
 
 /**
- * 種類と鍵で 1 つだけのバッチを送る。もう始めた鍵は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
+ * 種類と鍵で 1 つだけのバッチを送る。もう始めた鍵は何もしない。断られた時は始めた印を戻し、届いたか分からない時は印を unknown にして残し、どちらもエラーログに残す。
+ * 印を残すので、上限は送ろうとした回数で数え、同じ鍵を 2 度は送らない
  * @param env バインディング
  * @param kind 種類
  * @param key 週の始めの日。急ぐ故障は日と指紋
@@ -152,8 +164,8 @@ async function submitOnce(
   cap?: { prefix: string; max: number },
 ): Promise<string | null> {
   const id = newId(clockOf(now));
-  // 送る前に落ちて残った印は、時間がたてば取り直せるようにする
-  await env.DB.prepare("DELETE FROM batches WHERE kind = ? AND week = ? AND status = 'pending' AND created_at < ?").bind(kind, key, now - STALE_PENDING_MS).run();
+  // 送る途中で落ちて残った印は、送れたかが分からないので送り直さない
+  await env.DB.prepare("UPDATE batches SET status = 'unknown' WHERE kind = ? AND week = ? AND status = 'pending' AND created_at < ?").bind(kind, key, now - STALE_PENDING_MS).run();
   // 種類と鍵で 1 行だけを持てるので、同時に始めた 2 つの片方だけが送る。上限は同じ 1 文の条件に入れ、同時に来ても超えない
   const capped = cap ? "(SELECT count(*) FROM batches WHERE kind = ? AND substr(week, 1, ?) = ?) < ?" : "1 = 1";
   const claimed = await env.DB.prepare(
@@ -167,37 +179,79 @@ async function submitOnce(
     await env.DB.prepare("UPDATE batches SET batch_id = ?, status = 'submitted' WHERE id = ? AND status = 'pending'").bind(batchId, id).run();
     return id;
   } catch (error) {
-    await env.DB.prepare("DELETE FROM batches WHERE id = ? AND status = 'pending'").bind(id).run();
-    await recordError(env, { source: "job", level: "error", code: `${kind}_submit_failed`, error }, clockOf(now));
+    const unknown = error instanceof AppError && error.code === UNKNOWN_SUBMIT;
+    // 作られたか分からない送りは、送り直すと二重になるので印を残す
+    const sql = unknown ? "UPDATE batches SET status = 'unknown' WHERE id = ? AND status = 'pending'" : "DELETE FROM batches WHERE id = ? AND status = 'pending'";
+    await env.DB.prepare(sql).bind(id).run();
+    if (error instanceof AppError && error.code === "unauthenticated") await noticeAuthFailed(env, now);
+    await recordError(env, { source: "job", level: "error", code: `${kind}_submit_${unknown ? "unknown" : "failed"}`, error }, clockOf(now));
     return null;
   }
 }
 
 /**
- * 送ったバッチの終わりを見て、終わった物の結果を入れる。失敗はエラーログに残し、次の 5 分で読み直す
+ * 送ったバッチの終わりを見て、終わった物の結果を入れる。失敗はエラーログに残し、次の 5 分で読み直す。
+ * 期限を過ぎたバッチと続けて見つからないバッチは諦めて知らせる。Claude の鍵が断られた通知を読むまでは Claude を呼ばない
  * @param env バインディング
  * @param deps 外へ頼む口
  * @param now 今の時刻
  */
 export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number): Promise<void> {
-  const { results } = await env.DB.prepare("SELECT id, kind, week, batch_id, detail, created_at FROM batches WHERE status = 'submitted' ORDER BY id").all();
+  const claudeOpen = !(await claudeBlocked(env.DB));
+  if (claudeOpen) await pollSubmitted(env, deps, now);
+  // 前の回に作れなかった Issue を作り直す。GitHub だけを呼ぶので鍵の断りに関わらず行う
+  await syncIssues(env, deps.tracker, now);
+  // 終わりを見る間に鍵を断られたら、急ぐ故障も送らない
+  if (!claudeOpen || (await claudeBlocked(env.DB))) return;
+  // 急ぐ故障は週を待たずに調べる。結果は次の 5 分で入れる
+  for (const urgent of await urgentBatches(env, now)) await submitOnce(env, "urgent", urgent.key, urgent, deps, now, { prefix: urgent.day, max: URGENT_PER_DAY });
+}
+
+/**
+ * 送ったバッチを 1 つずつ見る。鍵が断られたら知らせて、残りは次の回に回す
+ * @param env バインディング
+ * @param deps 外へ頼む口
+ * @param now 今の時刻
+ */
+async function pollSubmitted(env: Bindings, deps: WeeklyDeps, now: number): Promise<void> {
+  const { results } = await env.DB.prepare("SELECT id, kind, week, batch_id, detail, created_at, failures FROM batches WHERE status = 'submitted' ORDER BY id").all();
   for (const raw of results) {
     const parsed = Pending.safeParse(raw);
     if (!parsed.success) continue;
     const p = parsed.data;
+    const late = now > p.created_at + BATCH_DEADLINE_MS;
+    let ended: boolean;
     try {
-      if (!(await batchEnded(env, deps.fetch, p.batch_id))) continue;
+      ended = await batchEnded(env, deps.fetch, p.batch_id);
+    } catch (error) {
+      await recordError(env, { source: "job", level: "error", code: `${p.kind}_poll_failed`, error }, clockOf(now));
+      if (error instanceof AppError && error.code === "unauthenticated") {
+        await noticeAuthFailed(env, now);
+        return;
+      }
+      if (error instanceof AppError && error.code === "not_found") await countNotFound(env, p, now);
+      else if (late) await failBatch(env, p, now, "期限を過ぎても終わりが分からない");
+      continue;
+    }
+    if (p.failures > 0) await env.DB.prepare("UPDATE batches SET failures = 0 WHERE id = ? AND status = 'submitted'").bind(p.id).run();
+    if (!ended) {
+      if (late) await failBatch(env, p, now, "期限を過ぎても終わらない");
+      continue;
+    }
+    // 終わったバッチの結果は 29 日読めるので、入れるのが落ちても期限で諦めず、次の 5 分で読み直す
+    try {
       const answers = await batchResults(env, deps.fetch, p.batch_id);
       const row: BatchRow = { id: p.id, kind: p.kind, week: p.week, batchId: p.batch_id, createdAt: p.created_at, detail: p.detail === null ? null : (JSON.parse(p.detail) as unknown) };
       await JOBS[p.kind].apply(env, deps, row, answers, now);
+      await recordAnswerFailures(env, p.kind, answers, now);
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: `${p.kind}_apply_failed`, error }, clockOf(now));
+      if (error instanceof AppError && error.code === "unauthenticated") {
+        await noticeAuthFailed(env, now);
+        return;
+      }
     }
   }
-  // 前の回に作れなかった Issue を作り直す
-  await syncIssues(env, deps.tracker, now);
-  // 急ぐ故障は週を待たずに調べる。結果は次の 5 分で入れる
-  for (const urgent of await urgentBatches(env, now)) await submitOnce(env, "urgent", urgent.key, urgent, deps, now, { prefix: urgent.day, max: URGENT_PER_DAY });
 }
 
 /**

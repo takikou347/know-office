@@ -2,7 +2,7 @@
 import { type Clock, FindingAnswer, jstClock, jstDay, newId, OPUS, redactPublic } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
-import { answerJson, type BatchRequest, type BatchResult, recordBatchUsage } from "../jobs/claude-batch.ts";
+import { answerJson, BATCH_EFFORT, BATCH_MAX_TOKENS, type BatchRequest, type BatchResult, recordBatchUsage } from "../jobs/claude-batch.ts";
 import type { BatchRow, WeekRange, WeeklyDeps, WeeklyJob } from "../jobs/weekly.ts";
 import { BURST_LIMIT, BURST_WINDOW_MS, CLAUDE_FAILED, recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
@@ -13,8 +13,6 @@ import { fingerprintMark, type IssueTracker, publicTracker, REPO_PATTERN } from 
 /** 1 度に送るエラーの原因の上限。多い順に送る */
 const MAX_GROUPS = 100;
 
-/** 答えの長さの上限 */
-const MAX_TOKENS = 2000;
 
 /** Issue を作る印を、作れずに残った物とみなすまでの間 */
 const STALE_CLAIM_MS = 10 * 60_000;
@@ -128,7 +126,7 @@ async function errorGroups(env: Bindings, from: number, to: number, filter: { ov
 function requestOf(group: DetailGroup, lines: string[], urgent: boolean): BatchRequest {
   const label = urgent ? `急ぐ故障 (${KINDS[group.kind].label})` : KINDS[group.kind].label;
   const when = `最初: ${jstDay(group.firstAt)} ${jstClock(group.firstAt)}、最後: ${jstDay(group.lastAt)} ${jstClock(group.lastAt)}`;
-  return { customId: group.customId, model: OPUS, system: SYSTEM, prompt: redactPublic([`種類: ${label}`, ...lines, when].join("\n")), maxTokens: MAX_TOKENS };
+  return { customId: group.customId, model: OPUS, system: SYSTEM, prompt: redactPublic([`種類: ${label}`, ...lines, when].join("\n")), maxTokens: BATCH_MAX_TOKENS, effort: BATCH_EFFORT };
 }
 
 /**

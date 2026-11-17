@@ -1,0 +1,1 @@
+ALTER TABLE `batches` ADD `failures` integer DEFAULT 0 NOT NULL;

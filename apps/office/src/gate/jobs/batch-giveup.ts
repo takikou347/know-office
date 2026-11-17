@@ -1,0 +1,64 @@
+// 送ったバッチ処理を諦める所。期限を過ぎた物と続けて見つからない物を失敗にして知らせ、入れなかった答えを残す (サービスと拡張の 3.6)
+import type { Bindings } from "../env.ts";
+import { recordError } from "../ledger/errors.ts";
+import { clockAt } from "../work/attendance.ts";
+import { noticeOnce } from "../work/run.ts";
+import type { BatchResult } from "./claude-batch.ts";
+
+/** 送ったバッチを諦めるまでの間。Anthropic のバッチは 24 時間で切れるので、1 時間の余りを見る (https://docs.claude.com/en/build-with-claude/batch-processing) */
+export const BATCH_DEADLINE_MS = 25 * 60 * 60_000;
+
+/** 続けて見つからなかったら諦める回数 */
+export const BATCH_NOT_FOUND_LIMIT = 3;
+
+/** 諦めたバッチの通知の種類 */
+export const BATCH_FAILED_NOTICE = "batch_failed";
+
+/** 諦めるかを決める batches の行 */
+export type SubmittedBatch = {
+  /** 行の ID */
+  id: string;
+  /** 種類 */
+  kind: string;
+  /** 週の始めの日。急ぐ故障は日と指紋 */
+  week: string;
+};
+
+/**
+ * 見つからなかった回数を足し、続けて上限に届いたら諦める
+ * @param env バインディング
+ * @param p batches の行
+ * @param now 今の時刻
+ */
+export async function countNotFound(env: Bindings, p: SubmittedBatch, now: number): Promise<void> {
+  const row = await env.DB.prepare("UPDATE batches SET failures = failures + 1 WHERE id = ? AND status = 'submitted' RETURNING failures").bind(p.id).first<{ failures: number }>();
+  if (row && row.failures >= BATCH_NOT_FOUND_LIMIT) await failBatch(env, p, now, `続けて ${String(BATCH_NOT_FOUND_LIMIT)} 回見つからない`);
+}
+
+/**
+ * 送ったバッチを諦め、オーナーに 1 件だけ知らせる。同時に 2 つが諦めても知らせるのは 1 度
+ * @param env バインディング
+ * @param p batches の行
+ * @param now 今の時刻
+ * @param reason 諦めた理由
+ */
+export async function failBatch(env: Bindings, p: SubmittedBatch, now: number, reason: string): Promise<void> {
+  const res = await env.DB.prepare("UPDATE batches SET status = 'failed', ended_at = ? WHERE id = ? AND status = 'submitted'").bind(now, p.id).run();
+  if (res.meta.changes !== 1) return;
+  await recordError(env, { source: "job", level: "error", code: `${p.kind}_batch_failed`, error: new Error(reason) }, clockAt(now));
+  await noticeOnce(env, { kind: BATCH_FAILED_NOTICE, title: `バッチ処理を諦めた (${p.kind})`, body: `${p.week} の分を送ったが、${reason}。この週の分は送り直さないので、要れば記録を見て手で確かめる` }, now);
+}
+
+/**
+ * 入れなかった答えを、理由ごとにエラーログに残す。上限で切れた答えが続くなら、上限か考える深さを見直す
+ * @param env バインディング
+ * @param kind 種類
+ * @param answers バッチの結果
+ * @param now 今の時刻
+ */
+export async function recordAnswerFailures(env: Bindings, kind: string, answers: BatchResult[], now: number): Promise<void> {
+  for (const a of answers) {
+    if (a.failure === undefined) continue;
+    await recordError(env, { source: "job", level: "warn", code: `${kind}_answer_${a.failure}`, error: new Error(`${a.customId} の答えを入れなかった`) }, clockAt(now));
+  }
+}

@@ -13,8 +13,8 @@ const Config = z.object({ vars: z.record(z.string(), z.string()), previews: z.ob
 
 describe("開発環境の代わりの物", () => {
   it("代わりの Access の設定とポートを .dev.vars から読む", () => {
-    const vars = parseDevVars("# 説明\nENVIRONMENT=development\nDEV_FAKES_URL=http://localhost:5199\nACCESS_TEAM=dev\nACCESS_AUD=dev-aud\nOWNER_EMAIL=owner@example.com\n");
-    expect(vars).toEqual({ port: 5199, team: "dev", aud: "dev-aud", email: "owner@example.com" });
+    const vars = parseDevVars("# 説明\nENVIRONMENT=development\nDEV_FAKES_URL=http://localhost:5199\nACCESS_TEAM=dev\nACCESS_AUD=dev-aud\nOWNER_EMAIL=owner@example.com\nANTHROPIC_API_KEY=dev-key\n");
+    expect(vars).toEqual({ port: 5199, team: "dev", aud: "dev-aud", email: "owner@example.com", claudeKey: "dev-key" });
   });
 
   it("要る値が無ければ止まる", () => {

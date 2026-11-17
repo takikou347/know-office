@@ -108,12 +108,14 @@ export type DevVars = {
   aud: string;
   /** オーナーのメールアドレス */
   email: string;
+  /** ゲートウェイの Claude の鍵。代わりの Claude API が通す */
+  claudeKey: string;
 };
 
 /**
  * .dev.vars の中身から代わりの物の設定を読む。ゲートウェイと同じ値を使うため、値はここにだけ置く
  * @param text .dev.vars の中身
- * @returns ポート、チーム名、宛先、メールアドレス
+ * @returns ポート、チーム名、宛先、メールアドレス、Claude の鍵
  * @throws Error 要る値が無い時
  */
 export function parseDevVars(text: string): DevVars {
@@ -128,7 +130,7 @@ export function parseDevVars(text: string): DevVars {
     if (!value) throw new Error(`.dev.vars に ${name} が無い`);
     return value;
   };
-  return { port: Number(new URL(need("DEV_FAKES_URL")).port), team: need("ACCESS_TEAM"), aud: need("ACCESS_AUD"), email: need("OWNER_EMAIL") };
+  return { port: Number(new URL(need("DEV_FAKES_URL")).port), team: need("ACCESS_TEAM"), aud: need("ACCESS_AUD"), email: need("OWNER_EMAIL"), claudeKey: need("ANTHROPIC_API_KEY") };
 }
 
 /**

@@ -32,12 +32,29 @@ export type BatchRequest = {
   system: string;
   /** 1 件ごとの中身 */
   prompt: string;
-  /** 答えの長さの上限 */
+  /** 答えの長さの上限。Opus 5.5 は考える分もここに入る */
   maxTokens: number;
+  /** 考える深さ */
+  effort: BatchEffort;
 };
 
-/** 読んだ 1 件の結果。失敗した物は text と usage が null */
-export type BatchResult = { customId: string; text: string | null; usage: ClaudeUsage | null };
+/** 考える深さ。Opus 5.5 は考える事を切れないので、深さだけで費用を抑える (https://docs.claude.com/en/build-with-claude/effort) */
+export type BatchEffort = "low" | "medium" | "high";
+
+/** 週のバッチ処理と急ぐ故障の調べの答えの長さの上限。考える分を含めて、JSON の答えが切れない長さ */
+export const BATCH_MAX_TOKENS = 8000;
+
+/** 週のバッチ処理と急ぐ故障の調べの考える深さ。答えは決まった形の JSON なので浅くする */
+export const BATCH_EFFORT: BatchEffort = "low";
+
+/** 答えを入れなかった理由。errored は Anthropic の側の失敗、max_tokens は上限で切れた、refusal は断った */
+export type BatchFailure = "errored" | "max_tokens" | "refusal";
+
+/** 読んだ 1 件の結果。失敗した物は text が null。上限で切れた答えと断りは費用が出るので usage を持つ */
+export type BatchResult = { customId: string; text: string | null; usage: ClaudeUsage | null; failure?: BatchFailure };
+
+/** 返事が無いか 5xx で、送った要求が作られたか分からない時の印。送り直すと二重になる */
+export const UNKNOWN_SUBMIT = "upstream_timeout";
 
 const Created = z.looseObject({ id: z.string() });
 const Status = z.looseObject({ processing_status: z.enum(["in_progress", "canceling", "ended"]) });
@@ -52,7 +69,11 @@ const Line = z.looseObject({
   result: z.union([
     z.looseObject({
       type: z.literal("succeeded"),
-      message: z.looseObject({ content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })), usage: UsageBody.optional() }),
+      message: z.looseObject({
+        content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+        stop_reason: z.string().nullish(),
+        usage: UsageBody.optional(),
+      }),
     }),
     z.looseObject({ type: z.enum(["errored", "canceled", "expired"]) }),
   ]),
@@ -67,7 +88,10 @@ const Line = z.looseObject({
  * @param timeoutMs 待つ上限
  * @returns 返事
  * @throws unavailable 鍵が無い時、全体を止めた後でまだ入れ直していない時
- * @throws upstream_failed 届かない時か、2xx でない時
+ * @throws unauthenticated Claude の API が鍵を断った時 (401、403)
+ * @throws not_found バッチが見つからない時 (404)
+ * @throws upstream_timeout 返事が無い時か、作られたか分からない 5xx の時
+ * @throws upstream_failed ほかの 2xx でない時
  */
 async function call(env: Bindings, fetch: Fetcher, path: string, init: { method: "GET" | "POST"; body?: string }, timeoutMs = 10_000): Promise<Response> {
   const secret = await claudeKey(env);
@@ -78,10 +102,15 @@ async function call(env: Bindings, fetch: Fetcher, path: string, init: { method:
   try {
     res = await allowedFetch(fetch, `${base}${path}`, [`${base}/`], { ...init, headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
-    throw new AppError("upstream_failed", "Claude のバッチ処理の API に届かない");
+    throw new AppError(UNKNOWN_SUBMIT, "Claude のバッチ処理の API の返事が無い");
   }
-  if (!res.ok) throw new AppError("upstream_failed", `Claude のバッチ処理の API が ${String(res.status)} を返した`);
-  return res;
+  if (res.ok) return res;
+  const shown = `Claude のバッチ処理の API が ${String(res.status)} を返した`;
+  if (res.status === 401 || res.status === 403) throw new AppError("unauthenticated", shown);
+  if (res.status === 404) throw new AppError("not_found", shown);
+  // 4xx と混み合いの 529 は受けていない。ほかの 5xx は途中の物が返した事もあり、作られたか分からない (https://docs.claude.com/en/api/errors)
+  if (res.status >= 500 && res.status !== 529) throw new AppError(UNKNOWN_SUBMIT, shown);
+  throw new AppError("upstream_failed", shown);
 }
 
 /**
@@ -90,14 +119,16 @@ async function call(env: Bindings, fetch: Fetcher, path: string, init: { method:
  * @param fetch 外への fetch
  * @param requests 送る物
  * @returns バッチの ID
- * @throws upstream_failed 届かない時、返った ID の形が違う時
+ * @throws unauthenticated 鍵を断られた時
+ * @throws upstream_timeout 返事が無く、作られたか分からない時
+ * @throws upstream_failed 断られた時、返った ID の形が違う時
  */
 export async function submitBatch(env: Bindings, fetch: Fetcher, requests: BatchRequest[]): Promise<string> {
   const body = {
     requests: requests.map((r) => ({
       custom_id: CustomId.parse(r.customId),
       // 変わらない先頭の指示は毎回同じ形で置き、読み直しの割引に当てる
-      params: { model: r.model, max_tokens: r.maxTokens, system: [{ type: "text", text: r.system, cache_control: { type: "ephemeral" } }], messages: [{ role: "user", content: r.prompt }] },
+      params: { model: r.model, max_tokens: r.maxTokens, output_config: { effort: r.effort }, system: [{ type: "text", text: r.system, cache_control: { type: "ephemeral" } }], messages: [{ role: "user", content: r.prompt }] },
     })),
   };
   const res = await call(env, fetch, BATCHES, { method: "POST", body: JSON.stringify(body) });
@@ -114,6 +145,8 @@ export async function submitBatch(env: Bindings, fetch: Fetcher, requests: Batch
  * @param fetch 外への fetch
  * @param batchId バッチの ID
  * @returns 終わっていれば true
+ * @throws unauthenticated 鍵を断られた時
+ * @throws not_found バッチが見つからない時
  * @throws upstream_failed 届かない時、形が違う時
  */
 export async function batchEnded(env: Bindings, fetch: Fetcher, batchId: string): Promise<boolean> {
@@ -140,14 +173,18 @@ export async function batchResults(env: Bindings, fetch: Fetcher, batchId: strin
     if (!line.success) continue;
     const result = line.data.result;
     if (result.type !== "succeeded") {
-      out.push({ customId: line.data.custom_id, text: null, usage: null });
+      out.push({ customId: line.data.custom_id, text: null, usage: null, failure: "errored" });
       continue;
     }
-    const text = result.message.content.flatMap((b) => (b.type === "text" && b.text !== undefined ? [b.text] : [])).join("");
+    // 上限で切れた答えと断りは、読める JSON に見えても入れない
+    const stop = result.message.stop_reason;
+    const failure = stop === "max_tokens" || stop === "refusal" ? stop : undefined;
+    const text = failure ? null : result.message.content.flatMap((b) => (b.type === "text" && b.text !== undefined ? [b.text] : [])).join("");
     const u = result.message.usage;
     out.push({
       customId: line.data.custom_id,
       text,
+      ...(failure ? { failure } : {}),
       usage: {
         inputTokens: u?.input_tokens ?? 0,
         outputTokens: u?.output_tokens ?? 0,

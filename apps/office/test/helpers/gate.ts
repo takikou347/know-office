@@ -201,7 +201,7 @@ function githubPath(github: TestGate["github"], path: string): string {
 export async function createTestGate(options: { clock: Clock; d1: TestD1; extensions?: readonly ExtensionDefinition[]; github?: boolean }): Promise<TestGate> {
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock, keyPair: accessKeyPair });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
-  const claude = createFakeClaude();
+  const claude = createFakeClaude({ keys: [ANTHROPIC_KEY] });
   const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey, codeloadBase: `${FAKES}/codeload` }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map(), branchHeads: new Map() });
   const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];

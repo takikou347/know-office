@@ -117,6 +117,9 @@ describe("再開", () => {
     expect(await answer(await call("PUT", "/api/v1/guard/keys/github-app", { privateKey, webhookSecret: NEW_WEBHOOK_SECRET }))).toEqual({ status: 200, body: { held: true, pending: ["claude"] } });
     expect(await answer(await resume())).toEqual({ status: 409, body: "conflict" });
 
+    // オーナーは Anthropic の画面で鍵を作り直し、古い鍵を消してから入れる
+    world.gate.claude.accepted.delete(ANTHROPIC_KEY);
+    world.gate.claude.accepted.add(NEW_CLAUDE_KEY);
     expect(await answer(await call("PUT", "/api/v1/guard/keys/claude", { apiKey: NEW_CLAUDE_KEY }))).toEqual({ status: 200, body: { held: false, pending: [] } });
     expect((await resume()).status).toBe(200);
     expect(world.gate.audits.map((a) => a.action).filter((a) => a.startsWith("guard.keys"))).toEqual(["guard.keys_replaced", "guard.keys_replaced"]);

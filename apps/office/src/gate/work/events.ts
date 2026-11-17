@@ -12,7 +12,7 @@ import { rethrowRpc } from "../rpc.ts";
 import { finishTask } from "./loop.ts";
 import { findNode } from "./nodes.ts";
 import { addStaffMessage, reachCheckpoint } from "./progress.ts";
-import { AUTH_FAILED_NOTICE, noticeOnce, runFailed } from "./run.ts";
+import { noticeAuthFailed, runFailed } from "./run.ts";
 import { bearer, type Caller, revokeTaskTickets, ticketTask } from "./ticket.ts";
 
 const eventsRoute = createRoute({
@@ -66,8 +66,7 @@ async function apply(ctx: EventContext, event: AgentEvent): Promise<void> {
       // 文は鍵の形を伏せて 200 字までに切って残す。名前は決めた物だけ
       await recordError(env, { source: "workspace", level: "error", code: event.name, error: new Error(event.message), traceId }, ctx.clock);
       // 鍵の失敗は社員ごとでなく 1 件だけ知らせる。読むまでどの社員も呼び出しを始めない
-      if (event.name === "sdk_auth_failed")
-        await noticeOnce(env, { kind: AUTH_FAILED_NOTICE, title: "Claude の鍵が断られた", body: "社員は Claude を呼べない。設定で鍵を確かめ、この通知を読むと社員が続きを始める" }, now);
+      if (event.name === "sdk_auth_failed") await noticeAuthFailed(env, now);
       return;
     case "result":
       await settle(ctx, event.nodeId, event.result);

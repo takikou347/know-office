@@ -19,7 +19,7 @@ function ticket(staffId: string): string {
 
 describe("開発環境の代わりの物", () => {
   it("代わりの Claude API は積んだ返事を順に返し、届いた要求を残す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     claude.push({ content: [{ type: "text", text: "1 つ目" }] });
     claude.push({ content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } }], stop_reason: "tool_use" });
     const first = await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
@@ -61,20 +61,35 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("代わりの Claude API は鍵が無ければ 401 を返す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     claude.push({ content: [{ type: "text", text: "返さない" }] });
     const res = await claude.app.request("/v1/messages", { method: "POST", headers: { "content-type": "application/json" }, body: BODY });
     expect(res.status).toBe(401);
   });
 
+  it("代わりの Claude API は通す鍵と作業トークンのほかを本物と同じく 401 で断り、通す鍵を替えられる", async () => {
+    const claude = createFakeClaude({ keys: ["test-key"] });
+    claude.push({ content: [{ type: "text", text: "通す" }] });
+    const send = (key: string) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": key }, body: BODY });
+    const wrong = await send("other-key");
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toMatchObject({ type: "error", error: { type: "authentication_error" } });
+    expect((await send(ticket("builder"))).status).toBe(401);
+    expect((await claude.app.request("/v1/messages/batches/msgbatch_none", { headers: { ...HEADERS, "x-api-key": "other-key" } })).status).toBe(401);
+    await claude.app.request("/__fake/keys", { method: "PUT", body: JSON.stringify({ keys: ["new-key"] }) });
+    expect(await (await claude.app.request("/__fake/keys")).json()).toEqual({ keys: ["new-key"] });
+    expect((await send("test-key")).status).toBe(401);
+    expect((await send("new-key")).status).toBe(200);
+  });
+
   it("代わりの Claude API は積んだ返事が無ければ 500 で知らせる", async () => {
-    const res = await createFakeClaude().app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
+    const res = await createFakeClaude({ keys: ["test-key"], workTokens: true }).app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
     expect(res.status).toBe(500);
     expect(await res.text()).toContain("返事が積まれていない");
   });
 
   it("代わりの Claude API は stream で SSE の出来事を順に返す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     claude.push({ content: [{ type: "text", text: "流す" }] });
     const res = await claude.app.request("/v1/messages", {
       method: "POST",
@@ -87,7 +102,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("代わりの Claude API は /__fake/ で返事を積み、届いた要求を読める", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ content: [{ type: "text", text: "外から" }] }) });
     await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
     const res = await claude.app.request("/__fake/requests");
@@ -95,7 +110,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("社員を決めて積んだ返事は、その社員の作業トークンの呼び出しにだけ返し、ほかの社員には先に積んだ物があっても渡さない", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", content: [{ type: "text", text: "レビュー担当へ" }] }) });
     const call = (key: string) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": key }, body: BODY });
     expect((await call(ticket("builder"))).status).toBe(500);
@@ -128,7 +143,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("待ちを付けて積んだ返事は、積んでからその間が過ぎるまで返さず、待つ間に呼び出しが切れたら次の呼び出しに残す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", delay_ms: 200, content: [{ type: "text", text: "待ってから" }] }) });
     const call = (signal?: AbortSignal) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": ticket("reviewer") }, body: BODY, ...(signal ? { signal } : {}) });
     // 待つ間に切れた呼び出しには返さず、積んだ物を先頭に戻す
@@ -161,13 +176,13 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("社員の形でない渡し先を付けて積もうとすると 400 で断る", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     const res = await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "nobody", content: [{ type: "text", text: "x" }] }) });
     expect(res.status).toBe(400);
   });
 
   it("代わりの Claude API は積んだ上限の返事を、その状態と Anthropic の形の失敗で返す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     claude.pushError(429, "rate_limit_error");
     claude.pushError(529, "overloaded_error");
     const first = await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
@@ -179,14 +194,14 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("代わりの Claude API は数えるだけの呼び出しに積んだ返事を使わずに答え、届いた鍵を残す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     const res = await claude.app.request("/v1/messages/count_tokens", { method: "POST", headers: HEADERS, body: BODY });
     expect(await res.json()).toEqual({ input_tokens: expect.any(Number) as unknown });
     expect(claude.keys).toEqual(["test-key"]);
   });
 
   it("代わりの Claude API はバッチ処理を受け、終えた後に custom_id ごとの結果を JSONL で返す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     const body = JSON.stringify({ requests: [{ custom_id: "c0", params: REQUEST }, { custom_id: "c1", params: REQUEST }] });
     const created = await claude.app.request("/v1/messages/batches", { method: "POST", headers: HEADERS, body });
     const batch = z.object({ id: z.string(), processing_status: z.string() }).loose().parse(await created.json());
@@ -209,7 +224,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("代わりの Claude API は知らないバッチを 404 で返す", async () => {
-    const res = await createFakeClaude().app.request("/v1/messages/batches/msgbatch_none", { headers: HEADERS });
+    const res = await createFakeClaude({ keys: ["test-key"], workTokens: true }).app.request("/v1/messages/batches/msgbatch_none", { headers: HEADERS });
     expect(res.status).toBe(404);
   });
 });

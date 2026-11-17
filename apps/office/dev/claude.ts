@@ -156,6 +156,8 @@ export type FakeClaude = {
   requests: z.infer<typeof MessagesRequest>[];
   /** 届いた x-api-key。プロキシが鍵を替えた事を確かめる */
   keys: string[];
+  /** 通す鍵。Anthropic の画面で作った鍵にあたり、ほかの鍵は本物と同じく 401 で断る */
+  accepted: Set<string>;
   /** 返事を積む */
   push(message: ScriptedMessage): void;
   /** 失敗を積む。extra で message、details、ヘッダーを足す */
@@ -186,14 +188,27 @@ function toMessage(message: ScriptedMessage, model: unknown, index: number) {
   };
 }
 
+/** 代わりの Claude API の作り方 */
+export type FakeClaudeOptions = {
+  /** 通す鍵 */
+  keys: string[];
+  /** true なら社員の作業トークン (JWT) も通す。開発のワークスペースはプロキシを通さずに呼ぶ */
+  workTokens?: boolean;
+};
+
+/** 通す鍵を替える本文。Anthropic の画面で鍵を作る、消す事にあたる */
+const KeysInput = z.object({ keys: z.array(z.string().min(1)) });
+
 /**
  * 代わりの Claude API を作る
+ * @param options 通す鍵と、作業トークンを通すか
  * @returns Hono、届いた要求、返事を積む push
  */
-export function createFakeClaude(): FakeClaude {
+export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
   const queue: Queued[] = [];
   const requests: z.infer<typeof MessagesRequest>[] = [];
   const keys: string[] = [];
+  const accepted = new Set(options.keys);
   const batches: FakeBatch[] = [];
   // 使用の上限に切り替えた社員。戻すまで、その社員の呼び出しに上限の返事を返し続ける
   const limits = new Map<StaffId, SpendLimitKind>();
@@ -221,6 +236,10 @@ export function createFakeClaude(): FakeClaude {
       const key = c.req.header("x-api-key");
       if (!key) return c.json({ type: "error", error: { type: "authentication_error", message: "x-api-key が無い" } }, 401);
       keys.push(key);
+      // 本物は作っていない鍵と消した鍵を 401 の authentication_error で断る (https://docs.claude.com/en/api/errors)
+      if (!accepted.has(key) && !(options.workTokens === true && staffOfKey(key) !== null)) {
+        return c.json({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }, 401);
+      }
       return next();
     })
     .post("/v1/messages/batches", async (c) => {
@@ -312,12 +331,21 @@ export function createFakeClaude(): FakeClaude {
       else limits.set(input.data.staffId, input.data.limit);
       return c.body(null, 204);
     })
-    .get("/__fake/requests", (c) => c.json(requests));
+    .get("/__fake/requests", (c) => c.json(requests))
+    .get("/__fake/keys", (c) => c.json({ keys: [...accepted] }))
+    .put("/__fake/keys", async (c) => {
+      const input = KeysInput.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) return c.json({ type: "error", error: { type: "invalid_request_error", message: "鍵の形が違う" } }, 400);
+      accepted.clear();
+      for (const key of input.data.keys) accepted.add(key);
+      return c.body(null, 204);
+    });
 
   return {
     app,
     requests,
     keys,
+    accepted,
     push: (message) => queue.push({ item: message, staffId: null }),
     pushError: (status, type, extra) => queue.push({ item: { error: { status, type, ...extra } }, staffId: null }),
     batches,

@@ -3,7 +3,7 @@ import { IdeaProposal, IdeasAnswer, newId, OPUS } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
-import { answerJson, type BatchRequest, type BatchResult, recordBatchUsage } from "./claude-batch.ts";
+import { answerJson, BATCH_EFFORT, BATCH_MAX_TOKENS, type BatchRequest, type BatchResult, recordBatchUsage } from "./claude-batch.ts";
 import type { BatchRow, WeekRange, WeeklyDeps, WeeklyJob } from "./weekly.ts";
 
 /** 1 回のバッチで足す案の上限。要求は 1 件で、週に 1 回なので、1 日にもこれを超えない */
@@ -12,8 +12,6 @@ export const IDEAS_PER_BATCH = 3;
 /** 社長のモデルに渡す今のサービスの上限。新しい物から渡す */
 const MAX_SERVICES = 50;
 
-/** 答えの長さの上限 */
-const MAX_TOKENS = 2000;
 
 /** 変わらない先頭の指示。毎週同じ文にして読み直しの割引に当てる */
 const SYSTEM = [
@@ -40,7 +38,7 @@ async function prepare(env: Bindings, _range: WeekRange, maxRequests: number): P
     `今のサービスと案: ${String(lines.length)} 件`,
     ...lines.map((s) => `- ${s.name} (${s.kind}、段階 ${s.stage}) 狙い: ${s.aim ?? "無し"}${s.dropped_reason === null ? "" : ` 見送った理由: ${s.dropped_reason}`}`),
   ].join("\n");
-  return { requests: [{ customId: "ideas", model: OPUS, system: SYSTEM, prompt, maxTokens: MAX_TOKENS }], detail: null };
+  return { requests: [{ customId: "ideas", model: OPUS, system: SYSTEM, prompt, maxTokens: BATCH_MAX_TOKENS, effort: BATCH_EFFORT }], detail: null };
 }
 
 /**

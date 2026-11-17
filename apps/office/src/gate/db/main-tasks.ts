@@ -208,7 +208,11 @@ export const findings = sqliteTable("findings", {
   notedAt: time("noted_at"),
 });
 
-/** 送った Claude のバッチ処理。種類と週ごとに 1 行で、同じ週を 2 度送らない */
+/**
+ * 送った Claude のバッチ処理。種類と週ごとに 1 行で、同じ週を 2 度送らない。
+ * status は pending (送る途中)、submitted (送った)、applied (結果を入れた)、unknown (送ったか分からないので送り直さない)、failed (終わらないので諦めた)。
+ * failures は続けて見つからなかった回数
+ */
 export const batches = sqliteTable(
   "batches",
   {
@@ -216,10 +220,11 @@ export const batches = sqliteTable(
     kind: text("kind", { enum: ["distill", "findings", "ideas", "urgent"] }).notNull(),
     week: text("week").notNull(),
     batchId: text("batch_id"),
-    status: text("status", { enum: ["pending", "submitted", "applied"] }).notNull(),
+    status: text("status", { enum: ["pending", "submitted", "applied", "unknown", "failed"] }).notNull(),
     detail: json("detail"),
     createdAt: time("created_at").notNull(),
     endedAt: time("ended_at"),
+    failures: integer("failures").notNull().default(0),
   },
   (t) => [uniqueIndex("batches_kind_week").on(t.kind, t.week)],
 );

@@ -93,9 +93,9 @@ describe("週のバッチ処理", () => {
     expect(world.gate.claude.batches).toHaveLength(1);
   });
 
-  it("送れなかった時は始めた印を戻し、次に始め直せる", async () => {
+  it("送りを断られた時は始めた印を戻し、次に始め直せる", async () => {
     await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
-    const down = { fetch: () => Promise.reject(new Error("届かない")), tracker: fakeTracker() };
+    const down = { fetch: () => Promise.resolve(Response.json({ type: "error", error: { type: "overloaded_error" } }, { status: 529 })), tracker: fakeTracker() };
     await startBatch(world.gate.env, "distill", down, dec(7, 3));
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
     await runBatch(world, "distill", () => PROPOSAL, fakeTracker(), dec(7, 4));
