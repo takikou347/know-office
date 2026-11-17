@@ -6,6 +6,7 @@ import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part } from "../../parts/section.tsx";
 import { STAFF_LABEL } from "../guard/labels.ts";
 import { dollars, EVENT_LABEL, KIND_LABEL, STAGE_LABEL } from "./labels.ts";
+import { ServiceIssuesView } from "./ServiceIssuesView.tsx";
 import { ServiceSettings } from "./ServiceSettings.tsx";
 import { ServiceStatusView } from "./ServiceStatusView.tsx";
 import { StageActions } from "./StageActions.tsx";
@@ -81,6 +82,7 @@ export function ServiceView({ serviceId, tick, onChanged }: ServiceViewProps) {
         defaultValue="state"
         items={[
           { value: "state", label: "様子", content: <ServiceStatusView service={s} onChanged={onChanged} /> },
+          { value: "issues", label: "Issue", content: <ServiceIssuesView serviceId={s.id} stage={s.stage} name={s.name} tick={tick} /> },
           { value: "idea", label: "元の案", content: <List label={`${s.name}の元の案`} items={idea} /> },
           {
             value: "log",
