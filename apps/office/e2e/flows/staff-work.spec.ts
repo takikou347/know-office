@@ -188,8 +188,8 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
   // 早退の時刻を本物の時計で待つ
   test.setTimeout(360_000);
   const until = soon();
-  // 早退は今日の勤務に掛かるので、日をまたぐ時刻には出せない
-  test.skip(until.hhmm >= "23:58" || until.hhmm < "00:03", "日をまたぐ時刻は早退を出せない");
+  // 22 時より後は通しの勤務の時刻が日をまたぐ形になり、早退を出せない。0 時の直後は今日の勤務の始まりが早退の時刻に近い
+  test.skip(until.hhmm >= "21:55" || until.hhmm < "00:03", "日をまたぐ勤務の時刻には早退を出せない");
   await openTree(page);
   cancelLeftOrders("reviewer");
   await dropLeftovers(page);

@@ -2,9 +2,12 @@
 import { expect, test } from "../helpers/test.ts";
 import { claudeKeys, setClaudeKeys } from "../helpers/fakes.ts";
 import { seedMain } from "./helpers/seed.ts";
+import { AUTH_TITLE, noticeBar } from "./helpers/notice-bar.ts";
 
 test.describe("落ちても続きから", () => {
   test("鍵が断られる", async ({ page }) => {
+    // 帯の前にほかの通知を読んで送るので、30 秒を超える事がある
+    test.slow();
     const keys = await claudeKeys(page.request);
     // 前の通しが残した読んでいない鍵の通知があると、送らずに帯だけが出るので、先に読んだ事にする
     seedMain(`UPDATE notices SET read_at = ${String(Date.now())} WHERE kind = 'sdk_auth_failed' AND read_at IS NULL`);
@@ -17,11 +20,8 @@ test.describe("落ちても続きから", () => {
       await setClaudeKeys(page.request, []);
       const fired = await page.request.get(`/cdn-cgi/local/scheduled?cron=${encodeURIComponent("*/5 * * * *")}`);
       expect(fired.ok()).toBe(true);
-      const bar = page.getByRole("status").filter({ hasText: "Claude の鍵が断られた" });
-      await expect(async () => {
-        await page.goto("/");
-        await expect(bar).toBeVisible({ timeout: 1000 });
-      }).toPass({ timeout: 15_000 });
+      await page.goto("/");
+      const bar = await noticeBar(page, "status", AUTH_TITLE, 60_000);
       await expect(bar.getByText("設定で鍵を確かめ")).toBeVisible();
       // 鍵を入れ直してから通知を読む。読むまでは送らず、終わりも見ない
       await setClaudeKeys(page.request, keys);

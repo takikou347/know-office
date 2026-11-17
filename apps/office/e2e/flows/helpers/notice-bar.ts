@@ -9,8 +9,11 @@ export const SPEND_TITLE = "Claude の API の使用の上限に届いた";
 /** GitHub のレート制限の通知の題 (サービスと拡張の 3.5) */
 export const RATE_TITLE = "GitHub の API のレート制限に届いた";
 
+/** Claude の鍵が断られた通知の題 (サービスと拡張の 3.6) */
+export const AUTH_TITLE = "Claude の鍵が断られた";
+
 /** 通しが帯に出るのを待つ通知の題。ほかの通しの道具はこれを読んで送らない */
-const AWAITED_TITLES = [SPEND_TITLE, RATE_TITLE] as const;
+const AWAITED_TITLES: readonly string[] = [SPEND_TITLE, RATE_TITLE, AUTH_TITLE];
 
 const Notices = z.object({ data: z.array(z.object({ id: z.string(), title: z.string(), readAt: z.string().nullable() }).loose()) });
 
@@ -26,7 +29,26 @@ export async function readNoticesTitled(page: Page, title: string): Promise<void
 }
 
 /**
- * 上部の帯に題の合う通知が出るまで待つ。帯は未読を 1 件ずつ出すので、先に出たほかの通知は帯で読んで送る。ほかの通しが待つ通知は送らない
+ * 通しが待たない読んでいない通知を入口で読む。夜のログインの通知 (日本時間の 0 時から 6 時) のように時刻で溜まる物があり、帯で 1 件ずつ送ると待つ間を超える
+ * @param page 画面を開いたページ
+ */
+async function readOtherNotices(page: Page): Promise<void> {
+  const headers = { Origin: new URL(page.url()).origin };
+  // 通しはログインの状態を持たずに始まり、画面を開いた後に画面がログインするので、入口が読めるまで待つ
+  let body: unknown = null;
+  await expect
+    .poll(async () => {
+      const res = await page.request.get("/api/v1/notices?limit=100");
+      if (res.ok()) body = await res.json();
+      return res.status();
+    })
+    .toBe(200);
+  const notices = Notices.parse(body);
+  for (const n of notices.data.filter((x) => x.readAt === null && !AWAITED_TITLES.includes(x.title))) expect((await page.request.put(`/api/v1/notices/${n.id}/read`, { headers })).status()).toBe(204);
+}
+
+/**
+ * 上部の帯に題の合う通知が出るまで待つ。帯は未読を 1 件ずつ出すので、ほかの通知は先に入口で読み、待つ間に出た物は帯で読んで送る。ほかの通しが待つ通知は送らない
  * @param page 画面を開いたページ
  * @param role 帯の役 (止まる強さは alert、ほかは status)
  * @param title 待つ通知の題
@@ -34,6 +56,7 @@ export async function readNoticesTitled(page: Page, title: string): Promise<void
  * @returns 待った通知の帯
  */
 export async function noticeBar(page: Page, role: "alert" | "status", title: string, timeout: number): Promise<Locator> {
+  await readOtherNotices(page);
   const bar = page.getByRole(role).filter({ hasText: title });
   let top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }) });
   for (const awaited of AWAITED_TITLES) top = top.filter({ hasNotText: awaited });

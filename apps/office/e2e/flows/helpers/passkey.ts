@@ -20,12 +20,17 @@ export function storePasskey(credential: VirtualCredential): void {
   writeFileSync(STORE, JSON.stringify(Stored.parse(credential)));
 }
 
+// Chrome は 1 つのページに内蔵の認証器を 1 つしか付けられないので、付けた物をページごとに覚えて使い回す
+const attached = new WeakMap<Page, VirtualAuthenticator>();
+
 /**
- * ページに仮想の認証器を付け、登録済みのオーナーのパスキーを入れる。このページでパスキーの確認を求められると、認証器が自動で確かめる
+ * ページに仮想の認証器を付け、登録済みのオーナーのパスキーを入れる。このページでパスキーの確認を求められると、認証器が自動で確かめる。同じページに 2 度呼ぶと 1 度目の認証器を返す
  * @param page 付けるページ
  * @returns 仮想の認証器
  */
 export async function useOwnerPasskey(page: Page): Promise<VirtualAuthenticator> {
+  const known = attached.get(page);
+  if (known) return known;
   const authenticator = await addVirtualAuthenticator(page);
   const stored = Stored.parse(JSON.parse(readFileSync(STORE, "utf8")));
   // 認証器は入れた回数から数え直すので、前のテストより必ず大きくなるよう 0.1 秒ごとに 1 進む数にする
@@ -38,5 +43,6 @@ export async function useOwnerPasskey(page: Page): Promise<VirtualAuthenticator>
     ...(stored.rpId === undefined ? {} : { rpId: stored.rpId }),
     ...(stored.userHandle === undefined ? {} : { userHandle: stored.userHandle }),
   });
+  attached.set(page, authenticator);
   return authenticator;
 }

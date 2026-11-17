@@ -1,6 +1,6 @@
 // 社員の仕事の通しが使う、通しの木、勤務の時刻、代わりの Claude API に積む返事、タスクを足して終えるまでを待つ道具 (社員が考えるの 3.3)
 import type { Locator, Page } from "@playwright/test";
-import { jstClock, jstDay } from "@know-office/core";
+import { jstClock } from "@know-office/core";
 import { z } from "zod";
 import { expect } from "../../helpers/test.ts";
 import { seedMain } from "./seed.ts";
@@ -87,19 +87,22 @@ export async function setSchedule(page: Page, start: string, end: string): Promi
  * @returns 状態
  */
 export async function reviewerState(page: Page): Promise<string | undefined> {
-  return Staff.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "reviewer")?.state;
+  return staffState(page, "reviewer");
 }
 
+/** 通しが勤務の時刻を日をまたぐ形に広げる、日本時間の時 (この時から 0 時まで) */
+const LATE_HOUR = 22;
+
 /**
- * 通しの間だけ広げる勤務の時刻を作る。今日のうちの 1 時間前 (0 時より前なら 0 時) に始まり、その 1 分前 (翌日) に終わる 23 時間 59 分にする。
- * 00:00 から 23:59 に固定すると、日本時間の日をまたぐ時に通しの途中で終わりに届いて退勤するので、空く 1 分を今から遠ざける。
- * 始まりを今日に置くのは、今日だけの指示 (早退など) が今の勤務に掛かるようにするため
+ * 通しの間だけ広げる勤務の時刻を作る。ふだんは 00:00 から 23:59 にする。
+ * 日本時間の 22 時より後は、23:59 から 0:00 の間で通しの途中に終わりに届いて退勤するので、1 時間前に始まりその 1 分前 (翌日) に終わる 23 時間 59 分にし、空く 1 分を今から遠ざける。
+ * 日をまたぐ形は早退の指示を出せない (所定の終わりが同じ日の始まりより前になる) ので、22 時より前は使わない
  * @param now 今の時刻
  * @returns 始まりと終わり (日本時間)
  */
 function wideSchedule(now: number): { start: string; end: string } {
-  const hour = 60 * 60 * 1000;
-  const start = jstDay(now - hour) === jstDay(now) ? jstClock(now - hour) : "00:00";
+  if (Number(jstClock(now).slice(0, 2)) < LATE_HOUR) return { start: "00:00", end: "23:59" };
+  const start = jstClock(now - 60 * 60 * 1000);
   const end = (minutes(start) + 24 * 60 - 1) % (24 * 60);
   return { start, end: `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}` };
 }
@@ -125,20 +128,32 @@ function widened({ start, end }: { start: string; end: string }): boolean {
 }
 
 /**
- * レビュー担当を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
+ * 社員の今の状態を読む
+ * @param page 画面を開いたページ
+ * @param staffId 社員 ID
+ * @returns 状態
+ */
+async function staffState(page: Page, staffId: string): Promise<string | undefined> {
+  return Staff.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === staffId)?.state;
+}
+
+/**
+ * 社員を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
  * 前に流した時のワークスペースが落ちて待っていれば、止めて再開して作り直させる。勤務の中でなければ、勤務の時刻を一日に広げて出勤させる
  * @param page 画面を開いたページ
+ * @param staffId 社員 ID
  * @param allDay 勤務の中でも勤務の時刻を一日に広げるか。通しの中で退勤させて出勤し直す時は、前の通しが戻した時刻のまま勤務の中に残っていても広げる
  * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
  */
-export async function clockInReviewer(page: Page, allDay = false): Promise<() => Promise<void>> {
-  if ((await reviewerState(page)) === "waiting") {
-    const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "reviewer", reason: "社員の仕事の通しの前に作り直す" } });
+export async function clockInStaff(page: Page, staffId: string, allDay = false): Promise<() => Promise<void>> {
+  if ((await staffState(page, staffId)) === "waiting") {
+    const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: staffId, reason: "社員の仕事の通しの前に作り直す" } });
     expect(stopped.status()).toBe(201);
     await resumeStaff(page);
-    await expect.poll(() => reviewerState(page), { timeout: 30_000 }).not.toMatch(/^(waiting|stopped)$/);
+    await expect.poll(() => staffState(page, staffId), { timeout: 30_000 }).not.toMatch(/^(waiting|stopped)$/);
   }
-  if (!allDay && (await reviewerState(page)) === "working") return () => Promise.resolve();
+  // 時間外の呼び出し (called) の間も、勤務の中と同じにタスクを進める
+  if (!allDay && /^(working|called)$/.test((await staffState(page, staffId)) ?? "")) return () => Promise.resolve();
   await ownerPasskey(page);
   const box = await scheduleCard(page);
   const read = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
@@ -149,14 +164,24 @@ export async function clockInReviewer(page: Page, allDay = false): Promise<() =>
   await setSchedule(page, wide.start, wide.end);
   try {
     // 同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して流し直す時は、開発の道で退勤した日の印を消して出勤させる
-    expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);
-    await expect.poll(() => reviewerState(page)).toBe("working");
+    expect((await page.request.post(`/__dev/staff/${staffId}/forget-day`)).status()).toBe(204);
+    await expect.poll(() => staffState(page, staffId)).toBe("working");
   } catch (error) {
     // 出勤できずに落ちても、広げた勤務の時刻を次の通しに残さない
     await restore();
     throw error;
   }
   return restore;
+}
+
+/**
+ * レビュー担当を勤務の中にする (clockInStaff のレビュー担当の形)
+ * @param page 画面を開いたページ
+ * @param allDay 勤務の中でも勤務の時刻を一日に広げるか
+ * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
+ */
+export async function clockInReviewer(page: Page, allDay = false): Promise<() => Promise<void>> {
+  return clockInStaff(page, "reviewer", allDay);
 }
 
 /**
