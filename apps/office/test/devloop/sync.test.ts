@@ -179,6 +179,11 @@ describe("自分で作った Issue の通知", () => {
   it("ほかの人が開いた Issue は社長の分けるタスクになる", async () => {
     await withDocs(world);
     await issueEvent({ number: 77, title: "人が書いた Issue", body: "本文" });
-    expect(await intakeTasks()).toMatchObject([{ title: "人が書いた Issue", issue_number: 77 }]);
+    // 印は誰でも書けるので、dev_issues に無い鍵の印を書いた人の Issue も分けるタスクになる
+    await issueEvent({ number: 78, title: "印をまねた Issue", body: `本文\n<!-- know-office:dev-issue:${"a".repeat(64)} -->` });
+    expect(await intakeTasks()).toMatchObject([
+      { title: "人が書いた Issue", issue_number: 77 },
+      { title: "印をまねた Issue", issue_number: 78 },
+    ]);
   });
 });

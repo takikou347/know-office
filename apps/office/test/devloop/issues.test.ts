@@ -3,8 +3,8 @@ import { AppError } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { advance, useWork } from "../helpers/work.ts";
 import { MINUTE, rows } from "../helpers/work.ts";
-import { BASE, buildTasks, callPlan, child, detail, devRows, issuesOf, pacedForge, plan, planFails, planOf, rewriteDocs, withDocs, DOCS, HEAD, REPO } from "../helpers/issues.ts";
-import { prototyped, studied, link, putDocs } from "../helpers/docs.ts";
+import { buildTasks, callPlan, child, detail, devRows, issuesOf, pacedForge, plan, planFails, planOf, rewriteDocs, withDocs, REPO } from "../helpers/issues.ts";
+import { prototyped } from "../helpers/docs.ts";
 import { wrapDb } from "../helpers/github.ts";
 
 const world = useWork({ github: true });
@@ -91,6 +91,16 @@ describe("設計書から Issue を作る", () => {
     expect(old?.comments.map((c) => c.body.split("\n")[0])).toEqual(["設計書の変更で置き換わったので閉じる"]);
     expect(await buildTasks(world)).toMatchObject([{ source: "issue:2", status: "dropped" }, { source: "issue:3", status: "todo" }]);
     expect(await devRows(world)).toMatchObject([{ kind: "parent" }, { number: 2, state: "closed" }, { number: 3, state: "open" }]);
+
+    // 閉じた子の要件の本文が変わると新しい子ができ、閉じた子にはコメントを書かず閉じたまま
+    await world.d1.DB.prepare("UPDATE dev_issues SET state = 'closed' WHERE number = 3").run();
+    const done = issuesOf(world)[2];
+    if (done) done.state = "closed";
+    rewriteDocs(world, "1-video.md", detail({ first: "絵から作る" }));
+    const again = await plan(world, planOf(id, [child("動画を作る")]));
+    expect(again.children).toMatchObject([{ requirement: "動画を作る", number: 4, created: true }]);
+    expect(again.closed).toEqual([]);
+    expect(issuesOf(world)[2]).toMatchObject({ state: "closed", comments: [] });
   });
 
   it("消えた要件", async () => {
@@ -182,11 +192,11 @@ describe("Issue を作る間の落ちと同時", () => {
 
 describe("段階の確かめ", () => {
   it("検討の段階のサービスには作らない", async () => {
-    await link(world);
-    await putDocs(world, DOCS, 0);
-    const id = await studied(world);
+    // リポジトリと設計書がそろっていても、検討に戻したサービスには作らない
+    const id = await withDocs(world);
+    await world.d1.DB.prepare("UPDATE services SET stage = 'study' WHERE id = ?").bind(id).run();
     expect(await planFails(world, planOf(id, [child("動画を作る")]))).toMatchObject({ code: "conflict" });
-    expect(HEAD).toHaveLength(40);
-    expect(BASE).toContain("04-detail");
+    expect(issuesOf(world)).toEqual([]);
+    expect(await devRows(world)).toEqual([]);
   });
 });

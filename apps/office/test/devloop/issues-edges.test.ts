@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createFakeGitHub } from "../../dev/github.ts";
 import { advance, MINUTE, rows, useWork } from "../helpers/work.ts";
-import { BASE, buildTasks, callPlan, child, detail, devRows, issuesOf, pacedForge, plan, planFails, planOf, rewriteDocs, withDocs, REPO } from "../helpers/issues.ts";
+import { buildTasks, callPlan, child, detail, devRows, issuesOf, pacedForge, plan, planFails, planOf, rewriteDocs, withDocs, REPO } from "../helpers/issues.ts";
 import { devIssueKey, parseRequirements } from "@know-office/core";
 import { z } from "zod";
 import { devIssueMark } from "../../src/gate/findings/tracker.ts";
@@ -266,6 +266,5 @@ describe("代わりの GitHub の決まり", () => {
     const over = await call("POST", "/issues", { title: "81" });
     expect(over.status).toBe(403);
     expect(over.headers.get("retry-after")).toBe("60");
-    expect(BASE).toBeTruthy();
   });
 });

@@ -32,7 +32,7 @@ import type { GuardDeps } from "../guard/deps.ts";
 import { receiveDeploymentStatus, receiveWorkflowRun } from "../services/deploys.ts";
 import { receiveDocsPush } from "../devloop/sync.ts";
 import { isDocsRepo } from "../devloop/docs-setting.ts";
-import { DEV_ISSUE_MARK_PREFIX } from "../findings/tracker.ts";
+import { devIssueKeyOf } from "../findings/tracker.ts";
 import { receivePush } from "../services/releases.ts";
 import type { Forge } from "../work/loop.ts";
 
@@ -182,7 +182,8 @@ async function intakeServiceHook(env: Bindings, hook: Hook, ctx: { forge: Forge;
   if (taken.meta.changes === 0) return;
   try {
     // 設計書のリポジトリの push は Issue を合わせるタスクに、ほかは依存と版の読みに回す
-    if (hook.event === "push") await (await isDocsRepo(env.DB, hook.repo) ? receiveDocsPush : receivePush)(env, ctx.forge, hook.payload, hook.now);
+    if (hook.event === "push" && (await isDocsRepo(env.DB, hook.repo))) await receiveDocsPush(env, ctx.forge, hook.payload, hook.now);
+    else if (hook.event === "push") await receivePush(env, ctx.forge, hook.payload, hook.now);
     else if (hook.event === "deployment_status") await receiveDeploymentStatus(env, hook.payload, hook.now);
     else await receiveWorkflowRun(env, hook.action, hook.payload, hook.now, ctx.guard);
   } catch (error) {
@@ -286,9 +287,11 @@ async function intakeIssue(env: Bindings, hook: Hook, record: D1PreparedStatemen
     await record.run();
     return;
   }
-  // ゲートウェイが設計書から作った Issue は、本文の隠した印を主に、dev_issues の行を補助に見分け、受けた記録だけを残して社長の分けるタスクにしない
+  // ゲートウェイが設計書から作った Issue は、受けた記録だけを残して社長の分けるタスクにしない。
+  // 本文の印は誰でも書けるので、印の鍵か番号が dev_issues の行にある時だけそうみなす。pending の行は送る前に鍵を持つ
   const { number, title, body } = issue.data.issue;
-  if ((body ?? "").includes(DEV_ISSUE_MARK_PREFIX) || (await env.DB.prepare("SELECT 1 FROM dev_issues WHERE repo = ? AND number = ?").bind(repo, number).first())) {
+  const key = devIssueKeyOf(body ?? null);
+  if (await env.DB.prepare("SELECT 1 FROM dev_issues WHERE mark_key = ? OR (repo = ? AND number = ?)").bind(key, repo, number).first()) {
     await record.run();
     return;
   }

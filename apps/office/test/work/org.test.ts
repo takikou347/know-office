@@ -44,7 +44,7 @@ async function startedWith(w: WorkWorld, nodeId: string): Promise<unknown> {
 describe("組織図", () => {
   it("役目の説明文を直す", async () => {
     expect((await org(world)).map((s) => [s.id, s.role, s.bossId, s.promptVersion])).toEqual([
-      ["president", "社長", null, 1],
+      ["president", "社長", null, 2],
       ["builder", "開発担当", "president", 1],
       ["reviewer", "レビュー担当", "president", 1],
     ]);
