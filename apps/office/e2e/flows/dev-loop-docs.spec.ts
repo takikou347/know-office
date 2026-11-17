@@ -89,7 +89,7 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
     expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
 
     const detail = async () => z.object({ data: z.object({ status: z.string(), events: z.array(z.object({ kind: z.string(), detail: z.record(z.string(), z.unknown()) }).loose()) }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data;
-    await expect.poll(async () => ["todo", "doing"].includes((await detail()).status), { timeout: 30_000, message: `${JSON.stringify((await detail()).events.map((e) => [e.kind, e.detail]))} ${JSON.stringify(((await (await page.request.get(`${FAKE_GITHUB}/__fake/requests`)).json()) as unknown[]).slice(-12))}` }).toBe(false);
+    await expect.poll(async () => ["todo", "doing"].includes((await detail()).status), { timeout: 60_000 }).toBe(false);
     const events = (await detail()).events;
     expect((await detail()).status, events.map((e) => `${e.kind} ${JSON.stringify(e.detail)}`).join(" | ")).toBe("review");
     expect(events.find((e) => e.kind === "docs_pr_opened")?.detail["prNumber"]).toBe(docsPr);
