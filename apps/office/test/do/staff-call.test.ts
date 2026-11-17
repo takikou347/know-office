@@ -47,4 +47,13 @@ describe("オーナーの指示に合わせる", () => {
     await old.storage.put("memory", before);
     expect(await old.book.call(CALL_TASK, jst(21), { perDay: 1 })).toBe(true);
   });
+
+  it("開発の通しが日の印を消すと、時間外の呼び出しの回数も数え直す", async () => {
+    const s = hire();
+    expect(await s.book.call(CALL_TASK, jst(21), { perDay: 1 })).toBe(true);
+    await s.book.checkpoint({ kind: "pr", nodeId: CALL_TASK.nodeId }, jst(21, 1));
+    expect(await s.book.call(CALL_TASK, jst(21, 10), { perDay: 1 })).toBe(false);
+    await s.book.forgetDay(jst(21, 20));
+    expect(await s.book.call(CALL_TASK, jst(21, 30), { perDay: 1 })).toBe(true);
+  });
 });

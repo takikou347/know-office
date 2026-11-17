@@ -79,13 +79,14 @@ export class StaffBook {
   }
 
   /**
-   * 始まりの時刻を処理し終えた日の印を消し、予定を読み直して出来事を処理する。開発の通しが同じ日に流し直す時だけ使う
+   * 始まりの時刻を処理し終えた日の印と時間外の呼び出しの回数を消し、予定を読み直して出来事を処理する。開発の通しが同じ日に流し直す時だけ使う
    * @param now 今の時刻
    * @returns 無し
    */
   async forgetDay(now: number): Promise<void> {
     const s = await this.#load();
     s.m.handledDay = null;
+    s.m.talkCalls = null;
     await this.#refresh(s, now);
     await this.#process(s, now);
     await this.#save(s, now);
