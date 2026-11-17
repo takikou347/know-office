@@ -1,6 +1,6 @@
 // 開発環境の代わりの GitHub を確かめる。ログインと記録の 3.9
 import { createHmac, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import type { Hono } from "hono";
+import { Hono } from "hono";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -154,6 +154,16 @@ describe("開発環境の代わりの物", () => {
     expect((await state(`${c}...main`)).status).toBe("diverged");
     expect((await state(`main...${a}`)).status).toBe("behind");
     expect((await state(`main...${c}`)).files).toEqual([{ filename: "src/feature.test.ts" }]);
+  });
+
+  it("代わりの GitHub は /github の下に立てても、Issue と compare に頭を除いた道で答える", async () => {
+    const github = createFakeGitHub();
+    const outer = new Hono().route("/github", github.app);
+    const headers = { authorization: "Bearer e2e", "user-agent": "know-office-test" };
+    const made = await outer.request("/github/repos/example/know-office/issues", { method: "POST", headers, body: JSON.stringify({ title: "動画を作る" }) });
+    expect(made.status).toBe(201);
+    const compare = await outer.request("/github/repos/example/know-office/compare/main...abc", { headers });
+    expect(compare.status).toBe(200);
   });
 
   it("代わりの GitHub は鍵が無ければ 401 を返す", async () => {

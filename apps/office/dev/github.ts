@@ -1,7 +1,7 @@
 // 開発環境の代わりの GitHub。テストが置いた返事を返し、App の作成とインストール、App の鍵からの絞った鍵、git の受け口、プルリクエストのレビューと行のコメント、Git の API のコミットを GitHub と同じ形で持つ
 import { generateKeyPairSync } from "node:crypto";
 import { Hono } from "hono";
-import { type FakeFailures, failureTaker, flowRoutes, requireUserAgent } from "./github-flows.ts";
+import { type FakeFailures, failureTaker, flowRoutes, mountedAt, requireUserAgent } from "./github-flows.ts";
 import { appVerifier, renewAppKey } from "./github-keys.ts";
 import { decodeJwt } from "jose";
 import { z } from "zod";
@@ -13,7 +13,6 @@ import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, 
 export type { FakeApp, FakeGitHub, FakeGitHubOptions, FakeToken, GitHubRequest } from "./github-types.ts";
 
 const FakeRoute = z.object({ route: z.string(), body: z.unknown() });
-
 const TokenRequest = z.object({ repositories: z.array(z.string()).optional(), permissions: z.record(z.string(), Permission).optional() }).strict();
 
 /** 1 時間の鍵の長さ */
@@ -310,7 +309,9 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       }
       const failed = takeFailure(route);
       if (failed) return failed;
-      if (!routes.has(route)) return issues.answer(route, text, token, new URL(c.req.url).searchParams) ?? pulls.answer(route, text, token) ?? c.json({ message: "Not Found" }, 404);
+      // Issue とプルリクエストと Git の答えは、/github の下に立てた時の頭 (/github) を除いた道で探す
+      const bare = `${c.req.method} ${c.req.path.slice(mountedAt(c.req.routePath).length)}`;
+      if (!routes.has(route)) return issues.answer(bare, text, token, new URL(c.req.url).searchParams) ?? pulls.answer(bare, text, token) ?? c.json({ message: "Not Found" }, 404);
       const body = routes.get(route);
       // 出したプルリクエストは、出した者を覚える。自分で可を付ける事を断るのに使う
       const opened = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
@@ -319,10 +320,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       return c.json(body);
     });
 
-  const set = (route: string, body: unknown): void => {
-    if (body === undefined) routes.delete(route);
-    else routes.set(route, body);
-  };
+  const set = (route: string, body: unknown): void => void (body === undefined ? routes.delete(route) : routes.set(route, body));
   return {
     app,
     requests,

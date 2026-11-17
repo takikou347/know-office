@@ -4,7 +4,7 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { freeRepoNames, restoreSeedServices } from "./helpers/seed.ts";
+import { freeRepoNames, restoreSeedServices, seedMain } from "./helpers/seed.ts";
 import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
 
 /** 代わりの GitHub がインストールで選ぶ、サービスのリポジトリ */
@@ -124,6 +124,7 @@ test("子 Issue の PR をオーナーが承認して main に入ると、GitHub
   // 代わりの GitHub に、main の先と、その上に出したブランチの先を置く。main は前の通しが進めているので、強制で置き直す
   const commit = async (parents: string[]): Promise<string> => {
     const res = await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/git/commits`, { ...github, data: { message: "m", tree: "1".repeat(40), parents } });
+    if (!res.ok()) throw new Error(`コミットを置けない: ${String(res.status())} ${await res.text()}`);
     return z.object({ sha: z.string() }).parse(await res.json()).sha;
   };
   const base = await commit([]);
@@ -156,8 +157,10 @@ test("子 Issue の PR をオーナーが承認して main に入ると、GitHub
     const node = z.object({ data: z.object({ status: z.string() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json());
     expect(node.data.status).toBe("done");
     // 画面のタスクが済みになっている
-    await page.goto(`/staff/builder/tasks/${ids.task}`);
-    await expect(page.getByRole("main").getByText("main に入れた").first()).toBeVisible();
+    await page.goto("/staff/builder?tab=tasks");
+    const row = page.getByRole("main").locator("li", { hasText: `#${String(issue)} 動画を作る` }).first();
+    await expect(row).toBeVisible();
+    await expect(row.getByText("済", { exact: true })).toBeVisible();
   } finally {
     seedMain(`DELETE FROM github_mirrors WHERE review_id = '${ids.review}'; DELETE FROM reviews WHERE id = '${ids.review}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
   }

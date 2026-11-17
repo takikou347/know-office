@@ -85,3 +85,12 @@ export const requireUserAgent: MiddlewareHandler = async (c, next) => {
   if (exempt || c.req.header("user-agent")) return next();
   return c.json({ message: "Request forbidden by administrative rules. Please make sure your request has a User-Agent header" }, 403);
 };
+
+/**
+ * 代わりの GitHub を別の道の下 (/github) に立てた時の、その頭を返す。立てる道は呼ばれた時の routePath の末尾の /* の手前
+ * @param routePath 当たった道の形
+ * @returns 頭。直に立てていれば空
+ */
+export function mountedAt(routePath: string): string {
+  return routePath.endsWith("/*") ? routePath.slice(0, -2) : "";
+}
