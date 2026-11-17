@@ -1,4 +1,4 @@
-// CI の Check が、依存の弱点のチェックを依存を変えた PR と週に 1 度の main で、動く入口への自動の攻撃のチェックを PR ごとに回す事を確かめる (セキュリティの「弱点のチェック」)
+// CI の Check が、依存とイメージの弱点のチェックを依存を変えた PR と週に 1 度の main で、動く入口への自動の攻撃のチェックを PR ごとに回す事を確かめる (セキュリティの「弱点のチェック」)
 // node:test の describe と it は Promise を返すが、node:test が待つので void で示す
 import { strict as assert } from "node:assert";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -46,6 +46,10 @@ void describe("弱点のチェック", () => {
       ["pnpm-lock.yaml", "package.json", "apps/office/package.json", "packages/core/package.json", "apps/office/src/gate/app.ts", "README.md", "package.json.bak"].filter((f) => deps.test(f)),
       ["pnpm-lock.yaml", "package.json", "apps/office/package.json", "packages/core/package.json"],
     );
+    // ワークスペースのイメージは、作った後に版を digest で固定した Trivy で見る。依存を変えた PR と週に 1 度の main でも回し、後から見つかった弱点に気づく
+    const image = all.get("image") ?? "";
+    assert.match(image, /^ {4}if: needs\.changes\.outputs\.code == 'true' \|\| needs\.changes\.outputs\.deps == 'true'$/m);
+    assert.match(image, /docker build -f apps\/workspace\/Dockerfile -t know-office-workspace:test \.\n[\s\S]*aquasec\/trivy:[\d.]+@sha256:[0-9a-f]{64}\n\s+image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress know-office-workspace:test$/m);
     // 週に 1 度の確かめで、ほかのジョブは回さない
     assert.match(all.get("check") ?? "", /^ {4}if: github\.event_name != 'schedule'$/m);
     // 動く入口への自動の攻撃は、画面の通しのジョブで 1 度だけ流す

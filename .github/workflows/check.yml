@@ -165,7 +165,8 @@ jobs:
   # ワークスペースのイメージを作り、社員がフックと実行物を書き換えられず、サーバーの鍵とメモリと 8080 番に触れない事を Docker で確かめる
   image:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    # 依存を変えた PR と週に 1 度の main でも、イメージの弱点を見る
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.deps == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
