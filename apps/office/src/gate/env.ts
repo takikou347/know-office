@@ -140,6 +140,10 @@ export interface Live extends Rpc.DurableObjectBranded {
   closeIp(ip: string): Promise<null>;
   /** すべての WebSocket を閉じる。except のログインセッションの物は残す */
   closeAll(except: string | null): Promise<null>;
+  /** 開いたエディタの補完の接続を、同時の数に入れる。配信と合わせて超えた分は古い配信から閉じる */
+  holdLsp(staffId: string, openedAt: number): Promise<null>;
+  /** 閉じたエディタの補完の接続を、同時の数から外す */
+  releaseLsp(staffId: string, openedAt: number): Promise<null>;
 }
 
 /** ワークスペースのコンテナの DO の RPC。社員 1 人に 1 つ */
@@ -164,6 +168,16 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   restore(input: unknown): Promise<null>;
   /** 起こした時に渡した鍵と同じかを確かめる。開発の代わりのワークスペースのハートビートを、その社員の物と決めるのに使う */
   holdsKey(key: string): Promise<boolean>;
+  /** エディタの補完の接続の前の支度。止まっていて wake なら 1 回だけ起こし、木が今の先でなければ取る役を 1 本にだけ渡す (needed) */
+  lspPrepare(input: unknown): Promise<{ tree: "ready" | "needed"; woke: boolean }>;
+  /** 取った木 (tar.gz) をワークスペースに渡す */
+  lspPutTree(nodeId: string, sha: string, body: ReadableStream<Uint8Array>): Promise<null>;
+  /** 木を取れなかった。待っている接続に取りに行かせる */
+  lspDropTree(nodeId: string, sha: string): Promise<null>;
+  /** 合うエディタの補完の接続を閉じる */
+  closeLsp(filter: unknown): Promise<null>;
+  /** 補完で起こした物の期限を確かめ、過ぎていれば止める。社員 DO の 5 分の arm が呼ぶ */
+  sweepEditor(now: number): Promise<null>;
 }
 
 /** 記録を年ごとに置く D1 のバインディングの名前。詳細設計の目次の 3.3 */
@@ -240,6 +254,8 @@ export type GateEnv = {
     forge: Forge;
     /** GitHub の 1 時間の鍵を作るのに使う、fetch、時刻、ためる所 */
     github: TokenDeps;
+    /** リポジトリのコミットの tarball を開く。エディタの補完の木に使う */
+    archive: (repo: string, sha: string) => Promise<ReadableStream<Uint8Array>>;
     /** 断った返事を、入口で 401、403、429 の数に入れたか。入れていればもう数えない */
     deniedCounted: boolean;
   };

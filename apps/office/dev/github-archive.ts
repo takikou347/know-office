@@ -43,7 +43,7 @@ export function createFakeArchives(codeloadBase: string): FakeArchives {
     if (key === undefined || key !== `${c.req.param("owner")}/${c.req.param("name")}:${c.req.param("ref")}`) return c.body(null, 404);
     const body = archives.get(key);
     if (body === undefined) return c.body(null, 404);
-    return new Response(body, { headers: { "content-type": "application/x-gzip" } });
+    return new Response(new Uint8Array(body), { headers: { "content-type": "application/x-gzip" } });
   });
   return { archives, answer, codeload };
 }

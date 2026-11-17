@@ -1,5 +1,4 @@
 // DO を本物の workerd で試すための入口。テストだけが使う
-import { DurableObject } from "cloudflare:workers";
 import { AppError, toBase64 } from "@know-office/core";
 import { z } from "zod";
 import { GuardDO as BaseGuardDO } from "../../src/gate/do/guard.ts";
@@ -8,6 +7,7 @@ import { RecorderDO as BaseRecorderDO } from "../../src/gate/do/recorder.ts";
 import { StaffDO as BaseStaffDO } from "../../src/gate/do/staff.ts";
 import { WorkspaceDO } from "../../src/gate/do/workspace.ts";
 import type { Bindings, WorkspaceContainer } from "../../src/gate/env.ts";
+import { callLive, IdleLsp } from "./harness-live.ts";
 
 export { WorkspaceDO };
 
@@ -85,20 +85,11 @@ console.warn = (...args: unknown[]) => {
   printWarn(...args);
 };
 
-/** 配信 DO への呼び出し */
-const LiveCall = z.discriminatedUnion("method", [
-  z.object({ method: z.literal("issue"), args: z.tuple([z.number()]) }),
-  z.object({ method: z.literal("redeem"), args: z.tuple([z.string(), z.number()]) }),
-  z.object({ method: z.literal("publish"), args: z.tuple([z.unknown()]) }),
-  z.object({ method: z.literal("closeSession"), args: z.tuple([z.string()]) }),
-  z.object({ method: z.literal("closeAll"), args: z.tuple([z.string().nullable()]) }),
-]);
-
 /** ワークスペースへの呼び出し 1 回 */
 const WorkspaceCalls = z.array(z.object({ method: z.string(), args: z.array(z.unknown()) }));
 
 /** ワークスペースのコンテナの DO の代わり。呼び出しを記憶に並べる */
-export class RecordingWorkspace extends DurableObject<Bindings> implements WorkspaceContainer {
+export class RecordingWorkspace extends IdleLsp implements WorkspaceContainer {
   /**
    * 呼び出しを並べる
    * @param method メソッド
@@ -314,12 +305,7 @@ export default {
     }
     const body: unknown = await req.json();
     if (path === "/live") {
-      const call = LiveCall.parse(body);
-      if (call.method === "issue") return Response.json(await live.issue(call.args[0]));
-      if (call.method === "redeem") return Response.json(await live.redeem(call.args[0], call.args[1]));
-      if (call.method === "publish") return Response.json(await live.publish(call.args[0]));
-      if (call.method === "closeSession") return Response.json(await live.closeSession(call.args[0]));
-      return Response.json(await live.closeAll(call.args[0]));
+      return Response.json(await callLive(live, body));
     }
     if (path === "/migrate") {
       const { binding, statements } = Migrate.parse(body);

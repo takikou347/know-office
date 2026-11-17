@@ -6228,6 +6228,96 @@ paths:
         - 404 `not_found`: レビューが存在しない
         - 409 `conflict`: 確認した後に変更が追加された
       security: *a1
+  /api/v1/reviews/{nodeId}/lsp:
+    get:
+      operationId: openReviewLsp
+      tags:
+        - reviews
+      summary: エディタの補完、型の誤り、定義へ移る
+      description: |-
+        画面と、レビューするタスクを作った社員のワークスペースの `tsc --lsp` を JSON-RPC の WebSocket でつなぐ。画面は初めて書き換えた時か、候補、型と説明、定義を求めた時に開く。上りは 1 件 1MiB (超えたら 1009)、1 分 600 回 (超えたら 1008)、下りは 1 件 4MiB (超えたら 1011) まで。ワークスペースごとに 1 本で、2 本目を受けてから前の物を 1008 で閉じる。1 時間か、10 分送りが無ければ閉じる。ログアウト、全部のログアウト、送信元の締め出し、全体の停止、ワークスペースを止めた時に閉じる。配信の同時 10 本に数える。勤務の外に `EDITOR_WAKE` で起こしたワークスペースは、接続が無くなって 10 分か、起こしてから 1 時間か、1 日 2 時間を使い切った時に止める。
+
+        処理の流れ:
+
+        1. `Origin` が自分の URL と一致することを確認する。違えば作業トークンを使わずに断る
+        2. `nodeId` が小文字の UUID であることを確認する
+        3. `Upgrade: websocket` があることを確認する
+        4. 配信の作業トークンを `LiveDO` で使用済みにする
+        5. `reviews` を取得し、リポジトリを読む操作をルールと照らす
+        6. レビューの先のコミットが 40 字の小文字の 16 進であることを確認する。ワークスペースへの道はこの 2 つだけで組む
+        7. 全体か作った社員が止まっていれば起こさない。勤務の外で `EDITOR_WAKE` が `on` で、ログインセッションが今も生きている時だけ、止まっているワークスペースを 1 回だけ起こしてよいとする
+        8. `WorkspaceDO` で、止めている最中なら止め終わりを待ち、止まっていれば起こしてよい時だけ 1 回起こす (やり直しと通知はしない)。勤務の外に起こした時は監査ログに `workspace.wake` を残す
+        9. ワークスペースの木が今の先でなければ、読む鍵で GitHub の tarball を取り、302 は `codeload.github.com` の下だけを `Authorization` を付けずに 1 回追い、ためずに流す。同じ木を同時に開いた時は 1 本だけが取り、ほかは渡し終えるのを待つ
+        10. `WorkspaceDO` がワークスペースの `/v1/lsp` に WebSocket を開き、101 を返して中継する。配信の同時の数に入れる
+
+        このルート固有のエラー:
+
+        - 400 `malformed_request`: `Upgrade: websocket` がない
+        - 401 `unauthenticated`: 作業トークンの形が違う、使用済み、または 60 秒を過ぎた
+        - 403 `origin_mismatch`: Origin がない、または異なる
+        - 403 `rule_denied`: ルールでリポジトリを読めない
+        - 404 `not_found`: レビューが存在しない
+        - 429 `rate_limited`: GitHub の上限に当たった、今日の補完で起こせる 2 時間を使い切った、または tarball を取るのがワークスペースごとに 1 時間 20 回か 1 日 100 回に届いた。待つ秒を `Retry-After` に付ける
+        - 502 `upstream_failed`: レビューの先のコミットの形が違う、GitHub が失敗を返した、tarball が 50MiB を超えた、ワークスペースが木を断った
+        - 503 `unavailable`: ワークスペースが止まっていて起こさない (勤務の間、`EDITOR_WAKE` が `off`、全体か社員の停止中)、または起きない。`Retry-After` に 30 を付ける
+      x-steps:
+        - "`Origin` が自分の URL と一致することを確認する。違えば作業トークンを使わずに断る"
+        - "`nodeId` が小文字の UUID であることを確認する"
+        - "`Upgrade: websocket` があることを確認する"
+        - 配信の作業トークンを `LiveDO` で使用済みにする
+        - "`reviews` を取得し、リポジトリを読む操作をルールと照らす"
+        - レビューの先のコミットが 40 字の小文字の 16 進であることを確認する。ワークスペースへの道はこの 2 つだけで組む
+        - 全体か作った社員が止まっていれば起こさない。勤務の外で `EDITOR_WAKE` が `on` で、ログインセッションが今も生きている時だけ、止まっているワークスペースを 1 回だけ起こしてよいとする
+        - "`WorkspaceDO` で、止めている最中なら止め終わりを待ち、止まっていれば起こしてよい時だけ 1 回起こす (やり直しと通知はしない)。勤務の外に起こした時は監査ログに `workspace.wake` を残す"
+        - ワークスペースの木が今の先でなければ、読む鍵で GitHub の tarball を取り、302 は `codeload.github.com` の下だけを `Authorization` を付けずに 1 回追い、ためずに流す。同じ木を同時に開いた時は 1 本だけが取り、ほかは渡し終えるのを待つ
+        - "`WorkspaceDO` がワークスペースの `/v1/lsp` に WebSocket を開き、101 を返して中継する。配信の同時の数に入れる"
+      x-errors:
+        - "400 `malformed_request`: `Upgrade: websocket` がない"
+        - "401 `unauthenticated`: 作業トークンの形が違う、使用済み、または 60 秒を過ぎた"
+        - "403 `origin_mismatch`: Origin がない、または異なる"
+        - "403 `rule_denied`: ルールでリポジトリを読めない"
+        - "404 `not_found`: レビューが存在しない"
+        - "429 `rate_limited`: GitHub の上限に当たった、今日の補完で起こせる 2 時間を使い切った、または tarball を取るのがワークスペースごとに 1 時間 20 回か 1 日 100 回に届いた。待つ秒を `Retry-After` に付ける"
+        - "502 `upstream_failed`: レビューの先のコミットの形が違う、GitHub が失敗を返した、tarball が 50MiB を超えた、ワークスペースが木を断った"
+        - "503 `unavailable`: ワークスペースが止まっていて起こさない (勤務の間、`EDITOR_WAKE` が `off`、全体か社員の停止中)、または起きない。`Retry-After` に 30 を付ける"
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            description: レビューするタスク。小文字の UUID v7
+          required: true
+          description: レビューするタスク。小文字の UUID v7
+          name: nodeId
+          in: path
+        - schema:
+            type: string
+            description: 配信の作業トークン
+          required: true
+          description: 配信の作業トークン
+          name: ticket
+          in: query
+      responses:
+        "101":
+          description: WebSocket に切り替えた
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+      security: *a1
   /api/v1/org:
     get:
       operationId: listOrg
@@ -9651,50 +9741,3 @@ paths:
         このルート固有のエラー:
 
         - 409 `conflict`: 実行中の処理がある
-  /api/v1/reviews/{nodeId}/lsp:
-    get:
-      operationId: openReviewLsp
-      tags:
-        - reviews
-      summary: コード補完と定義へのジャンプ
-      x-steps:
-        - "`Origin` を検証する"
-        - ワークスペースを起動し、101 を返して TypeScript の言語サーバーに接続する
-      x-errors:
-        - "403 `origin_mismatch`: Origin が異なる"
-        - "503 `unavailable`: ワークスペースが起動しない"
-      parameters:
-        - schema:
-            type: string
-            format: uuid
-            description: UUID v7
-          required: true
-          description: UUID v7
-          name: nodeId
-          in: path
-      responses:
-        "101":
-          description: WebSocket に切り替えた。ワークスペースを起動する
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
-        "500":
-          $ref: "#/components/responses/InternalError"
-        "503":
-          $ref: "#/components/responses/Unavailable"
-      description: |-
-        処理の流れ:
-
-        1. `Origin` を検証する
-        2. ワークスペースを起動し、101 を返して TypeScript の言語サーバーに接続する
-
-        このルート固有のエラー:
-
-        - 403 `origin_mismatch`: Origin が異なる
-        - 503 `unavailable`: ワークスペースが起動しない
-      security: *a1

@@ -43,7 +43,17 @@ function fakeWorld(options: { repos?: string[] } = {}): { deps: ArchiveDeps; see
     if (url.startsWith(`${FAKE_CODELOAD}/`)) return Promise.resolve(github.codeload.request(url.slice(FAKE_CODELOAD.length), init));
     return Promise.reject(new Error(`テストで外へ出た: ${url}`));
   };
-  return { deps: { base: API, codeload: FAKE_CODELOAD, fetcher, access: { appId: 1, token: () => Promise.resolve(READ_KEY) } }, seen, github };
+  return { deps: { base: API, codeload: FAKE_CODELOAD, fetcher, access: { token: () => Promise.resolve(READ_KEY) } }, seen, github };
+}
+
+/**
+ * 返事の URL が別のホストに替わった返事を作る
+ * @returns 返事
+ */
+function moved(): Response {
+  const res = new Response(TARBALL);
+  Object.defineProperty(res, "url", { value: "https://evil.example.com/x" });
+  return res;
 }
 
 /**
@@ -59,14 +69,19 @@ function redirectWorld(location: string, second: () => Response = () => new Resp
     if (url.startsWith("https://api.github.com/")) return Promise.resolve(new Response(null, { status: 302, headers: { location } }));
     return Promise.resolve(second());
   };
-  return { deps: { base: "https://api.github.com", codeload: "https://codeload.github.com", fetcher, access: { appId: 1, token: () => Promise.resolve("ghs_test") } }, seen };
+  return { deps: { base: "https://api.github.com", codeload: "https://codeload.github.com", fetcher, access: { token: () => Promise.resolve("ghs_test") } }, seen };
 }
 
 describe("読みやすさと補完", () => {
   it("tarball は読む鍵で取り、302 を 1 回だけ手で追う", async () => {
     const { deps, seen } = fakeWorld();
     const tokens: unknown[] = [];
-    const body = await readAll(await openArchive({ ...deps, access: { appId: 1, token: (repo, permissions) => Promise.resolve(void tokens.push({ repo, permissions }) ?? READ_KEY) } }, REPO, SHA));
+    const body = await readAll(await openArchive({ ...deps, access: {
+          token: (repo, permissions) => {
+            tokens.push({ repo, permissions });
+            return Promise.resolve(READ_KEY);
+          },
+        }, }, REPO, SHA));
     expect(body.equals(TARBALL)).toBe(true);
     expect(tokens).toEqual([{ repo: REPO, permissions: { contents: "read" } }]);
     expect(seen.map((s) => [s.url.split("?")[0], s.redirect])).toEqual([
@@ -86,8 +101,8 @@ describe("読みやすさと補完", () => {
       "https://codeload.github.com.example.com/example/app/legacy.tar.gz/x",
       "https://evil.com/codeload.github.com/example/app/legacy.tar.gz/x",
       // 利用者名を付けた物。メールアドレスの形を残さないよう、@ を組み立てる
-      `https://user${"@"}codeload.github.com/example/app/legacy.tar.gz/x`,
-      `https://user:pass${"@"}codeload.github.com/example/app/legacy.tar.gz/x`,
+      ["https://user", "codeload.github.com/example/app/legacy.tar.gz/x"].join("@"),
+      ["https://user:pass", "codeload.github.com/example/app/legacy.tar.gz/x"].join("@"),
       "http://codeload.github.com/example/app/legacy.tar.gz/x",
       "https://codeload.github.com:8443/example/app/legacy.tar.gz/x",
       "/example/app/legacy.tar.gz/x",
@@ -111,11 +126,6 @@ describe("読みやすさと補完", () => {
   });
 
   it("302 の先の返事の URL が途中で別のホストに変わったら断る", async () => {
-    const moved = (): Response => {
-      const res = new Response(TARBALL);
-      Object.defineProperty(res, "url", { value: "https://evil.example.com/x" });
-      return res;
-    };
     const { deps } = redirectWorld("https://codeload.github.com/example/app/legacy.tar.gz/x", moved);
     await expect(openArchive(deps, REPO, SHA)).rejects.toMatchObject({ code: "upstream_failed" });
   });

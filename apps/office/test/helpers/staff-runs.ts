@@ -53,6 +53,8 @@ export type WorkspaceSeen = {
   key?: string;
   /** 受けたオーナーの発言 */
   messages?: unknown[];
+  /** 閉じさせた補完の接続の相手 */
+  lspClosed?: unknown[];
   /** 発言への答え方。idle は走っていない (false)、down は届かない。無ければ受ける */
   messageAnswer?: "idle" | "down";
 };
@@ -65,6 +67,11 @@ export type WorkspaceSeen = {
 export function workspaceFake(seen: WorkspaceSeen) {
   return {
     holdsKey: (key: string) => Promise.resolve(seen.key !== undefined && seen.key === key),
+    closeLsp: (filter: unknown) => {
+      (seen.lspClosed ??= []).push(filter);
+      return Promise.resolve(null);
+    },
+    sweepEditor: () => Promise.resolve(null),
     replaceTicket: (ticket: string) => {
       if (seen.down) return Promise.reject(new Error("ワークスペースに届かない"));
       seen.tickets.push(ticket);

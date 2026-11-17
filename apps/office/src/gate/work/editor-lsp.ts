@@ -90,11 +90,11 @@ type Claim = { promise: Promise<void>; resolve: () => void };
  * @returns 約束と終わらせる関数
  */
 function claim(): Claim {
-  let resolve = (): void => undefined;
-  const promise = new Promise<void>((r) => {
-    resolve = r;
+  let done: (() => void) | undefined;
+  const promise = new Promise<void>((resolve) => {
+    done = resolve;
   });
-  return { promise, resolve };
+  return { promise, resolve: () => done?.() };
 }
 
 /** ワークスペース 1 つのエディタの補完。WorkspaceDO が 1 つ持つ */
@@ -215,7 +215,9 @@ export class EditorLsp {
   close(filter: LspCloseFilter): void {
     const relay = this.#active;
     if (!relay) return;
-    const hit = "sessionId" in filter ? relay.meta.sessionId === filter.sessionId : "ip" in filter ? relay.meta.ip === filter.ip : relay.meta.sessionId !== filter.except;
+    let hit = relay.meta.sessionId !== ("except" in filter ? filter.except : null);
+    if ("sessionId" in filter) hit = relay.meta.sessionId === filter.sessionId;
+    if ("ip" in filter) hit = relay.meta.ip === filter.ip;
     if (hit) relay.close(CLOSE.policy, "closed by owner");
   }
 

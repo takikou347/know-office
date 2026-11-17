@@ -118,12 +118,15 @@ export class LspRelay {
   fromScreen(data: string | ArrayBuffer): void {
     if (this.#ended) return;
     // ワークスペースは文字の 1 件だけを受ける
-    if (typeof data !== "string") return this.close(CLOSE.unsupported, "text frames only");
-    if (sizeOf(data) > LSP_RELAY_LIMITS.upBytes) return this.close(CLOSE.tooBig, "message too big");
-    const now = this.#timers.now();
-    this.#ups = this.#ups.filter((at) => now - at < MINUTE_MS);
-    if (this.#ups.length >= LSP_RELAY_LIMITS.upPerMinute) return this.close(CLOSE.policy, "too many messages");
-    this.#ups.push(now);
+    if (typeof data !== "string") {
+      this.close(CLOSE.unsupported, "text frames only");
+      return;
+    }
+    const refused = this.#refuseUp(data);
+    if (refused !== null) {
+      this.close(refused.code, refused.reason);
+      return;
+    }
     this.#cancelIdle();
     this.#cancelIdle = this.#armIdle();
     this.#upstream.send(data);
@@ -135,8 +138,8 @@ export class LspRelay {
    */
   fromUpstream(data: string | ArrayBuffer): void {
     if (this.#ended) return;
-    if (typeof data !== "string" || sizeOf(data) > LSP_RELAY_LIMITS.downBytes) return this.close(CLOSE.internal, "upstream message too big");
-    this.#screen.send(data);
+    if (typeof data === "string" && sizeOf(data) <= LSP_RELAY_LIMITS.downBytes) this.#screen.send(data);
+    else this.close(CLOSE.internal, "upstream message too big");
   }
 
   /**
@@ -168,6 +171,20 @@ export class LspRelay {
     shut(this.#screen, code, reason);
     shut(this.#upstream, CLOSE.normal, reason);
     this.#onEnd();
+  }
+
+  /**
+   * 画面からの文字の 1 件を断るかを決める。通す時は上りの回数に数える
+   * @param data 受けた文字
+   * @returns 断る時の番号と理由。通すなら null
+   */
+  #refuseUp(data: string): { code: number; reason: string } | null {
+    if (sizeOf(data) > LSP_RELAY_LIMITS.upBytes) return { code: CLOSE.tooBig, reason: "message too big" };
+    const now = this.#timers.now();
+    this.#ups = this.#ups.filter((at) => now - at < MINUTE_MS);
+    if (this.#ups.length >= LSP_RELAY_LIMITS.upPerMinute) return { code: CLOSE.policy, reason: "too many messages" };
+    this.#ups.push(now);
+    return null;
   }
 
   /**

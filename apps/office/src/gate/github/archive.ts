@@ -1,7 +1,9 @@
 // エディタの補完の木を GitHub の tarball から取る。読む鍵で取り、302 は 1 回だけ手で追い、codeload の先へは鍵を付けずに流す (タスクとレビューの 3.6)
 import { AppError, allowedFetch, type Fetcher, LSP_TREE_BYTES, LspTreeParams, RepoName } from "@know-office/core";
+import { endpoints } from "../endpoints.ts";
+import type { Bindings } from "../env.ts";
 import type { GitHubAccess } from "./forge.ts";
-import { GITHUB_USER_AGENT, githubRateLimited, githubRetryAfter } from "./app.ts";
+import { GITHUB_USER_AGENT, githubRateLimited, githubRetryAfter, githubToken, type TokenDeps } from "./app.ts";
 
 /** tarball を取る待ち (30 秒)。木は 50MiB まで */
 const ARCHIVE_TIMEOUT_MS = 30_000;
@@ -15,7 +17,7 @@ export type ArchiveDeps = {
   /** 外への fetch */
   fetcher: Fetcher;
   /** 鍵の出し手 */
-  access: GitHubAccess;
+  access: Pick<GitHubAccess, "token">;
 };
 
 /**
@@ -109,4 +111,31 @@ export async function openArchive(deps: ArchiveDeps, repo: string, sha: string):
     throw new AppError("upstream_failed", "tarball が大きすぎる");
   }
   return limited(second.body);
+}
+
+/**
+ * vault の App の鍵から読む鍵を作って tarball を開く口を作る
+ * @param env バインディング
+ * @param deps fetch、時刻、ためる所
+ * @returns tarball を開く口
+ */
+export function vaultArchive(env: Bindings, deps: TokenDeps): (repo: string, sha: string) => Promise<ReadableStream<Uint8Array>> {
+  return (repo, sha) => {
+    const ends = endpoints(env);
+    return openArchive({ base: ends.github, codeload: ends.codeload, fetcher: deps.fetcher, access: { token: async (r, permissions) => (await githubToken(env, deps, r, permissions)).reveal() } }, repo, sha);
+  };
+}
+
+/**
+ * 決まった鍵の出し手で tarball を開く口を作る。テストが鍵の出し手を渡した時に使う
+ * @param env バインディング
+ * @param fetcher 外への fetch
+ * @param access 鍵の出し手
+ * @returns tarball を開く口
+ */
+export function accessArchive(env: Bindings, fetcher: Fetcher, access: Pick<GitHubAccess, "token">): (repo: string, sha: string) => Promise<ReadableStream<Uint8Array>> {
+  return (repo, sha) => {
+    const ends = endpoints(env);
+    return openArchive({ base: ends.github, codeload: ends.codeload, fetcher, access }, repo, sha);
+  };
 }

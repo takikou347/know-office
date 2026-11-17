@@ -126,7 +126,11 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    */
   async arm(now: number): Promise<{ alarm: number | null }> {
     if ((await this.ctx.storage.getAlarm()) === null) await this.wake(now);
-    const { state, nodeId } = await this.status(now);
+    const { id, state, nodeId } = await this.status(now);
+    // 補完で起こしたワークスペースの期限を、alarm が消えた時の予備として確かめる。落ちても勤務は止めない
+    await this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(id))
+      .sweepEditor(now)
+      .catch((error: unknown) => log("warn", "editor_sweep_failed", { staffId: id, error: error instanceof Error ? error.message : "unknown" }));
     // pull でタスクを doing にした後、呼び出しを始める前に DO が落ちると、誰も始めない。ここで見つけて始める
     if (nodeId !== null && (state === "working" || state === "called") && !(await this.runState(nodeId)).started) this.#begin("continue", now);
     return { alarm: await this.ctx.storage.getAlarm() };

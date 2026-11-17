@@ -97,4 +97,31 @@ describe("配信 DO", () => {
     expect(opened.slice(1).every((o) => o.frames.length === 1)).toBe(true);
     for (const o of [...opened.slice(1), extra]) o.ws.close();
   });
+  // 閉じた接続には配らない事で確かめる。閉じる知らせは手元の中継で遅れて届く
+  it("補完の接続も数えて同時に 10 本まで開ける", async () => {
+    const base = Date.now();
+    const opened: Opened[] = [];
+    for (let n = 0; n < LIVE_MAX_SOCKETS - 1; n += 1) opened.push(await open(worker, `s${String(n)}`, base + n));
+    // 補完の接続を 2 本数えると、配信は 8 本までになり、古い 1 本を閉じる
+    await worker.live("holdLsp", "builder", base + 20);
+    await worker.live("holdLsp", "reviewer", base + 21);
+    await worker.live("publish", NOTICE);
+    await until(() => opened.slice(1).every((o) => o.frames.length > 0));
+    expect(opened.map((o) => o.frames.length)).toEqual([0, ...Array<number>(LIVE_MAX_SOCKETS - 2).fill(1)]);
+    // 同じワークスペースの補完は 1 本と数え、前の接続の閉じた知らせでは後から開いた物を外さない。閉じた補完は外す
+    await worker.live("holdLsp", "builder", base + 22);
+    await worker.live("releaseLsp", "builder", base + 20);
+    await worker.live("releaseLsp", "reviewer", base + 21);
+    const next = await open(worker, "next", base + 30);
+    await worker.live("publish", NOTICE);
+    await until(() => next.frames.length > 0);
+    // 補完 1 本と配信 9 本で 10 本なので、どれも閉じない
+    expect([...opened, next].map((o) => o.frames.length)).toEqual([0, ...Array<number>(LIVE_MAX_SOCKETS - 2).fill(2), 1]);
+    // もう 1 本開くと 11 本目なので、いちばん古い s1 を閉じる
+    const last = await open(worker, "last", base + 31);
+    await worker.live("publish", NOTICE);
+    await until(() => last.frames.length > 0);
+    expect([...opened, next, last].map((o) => o.frames.length)).toEqual([0, 2, ...Array<number>(LIVE_MAX_SOCKETS - 3).fill(3), 2, 1]);
+    for (const o of [...opened.slice(2), next, last]) o.ws.close();
+  });
 });

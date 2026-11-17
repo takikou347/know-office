@@ -8,6 +8,7 @@ import { rotateVaultKeys } from "../auth/vault.ts";
 import { nodes, notices, services, sessions, staff, stops, stopUpdates } from "../db/main.ts";
 import type { Bindings, Guard, Staff } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
+import { closeLspAll } from "../live/lsp.ts";
 import { announceNotice, closeLive } from "../live/publish.ts";
 import { clockAt } from "../work/attendance.ts";
 import type { GuardDeps, RecentOp } from "./deps.ts";
@@ -248,6 +249,7 @@ async function enforce(env: Bindings, input: StopInput & { stopId: string }, sta
       await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
       // 切ったログインセッションの配信を開いたままにしない
       await closeLive(env, clockAt(now), (live) => live.closeAll(null));
+      await closeLspAll(env, clockAt(now), { except: null });
       // 取り替えが落ちても、外の鍵の印と 1 時間の鍵の取り消しは必ず行う。落ちた事は最初の失敗を投げ直して止めた記録に残す
       const failures: unknown[] = [];
       try {

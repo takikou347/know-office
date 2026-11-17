@@ -10,6 +10,7 @@ import { vaultKey } from "../auth/vault.ts";
 import { notices, passkeys, sessions } from "../db/main.ts";
 import type { GateEnv } from "../env.ts";
 import { observe } from "../guard/observe.ts";
+import { closeLspAll } from "../live/lsp.ts";
 import { announceNotice, closeLive } from "../live/publish.ts";
 import { audit } from "../ledger/record.ts";
 import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
@@ -171,6 +172,7 @@ export const sessionRoutes = router
     await audit(c, "session.end_others", current.id);
     // 切ったセッションの配信を開いたままにしない
     await closeLive(c.env, c.var.clock, (live) => live.closeAll(current.id));
+    await closeLspAll(c.env, c.var.clock, { except: current.id });
     return noContent(c);
   })
   .openapi(deleteSessionRoute, async (c) => {
@@ -183,6 +185,7 @@ export const sessionRoutes = router
     if (row.id === currentSession(c).id) c.header("Set-Cookie", cookieHeader("", 0));
     await audit(c, "session.end", row.id);
     await closeLive(c.env, c.var.clock, (live) => live.closeSession(row.id));
+    await closeLspAll(c.env, c.var.clock, { sessionId: row.id });
     return noContent(c);
   })
   .openapi(getMeRoute, async (c) => {

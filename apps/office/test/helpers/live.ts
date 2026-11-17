@@ -10,6 +10,8 @@ export type TestLive = {
   opened: Request[];
   /** 閉じさせたログインセッション。全部を閉じさせた時は * */
   closed: string[];
+  /** 同時の数に入れている補完の接続 */
+  lsp: { staffId: string; openedAt: number }[];
 };
 
 /**
@@ -17,7 +19,7 @@ export type TestLive = {
  * @returns 覚えた事と、DO の RPC の代わり
  */
 export function fakeLive() {
-  const live: TestLive = { published: [], opened: [], closed: [] };
+  const live: TestLive = { published: [], opened: [], closed: [], lsp: [] };
   const ticketMap = new Map<string, unknown>();
   const tickets = new LiveTickets({
     get: (key) => ticketMap.get(key),
@@ -38,6 +40,14 @@ export function fakeLive() {
     },
     closeAll: () => {
       live.closed.push("*");
+      return Promise.resolve(null);
+    },
+    holdLsp: (staffId: string, openedAt: number) => {
+      live.lsp = [...live.lsp.filter((l) => l.staffId !== staffId), { staffId, openedAt }];
+      return Promise.resolve(null);
+    },
+    releaseLsp: (staffId: string, openedAt: number) => {
+      live.lsp = live.lsp.filter((l) => l.staffId !== staffId || l.openedAt !== openedAt);
       return Promise.resolve(null);
     },
     publish: (event: unknown) => {

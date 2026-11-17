@@ -4,6 +4,9 @@ import { log, systemClock } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings, Live } from "../env.ts";
 import { LIVE_MAX_AGE_MS, LIVE_MAX_SOCKETS } from "../live/limits.ts";
+
+/** 補完の接続を置く記憶の鍵の頭。社員 ID を続け、値は開いた時刻 */
+const LSP_PREFIX = "lsp:";
 import { LiveTickets } from "../live/tickets.ts";
 
 /** WebSocket に付けて休ませても残す、接続の印 */
@@ -66,9 +69,8 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server, [`session:${sessionId}`, `ip:${ip}`]);
     server.serializeAttachment({ sessionId, ip, openedAt });
-    // 上限を超えた分は、古い物から閉じる。開いた順は休んでも残る印の時刻で決める
-    const sockets = this.#sockets().toSorted((a, b) => a.openedAt - b.openedAt);
-    for (const old of sockets.slice(0, Math.max(0, sockets.length - LIVE_MAX_SOCKETS))) shut(old.ws, POLICY, "too many connections");
+    // 上限を超えた分は、古い物から閉じる。開いた順は休んでも残る印の時刻で決める。補完の接続も数に入れる
+    this.#trim(LIVE_MAX_SOCKETS - this.#lspCount(openedAt));
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(openedAt + LIVE_MAX_AGE_MS);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -119,6 +121,53 @@ export class LiveDO extends DurableObject<Bindings> implements Live {
   closeAll(except: string | null): Promise<null> {
     for (const s of this.#sockets()) if (s.sessionId !== except) shut(s.ws, POLICY, "closed by owner");
     return Promise.resolve(null);
+  }
+
+  /**
+   * 開いたエディタの補完の接続を同時の数に入れ、配信と合わせて上限を超えた分を古い配信から閉じる。補完の接続はワークスペースごとに 1 本
+   * @param staffId ワークスペースの社員
+   * @param openedAt 開いた時刻
+   * @returns 無し
+   */
+  holdLsp(staffId: string, openedAt: number): Promise<null> {
+    this.ctx.storage.kv.put(`${LSP_PREFIX}${staffId}`, openedAt);
+    this.#trim(LIVE_MAX_SOCKETS - this.#lspCount(openedAt));
+    return Promise.resolve(null);
+  }
+
+  /**
+   * 閉じたエディタの補完の接続を同時の数から外す。後から開いた同じワークスペースの物は外さない
+   * @param staffId ワークスペースの社員
+   * @param openedAt 開いた時刻
+   * @returns 無し
+   */
+  releaseLsp(staffId: string, openedAt: number): Promise<null> {
+    const key = `${LSP_PREFIX}${staffId}`;
+    if (this.ctx.storage.kv.get(key) === openedAt) this.ctx.storage.kv.delete(key);
+    return Promise.resolve(null);
+  }
+
+  /**
+   * 開いている補完の接続の数。1 時間を過ぎた物は閉じているので捨てる
+   * @param now 今の時刻
+   * @returns 数
+   */
+  #lspCount(now: number): number {
+    let count = 0;
+    for (const [key, value] of this.ctx.storage.kv.list({ prefix: LSP_PREFIX })) {
+      if (typeof value === "number" && now - value < LIVE_MAX_AGE_MS) count += 1;
+      else this.ctx.storage.kv.delete(key);
+    }
+    return count;
+  }
+
+  /**
+   * 配信の接続を keep 本まで残し、古い物から閉じる
+   * @param keep 残す数
+   */
+  #trim(keep: number): void {
+    const sockets = this.#sockets().toSorted((a, b) => a.openedAt - b.openedAt);
+    for (const old of sockets.slice(0, Math.max(0, sockets.length - Math.max(0, keep)))) shut(old.ws, POLICY, "too many connections");
   }
 
   /**

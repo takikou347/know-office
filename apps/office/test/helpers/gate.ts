@@ -202,7 +202,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock, keyPair: accessKeyPair });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude();
-  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map(), branchHeads: new Map() });
+  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey, codeloadBase: `${FAKES}/codeload` }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map(), branchHeads: new Map() });
   const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];
   const githubAccess: GitHubAccess = {
@@ -215,10 +215,10 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const fetcher: Fetcher = (url, init) => {
     if (url.startsWith(`${FAKES}/anthropic/`)) return Promise.resolve(claude.app.request(url.slice(`${FAKES}/anthropic`.length), init));
     if (url.startsWith(`${FAKES}/github/`)) return Promise.resolve(github.app.request(githubPath(github, url.slice(`${FAKES}/github`.length)), init));
+    if (url.startsWith(`${FAKES}/codeload/`)) return Promise.resolve(github.codeload.request(url.slice(`${FAKES}/codeload`.length), init));
     if (!url.startsWith(`${FAKES}/access/`)) return Promise.reject(new Error(`テストで外へ出た: ${url}`));
     certs.calls += 1;
-    if (certs.answer === "down") return Promise.resolve(new Response("", { status: 503 }));
-    if (certs.answer === "malformed") return Promise.resolve(Response.json({ keys: "none" }));
+    if (certs.answer !== "ok") return Promise.resolve(certs.answer === "down" ? new Response("", { status: 503 }) : Response.json({ keys: "none" }));
     return Promise.resolve(access.app.request(url.slice(`${FAKES}/access`.length)));
   };
   const audits: AuditInput[] = [];

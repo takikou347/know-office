@@ -25,6 +25,7 @@ import { orgRoutes } from "./routes/org.ts";
 import { passkeyRoutes } from "./routes/passkeys.ts";
 import { recordRoutes } from "./routes/records.ts";
 import { traceRoutes } from "./routes/traces.ts";
+import { reviewLspRoutes } from "./routes/review-lsp.ts";
 import { reviewReadRoutes } from "./routes/review-reads.ts";
 import { reviewRoutes } from "./routes/reviews.ts";
 import { serviceRoutes } from "./routes/services.ts";
@@ -48,6 +49,7 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
     .route("/", nodeRoutes)
     .route("/", reviewRoutes)
     .route("/", reviewReadRoutes)
+    .route("/", reviewLspRoutes)
     .route("/", orgRoutes)
     .route("/", serviceRoutes)
     .route("/", settingRoutes)

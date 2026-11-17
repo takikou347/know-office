@@ -2,8 +2,8 @@
 import { generateKeyPairSync } from "node:crypto";
 import { Hono } from "hono";
 import { type FakeFailures, failureTaker, flowRoutes, requireUserAgent } from "./github-flows.ts";
-import { renewAppKey } from "./github-keys.ts";
-import { decodeJwt, jwtVerify } from "jose";
+import { appVerifier, renewAppKey } from "./github-keys.ts";
+import { decodeJwt } from "jose";
 import { z } from "zod";
 import { createFakeArchives } from "./github-archive.ts";
 import { createFakePulls, type FakeActor, type FakePosted, type FakeTreeEntry } from "./github-pulls.ts";
@@ -15,8 +15,6 @@ const FakeRoute = z.object({ route: z.string(), body: z.unknown() });
 
 const TokenRequest = z.object({ repositories: z.array(z.string()).optional(), permissions: z.record(z.string(), Permission).optional() }).strict();
 
-/** App の JWT の長さの上限 (10 分)。GitHub の決まり */
-const APP_JWT_MAX_S = 600;
 /** 1 時間の鍵の長さ */
 const TOKEN_MS = 60 * 60_000;
 
@@ -67,24 +65,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     requests.push({ route, body: parsed, token });
   };
 
-  /**
-   * App の JWT を確かめ、その App を返す。GitHub と同じく RS256、iss は App ID、長さは 10 分まで
-   * @param header Authorization の値
-   * @returns App。確かめられなければ null
-   */
-  const appOf = async (header: string | undefined): Promise<FakeApp | null> => {
-    const jwt = /^Bearer (.+)$/.exec(header ?? "")?.[1];
-    if (!jwt) return null;
-    try {
-      const app = apps.get(Number(decodeJwt(jwt).iss));
-      if (!app) return null;
-      const { payload } = await jwtVerify(jwt, app.publicKey, { algorithms: ["RS256"], issuer: String(app.id), currentDate: new Date(now()) });
-      if (payload.iat === undefined || payload.exp === undefined || payload.exp - payload.iat > APP_JWT_MAX_S) return null;
-      return app;
-    } catch {
-      return null;
-    }
-  };
+  const appOf = appVerifier(apps, now);
 
   /**
    * 1 時間の鍵を読み、切れていない時だけ返す

@@ -10,6 +10,7 @@ import { securityHeaders } from "./headers.ts";
 import type { GateEnv } from "./env.ts";
 import { endpoints } from "./endpoints.ts";
 import { revokeTokens, SHARED_TOKENS, type TokenCache, vaultForge } from "./github/app.ts";
+import { accessArchive, vaultArchive } from "./github/archive.ts";
 import { type GitHubAccess, httpForge } from "./github/forge.ts";
 import { connectRollback, type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
@@ -95,6 +96,7 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
     c.set("guard", { ...guard, revokeGitHubTokens: (env) => revokeTokens(env, tokens) });
     c.set("github", tokens);
     c.set("forge", forge);
+    c.set("archive", github ? accessArchive(c.env, fetcher, github) : vaultArchive(c.env, tokens));
     await next();
   });
   app.use("*", trace);

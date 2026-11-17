@@ -1,5 +1,5 @@
 {
   // DO のテストの入口は Workers の中で動くので、Workers の型で確かめる。テストのファイルは apps/office/tsconfig.json で確かめる
   "extends": "../../tsconfig.worker.json",
-  "include": ["harness.ts"]
+  "include": ["harness.ts", "harness-live.ts"]
 }

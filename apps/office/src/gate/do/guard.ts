@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import { type GuardKeys, newId, systemClock } from "@know-office/core";
 import { type Admission, type Challenge, GuardBook, type RateBucket } from "../auth/guard-book.ts";
 import type { Bindings, Guard } from "../env.ts";
+import { closeLspAll } from "../live/lsp.ts";
 import { announceNotice, closeLive } from "../live/publish.ts";
 import type { Observed } from "../guard/deps.ts";
 import { type KeyState, OfficeGuard } from "../guard/office-guard.ts";
@@ -18,6 +19,7 @@ export class GuardDO extends DurableObject<Bindings> implements Guard {
     await announceNotice(this.env, id, systemClock);
     // 止めた送信元の配信を開いたままにしない
     await closeLive(this.env, systemClock, (live) => live.closeIp(ip));
+    await closeLspAll(this.env, systemClock, { ip });
   }, (at, count) => noticeDenied(this.env, at, count, systemClock));
 
   #office = new OfficeGuard(this.ctx.storage);

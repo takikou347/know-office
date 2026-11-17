@@ -1,25 +1,14 @@
 // 配信: 作業トークンと WebSocket への切り替え (社員と自動の 3.7、API の conversation)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, LiveTicket } from "@know-office/core";
-import { createMiddleware } from "hono/factory";
 import { createRouter } from "../app.ts";
 import { currentSession } from "./sessions.ts";
-import type { GateEnv } from "../env.ts";
+import { upgradeOrigin } from "../live/origin.ts";
 import { liveOf } from "../live/publish.ts";
 import { createdResponse, problems } from "../openapi.ts";
 import { created } from "../respond.ts";
 
 const router = createRouter();
-
-/**
- * WebSocket の切り替えは GET なので sameOrigin が見ない。ここで Origin が自分と同じかを、入力の検証と作業トークンを使うより先に確かめる
- * @throws origin_mismatch Origin が無い、null、または自分と違う時
- */
-const liveOrigin = createMiddleware<GateEnv>(async (c, next) => {
-  // Access の後ろでは要求の URL が公開の URL なので、その origin と文字列で比べる。前方一致や末尾の違いを通さない
-  if (c.req.header("Origin") !== new URL(c.req.url).origin) throw new AppError("origin_mismatch", "Origin が異なる");
-  await next();
-});
 
 const createLiveTicketRoute = createRoute({
   method: "post",
@@ -54,7 +43,7 @@ const openLiveRoute = createRoute({
     "401 `unauthenticated`: 作業トークンの形が違う、使用済み、または 60 秒を過ぎた",
     "403 `origin_mismatch`: Origin がない、または異なる",
   ],
-  middleware: [liveOrigin] as const,
+  middleware: [upgradeOrigin] as const,
   request: { query: z.object({ ticket: z.string().openapi({ param: { name: "ticket", in: "query", required: true } }) }).strict() },
   responses: { 101: { description: "WebSocket に切り替えた" }, ...problems(400, 401, 403, 422, 429, 500) },
 });
