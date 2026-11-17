@@ -13,8 +13,7 @@ import {
   GitHubInstallation,
   GitHubInstallationKey,
   RepoName,
-  Secret,
-  toBase64url,
+  Secret, toBase64url,
 } from "@know-office/core";
 import { SignJWT } from "jose";
 import { z, type ZodType } from "zod";
@@ -23,6 +22,7 @@ import { readStored, vaultKey } from "../auth/vault.ts";
 import { endpoints } from "../endpoints.ts";
 import type { Bindings } from "../env.ts";
 import { auditFrom } from "../ledger/record.ts";
+import { lazyDevIssues } from "../devloop/dev-issues.ts";
 import { type Forge, UNCONNECTED_FORGE } from "../work/loop.ts";
 import { type GitHubAccess, httpForge, type Permissions } from "./forge.ts";
 
@@ -455,6 +455,8 @@ export type TokenDeps = {
   clock: Clock;
   /** ためる所 */
   cache: TokenCache;
+  /** Issue を書く間の待ち。無ければ実際に待つ。テストは待たない物を渡す */
+  pause?: (ms: number) => Promise<void>;
 };
 
 /**
@@ -531,7 +533,7 @@ function vaultAccess(env: Bindings, deps: TokenDeps, appId: number): GitHubAcces
 export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
   let loaded: Promise<Forge> | null = null;
   const load = (): Promise<Forge> => {
-    loaded ??= loadLink(env).then((link) => (link.app && link.installation ? httpForge(endpoints(env).github, deps.fetcher, vaultAccess(env, deps, link.app.appId)) : UNCONNECTED_FORGE));
+    loaded ??= loadLink(env).then((link) => (link.app && link.installation ? httpForge(endpoints(env).github, deps.fetcher, vaultAccess(env, deps, link.app.appId), deps.pause === undefined ? {} : { pause: deps.pause }) : UNCONNECTED_FORGE));
     return loaded;
   };
   return {
@@ -553,5 +555,6 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
     defaultHead: async (repo) => (await load()).defaultHead(repo),
     branchHead: async (repo, branch) => (await load()).branchHead(repo, branch),
     listFiles: async (repo, ref, prefix) => (await load()).listFiles(repo, ref, prefix),
+    issues: lazyDevIssues(async () => (await load()).issues),
   };
 }

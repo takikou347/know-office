@@ -4,6 +4,7 @@ import { AppError, jstDay, type ReleaseCondition, type ReviewFileStatus, StaffId
 import { and, asc, desc, eq, gte, inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { approvals, nodes, staff, workEntries } from "../db/main.ts";
+import { type DevIssues, UNCONNECTED_DEV_ISSUES } from "../devloop/dev-issues.ts";
 import type { Bindings, Staff } from "../env.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
@@ -51,6 +52,8 @@ export type Forge = {
   branchHead(repo: string, branch: string): Promise<string>;
   /** コミット ref の木のうち、prefix の下のファイルの道 (リポジトリの頭から) を返す。GitHub が木を切った時と、500 件を超えた時は null */
   listFiles(repo: string, ref: string, prefix: string): Promise<string[] | null>;
+  /** 設計書から作る Issue の口。issue_plan だけが使う */
+  issues: DevIssues;
 };
 
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
@@ -73,6 +76,7 @@ export const UNCONNECTED_FORGE: Forge = {
   defaultHead: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   branchHead: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   listFiles: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  issues: UNCONNECTED_DEV_ISSUES,
 };
 
 /** 社員 DO の中で次のタスクを取るのに使う、勤務の本の口 */

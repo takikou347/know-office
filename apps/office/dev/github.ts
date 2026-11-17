@@ -6,6 +6,7 @@ import { appVerifier, renewAppKey } from "./github-keys.ts";
 import { decodeJwt } from "jose";
 import { z } from "zod";
 import { createFakeArchives } from "./github-archive.ts";
+import { createFakeIssues } from "./github-issues.ts";
 import { createFakePulls, type FakeActor, type FakePosted, type FakeTreeEntry } from "./github-pulls.ts";
 import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, type GitHubRequest, Manifest, Permission } from "./github-types.ts";
 
@@ -120,6 +121,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   };
 
   const archives = createFakeArchives(options.codeloadBase ?? "https://codeload.github.com");
+  const issues = createFakeIssues({ allows, next, now });
   const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, sent, heads, trees, posted });
 
   const app = new Hono().use("*", requireUserAgent)
@@ -129,7 +131,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       return c.body(null, 204);
     })
     .get("/__fake/requests", (c) => c.json(requests))
-    .route("/", flowRoutes(apps, failures))
+    .route("/", flowRoutes(apps, installations, failures))
     // 画面: オーナーが「作成」を押すと App ができ、manifest の redirect_url に code と state を付けて戻す
     .post("/web/settings/apps/new", async (c) => {
       const form = await c.req.parseBody();
@@ -308,7 +310,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       }
       const failed = takeFailure(route);
       if (failed) return failed;
-      if (!routes.has(route)) return pulls.answer(route, text, token) ?? c.json({ message: "Not Found" }, 404);
+      if (!routes.has(route)) return issues.answer(route, text, token, new URL(c.req.url).searchParams) ?? pulls.answer(route, text, token) ?? c.json({ message: "Not Found" }, 404);
       const body = routes.get(route);
       // 出したプルリクエストは、出した者を覚える。自分で可を付ける事を断るのに使う
       const opened = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
@@ -353,5 +355,6 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     posted,
     archives: archives.archives,
     codeload: archives.codeload,
+    issues,
   };
 }

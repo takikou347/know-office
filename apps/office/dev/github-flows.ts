@@ -1,8 +1,12 @@
 // 開発の時だけ使う。代わりの GitHub の、画面の通しから呼ぶ口。オーナーが GitHub の画面で秘密鍵を作り直す事と、GitHub の失敗を置いて返す事
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
+import { sendWebhook } from "./github-hooks.ts";
 import { renewAppKey } from "./github-keys.ts";
 import type { FakeApp } from "./github-types.ts";
+
+/** 代わりの GitHub に通知を送らせる要求。種類と本文。installation は代わりの GitHub が付ける */
+const FakeHook = z.object({ event: z.string().min(1), payload: z.record(z.string(), z.unknown()) });
 
 /** 置く失敗の道、返すステータス、返す回数 */
 const FakeFailure = z.object({ route: z.string(), status: z.number().int().min(400).max(599), times: z.number().int().min(1).max(10).default(1) });
@@ -28,10 +32,11 @@ export function failureTaker(failures: FakeFailures): (route: string) => Respons
 /**
  * 画面の通しから呼ぶ口を作る
  * @param apps 作った App
+ * @param installations インストール。ID から、App ID と選んだリポジトリ
  * @param failures 道ごとの、置いた失敗と残りの回数
  * @returns 口
  */
-export function flowRoutes(apps: Map<number, FakeApp>, failures: FakeFailures): Hono {
+export function flowRoutes(apps: Map<number, FakeApp>, installations: Map<number, { appId: number }>, failures: FakeFailures): Hono {
   return (
     new Hono()
       // 置いた回数だけ、その道に失敗を返す
@@ -44,6 +49,15 @@ export function flowRoutes(apps: Map<number, FakeApp>, failures: FakeFailures): 
       .delete("/__fake/failures", (c) => {
         failures.clear();
         return c.body(null, 204);
+      })
+      // GitHub が App の通知の宛先 (manifest の hook_attributes.url) へ、App の通知の秘密で署名して送る通知を、通しが起こす
+      .post("/__fake/hooks", async (c) => {
+        const input = FakeHook.parse(await c.req.json());
+        const made = [...apps.values()].at(-1);
+        const installed = [...installations.entries()].find(([, v]) => v.appId === made?.id)?.[0];
+        if (!made || installed === undefined) return c.json({ message: "App がインストールされていない" }, 409);
+        const res = await sendWebhook({ url: made.manifest.hook_attributes.url, event: input.event, payload: { ...input.payload, installation: { id: installed } }, secret: made.webhookSecret });
+        return c.body(null, res.status === 204 ? 204 : 502);
       })
       // 画面: オーナーが App の設定で「Generate a private key」を押すと、新しい秘密鍵の PEM が落ちてくる
       .post("/web/settings/apps/:slug/keys", (c) => {

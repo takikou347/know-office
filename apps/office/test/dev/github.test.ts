@@ -128,9 +128,9 @@ describe("開発環境の代わりの物", () => {
     github.set("GET /repos/o/r/pulls", [{ number: 1, title: "PR" }]);
     const ok = await ask(github.app, "/repos/o/r/pulls", { headers: { authorization: "token ghs_x" } });
     expect(await ok.json()).toEqual([{ number: 1, title: "PR" }]);
-    const missing = await ask(github.app, "/repos/o/r/issues", { headers: { authorization: "token ghs_x" } });
+    const missing = await ask(github.app, "/repos/o/r/labels", { headers: { authorization: "token ghs_x" } });
     expect(missing.status).toBe(404);
-    expect(github.requests.map((r) => r.route)).toEqual(["GET /repos/o/r/pulls", "GET /repos/o/r/issues"]);
+    expect(github.requests.map((r) => r.route)).toEqual(["GET /repos/o/r/pulls", "GET /repos/o/r/labels"]);
   });
 
   it("代わりの GitHub は鍵が無ければ 401 を返す", async () => {

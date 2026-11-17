@@ -11,6 +11,8 @@ import {
   GitHubGitCommit,
   GitHubGitObject,
   GitHubGitTree,
+  GitHubIssueCreated,
+  GitHubIssueList,
   GitHubPosted,
   GitHubPostedList,
   GitHubPull,
@@ -24,6 +26,7 @@ import {
   RULESET_NAME,
 } from "@know-office/core";
 import type { output, ZodType } from "zod";
+import type { DevIssues } from "../devloop/dev-issues.ts";
 import type { ChangedFile, Forge } from "../work/loop.ts";
 import { GITHUB_USER_AGENT, githubRateLimited, githubRetryAfter } from "./app.ts";
 
@@ -61,6 +64,12 @@ const PAGE_SIZE = 100;
 
 /** 目印を探す一覧のページの上限。1,000 件を超えるプルリクエストは読み切れないとして断る */
 const LIST_PAGES = 10;
+
+/** Issue を書く要求の間を空ける時間 (1 秒)。GitHub は POST、PATCH、PUT、DELETE を続けて送る時は 1 秒以上空けるよう求める (Best practices for using the REST API) */
+export const WRITE_GAP_MS = 1000;
+
+/** forge の設定。pause は書きの間を空ける待ち。テストは待たない物を渡す */
+export type ForgeOptions = { pause?: (ms: number) => Promise<void> };
 
 /** GitHub のファイルの種類を、画面で分ける種類に寄せる。copied は足した物、changed と unchanged は変えた物とみる */
 const FILE_STATUS: Readonly<Record<string, ChangedFile["status"]>> = { added: "added", copied: "added", removed: "removed", renamed: "renamed" };
@@ -147,10 +156,12 @@ async function parse<T>(res: Response, schema: ZodType<T>): Promise<T> {
  * @param base GitHub の REST API の宛先 (本番は https://api.github.com)
  * @param fetcher 外への fetch
  * @param access 鍵の出し手
+ * @param options 待ちの差し替え (テストは待たない物を渡す)
  * @returns GitHub を呼ぶ口
  */
-export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess): Forge {
+export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, options: ForgeOptions = {}): Forge {
   const root = `${base.replace(/\/$/, "")}/`;
+  const pause = options.pause ?? ((ms: number) => new Promise<void>((resolve) => void setTimeout(resolve, ms)));
 
   /**
    * 1 回呼ぶ。失敗のステータスも返事として返す
@@ -235,7 +246,66 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
     return NEW_FILE_MODE;
   }
   const writeContents: Permissions = { contents: "write" };
+  const issuesRead: Permissions = { issues: "read" };
+  const issuesWrite: Permissions = { issues: "write" };
+  let wrote = false;
+
+  /**
+   * Issue への書きを 1 つずつ、前の書きから 1 秒空けて送る
+   * @param action 書き
+   * @returns 書きの結果
+   */
+  async function paced<T>(action: () => Promise<T>): Promise<T> {
+    if (wrote) await pause(WRITE_GAP_MS);
+    wrote = true;
+    return action();
+  }
+
+  /**
+   * 100 件の頁を最大 10 頁まで読み、読み切れた時だけ全部を返す
+   * @param repo リポジトリ
+   * @param path 頁の番号を付ける前の道 (クエリ付き)
+   * @param schema 1 頁の形
+   * @returns 全部の項目
+   * @throws upstream_failed 10 頁を読んでも続きがある時
+   */
+  async function allPages<T>(repo: string, path: string, schema: ZodType<T[]>): Promise<T[]> {
+    const all: T[] = [];
+    for (let page = 1; page <= LIST_PAGES; page += 1) {
+      const list = await call(repo, issuesRead, { method: "GET", path: `${path}${path.includes("?") ? "&" : "?"}per_page=${String(PAGE_SIZE)}&page=${String(page)}` }, schema);
+      all.push(...list);
+      if (list.length < PAGE_SIZE) return all;
+    }
+    // 読み切れない時は、無いと言えないので作らずに断る
+    throw new AppError("upstream_failed", "Issue の一覧を読み切れない");
+  }
+
+  // GET /repos/{o}/{r}/issues は state=all、sort=created、direction=desc、per_page は 100 まで、頁で続きを読む。プルリクエストも混じり pull_request の項目で分かる (GitHub の REST API の Issues)
+  // POST /repos/{o}/{r}/issues は 201 で number と id を返す。PATCH /issues/{n} の state と state_reason (not_planned、reopened) で閉じ、開き直す
+  // POST /repos/{o}/{r}/issues/{n}/sub_issues は sub_issue_id に子の番号でなく ID を取り、201 を返す。1 つの親に 100 件まで、8 階層まで (GitHub の REST API の Sub-issues、Adding sub-issues)
+  // 書く要求は GitHub の決まりで、1 分に 80 件、1 時間に 500 件までの content creation と、続けて送る時の 1 秒の間がある (Rate limits for the REST API、Best practices for using the REST API)
+  const issues: DevIssues = {
+    listIssues: async (repo) => {
+      const all = await allPages(repo, "/issues?state=all&sort=created&direction=desc", GitHubIssueList);
+      return all.flatMap((i) => (i.pull_request === undefined ? [{ number: i.number, id: i.id, state: i.state, body: i.body ?? null }] : []));
+    },
+    createIssue: (repo, input) => paced(() => call(repo, issuesWrite, { method: "POST", path: "/issues" }, GitHubIssueCreated, { title: input.title, body: input.body, labels: input.labels })).then((i) => ({ number: i.number, id: i.id })),
+    linkSubIssue: (repo, parent, childId) =>
+      paced(async () => {
+        const res = await send(repo, issuesWrite, { method: "POST", path: `/issues/${String(parent)}/sub_issues` }, { sub_issue_id: childId });
+        if (res.ok) return;
+        // 422 は検証の失敗で、すでにこの親の子の時もある。親の子の一覧に子がいる時だけ成功とみなし、ほかの 422 は断る
+        if (res.status !== 422) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
+        const subs = await allPages(repo, `/issues/${String(parent)}/sub_issues`, GitHubIssueList);
+        if (!subs.some((i) => i.id === childId)) throw new AppError("upstream_failed", "GitHub が sub-issue のつなぎを断った");
+      }),
+    reopen: (repo, number) => paced(() => call(repo, issuesWrite, { method: "PATCH", path: `/issues/${String(number)}` }, GitHubIssueCreated, { state: "open", state_reason: "reopened" })).then(() => undefined),
+    closeNotPlanned: (repo, number) => paced(() => call(repo, issuesWrite, { method: "PATCH", path: `/issues/${String(number)}` }, GitHubIssueCreated, { state: "closed", state_reason: "not_planned" })).then(() => undefined),
+    comment: (repo, number, body) => paced(() => call(repo, issuesWrite, { method: "POST", path: `/issues/${String(number)}/comments` }, GitHubPosted, { body })).then(() => undefined),
+    hasComment: async (repo, number, marker) => (await allPages(repo, `/issues/${String(number)}/comments`, GitHubPostedList)).some((c) => c.body?.includes(marker) === true),
+  };
   return {
+    issues,
     pullFiles: async (repo, pr) => {
       const files: output<typeof GitHubPullFiles> = [];
       // 1 ページは 100 件まで。満ちていれば続きを読み、GitHub の上限の 30 ページまで満ちていれば読み切れないとして断る

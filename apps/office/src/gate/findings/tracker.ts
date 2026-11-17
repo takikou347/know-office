@@ -1,5 +1,6 @@
 // 見つけて直す仕組みが GitHub の Issue を作り、書き足し、閉じる口と、渡す前に文を伏せる包み。GitHub の連携 (#147) でつなぐまでは断る (サービスと拡張の 3.7)
 import { AppError, redactPublic } from "@know-office/core";
+import type { DevIssues } from "../devloop/dev-issues.ts";
 
 /** GitHub の Issue を扱う口。テストは代わりの物を渡す */
 export type IssueTracker = {
@@ -33,8 +34,32 @@ export function fingerprintMark(fingerprint: string): string {
   return `<!-- know-office:fingerprint:${fingerprint} -->`;
 }
 
-/** 本文の中の指紋の印。伏せずに残す */
-const MARK = /<!-- know-office:fingerprint:[\da-f]{64} -->/g;
+/** 本文の中の印 (指紋と設計書から作った Issue の鍵)。16 進数の長い続きなので、伏せずに残す。印を作る関数と伏せない処理は、ここの 1 か所だけにする */
+const MARK = /<!-- know-office:(?:fingerprint|dev-issue):[\da-f]{64} -->/g;
+
+/** 設計書から作った Issue の本文の印を読む正規表現。1 つ目の括りが鍵 */
+export const DEV_ISSUE_MARK = /<!-- know-office:dev-issue:([\da-f]{64}) -->/;
+
+/** 設計書から作った Issue の印の前置き。通知の受け口が、ゲートウェイの作った Issue かを見る */
+export const DEV_ISSUE_MARK_PREFIX = "know-office:dev-issue:";
+
+/**
+ * 設計書から作った Issue の本文に隠して入れる印を作る。送り直しで同じ Issue を探す鍵になる
+ * @param key 親か子を決める鍵 (SHA-256 の 16 進数 64 字)
+ * @returns HTML のコメント
+ */
+export function devIssueMark(key: string): string {
+  return `<!-- ${DEV_ISSUE_MARK_PREFIX}${key} -->`;
+}
+
+/**
+ * 本文から、設計書から作った Issue の印の鍵を読む
+ * @param body Issue の本文
+ * @returns 鍵。印が無ければ null
+ */
+export function devIssueKeyOf(body: string | null): string | null {
+  return DEV_ISSUE_MARK.exec(body ?? "")?.[1] ?? null;
+}
 
 /**
  * 外に出す文を伏せる。指紋の印は 16 進数の長い続きなので、印で区切ってほかの所だけを伏せる
@@ -47,6 +72,19 @@ function publicText(text: string): string {
     .split(MARK)
     .map((part, i) => `${redactPublic(part)}${marks[i] ?? ""}`)
     .join("");
+}
+
+/**
+ * 開発の回し方の Issue の口に渡す題、本文、コメントを、公開の文として伏せる口で包む。印は残す
+ * @param issues GitHub の Issue
+ * @returns 伏せてから渡す口
+ */
+export function publicDevIssues(issues: DevIssues): DevIssues {
+  return {
+    ...issues,
+    createIssue: (repo, input) => issues.createIssue(repo, { ...input, title: publicText(input.title), body: publicText(input.body) }),
+    comment: (repo, number, body) => issues.comment(repo, number, publicText(body)),
+  };
 }
 
 /**

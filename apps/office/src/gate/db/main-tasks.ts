@@ -1,4 +1,5 @@
 // D1 の DB のうち、タスク、承認、レビュー、GitHub、サービス、設定、通知、拡張のテーブル。データの 2 章 と 2.6
+import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { id, json, time } from "./columns.ts";
 
@@ -246,3 +247,35 @@ export const ownerDataReads = sqliteTable("owner_data_reads", {
   field: text("field").notNull(),
   nodeId: text("node_id"),
 });
+
+/**
+ * 設計書から作った Issue。1 行が親か子の Issue 1 件。GitHub に送る前に pending の行を取り、作れたら open にする (開発の回し方の 3.3)
+ * 一意は、親が (サービス、機能)、子が (サービス、機能、要件、本文のハッシュ)。mark_key は本文の隠した印の鍵で、送り直しで同じ Issue を探す
+ */
+export const devIssues = sqliteTable(
+  "dev_issues",
+  {
+    id: id(),
+    serviceId: text("service_id").notNull(),
+    repo: text("repo").notNull(),
+    number: integer("number"),
+    issueId: integer("issue_id"),
+    parentNumber: integer("parent_number"),
+    kind: text("kind", { enum: ["parent", "child"] }).notNull(),
+    feature: text("feature").notNull(),
+    requirement: text("requirement"),
+    reqHash: text("req_hash"),
+    issueKind: text("issue_kind", { enum: ["bug", "feature", "chore"] }),
+    paths: json("paths"),
+    markKey: text("mark_key").notNull(),
+    state: text("state", { enum: ["pending", "open", "closed"] }).notNull(),
+    createdAt: time("created_at").notNull(),
+    closedAt: time("closed_at"),
+  },
+  (t) => [
+    uniqueIndex("dev_issues_parent").on(t.serviceId, t.feature).where(sql`${t.kind} = 'parent'`),
+    uniqueIndex("dev_issues_child").on(t.serviceId, t.feature, t.requirement, t.reqHash).where(sql`${t.kind} = 'child'`),
+    uniqueIndex("dev_issues_number").on(t.repo, t.number),
+    uniqueIndex("dev_issues_mark").on(t.markKey),
+  ],
+);

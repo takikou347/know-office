@@ -2,6 +2,7 @@
 import type { KeyObject } from "node:crypto";
 import type { Hono } from "hono";
 import { z } from "zod";
+import type { FakeIssues } from "./github-issues.ts";
 import type { FakePosted, FakeTreeEntry } from "./github-pulls.ts";
 
 /** 代わりの GitHub の App が持てる権限。know-office の manifest と同じ */
@@ -100,6 +101,8 @@ export type FakeGitHub = {
   archives: Map<string, Uint8Array>;
   /** codeload の形の道 (/{o}/{r}/legacy.tar.gz/{sha}?token=)。代わりの物の置き場の /codeload に付ける */
   codeload: Hono;
+  /** Issue の置き場と受けた書き。一覧、作成、更新、コメント、sub-issue に GitHub と同じ決まりで答える */
+  issues: FakeIssues;
 };
 
 /** 代わりの GitHub の設定 */

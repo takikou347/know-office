@@ -3,6 +3,7 @@ import type { D1Database } from "@cloudflare/workers-types";
 import type { StaffId, ToolResult } from "@know-office/core";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import { z } from "zod";
+import { UNCONNECTED_DEV_ISSUES } from "../../src/gate/devloop/dev-issues.ts";
 import type { Staff } from "../../src/gate/env.ts";
 import type { CheckState, Forge } from "../../src/gate/work/loop.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
@@ -86,6 +87,7 @@ function fakeForge(): FakeForge {
     defaultHead: () => Promise.resolve("b".repeat(40)),
     branchHead: () => Promise.resolve("b".repeat(40)),
     listFiles: () => Promise.resolve([]),
+    issues: UNCONNECTED_DEV_ISSUES,
     dispatchWorkflow: (repo, workflow, inputs) => {
       forge.dispatched.push({ repo, workflow, inputs });
       return Promise.resolve("main");
