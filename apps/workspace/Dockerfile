@@ -3,13 +3,17 @@
 FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
 # 社員は root でない staff (uid 10001) で動く。Debian の staff の組は /usr/local に書ける事があるので、組は別の office にする
+# エディタの補完の tsc は、社員ともサーバーとも違う lsp (uid 10002) で動く (src/lsp-tsc.ts)。社員の作業 (/work とホーム) と両方のプロセスに触れない
 # サーバーは root で動き、SDK の子のプロセスだけを staff に落とす (src/spawn.ts)。社員はサーバーの環境、メモリ、8080 番に触れない
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ripgrep ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g pnpm@10.28.0 \
   && groupadd --gid 10001 office \
-  && useradd --create-home --shell /bin/bash --uid 10001 --gid office staff
+  && useradd --create-home --shell /bin/bash --uid 10001 --gid office staff \
+  && chmod 0700 /home/staff \
+  && groupadd --gid 10002 lsp \
+  && useradd --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --uid 10002 --gid lsp lsp
 
 # ワークスペースのコードとフックは /opt/workspace に置き、root の持ち物で社員が書けなくする
 WORKDIR /opt/workspace
@@ -22,8 +26,10 @@ COPY packages/core/src packages/core/src
 COPY apps/workspace/src apps/workspace/src
 RUN chown -R root:root /opt/workspace && chmod -R go-w /opt/workspace
 
-# 社員が書けるのはタスクのリポジトリを置く /work だけ
-RUN mkdir /work && chown staff:office /work
+# 社員が書けるのはタスクのリポジトリを置く /work だけ。lsp の tsc が読めないよう 0700 にする
+# レビューの木はサーバーが root で /review に広げ、lsp は読むだけ。社員は書けない
+RUN mkdir /work && chown staff:office /work && chmod 0700 /work \
+  && mkdir /review && chmod 0755 /review
 
 # USER を置かず root で起こす。uid を落とすには root が要る。サーバーの置き場は社員が書けない所にし、/work は SDK の子のプロセスにだけ渡す
 WORKDIR /opt/workspace

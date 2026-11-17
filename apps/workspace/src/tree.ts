@@ -124,7 +124,8 @@ function normalizeModes(dir: string): void {
 export class TreeStore {
   /** 置き場、型の束、時刻、上限、tar */
   readonly deps: TreeDeps;
-  readonly #limits: TreeLimits;
+  /** 上限 */
+  readonly limits: TreeLimits;
   readonly #tar: string;
   /** 使っている木の道と、使っている数 */
   readonly #held = new Map<string, number>();
@@ -139,7 +140,7 @@ export class TreeStore {
    */
   constructor(deps: TreeDeps) {
     this.deps = deps;
-    this.#limits = deps.limits ?? TREE_LIMITS;
+    this.limits = deps.limits ?? TREE_LIMITS;
     this.#tar = deps.tar ?? "/usr/bin/tar";
   }
 
@@ -239,7 +240,7 @@ export class TreeStore {
       let total = 0;
       for await (const chunk of body) {
         total += chunk.byteLength;
-        if (total > this.#limits.gzBytes) throw new AppError("payload_too_large", "木の圧縮した大きさが上限を超える");
+        if (total > this.limits.gzBytes) throw new AppError("payload_too_large", "木の圧縮した大きさが上限を超える");
         if (!out.write(chunk)) await Promise.race([new Promise((resolve) => out.once("drain", resolve)), failed]);
       }
     } finally {
@@ -255,10 +256,10 @@ export class TreeStore {
    * @throws validation_failed 確かめに通らない時
    */
   async #install(params: LspTreeParams, archive: string, staging: string): Promise<void> {
-    const deadline = this.deps.clock.now() + this.#limits.ms;
+    const deadline = this.deps.clock.now() + this.limits.ms;
     // 先に一覧で確かめ、通ってから広げる。-P で道を書いたまま出し、頭の / を消させない
     const listing = await this.#tarRun(["-t", "-v", "-P", "-f", "-"], archive, deadline, true);
-    checkListing(listing, this.#limits);
+    checkListing(listing, this.limits);
     mkdirSync(staging, { mode: 0o700 });
     await this.#tarRun(["-x", "-f", "-", "-C", staging, "--no-same-owner", "--no-same-permissions", "--strip-components=1", "--exclude=.git", "--exclude=node_modules"], archive, deadline, false);
     normalizeModes(staging);
@@ -297,7 +298,7 @@ export class TreeStore {
     let bytes = kept.reduce((sum, tree) => sum + tree.bytes, 0);
     let count = kept.length;
     for (const tree of kept.toSorted((a, b) => a.at - b.at)) {
-      if (count <= this.#limits.keep && bytes <= this.#limits.keepBytes) break;
+      if (count <= this.limits.keep && bytes <= this.limits.keepBytes) break;
       if (tree.dir === fresh || this.#held.has(tree.dir)) continue;
       this.#remove(tree.dir);
       count -= 1;
@@ -333,7 +334,7 @@ export class TreeStore {
       if (!collect) return;
       outputBytes += chunk.byteLength;
       // 件数の上限の 1 行 1KiB を超える一覧は読まずに断る
-      if (outputBytes > this.#limits.entries * 1024 + 1024) child.kill("SIGKILL");
+      if (outputBytes > this.limits.entries * 1024 + 1024) child.kill("SIGKILL");
       else output += chunk.toString("utf8");
     });
     let stdinOpen = true;
@@ -355,7 +356,7 @@ export class TreeStore {
       let streamed = 0;
       for await (const chunk of source as AsyncIterable<Buffer>) {
         streamed += chunk.byteLength;
-        if (streamed > this.#limits.streamBytes) {
+        if (streamed > this.limits.streamBytes) {
           child.kill("SIGKILL");
           throw refused("木を広げた大きさが上限を超える");
         }
