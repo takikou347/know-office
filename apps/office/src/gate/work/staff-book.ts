@@ -209,8 +209,7 @@ export class StaffBook {
     if (!parsed.success) throw new AppError("validation_failed", "タスクの形が違う");
     const s = await this.#load();
     await this.#process(s, now);
-    const day = jstDay(now);
-    const used = s.m.talkCalls?.day === day ? s.m.talkCalls.count : 0;
+    const [day, used] = [jstDay(now), s.m.talkCalls?.day === jstDay(now) ? s.m.talkCalls.count : 0];
     // 勤務中ならゲートウェイがワークスペースに渡すので、ここでは呼び出さない
     const called = s.m.state === "off" && (limit === undefined || used < limit.perDay);
     if (called) {
