@@ -1,6 +1,6 @@
 // ブラウザーごとに、オーナーのログインセッションを 1 つ作り、そのブラウザーの全部のテストで使う
 import { expect, test as setup } from "@playwright/test";
-import { z } from "zod";
+import { readNoticesTitled, UNUSUAL_LOGIN_TITLE } from "./flows/helpers/notice-bar.ts";
 import { LOGIN_PROJECT, sessionState } from "./helpers/session.ts";
 
 setup("ログインセッションを作る", async ({ page }) => {
@@ -17,8 +17,6 @@ setup("ログインセッションを作る", async ({ page }) => {
   const me = await page.evaluate(async () => (await fetch("/api/v1/me")).status);
   expect(me).toBe(200);
   // 日本時間の 0 時から 6 時は、このログインで「いつもと違うログイン」の通知が足され、画面の通しの帯に出てキーボードの順や重なりを変える。通しのログインなので読んでおく
-  const headers = { Origin: new URL(page.url()).origin };
-  const notices = z.object({ data: z.array(z.object({ id: z.string(), title: z.string(), readAt: z.string().nullable() }).loose()) }).parse(await (await page.request.get("/api/v1/notices?limit=100")).json());
-  for (const n of notices.data.filter((x) => x.title === "いつもと違うログインがあった" && x.readAt === null)) expect((await page.request.put(`/api/v1/notices/${n.id}/read`, { headers })).status()).toBe(204);
+  await readNoticesTitled(page, UNUSUAL_LOGIN_TITLE);
   await page.context().storageState({ path: sessionState(browser) });
 });

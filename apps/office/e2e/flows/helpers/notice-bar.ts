@@ -18,7 +18,7 @@ const AWAITED_TITLES: readonly string[] = [SPEND_TITLE, RATE_TITLE, AUTH_TITLE];
 const Notices = z.object({ data: z.array(z.object({ id: z.string(), title: z.string(), readAt: z.string().nullable() }).loose()) });
 
 /**
- * 題の合う読んでいない通知を入口で読む。残すと次の通しの帯に出る
+ * 題の合う読んでいない通知を入口で読む。残すと次の通しの帯に出る。読むのは新しい方から 100 件の 1 ページだけ
  * @param page 画面を開いたページ
  * @param title 読む通知の題
  */
@@ -28,8 +28,8 @@ export async function readNoticesTitled(page: Page, title: string): Promise<void
   for (const n of notices.data.filter((x) => x.title === title && x.readAt === null)) expect((await page.request.put(`/api/v1/notices/${n.id}/read`, { headers })).status()).toBe(204);
 }
 
-/** いつもと違うログインの通知の題。日本時間の 0 時から 6 時は、通しのログインごとに足される */
-const UNUSUAL_LOGIN_TITLE = "いつもと違うログインがあった";
+/** いつもと違うログインの通知の題 (routes/sessions.ts)。日本時間の 0 時から 6 時は、通しのログインごとに足される */
+export const UNUSUAL_LOGIN_TITLE = "いつもと違うログインがあった";
 
 /**
  * 読んでいない、いつもと違うログインの通知を入口で読む。夜は通しのログインごとに溜まり、帯で 1 件ずつ送ると待つ間を超える
