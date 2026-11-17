@@ -1,5 +1,5 @@
 // Claude のプロキシ。作業トークンを確かめた要求を、鍵を替えて Claude API へ流れのまま送り、使った量と上限の待ちを残す (社員が考えるの 3.4)
-import { allowedFetch, allowedModels, AppError, PROBLEMS, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
+import { allowedFetch, allowedModels, AppError, DEV_STAFF_HEADER, PROBLEMS, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -87,7 +87,7 @@ export async function relayClaude(c: Context<GateEnv>, ticket: TicketClaims): Pr
   const model = checkedModel(text, ticket.staffId);
   let res: Response;
   try {
-    res = await callUpstream(c, path, text);
+    res = await callUpstream(c, path, text, ticket.staffId);
   } catch (error) {
     // 届かない失敗はここで数えて返す。onError に任せると upstream_failed として別に残り、二重に数える
     if (!(error instanceof AppError) || error.code === "unavailable") throw error;
@@ -238,20 +238,24 @@ function safeJson(text: string): unknown {
  * @param c 要求の文脈
  * @param path 道
  * @param text 本文
+ * @param staffId 作業トークンの社員
  * @returns Claude API の返事
  * @throws unavailable 鍵が無い時、全体を止めた後でまだ入れ直していない時
  * @throws upstream_timeout 10 分で返らない時
  * @throws upstream_failed 届かない時
  */
-async function callUpstream(c: Context<GateEnv>, path: string, text: string): Promise<Response> {
+async function callUpstream(c: Context<GateEnv>, path: string, text: string, staffId: StaffId): Promise<Response> {
   const base = endpoints(c.env).anthropic;
   const key = await claudeKey(c.env);
   // SDK は beta の Messages API を ?beta=true で呼ぶ。ほかのクエリは送らない
   const query = new URL(c.req.url).searchParams.get("beta") === "true" ? "?beta=true" : "";
+  const headers = upstreamHeaders(c.req.raw.headers, key);
+  // 開発環境の代わりの Claude API は、替えた鍵では社員を見分けられないので、社員ごとに積んだ返事を選ぶ印を付ける。宛先が本物の時は付けない
+  if (c.env.ENVIRONMENT === "development") headers.set(DEV_STAFF_HEADER, staffId);
   try {
     return await allowedFetch(c.var.fetch, `${base}${path}${query}`, [`${base}/`], {
       method: "POST",
-      headers: upstreamHeaders(c.req.raw.headers, key),
+      headers,
       body: text,
       signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
     });

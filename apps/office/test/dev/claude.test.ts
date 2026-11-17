@@ -1,7 +1,7 @@
 // 開発環境の代わりの Claude API を確かめる。ログインと記録の 3.9
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { claudeSpendLimit, SPEND_LIMIT_KINDS } from "@know-office/core";
+import { claudeSpendLimit, DEV_STAFF_HEADER, SPEND_LIMIT_KINDS } from "@know-office/core";
 import { createFakeClaude, spendLimitError } from "../../dev/claude.ts";
 
 const HEADERS = { "x-api-key": "test-key", "anthropic-version": "2023-06-01", "content-type": "application/json" };
@@ -106,6 +106,25 @@ describe("開発環境の代わりの物", () => {
     // 社員を決めずに積んだ物は、どの呼び出しにも返す
     claude.push({ content: [{ type: "text", text: "誰にでも" }] });
     expect((await call(ticket("builder"))).status).toBe(200);
+  });
+
+  it("鍵が作業トークンでない時は、開発のプロキシが付けた社員の印で積んだ返事を選び、作業トークンの社員を印より先に使う", async () => {
+    const claude = createFakeClaude();
+    await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", content: [{ type: "text", text: "レビュー担当へ" }] }) });
+    const call = (key: string, staffId: string) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": key, [DEV_STAFF_HEADER]: staffId }, body: BODY });
+    // 作業トークンの社員は印より先に使うので、印が reviewer でも builder には渡さない
+    expect((await call(ticket("builder"), "reviewer")).status).toBe(500);
+    // 社員の形でない印は使わない
+    expect((await call("dev-fake-anthropic-key", "nobody")).status).toBe(500);
+    const res = await call("dev-fake-anthropic-key", "reviewer");
+    expect(await res.json()).toMatchObject({ content: [{ type: "text", text: "レビュー担当へ" }] });
+  });
+
+  it("使用の上限に切り替えた社員は、開発のプロキシが付けた社員の印でも見分ける", async () => {
+    const claude = createFakeClaude();
+    await claude.app.request("/__fake/limit", { method: "POST", body: JSON.stringify({ staffId: "reviewer", limit: "monthly" }) });
+    const res = await claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": "dev-fake-anthropic-key", [DEV_STAFF_HEADER]: "reviewer" }, body: BODY });
+    expect(res.status).toBe(429);
   });
 
   it("待ちを付けて積んだ返事は、積んでからその間が過ぎるまで返さず、待つ間に呼び出しが切れたら次の呼び出しに残す", async () => {

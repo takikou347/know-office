@@ -1,5 +1,5 @@
 // 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、使用の上限に切り替えられ、届いた要求と鍵を残す。バッチ処理は受けた後にテストが終えさせる
-import { SPEND_LIMIT_KINDS, type SpendLimitKind, StaffId } from "@know-office/core";
+import { DEV_STAFF_HEADER, SPEND_LIMIT_KINDS, type SpendLimitKind, StaffId } from "@know-office/core";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -59,6 +59,19 @@ function staffOfKey(key: string | undefined): StaffId | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 呼び出しの社員を決める。鍵が作業トークンならその社員、ゲートウェイの Claude のプロキシを通って鍵が替わっていれば、プロキシが付けた社員の印を使う
+ * @param key x-api-key
+ * @param mark DEV_STAFF_HEADER の値
+ * @returns 社員 ID。どちらからも決まらなければ null
+ */
+function staffOfCall(key: string | undefined, mark: string | undefined): StaffId | null {
+  const fromKey = staffOfKey(key);
+  if (fromKey !== null) return fromKey;
+  const fromMark = StaffId.safeParse(mark);
+  return fromMark.success ? fromMark.data : null;
 }
 
 /** 積める失敗のステータス */
@@ -225,7 +238,7 @@ export function createFakeClaude(): FakeClaude {
     .post("/v1/messages", async (c) => {
       const body = MessagesRequest.parse(await c.req.json());
       requests.push(body);
-      const staffId = staffOfKey(c.req.header("x-api-key"));
+      const staffId = staffOfCall(c.req.header("x-api-key"), c.req.header(DEV_STAFF_HEADER));
       // 本物の使用の上限は、直すまでどの呼び出しも断る
       const limit = staffId === null ? undefined : limits.get(staffId);
       if (limit !== undefined) return errorResponse(spendLimitError(limit));

@@ -129,6 +129,40 @@ describe("開発の代わりのワークスペースの出来事", () => {
     expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", nodeId)).toEqual([{ status: "doing" }]);
   });
 
+  it("社員の道で受けた Claude の呼び出しを、作業トークンを確かめてプロキシに回し、代わりの Claude API はその社員に積んだ返事を返す", async () => {
+    const { nodeId, token } = await builderAtWork(world);
+    await world.gate.staff.builder.book.heartbeat(world.clock.now());
+    // ほかの社員に積んだ返事を先に置き、鍵を替えた後でも社員を見分けて渡す事を確かめる
+    for (const [staffId, text] of [["reviewer", "レビュー担当への返事"], ["builder", "開発担当への返事"]] as const) {
+      const pushed = await world.gate.claude.app.request("/__fake/responses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ staffId, content: [{ type: "text", text }] }) });
+      expect(pushed.status).toBe(204);
+    }
+    const request = new Request("http://localhost:5174/__dev/workspace/builder/anthropic/v1/messages?beta=true", {
+      method: "POST",
+      headers: { "x-api-key": token, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 64, messages: [{ role: "user", content: "進める" }] }),
+    });
+    const res = await devWorkspaceEgress(request, world.gate.env, { clock: world.clock, guard: world.gate.deps, fetch: world.gate.fetch });
+    expect(res?.status).toBe(200);
+    expect(await res?.json()).toMatchObject({ content: [{ type: "text", text: "開発担当への返事" }] });
+    // プロキシは作業トークンを Claude API に渡さず、鍵を替える
+    expect(world.gate.claude.keys.at(-1)).toBe(world.gate.env.ANTHROPIC_API_KEY);
+    expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", nodeId)).toEqual([{ status: "doing" }]);
+  });
+
+  it("ほかの社員の道で送った Claude の呼び出しは、作業トークンの発行先と違うので 401 で断り、Claude API に送らない", async () => {
+    const { token } = await builderAtWork(world);
+    const sent = world.gate.claude.requests.length;
+    const request = new Request("http://localhost:5174/__dev/workspace/reviewer/anthropic/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": token, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 64, messages: [{ role: "user", content: "進める" }] }),
+    });
+    const res = await devWorkspaceEgress(request, world.gate.env, { clock: world.clock, guard: world.gate.deps, fetch: world.gate.fetch });
+    expect(res?.status).toBe(401);
+    expect(world.gate.claude.requests).toHaveLength(sent);
+  });
+
   it("開発の道でない要求はゲートウェイに任せる", () => {
     expect(send(world.gate.env, "/api/v1/nodes", "", [])).toBeNull();
   });

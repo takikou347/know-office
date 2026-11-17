@@ -9,6 +9,9 @@ import type { ContainerLike } from "./workspace-box.ts";
 /** 代わりのワークスペースがゲートウェイの受け手に送る道。/__dev/workspace/<社員 ID> の後に受け手の道を続ける */
 const DEV_EGRESS = /^\/__dev\/workspace\/([^/]+)(\/ws\/v1\/.+)$/;
 
+/** 代わりのワークスペースの SDK が呼ぶ Claude の道。/__dev/workspace/<社員 ID>/anthropic の後に Claude API の道を続ける */
+const DEV_CLAUDE = /^\/__dev\/workspace\/([^/]+)\/anthropic(\/v1\/.+)$/;
+
 /** ハートビートの道。代わりのワークスペースはワークスペースの鍵を付けて送る */
 const HEARTBEAT_PATH = "/ws/v1/heartbeat";
 
@@ -25,11 +28,10 @@ type DevFetch = (url: string, init?: RequestInit) => Promise<Response>;
 const RUNNING = new Set<string>();
 
 /**
- * 開発のコンテナの代わり。外向きの通信の受け手は付けない (代わりのワークスペースはゲートウェイの受け手を通らない)
- * 代わりのワークスペースの SDK は、代わりの物の置き場の Claude API だけを呼ぶ
+ * 開発のコンテナの代わり。外向きの通信の受け手は付けない。代わりのワークスペースはゲートウェイの開発の道 (devWorkspaceEgress) に送り、SDK の Claude の呼び出しもそこから Claude のプロキシに回る
  */
 export class DevContainer<F = unknown> implements ContainerLike<F> {
-  /** 受け手を作らない。代わりのワークスペースはゲートウェイの受け手を通らない */
+  /** 受け手を作らない。代わりのワークスペースはゲートウェイの開発の道に直に送る */
   readonly intercepts = false;
   /** 起こしている途中の物。Node のサーバーへの要求はこれを待つ */
   #booting: Promise<void> = Promise.resolve();
@@ -74,7 +76,7 @@ export class DevContainer<F = unknown> implements ContainerLike<F> {
   }
 
   /**
-   * 受け手は付けない。代わりのワークスペースはゲートウェイを通らずに代わりの物だけを呼ぶ
+   * 受け手は付けない。代わりのワークスペースはゲートウェイの開発の道に直に送る
    * @returns 無し
    */
   interceptOutboundHttp(): Promise<void> {
@@ -145,7 +147,7 @@ export function containerFor<F>(env: EndpointEnv, real: ContainerLike<F> | undef
 }
 
 /**
- * 開発の代わりのワークスペースが送った要求を、その社員のワークスペースの受け手に回す。代わりのワークスペースは Containers の外向きの通信を通らないので、ここで社員を道から決める
+ * 開発の代わりのワークスペースが送った要求と、その SDK の Claude の呼び出しを、その社員のワークスペースの受け手に回す。代わりのワークスペースは Containers の外向きの通信を通らないので、ここで社員を道から決める
  * 道の社員は信じず、作業トークンが発行された先のワークスペースと合う時だけ受ける。ハートビートはワークスペースの鍵が合う時だけ受け、作業トークンの要らないほかの道 (チェックポイント) は受けない
  * @param request 入口に届いた要求
  * @param env バインディング
@@ -154,7 +156,8 @@ export function containerFor<F>(env: EndpointEnv, real: ContainerLike<F> | undef
  */
 export function devWorkspaceEgress(request: Request, env: Bindings, options: EgressOptions): Promise<Response> | null {
   const url = new URL(request.url);
-  const match = DEV_EGRESS.exec(url.pathname);
+  const claude = DEV_CLAUDE.exec(url.pathname);
+  const match = DEV_EGRESS.exec(url.pathname) ?? claude;
   if (!match || env.ENVIRONMENT !== "development") return null;
   // DEV_FAKES_URL が手元でなければ、代わりのワークスペースも無いので受けない。入口の fetch の中で投げず、断る返事にする
   try {
@@ -165,7 +168,8 @@ export function devWorkspaceEgress(request: Request, env: Bindings, options: Egr
   const staffId = StaffId.safeParse(match[1]);
   const path = match[2] ?? "";
   if (!staffId.success) return Promise.resolve(new Response(null, { status: 404 }));
-  const forwarded = new Request(`http://gate.internal${path}${url.search}`, request);
+  // Claude の道は、コンテナの受け手が api.anthropic.com への要求を回すのと同じ形にして、作業トークンを確かめる Claude のプロキシに渡す
+  const forwarded = new Request(`${claude ? "https://api.anthropic.com" : "http://gate.internal"}${path}${url.search}`, request);
   const caller = { staffId: staffId.data, workspaceId: workspaceIdOf(env, staffId.data) };
   if (path === HEARTBEAT_PATH) return devHeartbeat(forwarded, env, caller, options);
   if (OPEN_PATHS.has(path)) return Promise.resolve(new Response(null, { status: 404 }));

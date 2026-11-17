@@ -16,7 +16,7 @@ export function staffHome(): string {
 
 /** 開発の代わりのワークスペースだけが渡す、手元の宛先と置き場。コンテナでは渡さない */
 export type LocalRun = {
-  /** 代わりの Claude API の宛先 */
+  /** Claude API の宛先。ゲートウェイの開発の道の Claude のプロキシ */
   baseUrl: string;
   /** 作業の置き場。手元には /work が無いので、作った一時の置き場を使う */
   cwd: string;
@@ -114,7 +114,7 @@ export function agentOptions(input: {
       HOME: local?.home ?? staffHome(),
       PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
       NODE_EXTRA_CA_CERTS: CONTAINER_CA,
-      // コンテナでは宛先を変えず、受け手がプロキシに回す。開発の代わりのワークスペースだけが手元の代わりの Claude を渡す
+      // コンテナでは宛先を変えず、受け手がプロキシに回す。開発の代わりのワークスペースは受け手を通らないので、ゲートウェイの開発の道のプロキシを渡す
       ...(local === undefined ? {} : { ANTHROPIC_BASE_URL: local.baseUrl }),
     },
     hooks: { PreToolUse: [{ hooks: [input.hook] }] },

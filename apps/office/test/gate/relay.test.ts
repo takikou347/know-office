@@ -1,4 +1,5 @@
 // Claude のプロキシを、作業トークンから代わりの Claude API、使った量の記録、勤怠の待ちまで確かめる (社員が考えるの 3.4、テスト設計の社員が考える)
+import { DEV_STAFF_HEADER, type Fetcher } from "@know-office/core";
 import { describe, expect, it, vi } from "vitest";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
 import { claudeBlocked } from "../../src/gate/work/run.ts";
@@ -130,6 +131,26 @@ describe("Claude のプロキシ", () => {
     expect(JSON.stringify(w.gate.audits)).not.toContain(ANTHROPIC_KEY);
     // 流れでない返事も、使った量を残す
     expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ input_tokens: 10, output_tokens: 10, cost_micro_usd: 120, request_id: null })]);
+  });
+
+  it("開発環境だけ、代わりの Claude API が社員を見分ける印を付けて送り、ほかの環境では付けない", async () => {
+    const work = await startTask();
+    const seen: (string | null)[] = [];
+    const capture: Fetcher = (_url, init) => {
+      seen.push(new Headers(init?.headers).get(DEV_STAFF_HEADER));
+      return Promise.resolve(Response.json({ content: [], usage: { input_tokens: 1, output_tokens: 1 } }));
+    };
+    expect((await callClaude(work, { ...messages("直す"), stream: false }, "/v1/messages", capture)).status).toBe(200);
+    const was = w.gate.env.ENVIRONMENT;
+    try {
+      for (const environment of ["production", "preview", undefined]) {
+        w.gate.env.ENVIRONMENT = environment;
+        expect((await callClaude(work, { ...messages("直す"), stream: false }, "/v1/messages", capture)).status).toBe(200);
+      }
+    } finally {
+      w.gate.env.ENVIRONMENT = was;
+    }
+    expect(seen).toEqual(["builder", null, null, null]);
   });
 
   it("止まっている社員の呼び出しは 409 stopped で断り、外へ出さない", async () => {

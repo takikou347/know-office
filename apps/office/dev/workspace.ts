@@ -9,7 +9,7 @@ import { z } from "zod";
 export type DevWorkspace = { port: number; events: unknown[][]; close(): Promise<void> };
 
 /** 代わりのワークスペースを起こす関数。apps/workspace/src/dev.ts の startDevWorkspace と同じ形 */
-export type StartDevWorkspace = (options: { key: string; anthropicUrl: string; gateUrl: string }) => Promise<DevWorkspace>;
+export type StartDevWorkspace = (options: { key: string; gateUrl: string }) => Promise<DevWorkspace>;
 
 /** 代わりのワークスペースが受けたタスクの開始 */
 export type ReceivedRun = { staffId: StaffId; nodeId: string };
@@ -66,13 +66,12 @@ async function loadWorkspace(): Promise<StartDevWorkspace> {
 
 /**
  * 代わりのワークスペースの置き場を作る
- * @param anthropicUrl 代わりの Claude API の宛先 (DEV_FAKES_URL/anthropic)
  * @param gateBase 手元のゲートウェイの宛先 (http://localhost:<番号>) を返す関数。開発サーバーが待ち受けた後に決まるので、起こす時に読む
  * @param start 代わりのワークスペースを起こす関数。省くと apps/workspace の物
  * @param heartbeat ハートビートの送り方。省くと fetch と setInterval
  * @returns Hono、受けたタスクの開始、止める口
  */
-export function createDevWorkspaces(anthropicUrl: string, gateBase: () => string, start?: StartDevWorkspace, heartbeat: DevHeartbeatDeps = {}): DevWorkspaces {
+export function createDevWorkspaces(gateBase: () => string, start?: StartDevWorkspace, heartbeat: DevHeartbeatDeps = {}): DevWorkspaces {
   // 起こした社員の鍵、ハートビートを止める関数、起こした Node のサーバー。サーバーと SDK は最初の /v1/runs か /v1/restore まで読み込まない
   const booted = new Map<StaffId, { key: string; stopBeat: () => void; server?: Promise<DevWorkspace> }>();
   const runs: ReceivedRun[] = [];
@@ -117,7 +116,7 @@ export function createDevWorkspaces(anthropicUrl: string, gateBase: () => string
   };
   const serverOf = (staffId: StaffId, held: { key: string; server?: Promise<DevWorkspace> }) => {
     // 出来事は社員ごとのゲートウェイの開発の道に送らせる
-    held.server ??= (start ? Promise.resolve(start) : loadWorkspace()).then((begin) => begin({ key: held.key, anthropicUrl, gateUrl: `${gateBase()}/__dev/workspace/${staffId}` }));
+    held.server ??= (start ? Promise.resolve(start) : loadWorkspace()).then((begin) => begin({ key: held.key, gateUrl: `${gateBase()}/__dev/workspace/${staffId}` }));
     return held.server;
   };
   const app = new Hono()

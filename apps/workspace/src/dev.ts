@@ -1,4 +1,4 @@
-// 開発環境の代わりのワークスペース。本物と同じサーバーと Runner を手元の空いた番号で起こし、SDK は手元の代わりの Claude API だけを呼び、出来事はゲートウェイの開発の道に送る (ログインと記録の 3.9、社員が考えるの 3.2)
+// 開発環境の代わりのワークスペース。本物と同じサーバーと Runner を手元の空いた番号で起こし、出来事と SDK の Claude の呼び出しはゲートウェイの開発の道に送る (ログインと記録の 3.9、社員が考えるの 3.2)
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +9,6 @@ import { GATE_ORIGIN } from "./hooks.ts";
 import { Runner } from "./run.ts";
 import { sdkAgent } from "./sdk.ts";
 import { createWorkspaceServer } from "./server.ts";
-
-/** 手元の代わりの Claude API の宛先。これでない宛先には SDK を向けない */
-const LOCAL_ANTHROPIC = /^http:\/\/(localhost|127\.0\.0\.1):\d+\/anthropic$/;
 
 /** ゲートウェイの開発の道 (/__dev/workspace/<社員 ID>)。これでない宛先には出来事を送らない */
 const LOCAL_GATE = /^http:\/\/(localhost|127\.0\.0\.1):\d+\/__dev\/workspace\/[a-z]+$/;
@@ -53,16 +50,15 @@ function devGateFetch(gateUrl: string): Fetcher {
 
 /**
  * 代わりのワークスペースを 127.0.0.1 の空いた番号で起こす。SDK の作業の置き場とホームは一時の置き場に作り、閉じる時に消す
- * @param options ゲートウェイの鍵、代わりの Claude API の宛先、ゲートウェイの開発の道、呼び出しの代わり
+ * SDK はゲートウェイの開発の道の Claude のプロキシ (<gateUrl>/anthropic) を呼ぶ。本物のコンテナと同じく、作業トークンを確かめ、使った量と上限を数えてから代わりの Claude API に回る
+ * @param options ゲートウェイの鍵、ゲートウェイの開発の道、呼び出しの代わり
  * @param options.key ゲートウェイの鍵
- * @param options.anthropicUrl 代わりの Claude API の宛先 (DEV_FAKES_URL/anthropic)
  * @param options.gateUrl ゲートウェイの開発の道 (http://localhost:<番号>/__dev/workspace/<社員 ID>)
  * @param options.agent SDK の呼び出し。省くと本物の SDK
  * @returns 起こした物
- * @throws internal 代わりの Claude API かゲートウェイの開発の道が手元でない時。本物の Claude とほかの宛先には向けない
+ * @throws internal ゲートウェイの開発の道が手元でない時。ほかの宛先には向けない
  */
-export async function startDevWorkspace(options: { key: string; anthropicUrl: string; gateUrl: string; agent?: Agent }): Promise<DevWorkspace> {
-  if (!LOCAL_ANTHROPIC.test(options.anthropicUrl)) throw new AppError("internal", "代わりの Claude API が手元の宛先でない");
+export async function startDevWorkspace(options: { key: string; gateUrl: string; agent?: Agent }): Promise<DevWorkspace> {
   if (!LOCAL_GATE.test(options.gateUrl)) throw new AppError("internal", "ゲートウェイの開発の道が手元の宛先でない");
   const events: AgentEvent[][] = [];
   const fetcher = devGateFetch(options.gateUrl);
@@ -82,7 +78,7 @@ export async function startDevWorkspace(options: { key: string; anthropicUrl: st
         return toGate.report(ticket, sent);
       },
     },
-    { baseUrl: options.anthropicUrl, cwd, home },
+    { baseUrl: `${options.gateUrl}/anthropic`, cwd, home },
   );
   const server = createWorkspaceServer(runner, options.key);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

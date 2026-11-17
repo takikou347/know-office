@@ -9,6 +9,9 @@ export const SONNET = "claude-sonnet-5-5";
 /** 軽いタスク (題を付ける、要約するなど) のモデル。SDK が裏で呼ぶので、どの役にも許す */
 export const HAIKU = "claude-haiku-5-5";
 
+/** 開発環境の Claude のプロキシが、代わりの Claude API に送る要求に付ける社員 ID のヘッダー。プロキシは鍵を替えるので、代わりの Claude API はこれで社員ごとに積んだ返事を選ぶ。本番とプレビューでは付けない */
+export const DEV_STAFF_HEADER = "x-know-dev-staff";
+
 /** 単価表にあるモデル */
 export type ClaudeModel = typeof OPUS | typeof SONNET | typeof HAIKU;
 

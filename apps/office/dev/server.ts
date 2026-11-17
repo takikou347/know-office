@@ -29,9 +29,8 @@ export async function startFakes(options: FakeAccessOptions & { port: number; ga
   const access = await createFakeAccess(options);
   const claude = createFakeClaude();
   const github = createFakeGitHub();
-  // 代わりのワークスペースの SDK は、ここに立てた代わりの Claude API だけを呼ぶ
-  // 出来事は手元のゲートウェイの開発の道に送る
-  const workspaces = createDevWorkspaces(`http://127.0.0.1:${String(options.port)}/anthropic`, options.gateBase);
+  // 代わりのワークスペースは、出来事も SDK の Claude の呼び出しも手元のゲートウェイの開発の道に送る。Claude の呼び出しはゲートウェイのプロキシからここの代わりの Claude API に届く
+  const workspaces = createDevWorkspaces(options.gateBase);
   const app = new Hono().route("/access", access.app).route("/anthropic", claude.app).route("/github", github.app).route("/workspace", workspaces.app);
   const server = serve({ fetch: app.fetch, port: options.port, hostname: "127.0.0.1" });
   return {
