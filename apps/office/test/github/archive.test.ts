@@ -57,16 +57,34 @@ function moved(): Response {
 }
 
 /**
+ * 読まれずに捨てられたかを覚える本文を作る
+ * @returns 本文と、捨てられたか
+ */
+function watchedBody(): { body: ReadableStream<Uint8Array>; cancelled: () => boolean } {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(16));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return { body, cancelled: () => cancelled };
+}
+
+/**
  * 本物の宛先の形で、302 の Location と 2 回目の返事を決めた GitHub につなぐ
  * @param location 302 の Location
  * @param second 2 回目の返事
+ * @param firstBody 1 回目の 302 の本文
  * @returns 取り方と届いた要求
  */
-function redirectWorld(location: string, second: () => Response = () => new Response(TARBALL)): { deps: ArchiveDeps; seen: Seen[] } {
+function redirectWorld(location: string, second: () => Response = () => new Response(TARBALL), firstBody: ReadableStream<Uint8Array> | null = null): { deps: ArchiveDeps; seen: Seen[] } {
   const seen: Seen[] = [];
   const fetcher: Fetcher = (url, init) => {
     seen.push({ url, authorization: new Headers(init?.headers).get("authorization"), redirect: init?.redirect });
-    if (url.startsWith("https://api.github.com/")) return Promise.resolve(new Response(null, { status: 302, headers: { location } }));
+    if (url.startsWith("https://api.github.com/")) return Promise.resolve(new Response(firstBody, { status: 302, headers: { location } }));
     return Promise.resolve(second());
   };
   return { deps: { base: "https://api.github.com", codeload: "https://codeload.github.com", fetcher, access: { token: () => Promise.resolve("ghs_test") } }, seen };
@@ -121,8 +139,32 @@ describe("読みやすさと補完", () => {
 
   it("302 の先がもう 1 度リダイレクトを返したら断る", async () => {
     const { deps, seen } = redirectWorld("https://codeload.github.com/example/app/legacy.tar.gz/x", () => new Response(null, { status: 302, headers: { location: "https://codeload.github.com/other" } }));
-    await expect(openArchive(deps, REPO, SHA)).rejects.toMatchObject({ code: "upstream_failed" });
+    // 2 度目の 302 は ok でないので後の確かめでも断るが、リダイレクトとして断る事を訳で確かめる
+    await expect(openArchive(deps, REPO, SHA)).rejects.toMatchObject({ code: "upstream_failed", message: "codeload がもう 1 度リダイレクトした" });
     expect(seen).toHaveLength(2);
+  });
+
+  it("302 の先に利用者名かパスワードがあれば、宛先の比べより先に断る", async () => {
+    for (const userinfo of ["user", "user:pw"]) {
+      const { deps, seen } = redirectWorld([`https://${userinfo}`, "codeload.github.com/example/app/legacy.tar.gz/x"].join("@"));
+      await expect(openArchive(deps, REPO, SHA)).rejects.toMatchObject({ code: "upstream_failed", message: "tarball の行き先が利用者名かパスワードを持つ" });
+      expect(seen).toHaveLength(1);
+    }
+  });
+
+  it("302 の本文と、断った 2 回目の本文は読まずに捨てる", async () => {
+    const first = watchedBody();
+    const ok = redirectWorld("https://codeload.github.com/example/app/legacy.tar.gz/x", undefined, first.body);
+    await readAll(await openArchive(ok.deps, REPO, SHA));
+    expect(first.cancelled()).toBe(true);
+    const failed = watchedBody();
+    const bad = redirectWorld("https://codeload.github.com/example/app/legacy.tar.gz/x", () => new Response(failed.body, { status: 500 }));
+    await expect(openArchive(bad.deps, REPO, SHA)).rejects.toMatchObject({ code: "upstream_failed" });
+    expect(failed.cancelled()).toBe(true);
+    const again = watchedBody();
+    const redirected = redirectWorld("https://codeload.github.com/example/app/legacy.tar.gz/x", () => new Response(again.body, { status: 302, headers: { location: "https://codeload.github.com/o" } }));
+    await expect(openArchive(redirected.deps, REPO, SHA)).rejects.toMatchObject({ code: "upstream_failed" });
+    expect(again.cancelled()).toBe(true);
   });
 
   it("302 の先の返事の URL が途中で別のホストに変わったら断る", async () => {

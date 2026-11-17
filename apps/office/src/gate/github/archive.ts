@@ -36,9 +36,23 @@ function codeloadUrl(location: string | null, codeload: string): string {
   } catch {
     throw new AppError("upstream_failed", "tarball の行き先の形が違う");
   }
-  // 頭の文字列で比べるので、codeload.github.com.example.com、別のホストの道、利用者名、http、ほかの番号を通さない
-  if (url.username !== "" || url.password !== "" || !url.href.startsWith(prefix)) throw new AppError("upstream_failed", "tarball の行き先が codeload でない");
+  // 利用者名とパスワードは、宛先の比べに頼らずに先に断る
+  if (url.username !== "" || url.password !== "") throw new AppError("upstream_failed", "tarball の行き先が利用者名かパスワードを持つ");
+  // 頭の文字列で比べるので、codeload.github.com.example.com、別のホストの道、http、ほかの番号を通さない
+  if (!url.href.startsWith(prefix)) throw new AppError("upstream_failed", "tarball の行き先が codeload でない");
   return url.href;
+}
+
+/**
+ * 返事の本文を読まずに捨ててから断る。捨てないと接続が残る
+ * @param res 返事
+ * @param error 投げる物
+ * @returns 返さない
+ * @throws AppError 渡した物
+ */
+async function refuse(res: Response, error: AppError): Promise<never> {
+  await res.body?.cancel().catch(() => undefined);
+  throw error;
 }
 
 /**
@@ -87,9 +101,11 @@ export async function openArchive(deps: ArchiveDeps, repo: string, sha: string):
     throw new AppError("upstream_failed", "GitHub に届かない");
   }
   const wait = githubRetryAfter(first);
-  if (wait !== null) throw githubRateLimited(wait);
-  if (first.status === 404) throw new AppError("not_found", "コミットが無い");
-  if (first.status !== 302) throw new AppError("upstream_failed", `GitHub が ${String(first.status)} を返した`);
+  if (wait !== null) return refuse(first, githubRateLimited(wait));
+  if (first.status === 404) return refuse(first, new AppError("not_found", "コミットが無い"));
+  if (first.status !== 302) return refuse(first, new AppError("upstream_failed", `GitHub が ${String(first.status)} を返した`));
+  // 302 の本文は使わない
+  await first.body?.cancel().catch(() => undefined);
   const target = codeloadUrl(first.headers.get("location"), deps.codeload);
   let second: Response;
   try {
@@ -102,14 +118,11 @@ export async function openArchive(deps: ArchiveDeps, repo: string, sha: string):
   } catch {
     throw new AppError("upstream_failed", "codeload に届かない");
   }
-  if (second.status >= 300 && second.status < 400) throw new AppError("upstream_failed", "codeload がもう 1 度リダイレクトした");
+  if (second.status >= 300 && second.status < 400) return refuse(second, new AppError("upstream_failed", "codeload がもう 1 度リダイレクトした"));
   // 返事の URL は要求の URL と同じはず。途中で別の所に替わっていれば受けない
-  if (second.url !== "" && !second.url.startsWith(`${deps.codeload.replace(/\/$/, "")}/`)) throw new AppError("upstream_failed", "codeload の返事の宛先が違う");
-  if (!second.ok || second.body === null) throw new AppError("upstream_failed", `codeload が ${String(second.status)} を返した`);
-  if (Number(second.headers.get("content-length") ?? "0") > LSP_TREE_BYTES) {
-    await second.body.cancel();
-    throw new AppError("upstream_failed", "tarball が大きすぎる");
-  }
+  if (second.url !== "" && !second.url.startsWith(`${deps.codeload.replace(/\/$/, "")}/`)) return refuse(second, new AppError("upstream_failed", "codeload の返事の宛先が違う"));
+  if (!second.ok || second.body === null) return refuse(second, new AppError("upstream_failed", `codeload が ${String(second.status)} を返した`));
+  if (Number(second.headers.get("content-length") ?? "0") > LSP_TREE_BYTES) return refuse(second, new AppError("upstream_failed", "tarball が大きすぎる"));
   return limited(second.body);
 }
 
