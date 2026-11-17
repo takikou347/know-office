@@ -37,8 +37,8 @@ export type UpdateDocsRepoInput = z.infer<typeof UpdateDocsRepoInput>;
 /** 設計書の外れた所。path は services/<名前>/ からの道 */
 export type DocsProblem = { path: string; detail: string };
 
-/** サービスの名前の形。設計書の置き場 `services/<名前>/` の道に入れるので、小文字、数字、`.`、`_`、`-` だけで、頭は英数字 */
-export const SERVICE_NAME = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+/** サービスの名前の形。設計書の置き場 `services/<名前>/` の道に入れるので、小文字、数字、`.`、`_`、`-` だけで、頭は英数字で、`..` を含まない */
+export const SERVICE_NAME = /^(?!.*\.\.)[a-z0-9][a-z0-9._-]{0,99}$/;
 
 // 次の 3 つは knowidea の tools/check.py の SERVICE_DOCS、SERVICE_KEYS、FEATURE_FILE の物を、設計書のリポジトリの PR で確かめる分だけ写した形
 const DOC_FOLDERS = ["01-overview", "02-architecture", "03-stack", "04-detail", "05-test", "06-operations"] as const;

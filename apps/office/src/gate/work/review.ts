@@ -4,7 +4,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { nodes, reviews, services } from "../db/main.ts";
-import { isFirstDocs, verifyDocsPr } from "../devloop/docs-pr.ts";
+import { expectedDocsName, isFirstDocs, verifyDocsPr } from "../devloop/docs-pr.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
@@ -98,7 +98,7 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
   let when: readonly ReleaseCondition[];
   if (checked.docs) {
     // 設計書のリポジトリは、確かめたコミットの形をここでも確かめる。PR を出した後に押された物を、形の外れたまま入れない
-    const shape = await verifyDocsPr(forge, review.repo, sha.data, checked.paths);
+    const shape = await verifyDocsPr(forge, review.repo, sha.data, checked.paths, await expectedDocsName(env.DB, made));
     if (shape.kind === "refused") return { kind: "refused", reason: shape.reason };
     if (shape.kind === "waiting") return { kind: "waiting", reason: shape.reason };
     // 最初の設計書だけオーナーの承認も要る。office とサービスの設定は読まない

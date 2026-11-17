@@ -171,6 +171,20 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     expect(pullsOpened(world)).toBe(0);
   });
 
+  it("設計書を書くタスクの PR が後から別のサービスの置き場だけを変えても、承認が出そろっても main が進まない", async () => {
+    const task = await openedDocsPull(world);
+    // 押された後の先は other の置き場だけを変える。形は合うが、このタスクは video-maker の置き場しか書けない
+    const other = { "services/other/README.md": README.replace("name: video-maker", "name: other"), "services/other/docs/01-overview/index.md": "# 概要\n" };
+    docsAt(world, NEXT, other);
+    pullOnGitHub(world, Object.keys(other));
+    await synchronize(world, DOCS, NEXT);
+    expect(await reviewerApproves(world, NEXT)).toBe(false);
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "approve", body: "読んだ", baseSha: NEXT });
+    expect(mainMoves(world)).toEqual([]);
+    expect((await events(world, task)).some((e) => e.kind === "merge_refused")).toBe(true);
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
+  });
+
   it("README の読みが落ちたら最初かどうかを決めず、待たずに失敗にする", async () => {
     const task = await openedDocsPull(world);
     world.gate.github.failNext(`GET /repos/${DOCS}/contents/services/video-maker/README.md`, 500);

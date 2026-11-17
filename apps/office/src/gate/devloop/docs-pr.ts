@@ -47,7 +47,7 @@ function refuse(reason: string, errors: { pointer: string; detail: string }[] = 
 async function checkIndexLine(forge: Forge, repo: string, sha: string, name: string): Promise<DocsPrCheck | null> {
   const base = await forge.readFile(repo, await forge.defaultHead(repo), INDEX);
   const next = await forge.readFile(repo, sha, INDEX);
-  const bad = (detail: string) => refuse("サービスの一覧は、自分の行を 1 行足すだけにする", [{ pointer: `#/files/${INDEX}`, detail }]);
+  const bad = (detail: string) => refuse("サービスの一覧は、自分の行を 1 行足すだけにする。main が進んだ時は rebase する", [{ pointer: `#/files/${INDEX}`, detail }]);
   if (base === null || next === null) return bad("既定のブランチと PR の先の両方に一覧が要る");
   const [before, after] = [base.split("\n"), next.split("\n")];
   if (after.length !== before.length + 1) return bad("足す行はちょうど 1 行にする");
@@ -66,17 +66,19 @@ async function checkIndexLine(forge: Forge, repo: string, sha: string, name: str
  * @param repo 設計書のリポジトリ
  * @param sha 確かめるコミット。変えた道、木、中身を全部この 1 つで読む
  * @param known 変えた道が分かっている時に渡す。無ければ GitHub から読む
+ * @param expected そのタスクで期待する名前。設計書を書くタスクだけが渡し、合わなければ断る。無ければ undefined
  * @returns 確かめの結果
  * @throws upstream_failed GitHub から読めない時
  */
-export async function verifyDocsPr(forge: Forge, repo: string, sha: string, known?: readonly string[] | null): Promise<DocsPrCheck> {
+export async function verifyDocsPr(forge: Forge, repo: string, sha: string, known?: readonly string[] | null, expected?: string): Promise<DocsPrCheck> {
   const paths = known === undefined ? await forge.changedPaths(repo, sha) : known;
   if (paths === null) return refuse("変えたファイルを確かめ切れない");
   if (paths.length === 0) return refuse("変えたファイルが無い");
   const own = paths.filter((p) => p !== INDEX);
   const [name, ...others] = serviceDirs(own);
-  if (name === undefined || others.length > 0 || !SERVICE_NAME.test(name) || name.includes("..")) return refuse("設計書の PR は 1 つの services/<名前>/ の下だけを変える");
+  if (name === undefined || others.length > 0 || !SERVICE_NAME.test(name)) return refuse("設計書の PR は 1 つの services/<名前>/ の下だけを変える");
   if (!own.every((p) => p.startsWith(`services/${name}/`))) return refuse("設計書の PR は services/<名前>/ の外を変えない。変えてよいのは services/README.md の自分の行だけ");
+  if (expected !== undefined && expected !== name) return refuse("設計書を書くタスクは、そのサービスの services/<名前>/ だけを変える", [{ pointer: "#/files", detail: `変えてよい置き場は services/${expected === "" ? "<名前>" : expected}/` }]);
   const prefix = `services/${name}/`;
   if (paths.includes(INDEX)) {
     const index = await checkIndexLine(forge, repo, sha, name);
@@ -110,7 +112,21 @@ export async function isFirstDocs(forge: Forge, repo: string, name: string): Pro
 }
 
 /**
- * 設計書の PR を出す前に確かめ、外れていれば断る。設計書を書くタスク (source が design:<サービス ID>) は、そのサービスの置き場 `services/<リポジトリの名前を小文字にした物>/` だけを変えられる。別のサービスの設計書を書き換えさせない
+ * 設計書を書くタスク (source が design:<サービス ID>) が変えてよい置き場の名前を出す。そのサービスの `services/<リポジトリの名前を小文字にした物>/`
+ * @param db 今の状態の D1
+ * @param task タスクの範囲と出どころ
+ * @param task.scope タスクの範囲。設計書を書くタスクではサービス ID
+ * @param task.source タスクの出どころ
+ * @returns 設計書を書くタスクでなければ undefined。分からなければ空文字 (どの名前にも合わない)
+ */
+export async function expectedDocsName(db: D1Database, task: { scope: string; source: string | null }): Promise<string | undefined> {
+  if (task.source?.startsWith("design:") !== true) return undefined;
+  const [owner] = await drizzle(db).select({ repo: services.repo }).from(services).where(eq(services.id, task.scope)).limit(1);
+  return owner?.repo?.split("/")[1]?.toLowerCase() ?? "";
+}
+
+/**
+ * 設計書の PR を出す前に確かめ、外れていれば断る。設計書を書くタスクは、そのサービスの置き場だけを変えられる。別のサービスの設計書を書き換えさせない
  * @param db 今の状態の D1
  * @param forge GitHub
  * @param task 出すタスクのリポジトリ、範囲、出どころ
@@ -123,11 +139,7 @@ export async function isFirstDocs(forge: Forge, repo: string, name: string): Pro
  */
 export async function assertDocsPr(db: D1Database, forge: Forge, task: { repo: string | null; scope: string; source: string | null }, head: string): Promise<void> {
   if (task.repo === null) throw new AppError("internal", "設計書のタスクにリポジトリが無い");
-  const shape = await verifyDocsPr(forge, task.repo, head);
+  const shape = await verifyDocsPr(forge, task.repo, head, undefined, await expectedDocsName(db, task));
   if (shape.kind === "refused") throw new AppError("validation_failed", shape.reason, { errors: shape.errors });
   if (shape.kind === "waiting") throw new AppError("upstream_failed", shape.reason);
-  if (task.source?.startsWith("design:") !== true) return;
-  const [owner] = await drizzle(db).select({ repo: services.repo }).from(services).where(eq(services.id, task.scope)).limit(1);
-  const expected = owner?.repo?.split("/")[1]?.toLowerCase();
-  if (expected !== shape.name) throw new AppError("validation_failed", "設計書を書くタスクは、そのサービスの services/<名前>/ だけを変える", { errors: [{ pointer: "#/files", detail: `変えてよい置き場は services/${expected ?? "<名前>"}/` }] });
 }
