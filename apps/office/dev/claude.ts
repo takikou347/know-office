@@ -349,7 +349,7 @@ export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
     requests,
     keys,
     accepted,
-    push: (message, options) => queue.push({ item: message, staffId: null, ...(options?.forGate === true ? { forGate: true } : {}) }),
+    push: (message, how) => queue.push({ item: message, staffId: null, ...(how?.forGate === true ? { forGate: true } : {}) }),
     pushError: (status, type, extra) => queue.push({ item: { error: { status, type, ...extra } }, staffId: null }),
     batches,
     endBatch: (id, answer) => {
