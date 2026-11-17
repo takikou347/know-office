@@ -3,7 +3,7 @@ import type { Notice } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Api, createApi } from "../../src/screen/api.ts";
-import { fetchNotices, holdNotices, NOTICE_HOLD_MS, NOTICE_LIVE_POLL_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, noticePollMs, watchNotices } from "../../src/screen/parts/notices.tsx";
+import { fetchNotices, holdNotices, latestOnly, NOTICE_HOLD_MS, NOTICE_LIVE_POLL_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, noticePollMs, watchNotices } from "../../src/screen/parts/notices.tsx";
 
 /**
  * 通知を作る
@@ -137,6 +137,24 @@ describe("通知を読み直す", () => {
     view.show(false);
     await vi.advanceTimersByTimeAsync(0);
     expect(reads()).toBe(2);
+  });
+});
+
+describe("読み直しが重なった時", () => {
+  it("先に始めた読みの答えが後から届いても、最後に始めた読みの答えを残す", async () => {
+    const answers: ((v: string) => void)[] = [];
+    const applied: string[] = [];
+    const pull = latestOnly(
+      () => new Promise<string>((resolve) => answers.push(resolve)),
+      (v) => applied.push(v),
+    );
+    const first = pull();
+    const second = pull();
+    answers[1]?.("新しい");
+    await second;
+    answers[0]?.("古い");
+    await first;
+    expect(applied).toEqual(["新しい"]);
   });
 });
 

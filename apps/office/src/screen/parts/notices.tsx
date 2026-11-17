@@ -56,6 +56,22 @@ export async function fetchNotices(api: Api): Promise<Notice[] | null> {
   return (await res.json()).data;
 }
 
+/**
+ * 読む関数を、最後に始めた読みの答えだけを渡す形に包む。先に始めた読みの答えが後から届いても、新しい答えを古い答えで上書きしない
+ * @param load 読む関数
+ * @param apply 答えを渡す先
+ * @returns 読む関数
+ */
+export function latestOnly<T>(load: () => Promise<T>, apply: (value: T) => void): () => Promise<void> {
+  let started = 0;
+  return async () => {
+    started += 1;
+    const mine = started;
+    const value = await load();
+    if (mine === started) apply(value);
+  };
+}
+
 /** タブの見え方。画面では document */
 export type NoticeView = Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
 
@@ -133,12 +149,15 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
     if (!api) return () => {};
     let live = true;
     const hold = holdNotices(() => setHolding(false));
-    const pull = async (): Promise<void> => {
-      const value = await fetchNotices(api);
-      if (!live) return;
-      setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
-      hold.settled();
-    };
+    // 読み直しが重なると答えの届く順が入れ替わるので、最後に始めた読みの答えだけを使う
+    const pull = latestOnly(
+      () => fetchNotices(api),
+      (value) => {
+        if (!live) return;
+        setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
+        hold.settled();
+      },
+    );
     const onMark = markReloader(pull);
     const unsubscribe = subscribe((event) => {
       if (event.type === "notice") onMark(event.notice.id);
