@@ -3077,6 +3077,7 @@ components:
               - node_assign
               - staff_request
               - study_submit
+              - issue_plan
               - service_close_request
               - pr_open
               - review_submit
@@ -3086,7 +3087,7 @@ components:
               - checkpoint
               - report
               - owner_info_read
-          maxItems: 13
+          maxItems: 14
           description: 社員の役で使える社員のツール。ワークスペースはこの名前のツールだけを MCP の受け手 staff に出す
         extensionTools:
           type: array

@@ -73,11 +73,11 @@ export function freeRepoNames(): void {
 }
 
 /**
- * 通しの後に、最初に登録したサービスのリポジトリを元に戻し、通しが足した案のリポジトリと設計書を書くタスクを片付ける。社員がほかの通しの前に取らないようにする
+ * 通しの後に、最初に登録したサービスのリポジトリを元に戻し、通しが足した案のリポジトリと、設計書を書くタスクと Issue を合わせるタスクを片付ける。社員がほかの通しの前に取らないようにする
  */
 export function restoreSeedServices(): void {
   seedMain("UPDATE services SET repo = NULL WHERE repo LIKE 'example/%'");
   seedMain("UPDATE services SET repo = 'takikou347/knowidea-ui' WHERE id = '00000000-0000-7000-8000-000000000101'");
   seedMain("UPDATE services SET repo = 'takikou347/know-office' WHERE id = '00000000-0000-7000-8000-000000000102'");
-  seedMain("UPDATE nodes SET status = 'dropped' WHERE source LIKE 'design:%' AND status IN ('todo', 'doing')");
+  seedMain("UPDATE nodes SET status = 'dropped' WHERE (source LIKE 'design:%' OR source LIKE 'issue-sync:%') AND status IN ('todo', 'doing')");
 }

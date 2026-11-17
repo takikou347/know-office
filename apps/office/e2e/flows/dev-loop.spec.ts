@@ -1,12 +1,37 @@
-// 開発の回し方の通し。オーナーが設定の画面で設計書のリポジトリを選び、案を試作に進めると、社員とタスクの画面に開発担当の「設計書: <名前>」のタスクが出る。ゲートウェイの返事は差し替えず、GitHub は開発の代わりの物を使う (開発の回し方の 3.1、3.2)
+// 開発の回し方の通し。オーナーが設定の画面で設計書のリポジトリを選び、案を試作に進めると、社員とタスクの画面に開発担当の「設計書: <名前>」のタスクが出る。設計書が main で変わる通知が届くと、社長の「Issue を合わせる: <名前>」のタスクが出る。ゲートウェイの返事は差し替えず、GitHub は開発の代わりの物を使う (開発の回し方の 3.1、3.2、3.3)
+import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
-import { connectGitHub, forgetGitHub } from "./helpers/github.ts";
+import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { freeRepoNames, restoreSeedServices } from "./helpers/seed.ts";
 import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
 
 /** 代わりの GitHub がインストールで選ぶ、サービスのリポジトリ */
 const REPO = "example/know-office";
+
+/**
+ * 木の返事から、題が合うタスクの ID を探す
+ * @param tree 木の返事
+ * @param title 探す題
+ * @returns タスク ID。無ければ null
+ */
+function findTaskId(tree: unknown, title: string): string | null {
+  const pending: unknown[] = [tree];
+  const Item = z.object({ id: z.string().optional(), title: z.string().optional() }).loose();
+  while (pending.length > 0) {
+    const node = pending.pop();
+    const list = z.array(z.unknown()).safeParse(node);
+    if (list.success) {
+      pending.push(...list.data);
+      continue;
+    }
+    const item = Item.safeParse(node);
+    if (!item.success) continue;
+    if (item.data.title === title && item.data.id !== undefined) return item.data.id;
+    pending.push(...Object.values(item.data));
+  }
+  return null;
+}
 
 test.afterEach(() => {
   forgetGitHub();
@@ -34,4 +59,47 @@ test("設計書のリポジトリを選んで試作に進める", async ({ page 
   // 開発担当に、設計書のリポジトリへ書くタスクが足されている
   await page.goto("/staff/builder?tab=tasks");
   await expect(page.getByRole("main").getByText(`設計書: ${title}`).first()).toBeVisible();
+});
+
+test("設計書が main で変わる通知から、社長の Issue を合わせるタスクが画面に出る", async ({ page }) => {
+  await useOwnerPasskey(page);
+  freeRepoNames();
+  await page.goto("/services");
+  await connectGitHub(page);
+  const docs = await chooseDocsRepo(page);
+
+  const title = `Issue の案 ${crypto.randomUUID().slice(0, 8)}`;
+  const serviceId = await addIdea(page, title);
+  const main = page.getByRole("main");
+  await move(page, "検討に進める", "調べる価値がある");
+  await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
+  await choose(page, "移す先", "作ると決める");
+  await choose(page, "リポジトリ", REPO);
+  await move(page, "作ると決める", "作る");
+  await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
+
+  // 設計書のリポジトリの main に、サービスの詳細設計の機能のファイルが入った事にする。通知の先で読む木と中身を、代わりの GitHub に置く
+  // 同じ本文の通知は 2 度目として捨てられるので、通しごとに違う先にする
+  const sha = `${crypto.randomUUID().replaceAll("-", "")}00000000`.slice(0, 40);
+  const file = "services/know-office/docs/04-detail/1-video.md";
+  const text = ["# 詳細設計 1. 動画", "", "## 1. 要件", "", "- **動画を作る**: 文章から作る", ""].join("\n");
+  await fakeGitHubRoute(page, `GET /repos/${docs}/git/trees/${sha}`, { sha, tree: [{ path: file, mode: "100644", type: "blob", sha: "1".repeat(40) }], truncated: false });
+  await fakeGitHubRoute(page, `GET /repos/${docs}/contents/${file}`, { type: "file", encoding: "base64", content: Buffer.from(text).toString("base64") });
+  // 代わりの GitHub が、App の通知の宛先へ署名して push の通知を送る
+  const pushed = await page.request.post(`${FAKE_GITHUB}/__fake/hooks`, {
+    data: { event: "push", payload: { ref: "refs/heads/main", after: sha, repository: { full_name: docs, default_branch: "main" }, commits: [{ modified: [file] }] } },
+  });
+  expect(pushed.status()).toBe(204);
+
+  // 社長のタスクに、Issue を合わせるタスクが出る。社長の山は先頭の 100 件までなので、ほかの通しが積んだ後でも開けるよう、サービスの範囲から探したタスクの詳細を開く
+  const found: { id: string | null } = { id: null };
+  await expect
+    .poll(async () => {
+      found.id = findTaskId(await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json(), `Issue を合わせる: ${title}`);
+      return found.id !== null;
+    }, { timeout: 20_000 })
+    .toBe(true);
+  const taskId = found.id ?? "";
+  await page.goto(`/staff/president/tasks/${taskId}`);
+  await expect(page.getByRole("main").getByRole("heading", { level: 2, name: `Issue を合わせる: ${title}` })).toBeVisible();
 });
