@@ -18,7 +18,7 @@ const TREE = tarGz([
   { name: "top/", type: "dir" },
   {
     name: "top/tsconfig.json",
-    body: JSON.stringify({ extends: "/work/secret/tsconfig.json", compilerOptions: { strict: true, noEmit: true, typeRoots: ["/work/secret/types"] }, include: ["src", "/work/secret/*.ts"] }),
+    body: JSON.stringify({ extends: "/work/secret/tsconfig.json", compilerOptions: { strict: true, noEmit: true, typeRoots: ["/work/secret/types"], types: ["leak"] }, include: ["src", "/work/secret/*.ts"] }),
   },
   { name: "top/src/a.ts", body: "export const a: number = leaked;\n" },
 ]);
@@ -123,19 +123,29 @@ describe("エディタの補完のイメージ", () => {
   });
 
   it("staff の子のプロセスから tsc の /proc/<pid> を読めない", () => {
+    // tsc が見つからなければ、下の確かめは何も見ずに通るので先に止める
+    expect(tscPid).toMatch(/^\d+$/);
+    // 対照: root は tsc に合図を送れる。社員が断られるのは uid が違うから
+    expect(inServer(id, `kill -0 ${tscPid}`, "root").code).toBe(0);
     for (const script of [`cat /proc/${tscPid}/environ`, `head -c 1 /proc/${tscPid}/mem`, `ls /proc/${tscPid}/fd`, `kill -0 ${tscPid}`]) {
       expect({ script, code: inServer(id, script).code }).not.toEqual({ script, code: 0 });
     }
   });
 
-  it("lsp の tsc から /work を読めない", () => {
+  it("lsp の利用者は /work と社員のホームとサーバーの環境を読めない", () => {
     for (const script of ["ls /work", "cat /work/secret/secret.ts", "ls /home/staff", "cat /proc/1/environ"]) {
       expect({ script, code: inServer(id, script, "lsp").code }).not.toEqual({ script, code: 0 });
     }
-    // tsconfig が /work を指しても、tsc は読めず、画面に中身も道も返らない
-    expect(received).toContain('"id":2');
-    expect(received).toContain('"id":3');
+  });
+
+  it("lsp の tsc から /work を読めない", () => {
+    // tsconfig の typeRoots と types が指す /work の leaked の宣言を tsc が読めれば、型と説明に SECRET が出る (/work を 0755 にすると出る)。読めないので、leaked が無いと知らせる
+    const parsed: unknown = JSON.parse(received);
+    const messages: unknown[] = Array.isArray(parsed) ? parsed : [];
+    const byId = (n: number): string => JSON.stringify(messages.find((message) => typeof message === "object" && message !== null && "id" in message && message.id === n) ?? null);
+    expect(byId(3)).not.toBe("null");
     expect(received).not.toContain(SECRET);
+    expect(byId(2)).toContain('"code":2304');
     expect(received).not.toContain("/work");
     expect(received).not.toContain("/review");
   });

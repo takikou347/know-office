@@ -15,6 +15,8 @@ export type LspSocket = {
   onMessage(listener: (data: Buffer, isBinary: boolean) => void): void;
   /** 閉じた時を受ける */
   onClose(listener: () => void): void;
+  /** 接続の誤り (枠の大きすぎなど) を受ける。ws は誤りの後に自分で閉じる */
+  onError(listener: () => void): void;
 };
 
 /** LspHub の依り所 */
@@ -78,6 +80,10 @@ export class LspHub {
       else session.fromScreen(data.toString("utf8"));
     });
     socket.onClose(() => session.end());
+    socket.onError(() => {
+      socket.close(1009, "接続の誤り");
+      session.end();
+    });
     const previous = this.#active;
     this.#active = { session, socket };
     // 新しい接続を受けてから前の物を閉じる

@@ -203,11 +203,15 @@ export class LspSession {
       if (this.#ended) return;
       const end = this.#buffer.indexOf("\r\n\r\n");
       if (end < 0) {
-        if (this.#buffer.byteLength > 1024) this.#close(1011, "tsc の返事を読めない");
+        if (this.#buffer.byteLength > 1024) this.#close(1011, "tsc の返事の枠を読めない");
         return;
       }
       const length = Number(/^Content-Length: (\d+)$/im.exec(this.#buffer.subarray(0, end).toString("ascii"))?.[1] ?? "NaN");
-      if (!Number.isSafeInteger(length) || length > TSC_MESSAGE_BYTES) {
+      if (!Number.isSafeInteger(length)) {
+        this.#close(1011, "tsc の返事の枠を読めない");
+        return;
+      }
+      if (length > TSC_MESSAGE_BYTES) {
         this.#close(1011, "tsc の返事が大きすぎる");
         return;
       }

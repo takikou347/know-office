@@ -97,4 +97,27 @@ describe("補完の口", () => {
     second.socket.close();
     await second.closed;
   });
+
+  it("1MiB を超える枠を送ってもサーバーが落ちず、接続が 1009 で閉じ、tsc が止まる", async () => {
+    expect((await s.put(`/v1/lsp/trees/${NODE}/${SHA}`, GOOD)).status).toBe(204);
+    const client = await s.connect(`?nodeId=${NODE}&sha=${SHA}`);
+    if (typeof client === "number") throw new Error(`開けない ${client}`);
+    // 受け手が誤りを投げても、このテストのプロセスを落とさずに数える
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown): void => {
+      uncaught.push(error);
+    };
+    process.on("uncaughtException", onUncaught);
+    try {
+      client.socket.send(JSON.stringify({ jsonrpc: "2.0", method: "textDocument/didChange", params: { text: "x".repeat(1024 * 1024) } }));
+      expect(await client.closed).toBe(1009);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(uncaught).toEqual([]);
+      expect(s.tscs[0]?.signals).toEqual(["SIGKILL"]);
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+    // サーバーは動いたまま
+    expect((await fetch(`${s.http()}/v1/health`)).status).toBe(200);
+  });
 });

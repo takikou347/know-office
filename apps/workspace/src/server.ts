@@ -260,6 +260,12 @@ function upgradeLsp(lsp: LspHub | undefined, wss: WebSocketServer, key: string, 
         close: (code, reason) => ws.close(code, reason),
         onMessage: (listener) => ws.on("message", (data, isBinary) => listener(Buffer.isBuffer(data) ? data : Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : Buffer.concat(data)), isBinary)),
         onClose: (listener) => ws.on("close", listener),
+        // 枠が 1MiB を超えた時などに ws は error を出す。受け手が無いと root のサーバーが落ちるので受け、記録して閉じる
+        onError: (listener) =>
+          ws.on("error", (error) => {
+            log("warn", "lsp_ws_error", { error: error.name, code: "code" in error ? String(error.code) : "" });
+            listener();
+          }),
       });
     } catch (error) {
       log("error", "lsp_open_failed", { error: error instanceof Error ? error.name : "unknown" });

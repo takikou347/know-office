@@ -1,9 +1,20 @@
 // エディタの補完の中継が、画面の JSON-RPC を絞り、tsc の要求に自分で答え、止める時に tsc を止める事を確かめる (仕事とレビューの 3.6、社員が考えるの 2 章)
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LSP_IDLE_MS, LspSession, RSS_CHECK_MS } from "../src/lsp.ts";
+import { LSP_IDLE_MS, LspSession, RSS_CHECK_MS, TSC_MESSAGE_BYTES } from "../src/lsp.ts";
 import { TSC_RSS_LIMIT_BYTES } from "../src/lsp-tsc.ts";
 import { fakeTsc, flush } from "./helpers/fake-tsc.ts";
 import { list, record, type Relay, relay, REVIEW, TREE, TYPES } from "./helpers/relay.ts";
+
+/**
+ * 中身がちょうど bytes バイトになる、id 1 の返事の枠を作る
+ * @param bytes 中身の大きさ
+ * @returns 枠
+ */
+function sized(bytes: number): Buffer {
+  const empty = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { contents: "" } });
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { contents: "x".repeat(bytes - Buffer.byteLength(empty)) } });
+  return Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+}
 
 describe("補完の中継", () => {
   let r: Relay;
@@ -16,6 +27,16 @@ describe("補完の中継", () => {
     r.session.end();
     vi.useRealTimers();
   });
+
+  /**
+   * tsc の stdout に生の物を書き、届くまで待つ
+   * @param raw 書く物
+   */
+  async function rawFromTsc(raw: Buffer | string): Promise<void> {
+    r.tsc.proc.stdout.write(raw);
+    await flush();
+    await flush();
+  }
 
   it("初期化の rootUri、workspaceFolders、initializationOptions、capabilities を決めた値に作り直して tsc に渡す", async () => {
     await r.screen({
@@ -157,5 +178,36 @@ describe("補完の中継", () => {
     await flush();
     expect(r.closed).toEqual([{ code: 1011, reason: "tsc が止まった" }]);
     expect(r.ended()).toBe(1);
+  });
+
+  describe("tsc の返事の枠", () => {
+    it("1 件ちょうど 4MiB は通し、1 バイト超えたら 1011 で閉じて tsc を kill する", async () => {
+      expect(TSC_MESSAGE_BYTES).toBe(4 * 1024 * 1024);
+      await r.screen({ jsonrpc: "2.0", id: 1, method: "textDocument/hover", params: { textDocument: { uri: "file:///repo/src/a.ts" }, position: { line: 0, character: 0 } } });
+      await rawFromTsc(sized(TSC_MESSAGE_BYTES));
+      expect(r.sent).toHaveLength(1);
+      expect(JSON.stringify(r.sent[0]).length).toBeGreaterThan(TSC_MESSAGE_BYTES - 100);
+      expect(r.closed).toEqual([]);
+      await r.screen({ jsonrpc: "2.0", id: 1, method: "textDocument/hover", params: { textDocument: { uri: "file:///repo/src/a.ts" }, position: { line: 0, character: 0 } } });
+      await rawFromTsc(sized(TSC_MESSAGE_BYTES + 1));
+      expect(r.sent).toHaveLength(1);
+      expect(r.closed).toEqual([{ code: 1011, reason: "tsc の返事が大きすぎる" }]);
+      expect(r.tsc.signals).toEqual(["SIGKILL"]);
+    });
+
+    it("Content-Length が数字でない枠は 1011 で閉じて tsc を kill する", async () => {
+      await rawFromTsc('Content-Length: abc\r\n\r\n{"jsonrpc":"2.0"}');
+      expect(r.closed).toEqual([{ code: 1011, reason: "tsc の返事の枠を読めない" }]);
+      expect(r.tsc.signals).toEqual(["SIGKILL"]);
+    });
+
+    it("枠の頭が 1024 バイトを超えて続けば 1011 で閉じて tsc を kill する", async () => {
+      // ちょうど 1024 バイトは待つ
+      await rawFromTsc(`Content-Length: 2\r\n${"X".repeat(1024 - 19)}`);
+      expect(r.closed).toEqual([]);
+      await rawFromTsc("X");
+      expect(r.closed).toEqual([{ code: 1011, reason: "tsc の返事の枠を読めない" }]);
+      expect(r.tsc.signals).toEqual(["SIGKILL"]);
+    });
   });
 });
