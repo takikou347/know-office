@@ -33,6 +33,9 @@ describe("GitHub の上限に当たった写し", () => {
     await api(world, "POST", `/api/v1/reviews/${task}/notes`, { path: "src/a.ts", line: 1, side: "new", body: "ここ" }, 201);
     expect((await mirrorRow()).attempts).toBe(0);
     expect(await newErrors(before)).toEqual(["github_mirror_rate_limited"]);
+    // 写しもゲートウェイから GitHub への口なので、レート制限の通知を出す (サービスと拡張の 3.5)
+    const notices = await rows(world.d1.DB, "SELECT level, body FROM notices WHERE kind = 'github_rate_limited'");
+    expect(notices.map((n) => ({ level: n["level"], wait: String(n["body"]).includes("900 秒後") }))).toEqual([{ level: "warn", wait: true }]);
     // 15 分の待ちの間は、5 分ごとの写し直しでも送らない
     world.clock.advance(10 * MINUTE);
     expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 0, failed: 0 });

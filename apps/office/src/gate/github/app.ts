@@ -25,7 +25,7 @@ import { auditFrom } from "../ledger/record.ts";
 import { lazyDevIssues } from "../devloop/dev-issues.ts";
 import { type Forge, UNCONNECTED_FORGE } from "../work/loop.ts";
 import { type GitHubAccess, httpForge, type Permissions } from "./forge.ts";
-import { GitHubRateLimited } from "./limits.ts";
+import { GitHubRateLimited } from "./rate-error.ts";
 
 /** state が効く長さ (10 分) */
 export const STATE_MS = 10 * 60_000;

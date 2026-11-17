@@ -3,7 +3,8 @@ import { AppError, type ClaudeSpendLimit, claudeSpendLimit, type Clock, log, red
 import type { Bindings } from "../env.ts";
 import { CLAUDE_RATE_LIMITED, CLAUDE_SPEND_LIMIT, recordError } from "../ledger/errors.ts";
 import { recordsOf } from "./nodes.ts";
-import { noticeOnce, SPEND_LIMIT_NOTICE } from "./run.ts";
+import { noticeOnce } from "./notice.ts";
+import { SPEND_LIMIT_NOTICE } from "./run.ts";
 
 /** レートの上限を数える窓と、通知を出す回数 */
 export const RATE_LIMIT_WINDOW_MS = 5 * 60_000;

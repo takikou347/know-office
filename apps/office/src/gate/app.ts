@@ -11,6 +11,8 @@ import type { GateEnv } from "./env.ts";
 import { endpoints } from "./endpoints.ts";
 import { revokeTokens, SHARED_TOKENS, type TokenCache, vaultForge } from "./github/app.ts";
 import { accessArchive, vaultArchive } from "./github/archive.ts";
+import { noteGitHubRateLimit } from "./github/limits.ts";
+import { GitHubRateLimited } from "./github/rate-error.ts";
 import { type GitHubAccess, httpForge } from "./github/forge.ts";
 import { connectRollback, type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
@@ -119,9 +121,13 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
     }
     return notFound(c);
   });
-  app.onError((err, c) => {
+  app.onError(async (err, c) => {
     if (err instanceof HTTPException && err.status === 400) {
       return problemResponse(c, new AppError("malformed_request", "リクエストを解釈できない"));
+    }
+    // ゲートウェイが GitHub を呼んで当たったレート制限は、社員のツールでもオーナーの操作でも通知に出す
+    if (err instanceof GitHubRateLimited) {
+      await noteGitHubRateLimit(c.env, c.get("clock") ?? systemClock, { seconds: err.seconds, route: c.req.routePath, status: 429, traceId: c.get("traceId") });
     }
     return onError(err, c);
   });

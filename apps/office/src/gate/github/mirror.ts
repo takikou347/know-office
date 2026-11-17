@@ -3,6 +3,8 @@ import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import { AppError, type Clock, MirrorCommentPayload, MirrorReviewPayload, MirrorStatusPayload, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
+import { noticeGitHubRateLimit } from "./limits.ts";
+import { GitHubRateLimited } from "./rate-error.ts";
 import type { Forge } from "../work/loop.ts";
 
 /** 送る者の印の長さ (1 分)。GitHub の呼び出しの待ち時間 (10 秒) の数回分より長くし、落ちた者の印は次の回に外れる */
@@ -80,6 +82,8 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
       const until = clock.now() + Number(error.headers["Retry-After"] ?? "60") * 1000;
       await env.DB.prepare("UPDATE github_mirrors SET claimed_until = ?, attempts = attempts - 1 WHERE id = ? AND sent_at IS NULL AND claimed_until = ?").bind(until, id, claim).run();
       await recordError(env, { source: "job", level: "warn", code: "github_mirror_rate_limited", error }, clock);
+      // 写しもゲートウェイから GitHub への口なので、エラーログは写しの code のまま、レート制限の通知を出す
+      await noticeGitHubRateLimit(env, clock, error instanceof GitHubRateLimited ? error.seconds : Number(error.headers["Retry-After"] ?? "60"));
       return "failed";
     }
     await env.DB.prepare("UPDATE github_mirrors SET claimed_until = NULL WHERE id = ? AND sent_at IS NULL").bind(id).run();

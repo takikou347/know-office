@@ -63,9 +63,12 @@ describe("落ちても続きから", () => {
     const work = await startTask(world, UI);
     // 中継の 403 (残り 0)、git の 429、ゲートウェイが呼んだ 403 (retry-after) のどれも数え、通知は読むまで 1 件
     world.gate.github.failNext(`GET /repos/${UI}/pulls`, 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1893456000" });
-    await fromWorkspace(world, work, new Request(`https://api.github.com/repos/${UI}/pulls`, { headers: { authorization: `Bearer ${work.token}` } }));
+    const api = await fromWorkspace(world, work, new Request(`https://api.github.com/repos/${UI}/pulls`, { headers: { authorization: `Bearer ${work.token}` } }));
+    // 通知を出しても、中継の返事は変えない
+    expect({ status: api.status, remaining: api.headers.get("x-ratelimit-remaining"), reset: api.headers.get("x-ratelimit-reset") }).toEqual({ status: 403, remaining: "0", reset: "1893456000" });
     world.gate.github.failNext(`GET /${UI}.git/info/refs`, 429, { "retry-after": "30" });
-    await fromWorkspace(world, work, new Request(`https://github.com/${UI}.git/info/refs?service=git-upload-pack`, { headers: { authorization: `Basic ${btoa(`x-access-token:${work.token}`)}` } }));
+    const git = await fromWorkspace(world, work, new Request(`https://github.com/${UI}.git/info/refs?service=git-upload-pack`, { headers: { authorization: `Basic ${btoa(`x-access-token:${work.token}`)}` } }));
+    expect({ status: git.status, retryAfter: git.headers.get("retry-after") }).toEqual({ status: 429, retryAfter: "30" });
     world.gate.github.failNext("GET /installation/repositories", 403, { "retry-after": "60" });
     await world.gate.request("/api/v1/github/repos", { headers: world.headers });
     expect(await rateNotices(before)).toEqual({ notices: [{ level: "warn", read: 0 }], errors: 3 });

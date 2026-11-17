@@ -1,13 +1,12 @@
 // 社員が取ったタスクの SDK の呼び出しを始める。最初の runs、作り直しと再開の後の続き、失敗の数え方と鍵の失敗の間の止め方を持つ (社員が考えるの 3.3、タスクとレビューの 3.1)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, log, newId, type NoticeLevel, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, type WorkResult } from "@know-office/core";
+import { AppError, log, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, type WorkResult } from "@know-office/core";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, notices, staff, staffPrompts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
-import { announceNotice } from "../live/publish.ts";
-import { clockAt } from "./attendance.ts";
+import { noticeOnce } from "./notice.ts";
 import { afterRunStarted, headMessages, withOwnerMessages } from "./deliver.ts";
 import { appendNodeEvent, findNode, type NodeRow, revertNode } from "./nodes.ts";
 import { issueTicket, revokeTaskTickets } from "./ticket.ts";
@@ -33,26 +32,6 @@ const EFFORT_BY_KIND: Partial<Record<string, RunInput["effort"]>> = { build: "me
 
 /** 呼び出しを始められる社員の状態。waiting はワークスペースを作り直して待つ間で、受け付けられなければ失敗に数える。延長の終わり (wrapping)、止まり、退勤の後は始めない */
 const RUNNABLE = new Set(["working", "called", "waiting"]);
-
-/**
- * 通知を、同じ種類と題の読んでいない物が無い時だけ 1 文で足し、足した時は画面に配る。同じ時の 2 回でも 1 件になる
- * @param env バインディング
- * @param notice 種類、題、本文
- * @param notice.kind 種類
- * @param notice.title 題。重ねない鍵も兼ねる
- * @param notice.body 本文
- * @param now 今の時刻
- * @param level 重さ。初期値は warn
- */
-export async function noticeOnce(env: Bindings, notice: { kind: string; title: string; body: string }, now: number, level: NoticeLevel = "warn"): Promise<void> {
-  const id = newId(clockAt(now));
-  const res = await env.DB
-    .prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, ?, ?, ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = ? AND title = ? AND read_at IS NULL)")
-    .bind(id, now, level, notice.kind, notice.title, notice.body, notice.kind, notice.title)
-    .run();
-  // 足した時だけ画面に配る。画面は印を受けて通知を読み直す
-  if (res.meta.changes === 1) await announceNotice(env, id, clockAt(now));
-}
 
 /**
  * Claude の鍵が断られた事を 1 件だけ知らせる。社員の呼び出しと週のバッチ処理のどちらで断られても同じ 1 件にする
