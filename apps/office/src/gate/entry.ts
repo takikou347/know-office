@@ -15,5 +15,6 @@ import { devStaffRoute } from "./work/dev-staff.ts";
  * @returns 返事
  */
 export function entryFetch(request: Request, env: Bindings, ctx?: ExecutionContext): Response | Promise<Response> {
-  return devWorkspaceEgress(request, env, { clock: systemClock, guard: UNCONNECTED_DEPS }) ?? devStaffRoute(request, env, { clock: systemClock }) ?? gate.fetch(request, env, ctx);
+  const waitUntil = ctx ? (p: Promise<unknown>) => ctx.waitUntil(p) : undefined;
+  return devWorkspaceEgress(request, env, { clock: systemClock, guard: UNCONNECTED_DEPS, ...(waitUntil ? { waitUntil } : {}) }) ?? devStaffRoute(request, env, { clock: systemClock }) ?? gate.fetch(request, env, ctx);
 }

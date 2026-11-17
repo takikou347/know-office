@@ -40,6 +40,8 @@ export type EgressOptions = {
   githubTokens?: TokenCache;
   /** 差し込む拡張。無ければ extensions/ から読み込んだ物 */
   extensions?: readonly ExtensionDefinition[];
+  /** 返事の後も処理を続けさせる口。Workers は受け手の ctx.waitUntil を渡す。無ければ返事の前に待つ */
+  waitUntil?: (promise: Promise<unknown>) => void;
 };
 
 const heartbeatRoute = createRoute({
@@ -214,7 +216,10 @@ export async function routeEgress(request: Request, env: Bindings, caller: Calle
       headers: { "Content-Type": "application/problem+json" },
     });
   }
-  const res = await createWorkspaceGate(caller, options).fetch(request, env);
+  const waitUntil = options.waitUntil;
+  // Hono は 3 つ目の引数を c.executionCtx にする。Claude のプロキシは、切られた流れの記録をここに渡す
+  const ctx = waitUntil ? { waitUntil, passThroughOnException: () => undefined, props: {} } : undefined;
+  const res = await createWorkspaceGate(caller, options).fetch(request, env, ctx);
   if (url.hostname !== "api.anthropic.com" || res.headers.get(RELAY_HEADER) === "forwarded") return res;
   // Claude API に届く前にプロキシが断った返事 (作業トークン、止まり、モデル、形) に印を付ける。ワークスペースはこれを鍵の失敗に数えない
   const marked = new Response(res.body, res);

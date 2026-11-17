@@ -211,6 +211,32 @@ describe("Claude のプロキシ", () => {
     expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ input_tokens: 40, output_tokens: 1, cost_micro_usd: 90 })]);
   });
 
+  it("ワークスペースが流れを切った後の記録は waitUntil に渡し、返事の後も最後まで走らせる", async () => {
+    const work = await startTask();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(START);
+      },
+    });
+    const later: Promise<unknown>[] = [];
+    await w.gate.staff[work.staffId].book.heartbeat(w.clock.now());
+    const caller: Caller = { staffId: work.staffId, workspaceId: workspaceIdOf(w.gate.env, work.staffId) };
+    const request = new Request("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": work.token, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify(messages("直す")),
+    });
+    const fetcher = upstream(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    const res = await routeEgress(request, w.gate.env, caller, { clock: w.clock, guard: w.gate.deps, fetch: fetcher, waitUntil: (p) => later.push(p) });
+    const reader = res.body?.getReader();
+    await reader?.read();
+    await reader?.cancel();
+    // 切った要求が終わった後に走る記録は、受け手の waitUntil に渡した 1 本だけ
+    expect(later).toHaveLength(1);
+    await Promise.all(later);
+    expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ input_tokens: 40 })]);
+  });
+
   it("Claude API が流れの途中で落ちても、届いた所までの量を残す", async () => {
     const work = await startTask();
     let sent = 0;

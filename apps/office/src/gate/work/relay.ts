@@ -119,7 +119,7 @@ export async function relayClaude(c: Context<GateEnv>, ticket: TicketClaims): Pr
   const waitedMs = await endWait(c, staff, ticket.staffId);
   const call: Call = { staffId: ticket.staffId, nodeId: ticket.nodeId, model, requestId: res.headers.get("request-id"), waitedMs };
   if (res.body && (res.headers.get("content-type") ?? "").includes("text/event-stream")) {
-    return new Response(meteredStream(res.body, (found) => recordUsage(c, call, found)), { status: res.status, headers });
+    return new Response(meteredStream(res.body, (found) => recordUsage(c, call, found), laterOf(c)), { status: res.status, headers });
   }
   const answer = await res.text();
   const parsed = MessageBody.safeParse(safeJson(answer));
@@ -313,22 +313,25 @@ async function endWait(c: Context<GateEnv>, staff: Staff, staffId: StaffId): Pro
  * 読み終えた時、ワークスペースが切った時、Claude API の流れが落ちた時のどれでも、message_start を受けていれば 1 度だけ記録する
  * @param source Claude API の流れ
  * @param record 記録する口
+ * @param later 切られた後の記録を、返事の後も走らせる口
  * @returns ワークスペースに返す流れ
  */
-function meteredStream(source: ReadableStream<Uint8Array>, record: (found: UsageBody) => Promise<void>): ReadableStream<Uint8Array> {
+function meteredStream(source: ReadableStream<Uint8Array>, record: (found: UsageBody) => Promise<void>, later: (task: Promise<void>) => Promise<void>): ReadableStream<Uint8Array> {
   const reader = source.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let found: UsageBody | null = null;
-  let recorded = false;
+  // 切った時に上流の読み出しが終わりを返し、pull の側でも記録が始まる。どちらから呼んでも同じ 1 本を待つ
+  let recorded: Promise<void> | null = null;
   const read = (blocks: string[]) => {
     for (const block of blocks) found = foldUsage(found, block);
   };
-  const finish = async () => {
-    if (recorded) return;
-    recorded = true;
-    read([buffer + decoder.decode()]);
-    if (found) await record(found);
+  const finish = (): Promise<void> => {
+    recorded ??= (async () => {
+      read([buffer + decoder.decode()]);
+      if (found) await record(found);
+    })();
+    return recorded;
   };
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -353,11 +356,36 @@ function meteredStream(source: ReadableStream<Uint8Array>, record: (found: Usage
       read(blocks);
     },
     async cancel(reason) {
-      // ワークスペースが切った。上流を止め、届いた所までを記録する
-      await reader.cancel(reason).catch(() => undefined);
-      await finish();
+      // ワークスペースが切った。切った要求はここで終わるので、上流を止めて届いた所までを記録するのは waitUntil に渡す
+      await later(
+        (async () => {
+          await reader.cancel(reason).catch(() => undefined);
+          await finish();
+        })(),
+      );
     },
   });
+}
+
+/**
+ * 返事の後も処理を走らせる口を作る。受け手が ctx を渡していれば waitUntil に渡し、無ければその場で待つ
+ * @param c 要求の文脈
+ * @returns 処理を受け取る口
+ */
+function laterOf(c: Context<GateEnv>): (task: Promise<void>) => Promise<void> {
+  let ctx: { waitUntil(promise: Promise<unknown>): void } | null;
+  try {
+    ctx = c.executionCtx;
+  } catch {
+    // Hono は ctx が無い時に executionCtx を読むと投げる
+    ctx = null;
+  }
+  if (ctx === null) return (task) => task;
+  const target = ctx;
+  return (task) => {
+    target.waitUntil(task);
+    return Promise.resolve();
+  };
 }
 
 /**

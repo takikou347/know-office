@@ -24,7 +24,7 @@ export class WorkspaceEgress extends WorkerEntrypoint<Bindings, EgressProps> {
    * @returns 返事
    */
   override fetch(request: Request): Promise<Response> {
-    return routeEgress(request, this.env, this.ctx.props, { clock: systemClock, guard: UNCONNECTED_DEPS });
+    return routeEgress(request, this.env, this.ctx.props, { clock: systemClock, guard: UNCONNECTED_DEPS, waitUntil: (p) => this.ctx.waitUntil(p) });
   }
 }
 
