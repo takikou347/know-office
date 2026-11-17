@@ -30,6 +30,8 @@ export {
   ExtensionToolSpec,
   extensionToolShape,
   HeartbeatInput,
+  LSP_TREE_BYTES,
+  LspTreeParams,
   ReasonInput,
   RESTORE_BODY_BYTES,
   RESTORE_TRANSCRIPT_BYTES,

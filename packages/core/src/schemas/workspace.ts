@@ -176,3 +176,21 @@ export const ReasonInput = z.object({ reason: z.string() }).strict().meta({ id: 
 
 /** 理由だけを持つ入力の型 */
 export type ReasonInput = z.infer<typeof ReasonInput>;
+
+/** ワークスペースが受けるレビューの木の圧縮した大きさの上限 (50MiB)。ゲートウェイが流す tarball もこの大きさで止める */
+export const LSP_TREE_BYTES = 50 * 1024 * 1024;
+
+/**
+ * ワークスペースのエディタの補完の口 (/v1/lsp/trees/{nodeId}/{sha} と /v1/lsp) が受ける木の名前。道に入るので、小文字の UUID と 40 字の小文字の 16 進のコミットだけを受ける
+ * z.uuid() は大文字を受けるので、正規表現で小文字に絞る
+ */
+export const LspTreeParams = z
+  .object({
+    nodeId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/).meta({ description: "レビューするタスク。小文字の UUID" }),
+    sha: z.string().regex(/^[0-9a-f]{40}$/).meta({ description: "レビューする先のコミット。40 字の小文字の 16 進" }),
+  })
+  .strict()
+  .meta({ id: "LspTreeParams" });
+
+/** レビューの木の名前の型 */
+export type LspTreeParams = z.infer<typeof LspTreeParams>;
