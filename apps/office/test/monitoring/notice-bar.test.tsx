@@ -3,7 +3,7 @@ import type { Notice } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Api, createApi } from "../../src/screen/api.ts";
-import { fetchNotices, latestOnly, NOTICE_LIVE_POLL_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, noticePollMs, watchNotices } from "../../src/screen/parts/notices.tsx";
+import { fetchNotices, keepLocalReads, latestOnly, NOTICE_LIVE_POLL_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, noticePollMs, watchNotices } from "../../src/screen/parts/notices.tsx";
 
 /**
  * 通知を作る
@@ -157,3 +157,13 @@ describe("読み直しが重なった時", () => {
     expect(applied).toEqual(["新しい"]);
   });
 });
+
+describe("既読にした通知", () => {
+  it("既読にする前に始めた読みの答えが後から届いても、帯に戻さない", () => {
+    const reads = new Map([[notice(2).id, "2026-12-08T02:00:00.000Z"]]);
+    const kept = keepLocalReads([notice(3), notice(2), notice(1, "2026-12-08T01:00:00.000Z")], reads);
+    expect(kept.map((n) => n.readAt)).toEqual([null, "2026-12-08T02:00:00.000Z", "2026-12-08T01:00:00.000Z"]);
+    expect(renderToString(<NoticeBar notices={kept} onRead={() => {}} />)).not.toContain("ほかに未読");
+  });
+});
+

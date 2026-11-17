@@ -67,6 +67,19 @@ export function latestOnly<T>(load: () => Promise<T>, apply: (value: T) => void)
   };
 }
 
+/**
+ * 画面で既読にした通知を、読んだ答えの上でも既読にしておく。既読にする前に始めた読みの答えが後から届いて、帯に戻るのを防ぐ
+ * @param notices 読んだ通知
+ * @param reads 画面で既読にした通知 ID と、その時刻
+ * @returns 画面で既読にした物を既読にした通知
+ */
+export function keepLocalReads(notices: Notice[], reads: ReadonlyMap<string, string>): Notice[] {
+  return notices.map((n) => {
+    const at = reads.get(n.id);
+    return n.readAt === null && at !== undefined ? { ...n, readAt: at } : n;
+  });
+}
+
 /** タブの見え方。画面では document */
 export type NoticeView = Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
 
@@ -106,6 +119,8 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
   const api = useContext(ApiContext);
   const { connected, subscribe } = useLive();
   const [loaded, setLoaded] = useState<Loaded>({ notices: [], state: "loading" });
+  // 既読にした通知。既読にする前に始めた読み (配信がつながった時の読み直しなど) の答えで帯に戻さない
+  const reads = useRef(new Map<string, string>());
   useEffect(() => {
     if (!api) return () => {};
     let live = true;
@@ -114,7 +129,7 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
       () => fetchNotices(api),
       (value) => {
         if (!live) return;
-        setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
+        setLoaded((before) => (value ? { notices: keepLocalReads(value, reads.current), state: "ok" } : { ...before, state: "error" }));
       },
     );
     const onMark = markReloader(pull);
@@ -134,13 +149,17 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
       if (!api) return;
       // 押した時に帯から消し、入口の答えを待たない。既読にできなければ帯に戻す
       const mark = (readAt: string | null) => setLoaded((before) => ({ ...before, notices: before.notices.map((n) => (n.id === id ? { ...n, readAt } : n)) }));
-      mark(new Date(systemClock.now()).toISOString());
+      const at = new Date(systemClock.now()).toISOString();
+      reads.current.set(id, at);
+      mark(at);
       void api.api.v1.notices[":noticeId"].read
         .$put({ param: { noticeId: id } })
         .then((res) => res.ok)
         .catch(() => false)
         .then((done) => {
-          if (!done) mark(null);
+          if (done) return;
+          reads.current.delete(id);
+          mark(null);
         });
     },
     [api],
