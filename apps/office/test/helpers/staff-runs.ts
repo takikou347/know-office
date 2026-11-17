@@ -51,12 +51,16 @@ export type WorkspaceSeen = {
   down: boolean;
   /** 起こした時に渡した鍵。起こしていなければ無い */
   key?: string;
+  /** 受けたオーナーの発言 */
+  messages?: unknown[];
+  /** 発言への答え方。idle は走っていない (false)、down は届かない。無ければ受ける */
+  messageAnswer?: "idle" | "down";
 };
 
 /**
  * ワークスペースの DO の代わりを作る。down の間は届かない
  * @param seen 受けた物を足す先
- * @returns replaceTicket、run、holdsKey
+ * @returns replaceTicket、run、holdsKey、message
  */
 export function workspaceFake(seen: WorkspaceSeen) {
   return {
@@ -65,6 +69,12 @@ export function workspaceFake(seen: WorkspaceSeen) {
       if (seen.down) return Promise.reject(new Error("ワークスペースに届かない"));
       seen.tickets.push(ticket);
       return Promise.resolve(null);
+    },
+    message: (input: unknown) => {
+      if (seen.messageAnswer === "down") return Promise.reject(new AppError("unavailable", "ワークスペースに届かない"));
+      if (seen.messageAnswer === "idle") return Promise.resolve(false);
+      (seen.messages ??= []).push(input);
+      return Promise.resolve(true);
     },
     run: (input: unknown) => {
       if (seen.down) return Promise.reject(new AppError("unavailable", "ワークスペースに届かない"));

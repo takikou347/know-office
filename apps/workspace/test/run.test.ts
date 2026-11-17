@@ -311,12 +311,12 @@ describe("働いた事をゲートウェイに届ける", () => {
     const runner = new Runner(agent, () => {}, undefined, transcripts, reporterOf);
     runner.start(RUN);
     await settle();
-    await runner.addMessage("テストも足して");
+    await runner.addMessage({ at: Date.UTC(2026, 10, 17, 1, 5), body: "テストも足して" });
     await settle();
     expect(flushed[0]).toBe("session-1 ticket-1");
     expect(calls).toHaveLength(2);
     expect(calls[0]?.options.abortController.signal.aborted).toBe(true);
-    expect(calls[1]?.prompt).toContain("テストも足して");
+    expect(calls[1]?.prompt).toContain('オーナーの発言 (日本時間 2026-11-17 10:05): "テストも足して"');
     expect(calls[1]?.options.resume).toBe("session-1");
     expect(sent).toEqual([]);
     finish();
@@ -329,7 +329,7 @@ describe("働いた事をゲートウェイに届ける", () => {
     const runner = new Runner(agent, () => {});
     runner.start(RUN);
     await settle();
-    await Promise.all([runner.addMessage("1 つ目"), runner.addMessage("2 つ目")]);
+    await Promise.all([runner.addMessage({ at: 0, body: "1 つ目" }), runner.addMessage({ at: 0, body: "2 つ目" })]);
     await settle();
     expect(calls).toHaveLength(2);
     expect(calls[1]?.prompt).toContain("1 つ目");
@@ -338,6 +338,6 @@ describe("働いた事をゲートウェイに届ける", () => {
 
   it("走っていない時の発言は conflict で断る", async () => {
     const runner = new Runner(() => Promise.resolve(), () => {});
-    await expect(runner.addMessage("聞こえる?")).rejects.toMatchObject({ code: "conflict" });
+    await expect(runner.addMessage({ at: 0, body: "聞こえる?" })).rejects.toMatchObject({ code: "conflict" });
   });
 });

@@ -120,7 +120,7 @@ async function handle(runner: Runner, key: string, req: IncomingMessage, res: Se
   if (route === "POST /v1/messages") {
     const input = WorkspaceMessageInput.safeParse(await readJson(req));
     if (!input.success) throw new AppError("validation_failed", "発言の形が違う");
-    await runner.addMessage(input.data.body);
+    await runner.addMessage({ body: input.data.body, at: Date.parse(input.data.at) });
     send(res, 204);
     return;
   }

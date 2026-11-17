@@ -104,6 +104,16 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
   }
 
   /**
+   * 走っている呼び出しにオーナーの発言を足させる (POST /v1/messages)。コンテナが止まっていれば起こさずに false を返す
+   * @param input WorkspaceMessageInput
+   * @returns ワークスペースが受けたら true
+   * @throws unavailable ワークスペースが答えない時
+   */
+  async message(input: unknown): Promise<boolean> {
+    return this.#box(await this.#staffId()).message(input);
+  }
+
+  /**
    * 作業トークンを差し替えさせる
    * @param ticket 新しい作業トークン
    * @returns 無し

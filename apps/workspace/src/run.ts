@@ -1,5 +1,5 @@
 // タスク 1 件分の SDK の呼び出しを持ち、作業トークンが差し替わったら今の呼び出しを終えて続きから呼び直す。呼び直す前と終わった時に会話の記録の増えを送る (社員が考えるの 3.3、3.7)
-import { type AgentEvent, AppError, log, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
+import { type AgentEvent, AppError, log, type OwnerMessage, ownerMessagesPrompt, type RestoreInput, type RunInput, systemClock } from "@know-office/core";
 import { type Agent, agentOptions, type LocalRun } from "./agent.ts";
 import { type HookDeps, preToolUse } from "./hooks.ts";
 import { SdkFailure } from "./sdk.ts";
@@ -25,12 +25,12 @@ class Interrupt extends Error {
 export const CONTINUE_PROMPT = "作業トークンを差し替えたので呼び直した。前のチェックポイントの続きから進める";
 
 /**
- * オーナーの発言を足して続きから呼ぶ時の指示を作る
- * @param bodies 届いた順の発言
+ * オーナーの発言を足して続きから呼ぶ時の指示を作る。発言の書式は次のタスクの頭に足す物と同じ
+ * @param messages 届いた順の発言
  * @returns 指示
  */
-export function messagePrompt(bodies: readonly string[]): string {
-  return `オーナーから発言が届いたので、呼び出しを止めて続きから呼び直した。発言を読み、今のタスクの続きに生かす。\n\n${bodies.map((b) => `オーナー: ${b}`).join("\n\n")}`;
+export function messagePrompt(messages: readonly OwnerMessage[]): string {
+  return `オーナーから発言が届いたので、呼び出しを止めて続きから呼び直した。発言を読み、今のタスクの続きに生かす。\n\n${ownerMessagesPrompt(messages)}`;
 }
 
 /** ゲートウェイに働いた事を届ける口。本物は events.ts の gateReporter */
@@ -75,7 +75,7 @@ type Current = {
   /** session が分かったら今の呼び出しを止める訳。分かる前に差し替えか発言が来た時に置く */
   pending: "ticket" | "message" | null;
   /** まだ指示に入れていないオーナーの発言 */
-  messages: string[];
+  messages: OwnerMessage[];
   /** 中断を頼まれたか */
   aborting: boolean;
   /** 呼び出しが終わった時に解ける */
@@ -191,15 +191,15 @@ export class Runner {
   /**
    * 走っている呼び出しにオーナーの発言を足す。送っていない記録を送ってから今の呼び出しを止め、発言を指示に続きから呼ぶ
    * 止めている途中に届いた発言は、同じ続きにまとめる
-   * @param body 発言
+   * @param message 発言と、ゲートウェイが受けた時刻
    * @returns 止めるのを頼んだ所
    * @throws conflict 走っていない時か、中断している時
    */
-  async addMessage(body: string): Promise<void> {
+  async addMessage(message: OwnerMessage): Promise<void> {
     const current = this.#current;
     if (!current || current.aborting) throw new AppError("conflict", "実行中の処理がない");
     const first = current.messages.length === 0 && current.pending === null;
-    current.messages.push(body);
+    current.messages.push(message);
     // 2 つ目からは、1 つ目が頼んだ続きにまとめる
     if (!first) return;
     current.pending = "message";

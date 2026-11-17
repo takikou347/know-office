@@ -20,4 +20,5 @@ export const MAIN_APPEND_ONLY = [
   "settings",
   "service_settings",
   "owner_data_reads",
+  "message_deliveries",
 ] as const;

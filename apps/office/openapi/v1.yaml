@@ -2453,6 +2453,22 @@ components:
             - staff
         body:
           type: string
+        deliveredAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: 社員のワークスペースが発言を受けた時刻。まだ渡していないか、社員の発言なら null
+        delivery:
+          type:
+            - string
+            - "null"
+          enum:
+            - run
+            - next_task
+            - skipped
+            - null
+          description: 渡した道。まだ渡していないオーナーの発言と社員の発言は null
       required:
         - id
         - at
@@ -2460,6 +2476,8 @@ components:
         - nodeId
         - sender
         - body
+        - deliveredAt
+        - delivery
       additionalProperties: false
     CreateMessageInput:
       type: object
@@ -3080,10 +3098,12 @@ components:
       properties:
         body:
           type: string
-          minLength: 1
-          maxLength: 20000
+        at:
+          type: string
+          format: date-time
       required:
         - body
+        - at
       additionalProperties: false
     ReasonInput:
       type: object
@@ -7493,6 +7513,7 @@ paths:
 
         1. `messages` を新しい順に取得する
         2. 長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す
+        3. オーナーの発言は `message_deliveries` を ID で引き、渡した時刻と道を付ける。印が無く 24 時間を過ぎた発言は `skipped` にする
 
         このルート固有のエラー:
 
@@ -7500,6 +7521,7 @@ paths:
       x-steps:
         - "`messages` を新しい順に取得する"
         - 長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す
+        - オーナーの発言は `message_deliveries` を ID で引き、渡した時刻と道を付ける。印が無く 24 時間を過ぎた発言は `skipped` にする
       x-errors:
         - "400 `malformed_request`: カーソルがメッセージ ID の形でない"
       parameters:
@@ -7560,8 +7582,8 @@ paths:
         処理の流れ:
 
         1. `messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く
-        2. タスク中ならワークスペースの `POST /v1/messages` に渡し、勤務時間外なら `StaffDO.call` で呼び出す
-        3. 発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する
+        2. タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す。時間外の呼び出しは #208
+        3. 発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する (#209)
         4. `LiveDO` に渡して画面に配信する
 
         このルート固有のエラー:
@@ -7569,8 +7591,8 @@ paths:
         - 409 `stopped`: 社員が停止中
       x-steps:
         - "`messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く"
-        - タスク中ならワークスペースの `POST /v1/messages` に渡し、勤務時間外なら `StaffDO.call` で呼び出す
-        - 発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する
+        - "タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す。時間外の呼び出しは #208"
+        - 発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する (#209)
         - "`LiveDO` に渡して画面に配信する"
       x-errors:
         - "409 `stopped`: 社員が停止中"

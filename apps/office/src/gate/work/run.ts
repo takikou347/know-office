@@ -8,6 +8,7 @@ import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import { announceNotice } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
+import { afterRunStarted, headMessages, withOwnerMessages } from "./deliver.ts";
 import { appendNodeEvent, findNode, type NodeRow, revertNode } from "./nodes.ts";
 import { issueTicket, revokeTaskTickets } from "./ticket.ts";
 import { extensionToolSpecs } from "./tools.ts";
@@ -140,6 +141,7 @@ export type RunStart = "started" | "skipped" | "blocked" | "busy" | "failed";
 
 /**
  * 社員が持つタスクの最初の呼び出しを、新しい作業トークンで始める。社員 DO の鎖の外で呼ぶ (鎖の中で呼ぶと、作業トークンの発行が同じ鎖を待って止まる)
+ * まだ渡していないオーナーの発言を指示の後ろに足し、頼めた後に印を付ける
  * @param env バインディング
  * @param staffId 社員 ID
  * @param now 今の時刻
@@ -156,9 +158,11 @@ export async function startRun(env: Bindings, staffId: StaffId, now: number, tra
   if (row.status !== "doing" || row.assignee !== staffId) return "skipped";
   const { promptVersion } = await target.runState(nodeId);
   const base = await runBase(env, staffId, nodeId, promptVersion);
+  // タスクの外で届いた、まだ渡していないオーナーの発言を指示の後ろに足す
+  const head = await headMessages(env, staffId, now);
   const { token, jti } = await issueTicket(env, staffId, nodeId, now, traceId);
   try {
-    await env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)).run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: taskPrompt(row) }));
+    await env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)).run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: withOwnerMessages(taskPrompt(row), head.picked) }));
   } catch (error) {
     // 渡せなかった作業トークンは使われないので失効させる
     await revokeTaskTickets(env, staffId, nodeId, "unused", now, [jti]);
@@ -170,5 +174,7 @@ export async function startRun(env: Bindings, staffId: StaffId, now: number, tra
     return "failed";
   }
   await target.markRun(nodeId, "started");
+  // 印は頼めた後に付ける。始めた事は印より先に残し、印が落ちても呼び出しは始まっている
+  await afterRunStarted(env, { staffId, nodeId }, head, "next_task", now);
   return "started";
 }

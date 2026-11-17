@@ -7,6 +7,7 @@ import { transcriptParts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import { clockAt } from "./attendance.ts";
+import { afterRunStarted, headMessages, withOwnerMessages } from "./deliver.ts";
 import { claudeBlocked, runBase, type RunStart, startRun } from "./run.ts";
 import { issueTicket, retireOtherTickets } from "./ticket.ts";
 
@@ -192,9 +193,11 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
   await workspace.restore(saved);
   const { promptVersion } = await staffDo.runState(nodeId);
   const base = await runBase(env, staffId, nodeId, promptVersion);
+  // 落ちる前に受けて記録に入らなかった発言は戻らない。まだ渡していない発言だけを頭に足す
+  const head = await headMessages(env, staffId, now);
   const { token, jti } = await issueTicket(env, staffId, nodeId, now);
   try {
-    await workspace.run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: RESUME_PROMPT, resume: saved.sessionId }));
+    await workspace.run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: withOwnerMessages(RESUME_PROMPT, head.picked), resume: saved.sessionId }));
   } catch (error) {
     // 渡せなかった作業トークンは使われないので失効させる
     await staffDo.revokeTokens([jti]);
@@ -203,6 +206,7 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
   await staffDo.markRun(nodeId, "started");
   // 落ちたワークスペースに渡していた作業トークンは、続きを渡した後に使えなくする
   await retireOtherTickets(env, staffId, nodeId, jti, now);
+  await afterRunStarted(env, { staffId, nodeId }, head, "run", now);
   return true;
 }
 

@@ -224,7 +224,18 @@ export function useLiveEvent(listener: LiveListener): void {
 }
 
 /**
- * 出来事を数えるかを決める関数を作る。通知と発言は 1 件に 1 つの ID なので、同じ印を 2 回受けても 1 回だけ数える。
+ * 1 件に 1 つの ID を持つ出来事の、同じ印を見分ける鍵を返す
+ * @param event 通知、発言、発言を渡した印
+ * @returns 種類と ID の鍵
+ */
+function idKey(event: Extract<LiveEvent, { type: "notice" | "message" | "message_delivered" }>): string {
+  if (event.type === "notice") return `notice:${event.notice.id}`;
+  if (event.type === "message") return `message:${event.message.id}`;
+  return `delivered:${event.delivery.id}`;
+}
+
+/**
+ * 出来事を数えるかを決める関数を作る。通知、発言、発言を渡した印は 1 件に 1 つの ID なので、同じ印を 2 回受けても 1 回だけ数える。
  * 社員は社員 DO が変わった時だけ出し、前と同じ状態に戻る事もあるので毎回数える。木の 1 件は何度も変わるので毎回数える
  * @returns 出来事を受けて、数えるなら true を返す関数
  */
@@ -232,7 +243,7 @@ export function liveTickCounter(): (event: LiveEvent) => boolean {
   const seen = recentIds();
   return (event) => {
     if (event.type === "staff" || event.type === "node") return true;
-    const key = event.type === "notice" ? `notice:${event.notice.id}` : `message:${event.message.id}`;
+    const key = idKey(event);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

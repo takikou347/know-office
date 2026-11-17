@@ -110,6 +110,19 @@ describe("経過の記憶", () => {
     expect(revoked.map((r) => [r.target, JSON.parse(r.detail) as unknown])).toEqual([[old.jti, { staffId: "builder", nodeId: TASK.nodeId, reason: "resumed" }]]);
   });
 
+  it("作り直した続きの頭に、まだ渡していないオーナーの発言を足して印を付ける", async () => {
+    await sendTwo();
+    // ワークスペースが落ちている間に届いた発言
+    await worker.query("REC_2030", `INSERT INTO messages (id, at, staff_id, node_id, sender, body, body_key) VALUES ('0190f4a8-0000-7000-8000-00000000d001', ${String(jst(9, 4))}, 'builder', NULL, 'owner', 'テストも足して', NULL)`);
+    await worker.staff("builder", "wake", jst(9, 5));
+    const got = await calls(worker, 4);
+    const run = z.object({ prompt: z.string(), resume: z.string() }).loose().parse(got[3]?.args[0]);
+    expect(run.resume).toBe(SESSION);
+    expect(run.prompt).toContain('オーナーの発言 (日本時間 2030-01-07 09:04): "テストも足して"');
+    await until(async () => (await worker.query("DB", "SELECT via FROM message_deliveries")).length > 0);
+    expect(await worker.query("DB", "SELECT message_id, node_id, via FROM message_deliveries")).toEqual([{ message_id: "0190f4a8-0000-7000-8000-00000000d001", node_id: TASK.nodeId, via: "run" }]);
+  });
+
   it("会話の記録は R2 にタスクごとの鍵で暗号にして置き、D1 に部分ごとの行を足す", async () => {
     await sendTwo();
     const prefix = `transcripts/builder/${TASK.nodeId}/${SESSION}/`;

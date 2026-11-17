@@ -1,5 +1,6 @@
 // ワークスペースとゲートウェイ、社員 DO の間でやり取りする形と、作業トークンの中身 (社員が考えるの 2 章)
 import { fromBase64 } from "../encoding.ts";
+import { codePoints, MESSAGE_MAX_CHARS } from "./conversation.ts";
 import { STAFF_TOOL_NAMES } from "../rules/staff-tools.ts";
 import { StaffId, WorkResult } from "./workday.ts";
 import { z } from "./zod.ts";
@@ -158,8 +159,14 @@ export const AgentEventsInput = z.object({ events: z.array(AgentEvent).min(1).ma
 /** ワークスペースから届く出来事の並びの型 */
 export type AgentEventsInput = z.infer<typeof AgentEventsInput>;
 
-/** POST /v1/messages の入力。走っている呼び出しに足すオーナーの発言 */
-export const WorkspaceMessageInput = z.object({ body: z.string().min(1).max(20_000) }).strict().meta({ id: "WorkspaceMessageInput" });
+/** POST /v1/messages の入力。走っている呼び出しに足すオーナーの発言と、ゲートウェイが受けた時刻。字数はコードポイントで数え、会話の上限と同じにする */
+export const WorkspaceMessageInput = z
+  .object({
+    body: z.string().refine((v) => codePoints(v) >= 1 && codePoints(v) <= MESSAGE_MAX_CHARS, { message: `1 字から ${String(MESSAGE_MAX_CHARS)} 字まで` }),
+    at: z.iso.datetime(),
+  })
+  .strict()
+  .meta({ id: "WorkspaceMessageInput" });
 
 /** オーナーの発言の型 */
 export type WorkspaceMessageInput = z.infer<typeof WorkspaceMessageInput>;

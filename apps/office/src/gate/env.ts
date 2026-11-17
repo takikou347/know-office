@@ -156,6 +156,8 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   abort(reason: string): Promise<null>;
   /** タスク 1 件分の SDK の呼び出しを始めさせる */
   run(input: unknown): Promise<null>;
+  /** 走っている呼び出しにオーナーの発言を足させる。止まっていれば起こさずに false、受けたら true */
+  message(input: unknown): Promise<boolean>;
   /** 作業トークンを差し替えさせる */
   replaceTicket(ticket: string): Promise<null>;
   /** 会話の記録を SDK の置き場に戻させる */

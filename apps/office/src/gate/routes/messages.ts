@@ -8,6 +8,7 @@ import { recordError } from "../ledger/errors.ts";
 import { announce } from "../live/publish.ts";
 import { createdResponse, listQuery, listResponse, problems } from "../openapi.ts";
 import { created, list } from "../respond.ts";
+import { DELIVERY_WINDOW_MS, type DeliveryMark, deliveriesOf, deliverToRun } from "../work/deliver.ts";
 import { recordsOf } from "../work/nodes.ts";
 
 const router = createRouter();
@@ -21,7 +22,11 @@ const listMessagesRoute = createRoute({
   tags: ["conversation"],
   summary: "社員とのメッセージ履歴",
   description: "カーソルは前のページの最後のメッセージ ID (UUID v7) で、その時刻の年から前の年へ続けて読む。",
-  "x-steps": ["`messages` を新しい順に取得する", "長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す"],
+  "x-steps": [
+    "`messages` を新しい順に取得する",
+    "長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す",
+    "オーナーの発言は `message_deliveries` を ID で引き、渡した時刻と道を付ける。印が無く 24 時間を過ぎた発言は `skipped` にする",
+  ],
   "x-errors": ["400 `malformed_request`: カーソルがメッセージ ID の形でない"],
   request: { params: StaffParam, query: listQuery(router) },
   responses: { 200: listResponse(Message), ...problems(400, 401, 403, 404, 422, 429, 500) },
@@ -36,8 +41,8 @@ const createMessageRoute = createRoute({
   description: "勤務時間外の場合は社員を呼び出す。字数はコードポイントで数える。",
   "x-steps": [
     "`messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く",
-    "タスク中ならワークスペースの `POST /v1/messages` に渡し、勤務時間外なら `StaffDO.call` で呼び出す",
-    "発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する",
+    "タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す。時間外の呼び出しは #208",
+    "発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する (#209)",
     "`LiveDO` に渡して画面に配信する",
   ],
   "x-errors": ["409 `stopped`: 社員が停止中"],
@@ -92,10 +97,11 @@ function yearsFrom(env: Bindings, year: number): D1Database[] {
  * 行を返す形にする。長い本文は R2 から読み、鍵が決めた形でないか R2 に無ければ、その発言だけ本文を空にしてエラーログに残す
  * @param env バインディング
  * @param row 行
+ * @param marks 発言 ID ごとの渡した印
  * @param clock 時刻
  * @returns メッセージ
  */
-async function toMessage(env: Bindings, row: MessageRow, clock: { now(): number }): Promise<Message> {
+async function toMessage(env: Bindings, row: MessageRow, marks: Map<string, DeliveryMark>, clock: { now(): number }): Promise<Message> {
   const staffId = StaffId.parse(row.staff_id);
   let body = row.body;
   if (row.body_key !== null) {
@@ -106,7 +112,22 @@ async function toMessage(env: Bindings, row: MessageRow, clock: { now(): number 
       await recordError(env, { source: "gate", level: "error", code: "message_body_missing", error: new Error(`メッセージ ${row.id} の本文が R2 に無い`) }, clock);
     }
   }
-  return { id: row.id, at: new Date(row.at).toISOString(), staffId, nodeId: row.node_id, sender: row.sender === "staff" ? "staff" : "owner", body };
+  const sender = row.sender === "staff" ? "staff" : "owner";
+  return { id: row.id, at: new Date(row.at).toISOString(), staffId, nodeId: row.node_id, sender, body, ...deliveryOf(sender, row.at, marks.get(row.id), clock.now()) };
+}
+
+/**
+ * 発言を渡した時刻と道を決める。印の無いオーナーの発言は、24 時間を過ぎていれば次の呼び出しでも渡さないので skipped にする
+ * @param sender 発言した側
+ * @param at 発言の時刻
+ * @param mark 渡した印
+ * @param now 今の時刻
+ * @returns 渡した時刻と道
+ */
+function deliveryOf(sender: Message["sender"], at: number, mark: DeliveryMark | undefined, now: number): Pick<Message, "deliveredAt" | "delivery"> {
+  if (sender === "staff") return { deliveredAt: null, delivery: null };
+  if (mark) return { deliveredAt: mark.via === "skipped" ? null : new Date(mark.at).toISOString(), delivery: mark.via };
+  return { deliveredAt: null, delivery: at < now - DELIVERY_WINDOW_MS ? "skipped" : null };
 }
 
 /**
@@ -133,7 +154,8 @@ export async function listMessages(env: Bindings, staffId: StaffId, page: { curs
     rows.push(...found.results);
   }
   const shown = rows.slice(0, page.limit);
-  const items = await Promise.all(shown.map((r) => toMessage(env, r, clock)));
+  const marks = await deliveriesOf(env.DB, shown.filter((r) => r.sender === "owner").map((r) => r.id));
+  const items = await Promise.all(shown.map((r) => toMessage(env, r, marks, clock)));
   return { items, next: rows.length > page.limit ? (shown.at(-1)?.id ?? null) : null };
 }
 
@@ -170,8 +192,9 @@ export async function appendMessage(
     if (key) await env.FILES.delete(key).catch(() => undefined);
     throw error;
   }
-  const message: Message = { id, at: new Date(at).toISOString(), staffId: input.staffId, nodeId: input.nodeId, sender: input.sender, body: input.body };
-  await announce(env, { type: "message", message: { ...message, body: headChars(input.body, MESSAGE_INLINE_CHARS), truncated: long } }, clock);
+  const message: Message = { id, at: new Date(at).toISOString(), staffId: input.staffId, nodeId: input.nodeId, sender: input.sender, body: input.body, deliveredAt: null, delivery: null };
+  const { deliveredAt: _at, delivery: _via, ...shown } = message;
+  await announce(env, { type: "message", message: { ...shown, body: headChars(input.body, MESSAGE_INLINE_CHARS), truncated: long } }, clock);
   return message;
 }
 
@@ -187,6 +210,10 @@ export const messageRoutes = router
     const status = await c.env.STAFF.get(c.env.STAFF.idFromName(staffId)).status(c.var.clock.now());
     if (status.state === "stopped") throw new AppError("stopped", "社員が止まっている");
     const message = await appendMessage(c.env, { staffId, sender: "owner", body: input.body, nodeId: input.nodeId ?? null, traceId: c.var.traceId }, c.var.clock);
-    // TODO(#121): タスク中ならワークスペースの POST /v1/messages に渡し、時間外なら StaffDO.call で呼び、勤務の指示を軽いモデルで抜き出す
-    return created(c, message, `/api/v1/staff/${staffId}/messages`);
+    // 発言は足した後に渡す。渡せなくても発言は残り、次の呼び出しの頭で渡す
+    const deliveredAt = await deliverToRun(c.env, { staffId, ...status }, { id: message.id, at: Date.parse(message.at), body: input.body }, c.var.clock.now());
+    // TODO(#208): 勤務時間外なら StaffDO.call で呼び出す
+    // TODO(#209): 発言に含まれる勤務の指示を軽いモデルで抜き出す
+    const answer: Message = deliveredAt === null ? message : { ...message, deliveredAt: new Date(deliveredAt).toISOString(), delivery: "run" };
+    return created(c, answer, `/api/v1/staff/${staffId}/messages`);
   });

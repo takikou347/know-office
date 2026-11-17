@@ -1,6 +1,6 @@
 // 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを鍵を付けて呼ぶ。起きなければ知らせる (社員が考えるの 2 章、3.2)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, CONTAINER_CA, Health, log, newId, ReasonInput, RestoreInput, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV } from "@know-office/core";
+import { AppError, CONTAINER_CA, Health, log, newId, ReasonInput, RestoreInput, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV, WorkspaceMessageInput } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -21,6 +21,8 @@ const CALL_TIMEOUT_MS = 10_000;
 const RESTORE_TIMEOUT_MS = 60_000;
 /** 中断の待ち (60 秒)。ワークスペースは会話の記録を送り終えてから返すので、ほかの呼び出しより長く待つ */
 const ABORT_TIMEOUT_MS = 60_000;
+/** 発言を足す待ち (60 秒)。ワークスペースは会話の記録を送り終えてから返すので、中断と同じだけ待つ */
+const MESSAGE_TIMEOUT_MS = 60_000;
 const POLL_MS = 1000;
 
 const HealthAnswer = z.object({ data: Health }).loose();
@@ -203,6 +205,28 @@ export class WorkspaceBox<F = unknown> {
     await this.#starting?.catch(() => undefined);
     if (!this.container.running || (await this.deps.keys.get()) === undefined) return;
     await this.#call("POST", "/v1/abort", ReasonInput.parse({ reason }), 204, ABORT_TIMEOUT_MS);
+  }
+
+  /**
+   * 走っている呼び出しにオーナーの発言を足させる。ワークスペースは会話の記録を送ってから今の呼び出しを止め、発言を指示に続きから呼ぶ
+   * 止まっているコンテナは起こさない。起こしても走っている呼び出しは無く、渡せないため
+   * @param input WorkspaceMessageInput
+   * @returns ワークスペースが受けたら true。止まっている、鍵が無い、走っていない (409) 時は false
+   * @throws validation_failed 形が違う時
+   * @throws unavailable ワークスペースが答えない時
+   */
+  async message(input: unknown): Promise<boolean> {
+    const parsed = WorkspaceMessageInput.safeParse(input);
+    if (!parsed.success) throw new AppError("validation_failed", "発言の形が違う");
+    await this.#starting?.catch(() => undefined);
+    if (!this.container.running || (await this.deps.keys.get()) === undefined) return false;
+    try {
+      await this.#call("POST", "/v1/messages", parsed.data, 204, MESSAGE_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof AppError && error.code === "conflict") return false;
+      throw error;
+    }
+    return true;
   }
 
   /**

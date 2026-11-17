@@ -197,6 +197,18 @@ export class RecordingWorkspace extends DurableObject<Bindings> implements Works
   }
 
   /**
+   * オーナーの発言を足させる
+   * @param input WorkspaceMessageInput
+   * @returns 受けたか。テストが決めた答え方で、message_idle は走っていない、message_down は届かない
+   */
+  async message(input: unknown): Promise<boolean> {
+    await this.#push("message", input);
+    const mode = await this.ctx.storage.get("mode");
+    if (mode === "message_down") throw new AppError("unavailable", "ワークスペースに届かない");
+    return mode !== "message_idle";
+  }
+
+  /**
    * 作業トークンを差し替えさせる
    * @param ticket 作業トークン
    * @returns 無し
