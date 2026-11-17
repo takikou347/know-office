@@ -6,6 +6,7 @@ import { AskBossTool } from "./ask-boss.ts";
 import { AskOwnerTool } from "./ask-owner.ts";
 import { CheckpointTool } from "./checkpoint.ts";
 import { IdeaAddTool } from "./idea-add.ts";
+import { IssuePlanTool } from "./issue-plan.ts";
 import { NodeAssignTool } from "./node-assign.ts";
 import { NodeCreateTool } from "./node-create.ts";
 import { OwnerInfoReadTool } from "./owner-info-read.ts";
@@ -38,6 +39,7 @@ export const STAFF_TOOL_CATALOG: Record<StaffToolName, StaffToolEntry> = {
   node_assign: { description: "タスクを社員に割り振る", shape: NodeAssignTool.shape },
   staff_request: { description: "社員の追加か役の変更をオーナーに求める。今のタスクはオーナーの答えを待ち、答えが出るまで社員は変わらない", shape: STAFF_REQUEST_SHAPE },
   study_submit: { description: "検討の段階の案を調べた材料を出す。オーナーが読んで進めるかを決める", shape: StudySubmitTool.shape },
+  issue_plan: { description: "設計書の機能ごとの親と要件ごとの子の組を送り、サービスのリポジトリに Issue を作る。題と本文はゲートウェイが決まった形で作る。Issue を合わせるタスクで呼ぶ", shape: IssuePlanTool.shape },
   service_close_request: { description: "サービスを閉じる案をオーナーに出す。オーナーが承認するまでサービスは閉じない", shape: ServiceCloseRequestTool.shape },
   pr_open: { description: "今のタスクのブランチ ko/<タスク ID の頭 8 字>-<name> からプルリクエストを出す。出すとタスクはレビューを待つ", shape: PrOpenTool.shape },
   review_submit: { description: "今のレビューのタスクに承認か差し戻しを出す。差し戻しは理由と一緒に作った社員に戻る", shape: ReviewSubmitTool.shape },

@@ -67,6 +67,8 @@ export {
   GitHubManifest,
   GitHubPosted,
   GitHubPostedList,
+  GitHubIssueCreated,
+  GitHubIssueList,
   GitHubWebhookHead,
   GitHubDeploymentStatusEvent,
   GitHubPushEvent,
@@ -144,7 +146,7 @@ export {
   WorkResult,
   WorkSchedule,
 } from "./schemas/workday.ts";
-export { checkServiceDocs, DOCS_REPO_KEY, SERVICE_NAME, type DocsProblem, DocsRepo, DocsRepoValue, docsMergeNeeds, serviceDirs, UpdateDocsRepoInput } from "./devloop/docs.ts";
+export { checkServiceDocs, isRedactedName, requirementsOf, DOCS_REPO_KEY, SERVICE_NAME, type DocsProblem, DocsRepo, DocsRepoValue, docsMergeNeeds, serviceDirs, UpdateDocsRepoInput } from "./devloop/docs.ts";
 export { Finding, FindingAnswer, FindingEffect, FindingKind, FindingNeeds, FindingStatus, Fingerprint } from "./schemas/findings.ts";
 export {
   CreateStopInput,
@@ -241,6 +243,8 @@ export { AskBossTool } from "./schemas/tools/ask-boss.ts";
 export { AskOwnerTool } from "./schemas/tools/ask-owner.ts";
 export { IdeaAddTool } from "./schemas/tools/idea-add.ts";
 export { ServiceCloseRequestTool } from "./schemas/tools/service-close-request.ts";
+export { devIssueKey, devIssueText, type DevIssueKind, type DevIssueSource, featureTitle, ISSUE_KINDS, ISSUE_LABELS, type IssueKind, type IssueLabel, parseRequirements } from "./devloop/issues.ts";
+export { FEATURE_NAME, ISSUE_PLAN_CHILDREN_MAX, ISSUE_PLAN_PARENTS_MAX, IssuePlanTool } from "./schemas/tools/issue-plan.ts";
 export { StudySubmitTool } from "./schemas/tools/study-submit.ts";
 export { NodeAssignTool } from "./schemas/tools/node-assign.ts";
 export { NodeCreateTool } from "./schemas/tools/node-create.ts";

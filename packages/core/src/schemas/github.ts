@@ -302,6 +302,14 @@ export const GitHubGitTree = z
 /** GET /repos/{o}/{r}/pulls/{n}/reviews と /comments の 1 ページのうち使う所。本文の目印で写した物を探す */
 export const GitHubPostedList = z.array(z.object({ id: GitHubId, body: z.string().max(70_000).nullable() }).loose()).max(100);
 
+/** GET /repos/{o}/{r}/issues の返事の 1 ページ。プルリクエストも混じり、pull_request の項目で分かる。1 ページ 100 件まで */
+export const GitHubIssueList = z
+  .array(z.object({ number: z.number().int().positive(), id: GitHubId, state: z.enum(["open", "closed"]), body: z.string().max(70_000).nullable().optional(), pull_request: z.unknown().optional() }).loose())
+  .max(100);
+
+/** POST /repos/{o}/{r}/issues の返事のうち使う所。番号と、sub-issue のつなぎに使う ID */
+export const GitHubIssueCreated = z.object({ number: z.number().int().positive(), id: GitHubId }).loose();
+
 /** GET /repos/{o}/{r}/git/commits/{sha} の返事のうち使う所 */
 export const GitHubGitCommit = z.object({ sha: Sha, tree: z.object({ sha: Sha }).loose() }).loose();
 

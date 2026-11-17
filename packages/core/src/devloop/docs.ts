@@ -1,4 +1,5 @@
 // 設計書の決まった形。設計書のリポジトリの設定の鍵、形の確かめ、main に入れる条件 (開発の回し方の 3.2)
+import { redactPublic } from "../log.ts";
 import { RepoName } from "../schemas/github.ts";
 import type { ReleaseCondition } from "../schemas/settings.ts";
 import { z } from "../schemas/zod.ts";
@@ -81,15 +82,33 @@ function chapterOf(text: string, chapter: number): string[] {
 }
 
 /**
+ * 詳細設計の 1 章の要件を、名前と本文で返す。Issue を作る側 (`parseRequirements`) と設計書の形の確かめが同じ読みを使う
+ * @param text 詳細設計の機能のファイル
+ * @returns 要件の名前と本文。出てきた順
+ */
+export function requirementsOf(text: string): { name: string; body: string }[] {
+  return chapterOf(text, 1).flatMap((l) => {
+    const found = /^- \*\*(.+?)\*\*:(.*)$/.exec(l);
+    return found?.[1] === undefined ? [] : [{ name: found[1], body: (found[2] ?? "").trim() }];
+  });
+}
+
+/**
  * 詳細設計の 1 章の要件の名前を返す
  * @param text 詳細設計の機能のファイル
  * @returns 要件の名前
  */
 function requirementNames(text: string): string[] {
-  return chapterOf(text, 1).flatMap((l) => {
-    const name = /^- \*\*(.+?)\*\*:/.exec(l)?.[1];
-    return name === undefined ? [] : [name];
-  });
+  return requirementsOf(text).map((r) => r.name);
+}
+
+/**
+ * 要件の名前が、公開の文を伏せる処理で変わる形 (鍵、メール、ID らしい文字列を含む) かを返す。題に出す名前なので、変わる名前は要件にできない。設計書の PR の確かめと Issue を作る側が同じ判断を使う
+ * @param name 要件の名前
+ * @returns 伏せる形なら true
+ */
+export function isRedactedName(name: string): boolean {
+  return redactPublic(name) !== name;
 }
 
 /**
@@ -135,6 +154,7 @@ export function checkServiceDocs(name: string, files: ReadonlyMap<string, string
     const feature = FEATURE_FILE.exec(path);
     const text = files.get(path) ?? "";
     if (feature?.[1] === "04-detail" && requirementNames(text).length === 0) add(path, "1 章に要件 `- **<名前>**:` が 1 つ以上要る");
+    if (feature?.[1] === "04-detail") for (const required of requirementNames(text).filter(isRedactedName)) add(path, `要件の名前 ${required} は鍵やメールらしい形で、公開の Issue の題にできない`);
     if (feature?.[1] !== "05-test") continue;
     const pair = files.get(`docs/04-detail/${feature[2] ?? ""}`);
     if (pair === undefined) {
