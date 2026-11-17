@@ -8,8 +8,13 @@ import type { FakeApp } from "./github-types.ts";
 /** 代わりの GitHub に通知を送らせる要求。種類と本文。installation は代わりの GitHub が付ける */
 const FakeHook = z.object({ event: z.string().min(1), payload: z.record(z.string(), z.unknown()) });
 
-/** 置く失敗の道、返すステータス、返す回数 */
-const FakeFailure = z.object({ route: z.string(), status: z.number().int().min(400).max(599), times: z.number().int().min(1).max(10).default(1) });
+/** 置く失敗の道、返すステータス、返す回数、足すヘッダー (レート制限の retry-after や x-ratelimit-remaining) */
+const FakeFailure = z.object({
+  route: z.string(),
+  status: z.number().int().min(400).max(599),
+  times: z.number().int().min(1).max(10).default(1),
+  headers: z.record(z.string(), z.string()).optional(),
+});
 
 /** 道ごとの、置いた失敗と残りの回数 */
 export type FakeFailures = Map<string, { status: number; left: number; headers?: Record<string, string> }>;
@@ -41,8 +46,8 @@ export function flowRoutes(apps: Map<number, FakeApp>, installations: Map<number
     new Hono()
       // 置いた回数だけ、その道に失敗を返す
       .post("/__fake/failures", async (c) => {
-        const { route, status, times } = FakeFailure.parse(await c.req.json());
-        failures.set(route, { status, left: times });
+        const { route, status, times, headers } = FakeFailure.parse(await c.req.json());
+        failures.set(route, { status, left: times, ...(headers ? { headers } : {}) });
         return c.body(null, 204);
       })
       // 置いた失敗を全部外す。画面の通しの片付けに使う

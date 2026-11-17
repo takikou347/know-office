@@ -25,6 +25,7 @@ import { auditFrom } from "../ledger/record.ts";
 import { lazyDevIssues } from "../devloop/dev-issues.ts";
 import { type Forge, UNCONNECTED_FORGE } from "../work/loop.ts";
 import { type GitHubAccess, httpForge, type Permissions } from "./forge.ts";
+import { GitHubRateLimited } from "./limits.ts";
 
 /** state が効く長さ (10 分) */
 export const STATE_MS = 10 * 60_000;
@@ -178,7 +179,7 @@ export function githubRetryAfter(res: Response): number | null {
  * @returns 投げるエラー
  */
 export function githubRateLimited(seconds: number): AppError {
-  return new AppError("rate_limited", "GitHub の上限に届いた", { headers: { "Retry-After": String(seconds) } });
+  return new GitHubRateLimited(seconds);
 }
 
 /**

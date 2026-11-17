@@ -9,8 +9,9 @@ import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { findNode } from "../work/nodes.ts";
 import type { TicketClaims } from "../work/ticket.ts";
-import { callGitHub, GITHUB_USER_AGENT, githubToken, isRedirect, parseGitHub } from "./app.ts";
+import { callGitHub, GITHUB_USER_AGENT, githubRetryAfter, githubToken, isRedirect, parseGitHub } from "./app.ts";
 import type { Permissions } from "./forge.ts";
+import { noteGitHubRateLimit } from "./limits.ts";
 import { repoScope } from "./rules.ts";
 
 /** push の本文の上限 (100MB)。GitHub が 1 回の push に受ける上限に合わせる。gzip は解いた後の量で数える */
@@ -225,6 +226,17 @@ async function defaultBranchOf(c: Context<GateEnv>, repo: string, token: string)
 }
 
 /**
+ * 中継した GitHub の返事がレート制限なら、エラーログと通知に残す。返事はそのままワークスペースに返す
+ * @param c 要求の文脈
+ * @param res GitHub の返事
+ */
+async function noteRelayedLimit(c: Context<GateEnv>, res: Response): Promise<void> {
+  const seconds = githubRetryAfter(res);
+  if (seconds === null) return;
+  await noteGitHubRateLimit(c.env, c.var.clock, { seconds, route: c.req.routePath, status: res.status, traceId: c.var.traceId });
+}
+
+/**
  * ワークスペースの git の要求を、絞った鍵を付けて github.com に送る。push はタスクのリポジトリのブランチだけを通す。本文は命令だけを読み、残りは流して送る
  * @param c 要求の文脈。作業トークンは受け手が確かめている
  * @param ticket 確かめた作業トークン
@@ -284,6 +296,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
     : { action: "github.read", detail: { nodeId: ticket.nodeId, via: "git", path: match[3] ?? "", status } };
   await auditFrom(c.env, { at: c.var.clock.now(), actor: ticket.staffId, target: repo.data, scope: "office", traceId: c.var.traceId, ...entry });
   if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
+  await noteRelayedLimit(c, res);
   if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
   return new Response(res.body, { status: res.status, headers: relayedHeaders(res, "application/octet-stream") });
 }
@@ -340,6 +353,7 @@ export async function relayGitHubApi(c: Context<GateEnv>, ticket: TicketClaims):
     traceId: c.var.traceId,
   });
   if (!res) throw new AppError("upstream_failed", "GitHub に届かない");
+  await noteRelayedLimit(c, res);
   if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
   return new Response(res.body, { status: res.status, headers: relayedHeaders(res, "application/json") });
 }

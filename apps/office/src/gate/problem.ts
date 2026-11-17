@@ -2,6 +2,7 @@
 import { AppError, type ErrorCode, type FieldError, log, PROBLEMS, type Problem, systemClock } from "@know-office/core";
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import type { GateEnv } from "./env.ts";
+import { GitHubRateLimited, noteGitHubRateLimit } from "./github/limits.ts";
 import { recordError } from "./ledger/errors.ts";
 import { audit } from "./ledger/record.ts";
 
@@ -56,6 +57,10 @@ export const onError: ErrorHandler<GateEnv> = async (err, c) => {
     await recordError(c.env, { source: "gate", level: "error", code: known.code, error: err, route: c.req.routePath, status, traceId }, c.get("clock") ?? systemClock);
   }
   if (known.code === "step_up_required") await recordDenied(c);
+  // ゲートウェイが GitHub を呼んで当たったレート制限は、社員のツールでもオーナーの操作でも通知に出す
+  if (err instanceof GitHubRateLimited) {
+    await noteGitHubRateLimit(c.env, c.get("clock") ?? systemClock, { seconds: err.seconds, route: c.req.routePath, status, traceId: c.get("traceId") });
+  }
   return problemResponse(c, known);
 };
 
