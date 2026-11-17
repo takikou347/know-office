@@ -236,13 +236,13 @@ function idKey(event: Extract<LiveEvent, { type: "notice" | "message" | "message
 
 /**
  * 出来事を数えるかを決める関数を作る。通知、発言、発言を渡した印は 1 件に 1 つの ID なので、同じ印を 2 回受けても 1 回だけ数える。
- * 社員は社員 DO が変わった時だけ出し、前と同じ状態に戻る事もあるので毎回数える。木の 1 件は何度も変わるので毎回数える
+ * 社員は社員 DO が変わった時だけ出し、前と同じ状態に戻る事もあるので毎回数える。木の 1 件と仕事の出来事は何度も起きるので毎回数える
  * @returns 出来事を受けて、数えるなら true を返す関数
  */
 export function liveTickCounter(): (event: LiveEvent) => boolean {
   const seen = recentIds();
   return (event) => {
-    if (event.type === "staff" || event.type === "node") return true;
+    if (event.type === "staff" || event.type === "node" || event.type === "work") return true;
     const key = idKey(event);
     if (seen.has(key)) return false;
     seen.add(key);

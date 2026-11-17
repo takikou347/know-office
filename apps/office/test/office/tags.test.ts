@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type TagBox, createTagSizer, spreadTags } from "../../src/screen/pages/office/tags.ts";
+import { type TagBox, createTagSizer, separateBoxes, spreadTags } from "../../src/screen/pages/office/tags.ts";
 
 // 名札が重ならないように、上にずらす。画面の全体の 3.2
 
@@ -94,5 +94,33 @@ describe("名札の大きさ", () => {
     sizer.sizeOf("a", "社長 働いている");
     sizer.sizeOf("b", "作る役 待っている");
     expect(counts).toEqual({ a: 2, b: 2 });
+  });
+});
+
+const hit = (id: string, left: number, top: number, width = 40, height = 60) => ({ id, left, top, width, height });
+const hitsOverlap = (a: ReturnType<typeof hit>, b: ReturnType<typeof hit>) =>
+  Math.min(a.left + a.width, b.left + b.width) > Math.max(a.left, b.left) && Math.min(a.top + a.height, b.top + b.height) > Math.max(a.top, b.top);
+
+describe("社員のリンクの箱を分ける", () => {
+  it("重ならない箱はそのまま返す", () => {
+    const boxes = [hit("a", 0, 0), hit("b", 100, 0)];
+    expect(separateBoxes(boxes)).toEqual(boxes);
+  });
+
+  it("横に重なる 2 つは、重なりの真ん中で左右に分ける", () => {
+    const [a, b] = separateBoxes([hit("a", 0, 0), hit("b", 20, 10)]);
+    expect(a).toEqual(hit("a", 0, 0, 30, 60));
+    expect(b).toEqual(hit("b", 30, 10, 30, 60));
+  });
+
+  it("縦に重なる 2 つは、重なりの真ん中で上下に分ける", () => {
+    const [a, b] = separateBoxes([hit("a", 0, 40), hit("b", 5, 0)]);
+    expect(b).toEqual(hit("b", 5, 0, 40, 50));
+    expect(a).toEqual(hit("a", 0, 50, 40, 50));
+  });
+
+  it("3 つが重なっても、どの 2 つも重ならない", () => {
+    const out = separateBoxes([hit("a", 0, 0), hit("b", 20, 20), hit("c", 10, 40)]);
+    for (const [i, a] of out.entries()) for (const b of out.slice(i + 1)) expect(hitsOverlap(a, b)).toBe(false);
   });
 });

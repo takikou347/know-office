@@ -1,12 +1,11 @@
 // オフィスの部屋。舞台と人形の社員を組み (組み立て)、出来事の動きを進め (動き)、状態ごとの形を当てて描き (描画)、閉じる時に捨てる (片付け)
 import { Color, MeshStandardMaterial, Vector3 } from "three";
-import type { Staff } from "../../mock.ts";
 import { type ModelAvatar, avatarSourceOf } from "./avatars.ts";
 import { disposeScene } from "./cleanup.ts";
 import { type ActorState, createDirector } from "./director.ts";
 import { CLOTHES, DOLL_SCALE, type Doll, PROPS, applyDollPose, buildDoll, dollScaleFor } from "./figure.ts";
 import { type DeskParts, SEAT_HEIGHT, buildRoomShell, stackPaper } from "./furniture.ts";
-import { type Point, seatOf, stationOf } from "./layout.ts";
+import { type Point, seatOf, stationOf, type RoomState } from "./layout.ts";
 import { buildMarks, type Marks, showMark } from "./marks.ts";
 import { activityOf, poseOf } from "./motion.ts";
 import type { Actors, Step } from "./plan.ts";
@@ -18,7 +17,7 @@ import { loadVrmAvatar } from "./vrm.ts";
 /** 部屋に置く社員 */
 export interface Seat {
   id: string;
-  state: Staff["state"];
+  state: RoomState;
 }
 
 /** 社員の姿を覆う、canvas の中の箱 (CSS のピクセル) */
@@ -63,7 +62,7 @@ export interface RoomOptions {
 
 /** 社員の姿と状態 */
 interface Figure {
-  state: Staff["state"];
+  state: RoomState;
   doll: Doll;
   marks: Marks;
   /** 差し替えたモデル。読めるまでと読めない時は人形を出す */
@@ -130,7 +129,7 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
         .catch(() => undefined);
     }
   }
-  const paintScreen = (id: string, state: Staff["state"]) => {
+  const paintScreen = (id: string, state: RoomState) => {
     const desk = desks[id];
     if (!desk) return;
     const on = state === "working";

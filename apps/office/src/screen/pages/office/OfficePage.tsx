@@ -1,10 +1,13 @@
-// オフィスの画面。画面のデータの変わりから出来事を起こし、3D を出せる時は部屋で動きを見せ、出せない時は 2D の一覧で社員を出す
+// オフィスの画面。社員を入口から読み、配信で届いた出来事を、3D を出せる時は部屋の動きで見せ、出せない時は 2D の一覧で社員を出す
+import { StaffOverview } from "@know-office/core";
 import { Button, List } from "knowidea-ui";
 import { Component, type ReactNode, Suspense, lazy, useCallback, useEffect, useState } from "react";
-import { type Staff, staff } from "../../mock.ts";
+import { z } from "zod";
+import { useLiveTick } from "../../parts/live.tsx";
+import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { StaffStatus } from "../../parts/staff-status.tsx";
-import { type OfficeEvent, type OfficeSnapshot, eventsBetween, newsOf } from "./events.ts";
-import { workFeed } from "./feed.ts";
+import { type OfficeEvent, type OfficeSnapshot, newsOf } from "./events.ts";
+import { officeNews } from "./news.ts";
 import { MOTION_ALLOWED_QUERY, browserEnv, canShow3d } from "./support.ts";
 
 // three.js と部屋の作りは、この画面を開いた時だけ読む
@@ -18,26 +21,23 @@ export interface EventBatch {
   events: OfficeEvent[];
 }
 
-const roleOf = (id: string) => staff.find((s) => s.id === id)?.role ?? id;
-
 /**
- * 写しの状態を、社員の役目と今の様子に重ねる
- * @param snap 写し
- * @returns 画面に出す社員
+ * 社員の ID から役目の名前を返す関数を作る。部屋に居ないオーナーは「オーナー」と読む
+ * @param people 読んだ社員
+ * @returns 役目の名前を返す関数
  */
-const peopleOf = (snap: OfficeSnapshot): Staff[] =>
-  staff.map((s) => ({ ...s, state: snap.staff.find((x) => x.id === s.id)?.state ?? s.state }));
+const rolesOf = (people: readonly StaffOverview[]) => (id: string) => (id === "owner" ? "オーナー" : (people.find((s) => s.id === id)?.role ?? id));
 
 /**
  * 社員を 2D の一覧で出す。押すと社員とタスクの画面でその社員の会話が開く
  * @param props.people 出す社員
  * @returns 社員の一覧
  */
-export function OfficeList({ people }: { /** 出す社員 */ people: readonly Staff[] }) {
+export function OfficeList({ people }: { /** 出す社員 */ people: readonly StaffOverview[] }) {
   return (
     <List
       label="社員の様子"
-      items={people.map((s) => ({ id: s.id, title: s.role, href: `/staff/${s.id}`, meta: <><StaffStatus state={s.state} /> {s.now}</> }))}
+      items={people.map((s) => ({ id: s.id, title: s.role, href: `/staff/${s.id}`, meta: <><StaffStatus state={s.state} /> {s.nodeTitle ?? ""}</> }))}
     />
   );
 }
@@ -56,24 +56,21 @@ class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode
 }
 
 /**
- * 画面のデータの変わりを聞き、前にオフィスが見た写しとの違いを出来事にする
- * @returns 今の写しと、出来事のまとまり
+ * オフィスを開いている間、配信で届いてためた出来事を受け取る。開いた時は、前にオフィスを開いた時からの出来事を受け取る
+ * @returns 出来事のまとまり
  */
-function useOfficeEvents() {
-  const [snap, setSnap] = useState(workFeed.snapshot);
+function useOfficeEvents(): EventBatch | null {
   const [batch, setBatch] = useState<EventBatch | null>(null);
   useEffect(() => {
     let id = 0;
     const take = () => {
-      const { before, now } = workFeed.take();
-      setSnap(now);
-      const events = eventsBetween(before, now);
+      const { before, events } = officeNews.take();
       if (events.length > 0) setBatch({ id: ++id, before, events });
     };
     take();
-    return workFeed.subscribe(take);
+    return officeNews.subscribe(take);
   }, []);
-  return { snap, batch };
+  return batch;
 }
 
 /**
@@ -90,7 +87,18 @@ export function OfficePage() {
   const [motionAllowed, setMotionAllowed] = useState(() => browser && window.matchMedia(MOTION_ALLOWED_QUERY).matches);
   // 動きを止めるボタンで止めているか。開き直すと動く所から始める
   const [halted, setHalted] = useState(false);
-  const { snap, batch } = useOfficeEvents();
+  const batch = useOfficeEvents();
+  const tick = useLiveTick((e) => e.type === "staff");
+  const loaded = useLoad(z.array(StaffOverview), (a) => a.api.v1.staff.$get({ query: {} }), tick);
+  // 読み直しに失敗しても、前に読めた社員で部屋を出し続け、失敗は部屋の上に出す
+  const [people, setPeople] = useState<readonly StaffOverview[] | null>(null);
+  // 前に読めた社員を、描く間に読めた物へ替える (React の「前の描画の値を覚える」形)
+  if (loaded.state === "ok" && loaded.data !== people) setPeople(loaded.data);
+  useEffect(() => {
+    if (loaded.state !== "ok") return;
+    // 読んだ状態は出来事にせず、次に届く状態の印の前の状態にする
+    officeNews.know(loaded.data);
+  }, [loaded]);
   useEffect(() => {
     // 開いている間に動きを減らす設定を変えても合わせる
     const query = window.matchMedia(MOTION_ALLOWED_QUERY);
@@ -99,11 +107,13 @@ export function OfficePage() {
     return () => query.removeEventListener("change", follow);
   }, []);
   const fail = useCallback(() => setMode("2d"), []);
-  const people = peopleOf(snap);
-  const news = <p role="status">{newsOf(batch?.events ?? [], roleOf)}</p>;
+  const failed = loaded.state === "failed" ? <FailedAlert title="社員を読めませんでした" failure={loaded} /> : null;
+  if (people === null) return failed ?? <p role="status">社員を読んでいます</p>;
+  const news = <p role="status">{newsOf(batch?.events ?? [], rolesOf(people))}</p>;
   const list = (
     <>
       <p>3D を出せないブラウザなので、社員を一覧で出しています。押すとその社員の会話が開きます</p>
+      {failed}
       {news}
       <OfficeList people={people} />
     </>
@@ -120,6 +130,7 @@ export function OfficePage() {
     <SceneBoundary fallback={list}>
       <Suspense fallback={<p role="status">部屋を読んでいます</p>}>
         <OfficeScene people={people} batch={batch} moves={motionAllowed && !halted} onFail={fail}>
+          {failed}
           {halt}
           {news}
         </OfficeScene>

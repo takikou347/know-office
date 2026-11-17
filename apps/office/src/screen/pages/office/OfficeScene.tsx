@@ -1,18 +1,19 @@
 // オフィスの 3D の部屋。オフィスの画面を開いた時だけ読み込み、社員の姿の上に、押すと会話が開くリンクを重ね、出来事の動きを見せる
 import "./office.css";
 import { type ReactNode, useEffect, useRef } from "react";
-import type { Staff } from "../../mock.ts";
+import type { StaffOverview } from "@know-office/core";
 import { STAFF_STATES } from "../../parts/staff-status.tsx";
+import { roomStateOf } from "./layout.ts";
 import { type Loop, browserClock, createLoop } from "./loop.ts";
 import type { EventBatch } from "./OfficePage.tsx";
 import { planMotions } from "./plan.ts";
 import { type ColorResolver, type Room, createRoom } from "./room.ts";
-import { type TagSizer, createTagSizer, spreadTags } from "./tags.ts";
+import { type TagSizer, createTagSizer, separateBoxes, spreadTags } from "./tags.ts";
 import { OFFICE_THEME, themeOf } from "./themes.ts";
 
 export interface OfficeSceneProps {
   /** 部屋に置く社員と今の状態 */
-  people: readonly Staff[];
+  people: readonly StaffOverview[];
   /** 見せる出来事のまとまり */
   batch: EventBatch | null;
   /** 動かすか。動かさない時は歩かずに置き換え、息や打鍵も止める */
@@ -57,30 +58,38 @@ function colorResolver(host: HTMLElement): ColorResolver {
  * 社員のリンクと名札を、姿を覆う箱に重ねる関数を作る。名札は重ならないようにずらし、変わった時だけ style を書く
  * @param room 部屋
  * @param links 社員の id ごとのリンク
+ * @param labels 社員の id ごとの名札
  * @param sizer 名札の大きさを覚えて返す物。字が変わった時だけ測る
  * @returns 重ねる関数
  */
-function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, sizer: TagSizer): () => void {
+function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, labels: ReadonlyMap<string, HTMLAnchorElement>, sizer: TagSizer): () => void {
   const written = new Map<string, string>();
   return () => {
     const boxes = room.boxes();
     const tags = boxes.flatMap((b) => {
-      const tag = links.get(b.id)?.firstElementChild;
+      const tag = labels.get(b.id)?.firstElementChild;
       if (!(tag instanceof HTMLElement)) return [];
       const { width, height } = sizer.sizeOf(b.id, tag.textContent);
       return [{ id: b.id, x: b.left + b.width / 2, bottom: b.top, width, height }];
     });
     const shift = spreadTags(tags);
+    // リンクは重ならないように削り、名札は姿の箱の上に置く
+    const hits = new Map(separateBoxes(boxes).map((h) => [h.id, h]));
     for (const b of boxes) {
       const a = links.get(b.id);
-      if (!a) continue;
-      const style = `translate(${Math.round(b.left)}px, ${Math.round(b.top)}px)|${Math.round(b.width)}|${Math.round(b.height)}|${Math.round(shift[b.id] ?? 0)}`;
+      const h = hits.get(b.id);
+      if (!a || !h) continue;
+      const style = [h.left, h.top, h.width, h.height, b.left, b.top, b.width, shift[b.id] ?? 0].map(Math.round).join("|");
       if (written.get(b.id) === style) continue;
       written.set(b.id, style);
-      a.style.transform = `translate(${Math.round(b.left)}px, ${Math.round(b.top)}px)`;
-      a.style.width = `${Math.round(b.width)}px`;
-      a.style.height = `${Math.round(b.height)}px`;
-      a.style.setProperty("--ko-tag-shift", `${Math.round(shift[b.id] ?? 0)}px`);
+      a.style.transform = `translate(${Math.round(h.left)}px, ${Math.round(h.top)}px)`;
+      a.style.width = `${Math.round(h.width)}px`;
+      a.style.height = `${Math.round(h.height)}px`;
+      const label = labels.get(b.id);
+      if (!label) continue;
+      label.style.transform = `translate(${Math.round(b.left)}px, ${Math.round(b.top)}px)`;
+      label.style.width = `${Math.round(b.width)}px`;
+      label.style.setProperty("--ko-tag-shift", `${Math.round(shift[b.id] ?? 0)}px`);
     }
   };
 }
@@ -93,10 +102,11 @@ function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, sizer
 export default function OfficeScene({ people, batch, moves, onFail, children }: OfficeSceneProps) {
   const frame = useRef<HTMLDivElement>(null);
   const links = useRef(new Map<string, HTMLAnchorElement>());
+  const labels = useRef(new Map<string, HTMLAnchorElement>());
   const control = useRef<Control | null>(null);
   const played = useRef(0);
   // 部屋は開いた時に 1 回だけ組む。後の変わりは出来事の動きで見せるので、組む時は初めに受けた出来事の前の状態から始める
-  const first = useRef(batch?.before.staff ?? people);
+  const first = useRef(people.map((s) => ({ id: s.id, state: batch?.before.staff.find((b) => b.id === s.id)?.state ?? s.state })));
   // 組む時の動かすかの初めの値。後の変わりは下の effect で部屋に伝え、組み直さない
   const initialMoves = useRef(moves);
 
@@ -109,7 +119,7 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
     box.prepend(el);
     let room: Room;
     try {
-      const seats = first.current.map((s) => ({ id: s.id, state: s.state }));
+      const seats = first.current.map((s) => ({ id: s.id, state: roomStateOf(s.state) }));
       room = createRoom(el, seats, themeOf(OFFICE_THEME), colorResolver(box), { moves: initialMoves.current, onLost: onFail });
     } catch {
       el.remove();
@@ -118,10 +128,10 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
     }
     // 名札は字が変わった時だけ測る。字の形を変える字体の読み込みと画面の大きさの変わりでは測り直す
     const sizer = createTagSizer((id) => {
-      const tag = links.current.get(id)?.firstElementChild;
+      const tag = labels.current.get(id)?.firstElementChild;
       return tag instanceof HTMLElement ? { width: tag.offsetWidth, height: tag.offsetHeight } : { width: 0, height: 0 };
     });
-    const place = placer(room, links.current, sizer);
+    const place = placer(room, links.current, labels.current, sizer);
     const loop = createLoop((t) => {
       room.render(t);
       place();
@@ -182,14 +192,14 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
     if (!c || !batch || batch.id === played.current) return;
     played.current = batch.id;
     for (const e of batch.events) c.room.play(planMotions(e, c.room.actors(), { walks: moves }));
-    c.room.setStates(people.map((s) => ({ id: s.id, state: s.state })));
+    c.room.setStates(people.map((s) => ({ id: s.id, state: roomStateOf(s.state) })));
     c.place();
   }, [batch, people, moves]);
 
   useEffect(() => {
     const c = control.current;
     if (!c) return;
-    c.room.setStates(people.map((s) => ({ id: s.id, state: s.state })));
+    c.room.setStates(people.map((s) => ({ id: s.id, state: roomStateOf(s.state) })));
     c.place();
   }, [people]);
 
@@ -205,6 +215,25 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
             ref={(a) => {
               if (a) links.current.set(s.id, a);
               else links.current.delete(s.id);
+            }}
+          >
+            <span className="ko-office-name">
+              {s.role} {STAFF_STATES[s.state].label}
+            </span>
+          </a>
+        ))}
+        {/* 名札は姿を覆う箱より後ろに並べ、ほかの社員の箱に隠れず押せるようにする。読み上げとキーボードは姿を覆う箱で受ける */}
+        {people.map((s) => (
+          <a
+            key={s.id}
+            className="ko-office-label"
+            href={`/staff/${s.id}`}
+            data-state={s.state}
+            aria-hidden="true"
+            tabIndex={-1}
+            ref={(a) => {
+              if (a) labels.current.set(s.id, a);
+              else labels.current.delete(s.id);
             }}
           >
             <span className="ko-office-tag">

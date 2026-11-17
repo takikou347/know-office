@@ -1,5 +1,29 @@
 // オフィスの部屋の配置。タイル (1 マス = 1) の上に家具、席、渡す所、休憩所を置き、家具を避けて歩く道を決める
-import type { Staff } from "../../mock.ts";
+import type { StaffState } from "@know-office/core";
+
+/** 部屋の中で見せる社員の様子。働く、待つ、止めた、退勤した */
+export type RoomState = "working" | "paused" | "stopped" | "off";
+
+/**
+ * 社員 DO の状態を、部屋の中で見せる様子にする。片付けと呼ばれた時は働く姿、待つ時は休憩所で待つ姿にする
+ * @param state 社員 DO の状態
+ * @returns 部屋の中の様子
+ */
+export function roomStateOf(state: StaffState): RoomState {
+  switch (state) {
+    case "working":
+    case "wrapping":
+    case "called":
+      return "working";
+    case "waiting":
+      return "paused";
+    case "stopped":
+    case "off":
+      return state;
+    default:
+      return state satisfies never;
+  }
+}
 
 /** 床の上の点 (タイルの単位)。x は右、z は手前が正 */
 export interface Point {
@@ -110,7 +134,7 @@ export function restSpotOf(id: keyof typeof SEATS): Spot {
  * @param state 社員の状態
  * @returns 居る所。部屋に居ない時は null
  */
-export function stationOf(id: string, state: Staff["state"]): Spot | null {
+export function stationOf(id: string, state: RoomState): Spot | null {
   if (!isSeated(id)) return null;
   switch (state) {
     case "working":

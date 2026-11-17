@@ -63,6 +63,12 @@ describe("動きの列", () => {
     expect(walks(planMotions({ kind: "assign", taskId: "t9", title: "X", from: "president", to: "builder" }, gone, { walks: true }))).toEqual([]);
   });
 
+  it("部屋に居ないオーナーが渡した仕事は、誰も歩かず書類だけが届く", () => {
+    expect(planMotions({ kind: "assign", taskId: "t9", title: "X", from: "owner", to: "builder" }, actors, { walks: true })).toEqual([
+      { kind: "give", actor: "owner", desk: "builder" },
+    ]);
+  });
+
   it("状態が変わると、前の場所から次の場所へ歩き、退勤すると部屋から居なくなる", () => {
     const steps = planMotions({ kind: "state", staffId: "reviewer", from: "paused", to: "working" }, actors, { walks: true });
     const [go] = walks(steps);

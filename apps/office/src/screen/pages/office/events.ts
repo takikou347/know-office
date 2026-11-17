@@ -1,63 +1,42 @@
-// 画面が持つ今のデータ (社員の状態、タスクの担当と状態) の変わりから、オフィスで見せる出来事を決める
-import type { Staff, Task } from "../../mock.ts";
+// 配信で届いた仕事の出来事と社員の状態の印から、オフィスで見せる出来事を決め、読み上げる文にする
+import type { OfficeWork, StaffState } from "@know-office/core";
+import type { RoomState } from "./layout.ts";
 
-/** 仕事を渡す社員 */
-export const ASSIGNER = "president";
-/** レビューをする社員 */
-export const REVIEWER = "reviewer";
-
-/** 出来事を決めるのに使うタスクの項目 */
-export type WorkTask = Pick<Task, "id" | "staffId" | "title" | "state">;
-
-/** ある時の、社員の状態とタスクの写し */
+/** ある時の社員の状態の写し */
 export interface OfficeSnapshot {
-  staff: readonly Pick<Staff, "id" | "state">[];
-  tasks: readonly WorkTask[];
+  staff: readonly { id: string; state: StaffState }[];
 }
 
-/** オフィスで見せる出来事 */
+/** オフィスで見せる出来事。社員でない側 (オーナー) は owner で、部屋には居ない */
 export type OfficeEvent =
   | { kind: "assign"; taskId: string; title: string; from: string; to: string }
   | { kind: "review-request"; taskId: string; title: string; from: string; to: string }
   | { kind: "approve"; taskId: string; title: string; by: string; owner: string }
   | { kind: "send-back"; taskId: string; title: string; by: string; to: string }
-  | { kind: "state"; staffId: string; from: Staff["state"]; to: Staff["state"] };
+  | { kind: "state"; staffId: string; from: RoomState; to: RoomState };
 
 /**
- * 2 つの写しの違いから出来事を決める。タスクの並びの順に、渡す、レビューを頼む、承認か差し戻しを出し、最後に社員の状態の変わりを出す
- * @param prev 前の写し
- * @param next 今の写し
- * @returns 出来事の並び
+ * 配信で届いた仕事の出来事を、オフィスで見せる出来事にする
+ * @param work 仕事の出来事
+ * @returns オフィスの出来事
  */
-export function eventsBetween(prev: OfficeSnapshot, next: OfficeSnapshot): OfficeEvent[] {
-  const events: OfficeEvent[] = [];
-  const before = new Map(prev.tasks.map((t) => [t.id, t]));
-  for (const t of next.tasks) {
-    const old = before.get(t.id);
-    const isNew = old === undefined;
-    const handedOver = old !== undefined && old.staffId !== t.staffId;
-    const forOthers = t.staffId !== ASSIGNER;
-    // 新しいタスクと担当の替わったタスクは、社長が担当に渡す
-    if ((isNew || handedOver) && forOthers) events.push({ kind: "assign", taskId: t.id, title: t.title, from: ASSIGNER, to: t.staffId });
-    const wasWaiting = old?.state === "可待ち";
-    const isWaiting = t.state === "可待ち";
-    const byOthers = t.staffId !== REVIEWER;
-    const backToWork = t.state === "今" || t.state === "次";
-    const entersReview = isWaiting && old?.state !== t.state;
-    if (entersReview && byOthers) events.push({ kind: "review-request", taskId: t.id, title: t.title, from: t.staffId, to: REVIEWER });
-    if (wasWaiting && t.state === "済") events.push({ kind: "approve", taskId: t.id, title: t.title, by: REVIEWER, owner: t.staffId });
-    if (wasWaiting && backToWork) events.push({ kind: "send-back", taskId: t.id, title: t.title, by: REVIEWER, to: t.staffId });
+export function officeEventOf(work: OfficeWork): OfficeEvent {
+  const task = { taskId: work.nodeId, title: work.title };
+  switch (work.action) {
+    case "assign":
+      return { kind: "assign", ...task, from: work.from, to: work.to };
+    case "review-request":
+      return { kind: "review-request", ...task, from: work.from, to: work.to };
+    case "approve":
+      return { kind: "approve", ...task, by: work.from, owner: work.to };
+    case "send-back":
+      return { kind: "send-back", ...task, by: work.from, to: work.to };
+    default:
+      return work.action satisfies never;
   }
-  const states = new Map(prev.staff.map((s) => [s.id, s.state]));
-  for (const s of next.staff) {
-    const was = states.get(s.id);
-    const changed = was !== undefined && was !== s.state;
-    if (changed) events.push({ kind: "state", staffId: s.id, from: was, to: s.state });
-  }
-  return events;
 }
 
-const STATE_WORDS: Readonly<Record<Staff["state"], string>> = {
+const STATE_WORDS: Readonly<Record<RoomState, string>> = {
   working: "働き始めた",
   paused: "休憩所で待ち始めた",
   stopped: "止められた",

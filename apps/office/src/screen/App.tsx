@@ -4,6 +4,7 @@ import { withScreens } from "./extensions.ts";
 import { type Navigate, Page, type ToggleExtension } from "./pages.tsx";
 import { useRevealFocus } from "./parts/focus.ts";
 import { LiveProvider } from "./parts/live.tsx";
+import { OfficeNewsFeed } from "./pages/office/news.ts";
 import { LiveNoticeBar, NoticeHold, NoticeProvider } from "./parts/notices.tsx";
 import { bottomCurrentOf, bottomItems, headingOf, morePath, screenOf, sideItemsWith } from "./routes.ts";
 
@@ -27,6 +28,7 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
   useRevealFocus();
   return (
     <LiveProvider>
+      <OfficeNewsFeed />
       <NoticeProvider>
         <NoticeHold>
           <AppShell

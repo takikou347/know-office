@@ -15,7 +15,7 @@ export { AppError, ERROR_CODES, PROBLEMS, type FieldError } from "./errors.ts";
 export { AuditInput, AuditRow, AuditVerification, VerifyAuditInput } from "./schemas/audit.ts";
 export { ERROR_SOURCES, ErrorEvent, ErrorEventCode, Trace, TraceId } from "./schemas/trace.ts";
 export { Notice, NoticeLevel, NoticeLink } from "./schemas/notices.ts";
-export { codePoints, CreateMessageInput, headChars, LiveEvent, LiveTicket, Message, MessageDelivery, MESSAGE_INLINE_CHARS, MESSAGE_MAX_CHARS, type OwnerMessage, ownerMessagesPrompt } from "./schemas/conversation.ts";
+export { codePoints, CreateMessageInput, headChars, LiveEvent, LiveTicket, Message, MessageDelivery, MESSAGE_INLINE_CHARS, MESSAGE_MAX_CHARS, OFFICE_WORK_ACTIONS, OfficeWork, type OwnerMessage, ownerMessagesPrompt } from "./schemas/conversation.ts";
 export { StorageUse } from "./schemas/storage.ts";
 export { AttendanceQuery, Dashboard, Month, RecordGroup, RecordSummary, RecordTotals, Uptime, UptimeQuery } from "./schemas/records.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";

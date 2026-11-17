@@ -75,6 +75,8 @@ export function createDirector(actors: ReadonlyMap<string, ActorState>, onGive: 
   // 段を終えた時の変わりを当てる
   const finish = (step: Step, now: number) => {
     const a = actors.get(step.actor);
+    // 部屋に居ない者 (オーナー) が渡した書類も机に届ける
+    if (step.kind === "give" && !a) onGive(step.desk);
     if (!a) return;
     switch (step.kind) {
       case "walk": {

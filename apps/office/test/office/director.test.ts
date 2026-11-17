@@ -50,6 +50,15 @@ describe("動きを進める", () => {
     expect(director.busy()).toBe(false);
   });
 
+  it("部屋に居ない者 (オーナー) が渡した書類も机に届く", () => {
+    const { given, director } = setup();
+    director.push([{ kind: "give", actor: "owner", desk: "builder" }]);
+    director.advance(0);
+    director.advance(GIVE_MS);
+    expect(given).toHaveBeenCalledWith("builder");
+    expect(director.busy()).toBe(false);
+  });
+
   it("印は出してから時間が過ぎると消える", () => {
     const { a, director } = setup();
     director.push([{ kind: "mark", actor: "president", mark: "ok" }]);

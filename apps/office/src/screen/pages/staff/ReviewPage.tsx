@@ -13,8 +13,6 @@ export interface ReviewPageProps {
   nodeId: string;
   /** 作った社員 ID。仕事の山に戻る道に使う */
   staffId: string;
-  /** 判断を入口が受けた時 */
-  onVerdict?: ((verdict: "approve" | "request_changes") => void) | undefined;
 }
 
 /**
@@ -35,11 +33,10 @@ function useMarkSeen(nodeId: string, head: ReviewHead | null): void {
 interface VerdictProps {
   head: ReviewHead;
   onDone: (text: string) => void;
-  onVerdict?: ((verdict: "approve" | "request_changes") => void) | undefined;
 }
 
 /** 承認か差し戻しを出す。読んだ先を添え、間に変更が足されていれば入口が 409 で断る */
-function Verdict({ head, onDone, onVerdict }: VerdictProps) {
+function Verdict({ head, onDone }: VerdictProps) {
   const api = useContext(ApiContext);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState<"approve" | "request_changes" | null>(null);
@@ -49,7 +46,6 @@ function Verdict({ head, onDone, onVerdict }: VerdictProps) {
     setBusy(verdict);
     const res = await api.api.v1.reviews[":nodeId"].verdict.$post({ param: { nodeId: head.nodeId }, json: { verdict, body, baseSha: head.headSha } }).catch(() => null);
     setBusy(null);
-    if (res?.ok) onVerdict?.(verdict);
     if (res?.ok) return onDone(verdict === "approve" ? "承認を出し、GitHub にも写しました" : "差し戻し、作る役に戻しました");
     setFailed(res ? await failureOf(res) : NETWORK);
   };
@@ -71,7 +67,7 @@ function Verdict({ head, onDone, onVerdict }: VerdictProps) {
 }
 
 /** レビューの画面 */
-export function ReviewPage({ nodeId, staffId, onVerdict }: ReviewPageProps) {
+export function ReviewPage({ nodeId, staffId }: ReviewPageProps) {
   const [version, setVersion] = useState(0);
   const loaded = useReviewHead(nodeId, version);
   const head = loaded.state === "ok" ? loaded.data : null;
@@ -136,7 +132,7 @@ export function ReviewPage({ nodeId, staffId, onVerdict }: ReviewPageProps) {
         </Alert>
       ) : null}
       <Part title="判断">
-        <Verdict head={data} onDone={reload} onVerdict={onVerdict} />
+        <Verdict head={data} onDone={reload} />
       </Part>
       <Part title="直す">
         <Select aria-label="直すファイル" placeholder="直すファイルを選ぶ" value={editing} onValueChange={setEditing} options={data.files.filter((f) => f.status !== "removed").map((f) => ({ value: f.path, label: f.path }))} />

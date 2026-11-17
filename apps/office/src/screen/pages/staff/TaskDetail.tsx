@@ -1,14 +1,12 @@
 // 仕事の山とタスクの詳細。社員のタスクを入口から読んで並べ、開いたタスクは出来事の流れと、レビューがあればレビューを出す (タスクとレビューの 3.6)
 import { NodeDetail, NodeTree, type StaffOverview } from "@know-office/core";
 import { List, Stack, Status, Timeline } from "knowidea-ui";
-import { useEffect } from "react";
 import { z } from "zod";
 import { jstDateTime } from "../../format.ts";
 import { useLiveTick } from "../../parts/live.tsx";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part } from "../../parts/section.tsx";
 import { NODE_STATUSES, taskHref } from "../../parts/tasks.ts";
-import { knowNode, reviewDecided } from "../office/feed.ts";
 import { ReviewPage } from "./ReviewPage.tsx";
 
 /** 1 度に読むタスクの数 */
@@ -61,9 +59,6 @@ export function TaskDetail({ staffId, nodeId }: TaskDetailProps) {
   const tick = useLiveTick((e) => e.type === "node" && e.node.id === nodeId);
   const loaded = useLoad(NodeDetail, (a) => a.api.v1.nodes[":nodeId"].$get({ param: { nodeId } }), tick);
   const node = loaded.state === "ok" ? loaded.data : null;
-  useEffect(() => {
-    if (node) knowNode(node);
-  }, [node]);
   // レビューはレビュー待ちか、レビューの出来事があるタスクにだけある。読めない時はレビューの側で読み直す
   const hasReview = node === null || node.status === "review" || node.events.some((e) => e.kind.includes("review"));
   return (
@@ -79,7 +74,7 @@ export function TaskDetail({ staffId, nodeId }: TaskDetailProps) {
       ) : null}
       {loaded.state === "loading" ? <p role="status">タスクを読んでいます</p> : null}
       {loaded.state === "failed" ? <FailedAlert title="タスクを読めませんでした" failure={loaded} /> : null}
-      {hasReview ? <ReviewPage key={nodeId} nodeId={nodeId} staffId={staffId} onVerdict={(v) => reviewDecided(nodeId, v)} /> : null}
+      {hasReview ? <ReviewPage key={nodeId} nodeId={nodeId} staffId={staffId} /> : null}
     </Stack>
   );
 }

@@ -76,14 +76,33 @@ export const LiveTicket = z.object({ ticket: z.string(), expiresAt: z.iso.dateti
 /** 配信の作業トークンの型 */
 export type LiveTicket = z.infer<typeof LiveTicket>;
 
+/** オフィスで見せる仕事の出来事の種類。渡す、レビューを頼む、承認、差し戻し */
+export const OFFICE_WORK_ACTIONS = ["assign", "review-request", "approve", "send-back"] as const;
+
+/** オフィスで見せる仕事の出来事。社員でない側 (オーナー、ゲートウェイ) は owner にする */
+export const OfficeWork = z
+  .object({
+    nodeId: z.uuid(),
+    title: z.string().min(1).max(200),
+    action: z.enum(OFFICE_WORK_ACTIONS),
+    from: z.union([StaffId, z.literal("owner")]),
+    to: z.union([StaffId, z.literal("owner")]),
+  })
+  .strict();
+
+/** オフィスで見せる仕事の出来事の型 */
+export type OfficeWork = z.infer<typeof OfficeWork>;
+
 /**
- * LiveDO が画面に流す出来事。社員の状態が変わった、通知が足された、タスクの木の 1 件が変わった (この 2 つは印だけで、画面が GET で読む)、発言が足された、オーナーの発言を社員に渡した (ID と道と時刻だけ)。
- * 発言の本文は頭の 2,000 字までで、切った時は truncated にし、画面が GET で読み直す。オーナーの情報、鍵、作業トークンは載せない
+ * LiveDO が画面に流す出来事。社員の状態が変わった、通知が足された、タスクの木の 1 件が変わった (この 2 つは印だけで、画面が GET で読む)、発言が足された、オーナーの発言を社員に渡した (ID と道と時刻だけ)、
+ * オフィスで見せる仕事の出来事 (渡した、レビューを頼んだ、承認した、差し戻した) が起きた。
+ * 発言の本文は頭の 2,000 字までで、切った時は truncated にし、画面が GET で読み直す。仕事の出来事はタスクの題と誰から誰へだけを持つ。オーナーの情報、鍵、作業トークンは載せない
  */
 export const LiveEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("staff"), staff: z.object({ id: StaffId, state: StaffState, nodeId: z.string().nullable() }).strict() }).strict(),
   z.object({ type: z.literal("notice"), notice: z.object({ id: z.uuid() }).strict() }).strict(),
   z.object({ type: z.literal("node"), node: z.object({ id: z.uuid() }).strict() }).strict(),
+  z.object({ type: z.literal("work"), work: OfficeWork }).strict(),
   z
     .object({
       type: z.literal("message_delivered"),

@@ -9,7 +9,7 @@ import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 import { toNotice } from "../ledger/notices.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
-import { toNode } from "../work/nodes.ts";
+import { toNode } from "../work/node-view.ts";
 import { loadStaff } from "./staff.ts";
 
 const router = createRouter();

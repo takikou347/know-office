@@ -47,7 +47,31 @@
   outline-offset: 2px;
 }
 
+/* 名札の置き場。姿を覆う箱と同じ所に置き、名札だけを押せる */
+.ko-office-label {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--color-text);
+  text-decoration: none;
+  pointer-events: none;
+}
+
+/* 箱の名前は読み上げだけに残し、見せるのは名札 */
+.ko-office-name {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .ko-office-tag {
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -63,11 +87,11 @@
   white-space: nowrap;
 }
 
-.ko-office-who[data-state="stopped"] .ko-office-tag {
+.ko-office-label[data-state="stopped"] .ko-office-tag {
   border-color: var(--color-error);
 }
 
-.ko-office-who[data-state="off"] .ko-office-tag {
+.ko-office-label[data-state="off"] .ko-office-tag {
   color: var(--color-text-muted);
 }
 

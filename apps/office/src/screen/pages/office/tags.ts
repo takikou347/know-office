@@ -72,3 +72,48 @@ export function createTagSizer(measure: (id: string) => TagSize): TagSizer {
     reset: () => known.clear(),
   };
 }
+
+/** 社員のリンクの箱 (CSS のピクセル) */
+export interface HitBox {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 社員のリンクの箱が重ならないように削る。重なる 2 つは、重なりの浅い向きで、重なりの真ん中で分ける。押した所と開く社員が食い違わず、押す的が重ならない (WCAG 2.5.8)
+ * @param boxes 社員の姿を覆う箱
+ * @returns 重ならないように削った箱。並びは受けた順
+ */
+export function separateBoxes(boxes: readonly HitBox[]): HitBox[] {
+  const out = boxes.map((b) => ({ ...b }));
+  for (const [i, a] of out.entries()) {
+    for (const b of out.slice(i + 1)) {
+      const overX = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
+      const overY = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+      if (overX <= 0 || overY <= 0) continue;
+      if (overX <= overY) cut(a, b, "left", "width", overX);
+      else cut(a, b, "top", "height", overY);
+    }
+  }
+  return out;
+}
+
+/**
+ * 2 つの箱を、start の向きで重なりの真ん中で分ける。手前 (start の小さい側) の箱の終わりと、奥の箱の始まりを真ん中にそろえる
+ * @param a 1 つ目の箱。その場で書き換える
+ * @param b 2 つ目の箱。その場で書き換える
+ * @param start 分ける向きの始まりの項目
+ * @param size 分ける向きの大きさの項目
+ * @param over 重なりの長さ
+ */
+function cut(a: HitBox, b: HitBox, start: "left" | "top", size: "width" | "height", over: number) {
+  const [first, second] = a[start] + a[size] / 2 <= b[start] + b[size] / 2 ? [a, b] : [b, a];
+  const mid = Math.max(first[start], second[start]) + over / 2;
+  const secondEnd = second[start] + second[size];
+  first[size] = Math.max(0, mid - first[start]);
+  second[start] = mid;
+  second[size] = Math.max(0, secondEnd - mid);
+}

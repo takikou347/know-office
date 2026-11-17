@@ -8,15 +8,7 @@ const SCREEN = join(import.meta.dirname, "../../src/screen");
 /**
  * まだ仮のデータを読んでいる画面のファイルと、受け持つ Issue。API につないだら消す。デプロイの前に空にする
  */
-const STILL_MOCK: Record<string, string> = {
-  "pages/office/OfficePage.tsx": "#87",
-  "pages/office/OfficeScene.tsx": "#87",
-  "pages/office/events.ts": "#87",
-  "pages/office/feed.ts": "#87",
-  "pages/office/layout.ts": "#87",
-  "pages/office/motion.ts": "#87",
-  "pages/office/room.ts": "#87",
-};
+const STILL_MOCK: Record<string, string> = {};
 
 /** 画面のソースの拡張子 */
 const SOURCE = /\.[cm]?[jt]sx?$/;

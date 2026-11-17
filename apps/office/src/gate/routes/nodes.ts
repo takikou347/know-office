@@ -5,7 +5,8 @@ import { createRouter } from "../app.ts";
 import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, ok } from "../respond.ts";
 import { notifyStaff } from "../work/loop.ts";
-import { createNode, loadAssigned, loadDetail, loadTrees, toNode, updateNode } from "../work/nodes.ts";
+import { toNode } from "../work/node-view.ts";
+import { createNode, loadAssigned, loadDetail, loadTrees, updateNode } from "../work/nodes.ts";
 
 const router = createRouter();
 

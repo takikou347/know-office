@@ -11,6 +11,8 @@ import { recordError } from "../ledger/errors.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { announce } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
+import { announceWork, type WorkCause } from "./office-work.ts";
+import { iso, toNode } from "./node-view.ts";
 
 /** nodes の行 */
 export type NodeRow = typeof nodes.$inferSelect;
@@ -50,8 +52,11 @@ export function recordsOf(env: Bindings, at: number): D1Database {
   return db;
 }
 
+/** タスクの出来事。項目の説明は appendNodeEvent の JSDoc */
+type NodeEventInput = WorkCause & { nodeId: string; detail: Record<string, unknown>; key?: string };
+
 /**
- * タスクの出来事を node_events に 1 行足す
+ * タスクの出来事を node_events に 1 行足し、画面に印を配る。オフィスで見せる出来事なら、足せた時だけ仕事の出来事も配る
  * @param env バインディング
  * @param input 出来事
  * @param input.nodeId タスク ID
@@ -59,16 +64,20 @@ export function recordsOf(env: Bindings, at: number): D1Database {
  * @param input.kind 出来事の種類 (created、started、review_rejected など)
  * @param input.detail 中身。鍵やオーナーの情報は入れない
  * @param input.key 書き直しても 1 行にする時の鍵。ID を時刻とこの鍵から決める。無ければ新しい ID
+ * @param input.assigned 頼む先を替えた時の前と後の担当。updated の時だけ渡す
  * @param actor 時刻とトレース ID
  */
-export async function appendNodeEvent(env: Bindings, input: { nodeId: string; staffId: string | null; kind: string; detail: Record<string, unknown>; key?: string }, actor: Actor): Promise<void> {
+export async function appendNodeEvent(env: Bindings, input: NodeEventInput, actor: Actor): Promise<void> {
   const id = input.key === undefined ? newId(clockAt(actor.now)) : await keyedId(actor.now, input.key);
-  await drizzle(recordsOf(env, actor.now))
+  const added = await drizzle(recordsOf(env, actor.now))
     .insert(nodeEvents)
     .values({ id, at: actor.now, nodeId: input.nodeId, staffId: input.staffId, kind: input.kind, detail: input.detail, traceId: actor.traceId ?? null })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: nodeEvents.id });
   // 木の 1 件が変わる時は必ず出来事を足すので、ここで印を配れば画面はどの変わり方でも読み直せる
   await announce(env, { type: "node", node: { id: input.nodeId } }, clockAt(actor.now));
+  // 同じ鍵の 2 度目 (GitHub の送り直しなど) で、オフィスに同じ出来事を 2 度見せない
+  if (added.length > 0) await announceWork(env, input, clockAt(actor.now));
 }
 
 /**
@@ -247,7 +256,7 @@ export async function updateNode(env: Bindings, id: string, version: number, cha
   const changed = await saveNode(env.DB, next, row.version);
   if (!changed) throw new AppError("conflict", "バージョンが違う");
   const fields = Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined));
-  await appendNodeEvent(env, { nodeId: id, staffId: staffOrNull(actor.by), kind: "updated", detail: fields }, actor);
+  await appendNodeEvent(env, { nodeId: id, staffId: staffOrNull(actor.by), kind: "updated", detail: fields, assigned: { from: row.assignee, to: next.assignee } }, actor);
   await auditFrom(env, { at: actor.now, actor: actor.by, action: "node.update", target: id, scope: row.scope, detail: fields, traceId: actor.traceId });
   if (change.status === "dropped") await leaveDropped(env, row, actor.now);
   return next;
@@ -388,33 +397,6 @@ function progressOf(rows: NodeRow[]): Map<string, number> {
     else if (!out.has(r.id)) count(r);
   }
   return out;
-}
-
-const iso = (at: number) => new Date(at).toISOString();
-
-/**
- * 行を返す形にする
- * @param row nodes の行
- * @param progress 進み具合
- * @returns 木の 1 件
- */
-export function toNode(row: NodeRow, progress: number): Node {
-  return {
-    id: row.id,
-    kind: row.kind,
-    parentId: row.parentId,
-    scope: row.scope,
-    title: row.title,
-    body: row.body ?? "",
-    taskKind: row.taskKind,
-    assignee: row.assignee,
-    status: row.status,
-    priority: row.priority,
-    progress,
-    version: row.version,
-    createdAt: iso(row.createdAt),
-    updatedAt: iso(row.updatedAt),
-  };
 }
 
 /**

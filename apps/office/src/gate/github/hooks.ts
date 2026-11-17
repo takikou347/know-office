@@ -394,6 +394,7 @@ async function applyFromGitHub(env: Bindings, found: FromGitHub, review: { id: s
       log("info", "github_review_stale", { reviewId: review.id, githubReviewId: found.githubId });
       return;
     }
+    // TODO(#199): 同じレビューを配信 ID を替えて受け直した時に、出来事を 2 度足さないよう GitHub のレビュー ID から鍵を決める
     // 出来事の node_events は年ごとの記録の D1 にあり、D1 のバッチは 1 つの D1 の中だけなので、同じバッチに入れられない
     const kind = found.verdict === "approve" ? "owner_approved" : "review_rejected";
     await appendNodeEvent(env, { nodeId: review.node_id, staffId: null, kind, detail: { by: "owner", summary: found.body, githubReviewId: found.githubId } }, actor);

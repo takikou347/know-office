@@ -1,5 +1,5 @@
 // 人形の社員の、することごとの、ある時刻の形。three.js を使わずに決め、部屋はこの形を姿に当てる
-import type { Staff } from "../../mock.ts";
+import type { RoomState } from "./layout.ts";
 
 /** 社員のすること。状態から決まる 4 つに、出来事で歩く時を足す */
 export type Activity = "work" | "wait" | "stopped" | "off" | "walk";
@@ -39,7 +39,7 @@ const blinkAt = (t: number) => t % 3700 < 150;
  * @param state 社員の状態
  * @returns すること
  */
-export function activityOf(state: Staff["state"]): Activity {
+export function activityOf(state: RoomState): Activity {
   const map = { working: "work", paused: "wait", stopped: "stopped", off: "off" } as const;
   return map[state];
 }
