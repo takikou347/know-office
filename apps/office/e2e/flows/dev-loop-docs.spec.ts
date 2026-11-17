@@ -140,8 +140,9 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
       const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
       await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: origin }, data: { version, status: "dropped" } });
     }
+    // 子のタスクは消さない。開発担当がまだ持っている事があり、消すと続きを呼んで落ち、後の通しの社員を塞ぐ (次の通しの前処理が、持つ物を外す)
     try {
-      seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM task_docs WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
+      seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM task_docs WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'`);
     } finally {
       // 後始末が落ちても勤務の時刻を戻す。外したタスクを開発担当に戻すのはその後 (afterEach)
       await restoreSchedule?.();
