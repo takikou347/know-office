@@ -1,5 +1,6 @@
 // 会話の言葉の指示の通し。設定の画面で開き、レビュー担当に「今日は休みにして」と話しかけると、発言の下に休みの指示が出て、会話から取り消せる。ゲートウェイの返事は差し替えない (社員と勤怠の 3.4)
 import type { Page } from "@playwright/test";
+import { z } from "zod";
 import { FAKES } from "../helpers/fakes.ts";
 import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
@@ -43,6 +44,20 @@ function today(): string {
 }
 
 /**
+ * 明日の日本時間の日
+ * @returns YYYY-MM-DD
+ */
+function tomorrow(): string {
+  return new Date(Date.now() + 33 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** 指示の一覧の返事 */
+const OrderList = z.object({ data: z.array(z.object({ id: z.string(), cancelledAt: z.string().nullable() }).loose()) });
+
+/** 代わりの Claude API に届いた要求のうち、ゲートウェイの抜き出しの物 */
+const Requests = z.array(z.object({ tool_choice: z.object({ name: z.string() }).loose().optional() }).loose());
+
+/**
  * M/D の形の今日
  * @returns M/D
  */
@@ -70,6 +85,22 @@ test.describe("オーナーの指示に合わせる", () => {
       await expect(bubble.getByText(`${shortToday()} を休みにしました (取り消しました)`)).toBeVisible();
       await page.goto("/staff/reviewer");
       await expect(page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByText(/に取り消した/)).toBeVisible();
+      // 先にほかの所で取り消された指示は、会話のボタンから取り消すと「もう取り消されています」と出す
+      await scriptOrders(page, [{ kind: "off", day: tomorrow() }]);
+      const next = await sayToReviewer(page, `明日は休みにして ${String(Date.now())}`);
+      const button = next.getByRole("button", { name: "休みの指示を取り消す" });
+      await expect(button).toBeVisible();
+      // 押せる大きさは 44px 以上で、幅 390 でも横にはみ出さない
+      expect((await button.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(button).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const listed = OrderList.parse(await (await page.request.get(`/api/v1/staff/reviewer/orders?day=${tomorrow()}`)).json()).data;
+      for (const o of listed.filter((x) => x.cancelledAt === null)) expect((await page.request.delete(`/api/v1/staff/reviewer/orders/${o.id}`)).status()).toBe(200);
+      await button.click();
+      await expect(next.getByRole("status")).toHaveText("もう取り消されています");
+      await expect(next.getByText(/を休みにしました \(取り消しました\)/)).toBeVisible();
     } finally {
       try {
         await setChatOrders(page, false);
@@ -82,7 +113,7 @@ test.describe("オーナーの指示に合わせる", () => {
   test("会話の言葉の指示が閉じていれば抜き出さない", async ({ page }) => {
     cancelLeftOrders("reviewer");
     await setChatOrders(page, false);
-    const extracted = async () => (await (await page.request.get(`${FAKES}/anthropic/__fake/requests`)).text()).split('"name":"record_orders"').length;
+    const extracted = async () => Requests.parse(await (await page.request.get(`${FAKES}/anthropic/__fake/requests`)).json()).filter((r) => r.tool_choice?.name === "record_orders").length;
     const before = await extracted();
     const said = `閉じた時の休み ${String(Date.now())}`;
     const bubble = await sayToReviewer(page, `今日は休みにして ${said}`);

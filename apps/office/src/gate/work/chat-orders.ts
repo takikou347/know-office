@@ -28,7 +28,7 @@ import { CHAT_ORDERS, loadSwitch } from "../services/switches.ts";
 import { clockAt, loadSchedule } from "./attendance.ts";
 import { claudeKey } from "./claude-key.ts";
 import { recordsOf } from "./nodes.ts";
-import { addOrder } from "./orders.ts";
+import { addOrder, untilOf } from "./orders.ts";
 
 /** Anthropic の API の版 */
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -218,22 +218,22 @@ async function keep(c: Context<GateEnv>, code: "chat_orders_failed" | "order_rep
  * @param message 発言 ID と本文
  * @param message.id 発言 ID
  * @param message.body 本文
- * @returns 足した指示と、パスキーの確認が無いので足さなかった延長
+ * @returns 足した指示と、パスキーの確認が無いので足さなかった延長。restToday は今日の休みを抜き出したか (もう休みで足さなかった時も true)
  */
-export async function readOrders(c: Context<GateEnv>, staffId: StaffId, message: { id: string; body: string }): Promise<(MessageOrder | SkippedOrder)[]> {
+export async function readOrders(c: Context<GateEnv>, staffId: StaffId, message: { id: string; body: string }): Promise<{ orders: (MessageOrder | SkippedOrder)[]; restToday: boolean }> {
   const env = c.env;
   const now = c.var.clock.now();
   let extracted: Extracted;
   try {
     const setting = await loadSwitch(env.DB, CHAT_ORDERS);
-    if (!setting.value.enabled) return [];
+    if (!setting.value.enabled) return { orders: [], restToday: false };
     const today = jstDay(now);
     // 呼んで失敗した回も数えるので、印は返さない
-    if (!(await reserveRead(env.DB, { messageId: message.id, day: today, perDay: setting.value.perDay }, now))) return [];
+    if (!(await reserveRead(env.DB, { messageId: message.id, day: today, perDay: setting.value.perDay }, now))) return { orders: [], restToday: false };
     extracted = await extractOrders(env, c.var.fetch, { body: message.body, today, end: (await loadSchedule(env.DB)).end });
   } catch (error) {
     await keep(c, "chat_orders_failed", error);
-    return [];
+    return { orders: [], restToday: false };
   }
   try {
     await recordUsage(env, { staffId, messageId: message.id, usage: extracted.usage, traceId: c.var.traceId }, now);
@@ -244,13 +244,18 @@ export async function readOrders(c: Context<GateEnv>, staffId: StaffId, message:
   for (const order of extracted.orders) {
     // 延長は働く時間を増やすので、ボタンと同じくパスキーで確かめた時だけ足す
     if (order.kind === "extend" && !hasStepUp(c)) {
-      out.push({ kind: "extend", day: order.day, until: order.until ?? "", skipped: "step_up_required" });
+      // ボタンで出し直せる延長だけを案内する。過ぎた時刻や終わりより前の延長は黙って捨てる
+      const valid = await untilOf(env.DB, order, now).then(
+        () => true,
+        () => false,
+      );
+      if (valid) out.push({ kind: "extend", day: order.day, until: order.until ?? "", skipped: "step_up_required" });
       continue;
     }
     const added = await addChatOrder(c, staffId, message.id, order);
     if (added) out.push(added);
   }
-  return out;
+  return { orders: out, restToday: extracted.orders.some((o) => o.kind === "off" && o.day === jstDay(now)) };
 }
 
 /**

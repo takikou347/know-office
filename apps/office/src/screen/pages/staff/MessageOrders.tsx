@@ -75,7 +75,8 @@ export function MessageOrders({ staff, orders }: MessageOrdersProps) {
           </Stack>
         ),
       )}
-      {gone ? <span role="status">もう取り消されています</span> : null}
+      {/* 読み上げの入れ物は先に置き、中身だけを入れ替える */}
+      <span role="status">{gone ? "もう取り消されています" : ""}</span>
       {failure ? <FailedAlert title="指示を取り消せませんでした" failure={failure} /> : null}
     </Stack>
   );

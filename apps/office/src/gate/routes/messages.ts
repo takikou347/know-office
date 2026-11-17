@@ -1,6 +1,6 @@
 // 会話: 社員とのメッセージを読む、送る (社員と自動の 3.7、API の conversation)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, codePoints, log, CreateMessageInput, headChars, jstDay, jstYear, Message, MESSAGE_INLINE_CHARS, type MessageOrder, newId, StaffId } from "@know-office/core";
+import { AppError, codePoints, log, CreateMessageInput, headChars, jstYear, Message, MESSAGE_INLINE_CHARS, type MessageOrder, newId, StaffId } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { createRouter } from "../app.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
@@ -49,7 +49,7 @@ const createMessageRoute = createRoute({
     "`messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く",
     "タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す",
     "設定 `workday.chatOrders` が開いていれば、`chat_order_reads` に今日の回数が上限より少ない時だけ発言の印を足し、足せた時だけ Messages API を Haiku で 1 回呼んで勤務の指示を抜き出す。使った量を `usage` に足す。抜き出した指示は指示のボタンと同じ確かめで `day_orders` に `source` `chat` と `message_id` を付けて足し、`StaffDO.order` で予定を作り直し、監査ログに `order.create` を記録する。延長はこの要求のログインセッションが 15 分以内にパスキーで確かめた時だけ足し、確かめていなければ返事に `step_up_required` の印で返す。抜き出せなくても 201 を返し、訳をエラーログに `chat_orders_failed` で残す",
-    "社員が退勤していて、この発言で今日を休みにしておらず、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す",
+    "社員が退勤していて、この発言から今日の休みを抜き出しておらず (もう休みで足さなかった時も含む)、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す",
     "`LiveDO` に渡して画面に配信する",
   ],
   "x-errors": ["409 `stopped`: 社員が停止中"],
@@ -241,11 +241,9 @@ export const messageRoutes = router
     const message = await appendMessage(c.env, { staffId, sender: "owner", body: input.body, nodeId: input.nodeId ?? null, traceId: c.var.traceId }, c.var.clock);
     // 発言は足した後に渡す。渡せなくても発言は残り、次の呼び出しの頭で渡す
     const deliveredAt = await deliverToRun(c.env, { staffId, ...status }, { id: message.id, at: Date.parse(message.at), body: input.body }, c.var.clock.now());
-    // 抜き出しを呼び出しより先にし、今日を休みにした発言では社員を呼び出さない
-    const orders = await readOrders(c, staffId, { id: message.id, body: input.body });
-    const today = jstDay(c.var.clock.now());
-    const offToday = orders.some((o) => !("skipped" in o) && o.kind === "off" && o.day === today);
-    if (status.state === "off" && !offToday) await callOffHours(c.env, staffId, c.var.clock.now(), c.var.traceId);
+    // 抜き出しを呼び出しより先にし、今日を休みにと言った発言では社員を呼び出さない。もう休みで足さなかった時も同じ
+    const { orders, restToday } = await readOrders(c, staffId, { id: message.id, body: input.body });
+    if (status.state === "off" && !restToday) await callOffHours(c.env, staffId, c.var.clock.now(), c.var.traceId);
     const delivered: Message = deliveredAt === null ? message : { ...message, deliveredAt: new Date(deliveredAt).toISOString(), delivery: "run" };
     const answer: Message = { ...delivered, orders };
     return created(c, answer, `/api/v1/staff/${staffId}/messages`);
