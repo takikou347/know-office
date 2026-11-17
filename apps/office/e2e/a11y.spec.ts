@@ -183,6 +183,8 @@ test.describe("使いやすさ", () => {
   test("通知の帯が後から出ても、focus した物を隠さない", async ({ page }) => {
     await stubReview(page);
     await page.goto(REVIEW_PATH);
+    // 画面を開き終えるのと、後から読む最初のファイルの変更を分けて待つ。CI の最初の読み込みで 5 秒の 1 回に収まらない事がある
+    await expect(page.getByRole("button", { name: "承認する" })).toBeVisible();
     await expect(page.getByText("const empty = 0;")).toBeVisible();
     // 中身の下の端にある入力欄に focus を置く。帯が後から出て中身の段が縮むと、下へ押し出される
     const comment = page.getByLabel("判断の一言");
