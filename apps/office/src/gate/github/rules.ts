@@ -5,7 +5,7 @@ import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 import { services, settings } from "../db/main.ts";
-import { isDocsRepo } from "../devloop/docs-repo.ts";
+import { isDocsRepo } from "../devloop/docs-setting.ts";
 import type { Bindings } from "../env.ts";
 import { DEFAULT_PREFIX, loadOfficeDefaults, serviceRules } from "../services/settings.ts";
 import { clockAt } from "../work/attendance.ts";

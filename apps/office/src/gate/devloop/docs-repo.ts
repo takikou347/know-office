@@ -1,47 +1,15 @@
 // 設計書のリポジトリ。office の設定 devloop.docs_repo に 1 つ持ち、触れて非公開でサービスのリポジトリでない物だけを選ばせる (開発の回し方の 3.2)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, DOCS_REPO_KEY, DocsRepoValue, newId } from "@know-office/core";
-import { and, desc, eq, type SQL, sql } from "drizzle-orm";
+import { AppError, DOCS_REPO_KEY, newId } from "@know-office/core";
+import { type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { services, settings } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { loadLink, type TokenDeps } from "../github/app.ts";
+import { loadGitHubRules } from "../github/rules.ts";
 import { findInstallationRepo, installedAs } from "../github/repos.ts";
 import { clockAt } from "../work/attendance.ts";
-
-/** 設計書のリポジトリの今の値と版 */
-export type DocsRepo = { repo: string; version: number };
-
-/**
- * 設計書のリポジトリの最新の値を読む
- * @param db 今の状態の D1
- * @returns 値と版。まだ選んでいなければ null
- * @throws internal 置いた値の形が違う時
- */
-export async function loadDocsRepo(db: D1Database): Promise<DocsRepo | null> {
-  const [row] = await drizzle(db)
-    .select({ value: settings.value, version: settings.version })
-    .from(settings)
-    .where(and(eq(settings.key, DOCS_REPO_KEY), eq(settings.scope, "office")))
-    .orderBy(desc(settings.version))
-    .limit(1);
-  if (!row) return null;
-  // 形の違う値で判断すると設計書の守りが外れるので、読めない時は失敗にする
-  const value = DocsRepoValue.safeParse(row.value);
-  if (!value.success) throw new AppError("internal", "settings の devloop.docs_repo の形が違う");
-  return { repo: value.data.repo, version: row.version };
-}
-
-/**
- * リポジトリが今の設計書のリポジトリかを、名前の大文字小文字を分けずに見る
- * @param db 今の状態の D1
- * @param repo リポジトリ
- * @returns 設計書のリポジトリなら true
- */
-export async function isDocsRepo(db: D1Database, repo: string): Promise<boolean> {
-  const docs = await loadDocsRepo(db);
-  return docs !== null && docs.repo.toLowerCase() === repo.toLowerCase();
-}
+import { type DocsRepo, loadDocsRepo } from "./docs-setting.ts";
 
 /**
  * サービスのリポジトリに同じ名前 (大文字小文字を分けない) があるかを読む
@@ -52,6 +20,18 @@ export async function isDocsRepo(db: D1Database, repo: string): Promise<boolean>
 async function ownedByService(db: D1Database, repo: string): Promise<boolean> {
   const [row] = await drizzle(db).select({ id: services.id }).from(services).where(sql`lower(${services.repo}) = ${repo.toLowerCase()}`).limit(1);
   return row !== undefined;
+}
+
+/**
+ * GitHub のルールの触れるリポジトリに入っているかを読む。ルールが null (連携したものすべて) なら入っている
+ * @param db 今の状態の D1
+ * @param repo リポジトリ
+ * @returns 触れるなら true
+ * @throws internal ルールの値の形が違う時
+ */
+async function touchable(db: D1Database, repo: string): Promise<boolean> {
+  const { repos } = await loadGitHubRules(db);
+  return repos === null || repos.some((r) => r.toLowerCase() === repo.toLowerCase());
 }
 
 /**
@@ -84,6 +64,7 @@ export async function setDocsRepo(env: Bindings, deps: TokenDeps, input: { repo:
   if (found === null) throw refuse("GitHub App のインストールで選んだリポジトリから選ぶ");
   if (!found.private) throw refuse("設計書のリポジトリは非公開の物から選ぶ");
   if (await ownedByService(env.DB, found.fullName)) throw refuse("サービスのリポジトリは設計書のリポジトリに選べない");
+  if (!(await touchable(env.DB, found.fullName))) throw refuse("GitHub のルールの触れるリポジトリに入っていない。先にルールの触れるリポジトリへ足す");
   const next = input.version + 1;
   const noService = sql`NOT EXISTS (SELECT 1 FROM ${services} WHERE lower(${services.repo}) = ${found.fullName.toLowerCase()})`;
   const written = await drizzle(env.DB)
@@ -112,6 +93,7 @@ export async function requireDocsRepo(env: Bindings, deps: TokenDeps): Promise<{
   const found = await findInstallationRepo(env, deps, docs.repo);
   if (found === null || !found.private) throw new AppError("conflict", "設計書のリポジトリが触れる非公開のリポジトリでなくなった。設定で選び直す");
   if (await ownedByService(env.DB, docs.repo)) throw new AppError("conflict", "設計書のリポジトリがサービスのリポジトリと同じ。設定で選び直す");
+  if (!(await touchable(env.DB, docs.repo))) throw new AppError("conflict", "設計書のリポジトリが GitHub のルールの触れるリポジトリから外れた。設定で選び直す");
   const same = sql`COALESCE((SELECT MAX(${settings.version}) FROM ${settings} WHERE ${settings.key} = ${DOCS_REPO_KEY} AND ${settings.scope} = 'office'), 0) = ${docs.version}`;
   return { repo: found.fullName, still: sql`${installedAs(link.installation.version)} AND ${same}` };
 }

@@ -40,7 +40,7 @@ import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { repoScope } from "../github/rules.ts";
-import { verifyDocsPr } from "../devloop/docs-pr.ts";
+import { assertDocsPr } from "../devloop/docs-pr.ts";
 import { announceNotice } from "../live/publish.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { readOwnerData } from "./owner-data.ts";
@@ -311,12 +311,8 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
     await observe(env, { type: "rule_denied", staffId: call.staffId, nodeId: task.id, operation: op.operation, target: recordedText(op.target) }, call.now, call.guard ?? UNCONNECTED_DEPS, call.traceId);
     throw new AppError("rule_denied", refusal.reason);
   }
-  if (docs) {
-    // 形の外れた設計書は、GitHub に PR を出す前に断る
-    const shape = await verifyDocsPr(forge, task.repo, head);
-    if (shape.kind === "refused") throw new AppError("validation_failed", shape.reason, { errors: shape.errors });
-    if (shape.kind === "waiting") throw new AppError("upstream_failed", shape.reason);
-  }
+  // 形の外れた設計書と、別のサービスの置き場を変える設計書のタスクは、GitHub に PR を出す前に断る
+  if (docs) await assertDocsPr(env.DB, forge, task, head);
   const pr = await forge.openPull({ repo: task.repo, branch, title: input.title, body: input.body });
   // 出す間にオーナーが名前などを直すとバージョンが進むので、読み直して、まだこの社員の作業中の時だけ移す
   const fresh = await findNode(env.DB, task.id);

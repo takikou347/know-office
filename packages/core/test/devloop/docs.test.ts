@@ -66,6 +66,10 @@ describe("決まった形の設計書", () => {
     expect(problemPaths({ "docs/04-detail/Video.md": DETAIL })).toEqual(["docs/04-detail/Video.md"]);
     expect(problemPaths({ "docs/01-overview/extra.md": "# 余り" })).toEqual(["docs/01-overview/extra.md"]);
 
+    // services/<名前>/ の直下は README.md と docs/ だけ
+    expect(problemPaths({ "notes.md": "# メモ" })).toEqual(["notes.md"]);
+    expect(problemPaths({ "src/a.ts": "x" })).toEqual(["src/a.ts"]);
+
     // 1 ファイル 200 行まで。ちょうど 200 行は通り、201 行は外れる
     expect(problemPaths({ "docs/01-overview/index.md": lines(200) })).toEqual([]);
     expect(problemPaths({ "docs/01-overview/index.md": lines(201) })).toEqual(["docs/01-overview/index.md"]);

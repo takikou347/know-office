@@ -7,6 +7,7 @@ import {
   type CreateIdeaInput,
   NEXT_STAGES,
   newId,
+  SERVICE_NAME,
   type ServiceCard,
   type ServiceDetail,
   type ServiceStage,
@@ -158,7 +159,7 @@ async function sameNameCondition(db: D1Database, serviceId: string, repo: string
  */
 async function designTask(env: Bindings, row: ServiceRow, repo: string, docsRepo: string, actor: Actor): Promise<NodeRow> {
   const project = await intakeProject(env, row.id, actor);
-  const dir = `services/${repo.split("/")[1] ?? repo}/`;
+  const dir = `services/${(repo.split("/")[1] ?? repo).toLowerCase()}/`;
   const body = [`サービス ID: ${row.id}`, `設計書のリポジトリ: ${docsRepo}`, `書く置き場: ${dir}`, "形はそのリポジトリの services/WRITING.md に従う", "書いたら pr_open で PR を出す。最初の設計書はオーナーが読んで承認した物だけが main に入る"].join("\n");
   return newNodeRow(env, { kind: "task", parentId: project.id, scope: row.id, title: `設計書: ${row.name}`, body, taskKind: "build", assignee: "builder", repo: docsRepo, source: `design:${row.id}` }, actor);
 }
@@ -173,7 +174,7 @@ async function designTask(env: Bindings, row: ServiceRow, repo: string, docsRepo
  * @returns 移した後の行
  * @throws not_found サービスが無い時
  * @throws conflict 今の段階から移れない時、読んだ後に段階か GitHub との連携か設計書のリポジトリが変わった時、GitHub とつないでいないのにリポジトリを選んだ時、設計書のリポジトリが無いか使えない時、リポジトリが設計書のリポジトリと同じか、同じ名前のリポジトリを持つ別のサービスがある時
- * @throws validation_failed prototype に進めるのに担当の社員かリポジトリが無い時、ほかの段階にリポジトリを送った時、触れるリポジトリに無い時
+ * @throws validation_failed prototype に進めるのに担当の社員かリポジトリが無い時、リポジトリの名前が設計書の置き場にできない形の時、ほかの段階にリポジトリを送った時、触れるリポジトリに無い時
  * @throws upstream_failed 触れるリポジトリを GitHub から読めない時
  */
 export async function advanceService(env: Bindings, serviceId: string, input: AdvanceInput, actor: Actor, github: TokenDeps): Promise<ServiceRow> {
@@ -185,6 +186,8 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
     ...(prototype && input.repo === undefined ? [{ pointer: "#/repo", detail: "prototype に進める時に要る" }] : []),
     // 登録の時に決める項目なので、ほかの段階では受けない。後から変えるのは設定で行う
     ...(!prototype && input.repo !== undefined ? [{ pointer: "#/repo", detail: "prototype に進める時だけ送る" }] : []),
+    // 設計書の置き場 services/<名前>/ の名前は、リポジトリの名前を小文字にした物。道に入れられない形なら選べない
+    ...(prototype && input.repo !== undefined && !SERVICE_NAME.test((input.repo.split("/")[1] ?? "").toLowerCase()) ? [{ pointer: "#/repo", detail: "設計書の置き場にできる名前 (小文字、数字、. _ - で、頭は英数字) のリポジトリを選ぶ" }] : []),
   ];
   if (missing.length > 0) throw new AppError("validation_failed", "作ると決める時は担当の社員とリポジトリが要る", { errors: missing });
   // TODO(#71): service に進める時は、サービスの deployWhen のチェックとレビュー担当の承認を GitHub から確かめる

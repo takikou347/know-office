@@ -1,7 +1,7 @@
 // サービスのリポジトリを、GitHub App で触れるリポジトリから選ぶ確かめ。試作に進める時と設定で変える時が同じ確かめを通す (サービスと拡張の 3.1、3.3)
 import { AppError, DOCS_REPO_KEY } from "@know-office/core";
 import { type SQL, sql } from "drizzle-orm";
-import { loadDocsRepo } from "../devloop/docs-repo.ts";
+import { loadDocsRepo } from "../devloop/docs-setting.ts";
 import type { Bindings } from "../env.ts";
 import { loadLink, type TokenDeps } from "../github/app.ts";
 import { hasInstallationRepo, installedAs } from "../github/repos.ts";

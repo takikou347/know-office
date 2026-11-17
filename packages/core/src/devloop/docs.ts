@@ -37,7 +37,10 @@ export type UpdateDocsRepoInput = z.infer<typeof UpdateDocsRepoInput>;
 /** 設計書の外れた所。path は services/<名前>/ からの道 */
 export type DocsProblem = { path: string; detail: string };
 
-// knowidea の tools/check.py の SERVICE_DOCS、SERVICE_KEYS、FEATURE_FILE と同じ形
+/** サービスの名前の形。設計書の置き場 `services/<名前>/` の道に入れるので、小文字、数字、`.`、`_`、`-` だけで、頭は英数字 */
+export const SERVICE_NAME = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+
+// 次の 3 つは knowidea の tools/check.py の SERVICE_DOCS、SERVICE_KEYS、FEATURE_FILE の物を、設計書のリポジトリの PR で確かめる分だけ写した形
 const DOC_FOLDERS = ["01-overview", "02-architecture", "03-stack", "04-detail", "05-test", "06-operations"] as const;
 const FEATURE_FILE = /^docs\/(04-detail|05-test)\/(\d+-[a-z0-9]+(?:-[a-z0-9]+)*\.md)$/;
 const KEYS = { kind: ["app", "library", "tool"], status: ["planning", "building", "active", "retired"], visibility: ["public", "private"] } as const;
@@ -109,6 +112,9 @@ export function checkServiceDocs(name: string, files: ReadonlyMap<string, string
     for (const key of ["repo", "summary"]) if (!front[key]) add("README.md", `${key} が要る`);
     for (const [key, allowed] of Object.entries(KEYS)) if (!(allowed as readonly string[]).includes(front[key] ?? "")) add("README.md", `${key} は ${allowed.join("、")} のどれか`);
   }
+
+  // services/<名前>/ の直下は README.md と docs/ だけ
+  for (const path of paths) if (path !== "README.md" && !path.startsWith("docs/")) add(path, "services/<名前>/ の直下に置けるのは README.md と docs/ だけ");
 
   // docs/ の下の置き場。番号のフォルダの index.md と、04 と 05 の機能のファイルだけ
   const indexes = new Set(DOC_FOLDERS.map((d) => `docs/${d}/index.md`));
