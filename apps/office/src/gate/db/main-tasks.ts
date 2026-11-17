@@ -57,6 +57,7 @@ export const reviews = sqliteTable("reviews", {
   branch: text("branch").notNull(),
   baseSha: text("base_sha").notNull(),
   headSha: text("head_sha").notNull(),
+  docsHeadSha: text("docs_head_sha"),
   lastSeenSha: text("last_seen_sha"),
   checks: json("checks"),
   reviewerSummary: text("reviewer_summary"),
@@ -285,4 +286,21 @@ export const devIssues = sqliteTable(
     uniqueIndex("dev_issues_number").on(t.repo, t.number),
     uniqueIndex("dev_issues_mark").on(t.markKey),
   ],
+);
+
+/**
+ * タスクが同じ時に直す設計書の PR。1 タスクに 1 行で、設計書の PR を出す前に取る (取れなければ重なりの 409)。pr_number が null は取っただけで、PR をまだ出していない (開発の回し方の 3.6)
+ * 同じサービスの設計書を直す別のタスクが done と dropped でない間は、重なりとして新しい行を取れない。先は reviews.docs_head_sha と PR の今の先で見る
+ */
+export const taskDocs = sqliteTable(
+  "task_docs",
+  {
+    nodeId: text("node_id").primaryKey(),
+    serviceId: text("service_id").notNull(),
+    repo: text("repo").notNull(),
+    prNumber: integer("pr_number"),
+    branch: text("branch").notNull(),
+    createdAt: time("created_at").notNull(),
+  },
+  (t) => [index("task_docs_service").on(t.serviceId), uniqueIndex("task_docs_pr").on(t.repo, t.prNumber)],
 );

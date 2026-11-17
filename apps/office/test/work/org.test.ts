@@ -46,7 +46,7 @@ describe("組織図", () => {
     expect((await org(world)).map((s) => [s.id, s.role, s.bossId, s.promptVersion])).toEqual([
       ["president", "社長", null, 2],
       ["builder", "開発担当", "president", 1],
-      ["reviewer", "レビュー担当", "president", 1],
+      ["reviewer", "レビュー担当", "president", 2],
     ]);
     await clockIn(world, "builder");
     const [first, second] = await twoTasks(world);
