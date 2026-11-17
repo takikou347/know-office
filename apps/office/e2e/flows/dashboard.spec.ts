@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { part } from "./helpers/screen.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { runLocalD1, seedMain } from "./helpers/seed.ts";
+import { runLocalWrangler, seedMain } from "./helpers/seed.ts";
 
 // ダッシュボードと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。承認待ちとタスクは種に置き、応答を差し替えない (API の records と settings)
 
@@ -70,7 +70,7 @@ test.describe("記録", () => {
     const id = `${ts.slice(0, 8)}-${ts.slice(8, 12)}-7fff-bfff-ffffffffffff`;
     const traceId = `e2e0${now.toString(16).padStart(28, "0")}`.slice(0, 32);
     const year = new Intl.DateTimeFormat("en", { timeZone: "Asia/Tokyo", year: "numeric" }).format(new Date(now));
-    runLocalD1([
+    runLocalWrangler([
       "exec",
       "wrangler",
       "d1",

@@ -8,8 +8,7 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { runLocalD1, seedMain } from "./helpers/seed.ts";
-
+import { runLocalWrangler, seedMain } from "./helpers/seed.ts";
 
 /** 代わりの GitHub がインストールで選ぶリポジトリ */
 const REPO = "example/know-office";
@@ -39,7 +38,7 @@ function seedStudy(serviceId: string, body: string): void {
   const key = `studies/${serviceId}/${crypto.randomUUID()}.md`;
   const file = join(mkdtempSync(join(tmpdir(), "study-")), "study.md");
   writeFileSync(file, body);
-  runLocalD1(["exec", "wrangler", "r2", "object", "put", `know-office-files/${key}`, "--local", `--file=${file}`]);
+  runLocalWrangler(["exec", "wrangler", "r2", "object", "put", `know-office-files/${key}`, "--local", `--file=${file}`]);
   seedMain(`UPDATE services SET study_key = '${key}' WHERE id = '${serviceId}'`);
 }
 

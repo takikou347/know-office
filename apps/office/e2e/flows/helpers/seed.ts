@@ -33,7 +33,7 @@ function withE2eState(args: string[]): string[] {
  * 通しの置き場の手元の D1 と R2 に pnpm のコマンドを流す。開発の入口の書き込みと重なって SQLITE_BUSY で断られた時は、間を空けて 3 回まで流し、ほかの失敗はそのまま投げる。流すコマンドは何度流しても同じ結果になる物だけにする
  * @param args pnpm に渡す引数
  */
-export function runLocalD1(args: string[]): void {
+export function runLocalWrangler(args: string[]): void {
   for (let tried = 1; ; tried += 1) {
     try {
       execFileSync("pnpm", withE2eState(args), { cwd: office, stdio: "pipe", env: { ...process.env, [PERSIST_ENV]: E2E_STATE } });
@@ -50,7 +50,7 @@ export function runLocalD1(args: string[]): void {
  * @param sql 流す SQL。値はテストが決めた物だけを入れ、外から来た文字を入れない
  */
 export function seedMain(sql: string): void {
-  runLocalD1(["exec", "wrangler", "d1", "execute", "DB", "--local", `--command=${sql}`]);
+  runLocalWrangler(["exec", "wrangler", "d1", "execute", "DB", "--local", `--command=${sql}`]);
 }
 
 /**
