@@ -57,6 +57,11 @@ void describe("弱点のチェック", () => {
     for (const entry of entries) {
       assert.match(entry, /^ {2}- id: CVE-\d+-\d+\n {4}paths:\n( {6}- "[^"*]+"\n)+ {4}expired_at: \d{4}-\d{2}-\d{2}\n?$/, entry);
     }
+    // イメージに入れる pnpm は packageManager と同じ版にする。違うと pnpm が別の版を落として使い、その版の弱点がイメージに残る
+    const manager = /"packageManager": "(pnpm@[\d.]+)"/.exec(readFileSync(join(root, "package.json"), "utf8"))?.[1];
+    assert.ok(manager, "package.json に packageManager が無い");
+    const dockerfile = readFileSync(join(root, "apps", "workspace", "Dockerfile"), "utf8");
+    assert.match(dockerfile, new RegExp(`npm install -g npm@[\\d.]+ ${manager.replaceAll(".", "\\.")} `), `Dockerfile の pnpm が ${manager} でない`);
     // 週に 1 度の確かめで、ほかのジョブは回さない
     assert.match(all.get("check") ?? "", /^ {4}if: github\.event_name != 'schedule'$/m);
     // 動く入口への自動の攻撃は、画面の通しのジョブで 1 度だけ流す
