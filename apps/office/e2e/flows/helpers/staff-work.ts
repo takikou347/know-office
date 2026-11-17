@@ -1,5 +1,6 @@
 // 社員の仕事の通しが使う、通しの木、勤務の時刻、代わりの Claude API に積む返事、タスクを足して終えるまでを待つ道具 (社員が考えるの 3.3)
 import type { Locator, Page } from "@playwright/test";
+import { jstClock, jstDay } from "@know-office/core";
 import { z } from "zod";
 import { expect } from "../../helpers/test.ts";
 import { seedMain } from "./seed.ts";
@@ -89,8 +90,39 @@ export async function reviewerState(page: Page): Promise<string | undefined> {
   return Staff.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "reviewer")?.state;
 }
 
-/** 通しの間だけ広げる勤務の時刻 */
-export const ALL_DAY = { start: "00:00", end: "23:59" };
+/**
+ * 通しの間だけ広げる勤務の時刻を作る。今日のうちの 1 時間前 (0 時より前なら 0 時) に始まり、その 1 分前 (翌日) に終わる 23 時間 59 分にする。
+ * 00:00 から 23:59 に固定すると、日本時間の日をまたぐ時に通しの途中で終わりに届いて退勤するので、空く 1 分を今から遠ざける。
+ * 始まりを今日に置くのは、今日だけの指示 (早退など) が今の勤務に掛かるようにするため
+ * @param now 今の時刻
+ * @returns 始まりと終わり (日本時間)
+ */
+function wideSchedule(now: number): { start: string; end: string } {
+  const hour = 60 * 60 * 1000;
+  const start = jstDay(now - hour) === jstDay(now) ? jstClock(now - hour) : "00:00";
+  const end = (minutes(start) + 24 * 60 - 1) % (24 * 60);
+  return { start, end: `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}` };
+}
+
+/**
+ * HH:MM を 0 時からの分に直す
+ * @param hhmm 時刻
+ * @returns 分
+ */
+function minutes(hhmm: string): number {
+  return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+}
+
+/**
+ * 勤務の時刻が、通しが広げた 23 時間 59 分のままか
+ * @param schedule 始まりと終わり (日本時間)
+ * @param schedule.start 始まり
+ * @param schedule.end 終わり
+ * @returns 広げたままなら true
+ */
+function widened({ start, end }: { start: string; end: string }): boolean {
+  return (minutes(start) - minutes(end) + 24 * 60) % (24 * 60) === 1;
+}
 
 /**
  * レビュー担当を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
@@ -111,9 +143,10 @@ export async function clockInReviewer(page: Page, allDay = false): Promise<() =>
   const box = await scheduleCard(page);
   const read = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
   // 前の通しが落ちて一日に広げたまま残していれば、それを元にせず、勤務の時刻の初期値 (DEFAULT_SCHEDULE) に戻す
-  const was = read.start === ALL_DAY.start && read.end === ALL_DAY.end ? { start: "09:00", end: "17:00" } : read;
+  const was = widened(read) ? { start: "09:00", end: "17:00" } : read;
   const restore = () => setSchedule(page, was.start, was.end);
-  await setSchedule(page, ALL_DAY.start, ALL_DAY.end);
+  const wide = wideSchedule(Date.now());
+  await setSchedule(page, wide.start, wide.end);
   try {
     // 同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して流し直す時は、開発の道で退勤した日の印を消して出勤させる
     expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);

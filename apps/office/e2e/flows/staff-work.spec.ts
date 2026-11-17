@@ -188,7 +188,7 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
   // 早退の時刻を本物の時計で待つ
   test.setTimeout(360_000);
   const until = soon();
-  // 勤務の時刻を 23:59 までに広げるので、早退はそれより前でないと出せない
+  // 早退は今日の勤務に掛かるので、日をまたぐ時刻には出せない
   test.skip(until.hhmm >= "23:58" || until.hhmm < "00:03", "日をまたぐ時刻は早退を出せない");
   await openTree(page);
   cancelLeftOrders("reviewer");
