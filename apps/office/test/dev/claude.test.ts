@@ -143,7 +143,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("ゲートウェイ向けに積んだ返事は、作業トークンでない鍵の呼び出しにだけ先に返し、社員には渡さない", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     claude.push({ content: [{ type: "text", text: "社員へ" }] });
     await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ content: [{ type: "text", text: "ゲートウェイへ" }], forGate: true }) });
     const staff = await claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": ticket("reviewer") }, body: BODY });
