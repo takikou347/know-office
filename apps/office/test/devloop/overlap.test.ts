@@ -1,7 +1,7 @@
 // 開発担当がタスクを取る時の重なりの確かめ。同じリポジトリの doing か review の子と、触るファイルの glob の固定の頭が重なる物は取らない (開発の回し方の 3.5)
 import { describe, expect, it } from "vitest";
 import { child, planOf, plan, withDocs } from "../helpers/issues.ts";
-import { advance, at, clockIn, REPO, rows, staffOf, tool, useWork } from "../helpers/work.ts";
+import { advance, api, at, clockIn, REPO, rows, staffOf, tool, useWork } from "../helpers/work.ts";
 import { claimNode } from "../../src/gate/work/loop.ts";
 import { findNode } from "../../src/gate/work/nodes.ts";
 
@@ -60,6 +60,18 @@ describe("1 Issue を 1 回の作業で入れる", () => {
     expect(await states()).toEqual({ 動画を作る: "done", 動画を見る: "doing", 動画を消す: "review" });
   });
 
+  it("重なっていた子が見送られると、待っていた子を取る", async () => {
+    const ids = await setup([["src/video/**"], ["src/video/view/*.ts"], ["docs/*.md"]]);
+    await openPr("make");
+    await openPr("remove");
+    expect(await states()).toEqual({ 動画を作る: "review", 動画を見る: "todo", 動画を消す: "review" });
+    // オーナーが review の子を見送りにすると、重なって待っていた子を取る
+    const first = ids["動画を作る"] ?? "";
+    const { version } = await findNode(world.d1.DB, first);
+    await api(world, "PATCH", `/api/v1/nodes/${first}`, { version, status: "dropped" });
+    expect(await states()).toEqual({ 動画を作る: "dropped", 動画を見る: "doing", 動画を消す: "review" });
+  });
+
   it("頭の無い glob", async () => {
     await setup([["**/*.ts"], ["src/a.ts"], ["docs/*.md"]]);
     // 頭が空の子が doing の間は、ほかの子を取らない
@@ -72,7 +84,6 @@ describe("1 Issue を 1 回の作業で入れる", () => {
 describe("取る文の重なりの確かめ", () => {
   it("同時に取りに来ても重なる 2 つは 1 つだけ doing になる", async () => {
     const ids = await setup([["src/video/**"], ["src/video/view/*.ts"], ["docs/*.md"]]);
-    await world.d1.DB.prepare("UPDATE nodes SET status = 'todo', assignee = 'builder' WHERE id = ?").bind(ids["動画を作る"]).run();
     // 取った子を戻し、重なる 2 つが同じ版を読んで同時に取りに来る
     await world.d1.DB.prepare("UPDATE nodes SET status = 'todo' WHERE source LIKE 'issue:%'").run();
     const a = await findNode(world.d1.DB, ids["動画を作る"] ?? "");

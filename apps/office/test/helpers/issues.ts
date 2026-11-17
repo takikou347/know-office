@@ -2,7 +2,7 @@
 import { AppError, type ToolResult } from "@know-office/core";
 import { z } from "zod";
 import type { FakeIssue } from "../../dev/github-issues.ts";
-import { vaultForge } from "../../src/gate/github/app.ts";
+import { vaultForge } from "../../src/gate/github/vault-forge.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
 import type { Forge } from "../../src/gate/work/loop.ts";
 import { DOCS, HEAD, MAIN, NEXT, REPO, README, docsAt, prototyped } from "./docs.ts";

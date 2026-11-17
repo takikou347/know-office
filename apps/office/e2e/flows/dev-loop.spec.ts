@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
+import { openTree, scriptReply } from "./helpers/staff-work.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { freeRepoNames, restoreSeedServices, seedMain } from "./helpers/seed.ts";
 import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
@@ -116,52 +117,79 @@ test("設計書が main で変わる通知から、社長の Issue を合わせ�
   await expect(page.getByRole("main").getByRole("heading", { level: 2, name: `Issue を合わせる: ${title}` })).toBeVisible();
 });
 
-test("子 Issue の PR をオーナーが承認して main に入ると、GitHub の Issue が閉じ、タスクが済みになる", async ({ page }) => {
+test("開発担当が子 Issue の PR を出し、オーナーが承認して main に入ると、GitHub の Issue が閉じ、タスクが済みになる", async ({ page }) => {
+  test.slow();
   const { serviceId } = await prototypeService(page, "入れる案");
-  const ids = { task: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, review: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, dev: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}` };
+  // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
+  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
+  expect(stopped.status()).toBe(201);
+  // 子 Issue のタスクの親にする、通しの木 (開発担当の作業の開始が祖先の木を読む)。止めた社員もここで再開する
+  await openTree(page);
+  const ids = { task: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, dev: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}` };
   const github = { headers: { authorization: "Bearer e2e", "user-agent": "know-office-e2e" } };
+  const ref = `${FAKE_GITHUB}/repos/${REPO}/git/refs/heads`;
 
-  // 代わりの GitHub に、main の先と、その上に出したブランチの先を置く。main は前の通しが進めているので、強制で置き直す
+  // 代わりの GitHub に、main の先と、その上に出す前のブランチの先を置く。main は前の通しが進めているので、前の先を覚え、終わりに戻す
   const commit = async (parents: string[]): Promise<string> => {
     const res = await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/git/commits`, { ...github, data: { message: "m", tree: "1".repeat(40), parents } });
     if (!res.ok()) throw new Error(`コミットを置けない: ${String(res.status())} ${await res.text()}`);
     return z.object({ sha: z.string() }).parse(await res.json()).sha;
   };
+  const before = await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/git/ref/heads/main`, github);
+  const previous = before.ok() ? z.object({ object: z.object({ sha: z.string() }) }).parse(await before.json()).object.sha : null;
   const base = await commit([]);
   const head = await commit([base]);
-  const reset = await page.request.patch(`${FAKE_GITHUB}/repos/${REPO}/git/refs/heads/main`, { ...github, data: { sha: base, force: true } });
-  expect(reset.status()).toBe(200);
-  // 子 Issue と、チェックの結果
+  const branch = `ko/019a7b00-make${crypto.randomUUID().slice(0, 6)}`;
+  const put = async (name: string, sha: string) => expect((await page.request.patch(`${ref}/${name}`, { ...github, data: { sha, force: true } })).status()).toBe(200);
   const issue = z.object({ number: z.number() }).parse(await (await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/issues`, { ...github, data: { title: "動画を作る", body: "設計書: 詳細設計 1-video の要件「動画を作る」", labels: ["feature"] } })).json()).number;
   await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${head}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] });
 
-  // 開発担当が PR を出してレビュー担当が承認した後の状態を置く。社員のツールは画面から呼べないので、タスク、子 Issue の行、レビューを手元の D1 に置く
+  // 子 Issue のタスクと行は、設計書から Issue を立てる道 (社長の issue_plan) の結果なので、手元の D1 に置く。PR は置かず、開発担当に出させる
   const now = String(Date.now());
+  const mark = `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
   seedMain(
-    `INSERT INTO nodes (id, kind, parent_id, scope, title, status, priority, repo, branch, pr_number, issue_number, source, assignee, task_kind, version, created_by, created_at, updated_at) VALUES ('${ids.task}', 'task', '019a7b00-0000-7000-8000-0000000000e3', '${serviceId}', '#${String(issue)} 動画を作る', 'review', 3, '${REPO}', 'ko/e2e-make', 1, ${String(issue)}, 'issue:${String(issue)}', 'builder', 'build', 1, 'system', ${now}, ${now})`,
+    `INSERT INTO nodes (id, kind, parent_id, scope, title, status, priority, repo, issue_number, source, assignee, task_kind, version, created_by, created_at, updated_at) VALUES ('${ids.task}', 'task', '019a7b00-0000-7000-8000-0000000000e3', '${serviceId}', '#${String(issue)} 動画を作る', 'todo', 0, '${REPO}', ${String(issue)}, 'issue:${String(issue)}', NULL, 'build', 1, 'system', ${now}, ${now})`,
   );
   seedMain(
-    `INSERT INTO dev_issues (id, service_id, repo, number, issue_id, kind, feature, requirement, req_hash, issue_kind, paths, heads, mark_key, state, created_at) VALUES ('${ids.dev}', '${serviceId}', '${REPO}', ${String(issue)}, ${String(issue)}, 'child', '1-video', '動画を作る', 'e2e', 'feature', '["src/a.ts"]', '["src/a.ts"]', '${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}', 'open', ${now})`,
-  );
-  seedMain(
-    `INSERT INTO reviews (id, node_id, repo, pr_number, branch, base_sha, head_sha, reviewer_verdict, reviewer_summary) VALUES ('${ids.review}', '${ids.task}', '${REPO}', 1, 'ko/e2e-make', '${base}', '${head}', 'approve', '確かめた')`,
+    `INSERT INTO dev_issues (id, service_id, repo, number, issue_id, kind, feature, requirement, req_hash, issue_kind, paths, heads, mark_key, state, created_at) VALUES ('${ids.dev}', '${serviceId}', '${REPO}', ${String(issue)}, ${String(issue)}, 'child', '1-video', '動画を作る', 'e2e', 'feature', '["src/a.ts"]', '["src/a.ts"]', '${mark}', 'open', ${now})`,
   );
 
   try {
-    // オーナーが承認すると、チェックとレビュー担当の承認がそろっているので、main が進み、Issue が閉じる
+    await put("main", base);
+    await put(branch, head);
+    // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチ名は ko/<タスク ID の頭 8 字>-<name>
+    const name = branch.slice("ko/019a7b00-".length);
+    await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use", undefined, "builder");
+    await scriptReply(page, [{ type: "text", text: "PR を出した" }], "end_turn", undefined, "builder");
+    // 開発担当に頼むと、開発担当がタスクを取って始める
+    expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: new URL(page.url()).origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
+
+    // タスクがレビューに移り、代わりの GitHub が受けた PR の本文の最後に Closes が付いている
+    const status = async () => z.object({ data: z.object({ status: z.string() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data;
+    await expect.poll(async () => (await status()).status, { timeout: 60_000 }).toBe("review");
+    const opened = z.object({ data: z.object({ events: z.array(z.object({ kind: z.string(), detail: z.record(z.string(), z.unknown()) }).loose()) }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data.events.find((e) => e.kind === "pr_opened");
+    const pr = z.number().parse(opened?.detail["prNumber"]);
+    const body = z.object({ body: z.string() }).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/pulls/${String(pr)}`, github)).json()).body;
+    expect(body.endsWith(`Closes #${String(issue)}`)).toBe(true);
+
+    // レビュー担当の承認は社員のツールなので手元の D1 に置く。オーナーが承認すると、チェックとレビュー担当の承認がそろっているので、main が進み、Issue が閉じる
+    seedMain(`UPDATE reviews SET reviewer_verdict = 'approve', reviewer_summary = '確かめた' WHERE node_id = '${ids.task}'`);
     const verdict = await page.request.post(`/api/v1/reviews/${ids.task}/verdict`, { data: { verdict: "approve", body: "よい", baseSha: head }, headers: { Origin: new URL(page.url()).origin } });
     expect(verdict.status()).toBe(200);
     await expect
       .poll(async () => z.object({ state: z.string(), state_reason: z.string().nullable() }).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/issues/${String(issue)}`, github)).json()), { timeout: 20_000 })
       .toEqual({ state: "closed", state_reason: "completed" });
-    const node = z.object({ data: z.object({ status: z.string() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json());
-    expect(node.data.status).toBe("done");
+    expect((await status()).status).toBe("done");
     // 画面のタスクが済みになっている
     await page.goto("/staff/builder?tab=tasks");
     const row = page.getByRole("main").locator("li", { hasText: `#${String(issue)} 動画を作る` }).first();
     await expect(row).toBeVisible();
     await expect(row.getByText("済", { exact: true })).toBeVisible();
   } finally {
-    seedMain(`DELETE FROM github_mirrors WHERE review_id = '${ids.review}'; DELETE FROM reviews WHERE id = '${ids.review}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
+    // 後の通しに残さない。main は前の先に戻す (前が無ければ消す)、出したブランチも消す
+    if (previous === null) await page.request.delete(`${ref}/main`, github);
+    else await page.request.patch(`${ref}/main`, { ...github, data: { sha: previous, force: true } });
+    await page.request.delete(`${ref}/${branch}`, github);
+    seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM nodes WHERE title = 'レビュー: #${String(issue)} 動画を作る'; DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
   }
 });

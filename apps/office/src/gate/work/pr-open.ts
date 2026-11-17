@@ -3,7 +3,7 @@ import { AppError, newId, type PrOpenTool, recordedText, type StaffId } from "@k
 import { drizzle } from "drizzle-orm/d1";
 import { reviews } from "../db/main.ts";
 import { assertDocsPr } from "../devloop/docs-pr.ts";
-import { childOf, missingTests, readPrFiles, type PrFiles, testsError, withCloses } from "../devloop/pr-issue.ts";
+import { type ChildRef, childOf, missingTests, readPrFiles, type PrFiles, testsError, withCloses } from "../devloop/pr-issue.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
 import { type GuardDeps, UNCONNECTED_DEPS } from "../guard/deps.ts";
@@ -28,12 +28,12 @@ export type PrCall = { staffId: StaffId; now: number; traceId?: string | undefin
  * @param task 出すタスク
  * @param branch ブランチ
  * @param pin ブランチの先を必ず固定するか。出し直しは、レビューの行に書く先を読むので true
- * @returns 確かめた先。ブランチの先を固定した時はそのコミット、そうでなければブランチの名前
+ * @returns 確かめた先 (ブランチの先を固定した時はそのコミット、そうでなければブランチの名前) と、タスクの子 Issue
  * @throws rule_denied ルールの外の時
  * @throws validation_failed 設計書の形が違う時、bug と feature の子がテストのファイルを変えていない時
  * @throws upstream_failed 設計書の木を読み切れない時、GitHub から読めない時
  */
-async function guardPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow & { repo: string }, branch: string, pin: boolean): Promise<string> {
+async function guardPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow & { repo: string }, branch: string, pin: boolean): Promise<{ head: string; child: ChildRef | null }> {
   const docs = (await repoScope(env.DB, task.repo)).docs;
   const child = await childOf(env.DB, task);
   // 設計書と子のタスクは、ブランチの先を 1 つのコミットに固定し、変えたファイルと形の確かめを同じコミットで読む
@@ -53,7 +53,7 @@ async function guardPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow 
     const missing = missingTests(child, found);
     if (missing !== null) throw testsError(missing);
   }
-  return head;
+  return { head, child };
 }
 
 /**
@@ -121,13 +121,12 @@ export async function openPr(env: Bindings, forge: Forge, call: PrCall, task: No
   if (task.prNumber !== null) {
     // 出し直し。別の name でも、PR は最初のブランチの 1 本だけ
     const review = await findReview(env.DB, task.id);
-    const head = await guardPr(env, forge, call, own, review.branch, true);
+    const { head } = await guardPr(env, forge, call, own, review.branch, true);
     await hand(env, call, own, { branch: review.branch, number: review.prNumber, baseSha: review.baseSha, headSha: head, first: false });
     return { number: review.prNumber, branch: review.branch };
   }
   const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
-  await guardPr(env, forge, call, own, branch, false);
-  const child = await childOf(env.DB, task);
+  const { child } = await guardPr(env, forge, call, own, branch, false);
   const pr = await forge.openPull({ repo: task.repo, branch, title: input.title, body: child === null ? input.body : withCloses(input.body, child.number) });
   await hand(env, call, own, { branch, number: pr.number, baseSha: pr.baseSha, headSha: pr.headSha, first: true });
   return { number: pr.number, branch };

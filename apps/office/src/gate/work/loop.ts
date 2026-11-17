@@ -351,7 +351,7 @@ export async function callForMessage(env: Bindings, staffId: StaffId, now: numbe
   const next = await nextTodo(env, staffId);
   if (!next) return false;
   const target = staffDo(env, staffId);
-  return start(env, staffId, next.row, now, (task) => target.call(task, now, traceId, { perDay }));
+  return (await start(env, staffId, next.row, now, (task) => target.call(task, now, traceId, { perDay }))) === "started";
 }
 
 /**

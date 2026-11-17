@@ -154,6 +154,27 @@ describe("開発環境の代わりの物", () => {
     expect((await state(`${c}...main`)).status).toBe("diverged");
     expect((await state(`main...${a}`)).status).toBe("behind");
     expect((await state(`main...${c}`)).files).toEqual([{ filename: "src/feature.test.ts" }]);
+    // 先を読み、消せる。消した後は読めない
+    const ref = async (method: string) => ask(github.app, `/repos/${repo}/git/${method === "GET" ? "ref" : "refs"}/heads/main`, { method, headers });
+    expect(z.object({ object: z.object({ sha: z.string() }) }).parse(await (await ref("GET")).json()).object.sha).toBe(b);
+    expect((await ref("DELETE")).status).toBe(204);
+    expect((await ref("GET")).status).toBe(404);
+  });
+
+  it("代わりの GitHub は出した PR の本文を覚えて読ませ、先が無いブランチは 422 にする", async () => {
+    const github = createFakeGitHub();
+    const token = await mintToken(github, { contents: "write", pull_requests: "write" });
+    const headers = { authorization: `Bearer ${token}` };
+    const repo = "example/knowidea-ui";
+    const send = (path: string, method: string, body?: unknown) => ask(github.app, `/repos/${repo}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const sha = z.object({ sha: z.string() }).parse(await (await send("/git/commits", "POST", { message: "m", tree: "t".repeat(40), parents: [] })).json()).sha;
+    const open = (head: string) => send("/pulls", "POST", { title: "題", head, base: "main", body: "本文\n\nCloses #3" });
+    expect((await open("ko/none")).status).toBe(422);
+    expect((await send("/git/refs/heads/ko/x", "PATCH", { sha, force: true })).status).toBe(200);
+    const made = z.object({ number: z.number(), head: z.object({ sha: z.string() }) }).parse(await (await open("ko/x")).json());
+    expect(made.head.sha).toBe(sha);
+    expect(z.object({ body: z.string() }).parse(await (await send(`/pulls/${String(made.number)}`, "GET")).json()).body).toBe("本文\n\nCloses #3");
+    expect((await send("/pulls/1", "GET")).status).toBe(404);
   });
 
   it("代わりの GitHub は /github の下に立てても、Issue と compare に頭を除いた道で答える", async () => {

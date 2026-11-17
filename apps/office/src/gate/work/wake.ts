@@ -6,6 +6,7 @@ import { nodes } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "./attendance.ts";
+import { notifyStaff } from "./loop.ts";
 
 /**
  * リポジトリで doing か review の子が出た (入った、見送り、止まった) 後に、そのリポジトリで待つ子 Issue のタスクの担当へ、次を取る事を知らせる。
@@ -21,6 +22,6 @@ export async function wakeWaiting(env: Bindings, repo: string, now: number): Pro
     .where(and(eq(nodes.kind, "task"), eq(nodes.status, "todo"), eq(nodes.repo, repo), isNotNull(nodes.issueNumber)));
   for (const { assignee } of waiting) {
     const id = StaffId.safeParse(assignee);
-    if (id.success) await env.STAFF.get(env.STAFF.idFromName(id.data)).pull(now).catch((error: unknown) => recordError(env, { source: "gate", level: "error", code: "staff_wake_failed", error }, clockAt(now)));
+    if (id.success) await notifyStaff(env, id.data, now, false).catch((error: unknown) => recordError(env, { source: "gate", level: "error", code: "staff_wake_failed", error }, clockAt(now)));
   }
 }

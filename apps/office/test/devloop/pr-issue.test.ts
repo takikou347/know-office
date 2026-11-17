@@ -1,6 +1,7 @@
 // 子 Issue のタスクの PR。本文にゲートウェイが Closes を付け、bug と feature はテストのファイルを変えていなければ断る。出し直しは新しい PR を出さない (開発の回し方の 3.5)
 import type { ToolResult } from "@know-office/core";
 import { describe, expect, it } from "vitest";
+import { docsAt, GOOD, HEAD, pullOnGitHub, tool as docsTool } from "../helpers/docs.ts";
 import { child, planOf, plan, withDocs } from "../helpers/issues.ts";
 import { z } from "zod";
 import { clockIn, purposeAndGoal, REPO, rows, staffOf, tool, useWork } from "../helpers/work.ts";
@@ -95,6 +96,13 @@ describe("1 Issue を 1 回の作業で入れる", () => {
     changes(["src/a.ts"]);
     expect(await open()).toMatchObject({ isError: false });
     expect(world.forge.pulls).toHaveLength(1);
+    // 設計書のリポジトリへの PR も、テストのファイルが無くても断らない
+    await world.d1.DB.prepare("UPDATE nodes SET status = 'todo' WHERE title LIKE '設計書:%'").run();
+    await staffOf(world, "builder").pull(world.clock.now());
+    pullOnGitHub(world, Object.keys(GOOD));
+    docsAt(world, HEAD, GOOD);
+    expect(await docsTool(world, "builder", "pr_open", { name: "video-maker-docs", title: "設計書", body: "" })).toMatchObject({ isError: false });
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE title LIKE '設計書:%'")).toEqual([{ status: "review" }]);
   });
 });
 

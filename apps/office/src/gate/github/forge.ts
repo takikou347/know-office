@@ -398,7 +398,11 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
     merge: async (repo, head) => {
       // ブランチの先を読み直さず、変えたファイルとチェックを確かめたコミットまで進める
       const res = await send(repo, { contents: "write" }, { method: "PATCH", path: "/git/refs/heads/main" }, { sha: commitSha(head.sha), force: false });
-      if (res.ok) return "merged";
+      if (res.ok) {
+        // 返事の形も確かめてから、進めたとみなす
+        await parse(res, GitHubRef);
+        return "merged";
+      }
       if (res.status !== 422) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
       // 422 は fast-forward にならない時のほか、ルールセットが断った時もある。main と確かめたコミットを比べ、main が先に進んでいる (behind か diverged) 時だけ behind にする
       const state = (await call(repo, readContents, { method: "GET", path: `/compare/main...${commitSha(head.sha)}` }, GitHubCompare)).status;

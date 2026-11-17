@@ -13,6 +13,7 @@ import { announce } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 import { announceWork, type WorkCause } from "./office-work.ts";
 import { iso, toNode } from "./node-view.ts";
+import { wakeWaiting } from "./wake.ts";
 
 /** nodes の行 */
 export type NodeRow = typeof nodes.$inferSelect;
@@ -258,7 +259,11 @@ export async function updateNode(env: Bindings, id: string, version: number, cha
   const fields = Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined));
   await appendNodeEvent(env, { nodeId: id, staffId: staffOrNull(actor.by), kind: "updated", detail: fields, assigned: { from: row.assignee, to: next.assignee } }, actor);
   await auditFrom(env, { at: actor.now, actor: actor.by, action: "node.update", target: id, scope: row.scope, detail: fields, traceId: actor.traceId });
-  if (change.status === "dropped") await leaveDropped(env, row, actor.now);
+  if (change.status === "dropped") {
+    await leaveDropped(env, row, actor.now);
+    // 作業中か review の子が見送られたら、重なって待っていた子を取らせる
+    if (row.issueNumber !== null && row.repo !== null && (row.status === "doing" || row.status === "review")) await wakeWaiting(env, row.repo, actor.now);
+  }
   return next;
 }
 

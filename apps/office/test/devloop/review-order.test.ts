@@ -54,6 +54,25 @@ async function statusOf(id: string): Promise<unknown> {
   return (await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", id))[0]?.["status"];
 }
 
+/**
+ * n 個が着くまで待たせ、そろったら全員を放す
+ * @param n そろえる数
+ * @returns 着く関数と、着いた数を返す関数
+ */
+function barrier(n: number): { arrive: () => Promise<void>; arrived: () => number } {
+  let count = 0;
+  const waiting: (() => void)[] = [];
+  return {
+    arrive: () =>
+      new Promise<void>((resolve) => {
+        count += 1;
+        waiting.push(resolve);
+        if (count === n) for (const go of waiting) go();
+      }),
+    arrived: () => count,
+  };
+}
+
 describe("古い main の上で確かめた PR は入らない", () => {
   it("同じ main から出した 2 つのうち、先に承認した 1 つだけが入る", async () => {
     const [first, second] = await twoPullRequests();
@@ -84,14 +103,16 @@ describe("古い main の上で確かめた PR は入らない", () => {
   it("同時に承認された 2 つのうち 1 つだけが入る", async () => {
     const [first, second] = await twoPullRequests();
     await world.d1.DB.prepare("UPDATE reviews SET reviewer_verdict = 'approve' WHERE node_id IN (?, ?)").bind(first, second).run();
-    // 1 つ目が main を進める前に、2 つ目が確かめを終えて同じ main の先を見ている
-    world.forge.during.merge = () => Promise.resolve();
+    // 2 つの merge がそろうまで待たせる。どちらも main が進む前に確かめを終えて、同じ main の先を見ている
+    const gate = barrier(2);
+    world.forge.during.merge = gate.arrive;
     const run = async (id: string) => {
       const made = await findNode(world.d1.DB, id);
       const branch = `ko/${id.slice(0, 8)}-${id === first ? "table" : "fix"}`;
       return mergeIfReady(world.gate.env, world.forge, made, { repo: made.repo ?? "", branch, prNumber: made.prNumber ?? 0, reviewer: null }, { staffId: null, kind: "owner_approved", detail: {} }, { by: "owner", now: world.clock.now() }, world.gate.deps);
     };
     const results = await Promise.all([run(first), run(second)]);
+    expect(gate.arrived()).toBe(2);
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(world.forge.merged).toHaveLength(1);
     // 入らなかった側は done に残らず、作った社員に戻る

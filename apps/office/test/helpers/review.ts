@@ -1,7 +1,7 @@
 // レビューのテストの手伝い。代わりの GitHub に連携し、開発担当にプルリクエストを出させ、GitHub の形の通知を作る (タスクとレビューの 3.5、3.6)
 import { expect } from "vitest";
 import { z } from "zod";
-import { vaultForge } from "../../src/gate/github/app.ts";
+import { vaultForge } from "../../src/gate/github/vault-forge.ts";
 import type { Forge } from "../../src/gate/work/loop.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
 import { type Connected, connect, hook, wrapDb } from "./github.ts";

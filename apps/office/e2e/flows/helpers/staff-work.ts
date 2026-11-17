@@ -198,10 +198,11 @@ export async function finishedBy(page: Page, nodeId: string): Promise<void> {
  * @param content 返す中身のブロック
  * @param stopReason 止まった理由
  * @param delayMs 受けてから返すまで待つ長さ。無ければすぐ返す
+ * @param staffId 返す社員。無ければレビュー担当
  */
-export async function scriptReply(page: Page, content: Record<string, unknown>[], stopReason: "tool_use" | "end_turn", delayMs?: number): Promise<void> {
+export async function scriptReply(page: Page, content: Record<string, unknown>[], stopReason: "tool_use" | "end_turn", delayMs?: number, staffId = "reviewer"): Promise<void> {
   // 開発担当なども同じ時に見本のタスクで SDK を呼ぶので、レビュー担当の作業トークンの呼び出しにだけ返させる
-  const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { staffId: "reviewer", content, stop_reason: stopReason, ...(delayMs === undefined ? {} : { delay_ms: delayMs }) } });
+  const res = await page.request.post(`${FAKES}/anthropic/__fake/responses`, { data: { staffId, content, stop_reason: stopReason, ...(delayMs === undefined ? {} : { delay_ms: delayMs }) } });
   expect(res.status()).toBe(204);
 }
 

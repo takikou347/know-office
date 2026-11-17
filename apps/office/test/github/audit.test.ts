@@ -1,6 +1,6 @@
 // App を通した操作の記録。社員がプルリクエストを出すと、どの社員がどのタスクで出したかが監査ログに残る (タスクとレビューの 3.3)
 import { describe, expect, it } from "vitest";
-import { vaultForge } from "../../src/gate/github/app.ts";
+import { vaultForge } from "../../src/gate/github/vault-forge.ts";
 import { createNode } from "../../src/gate/work/nodes.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
 import { clockIn, purposeAndGoal, staffOf, useWork } from "../helpers/work.ts";

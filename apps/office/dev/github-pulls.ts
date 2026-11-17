@@ -5,6 +5,8 @@ import { z } from "zod";
 const ReviewRequest = z.object({ event: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]), body: z.string().optional(), commit_id: z.string().optional() }).loose();
 /** 行のコメントを出す要求。GitHub の POST /repos/{o}/{r}/pulls/{n}/comments */
 const CommentRequest = z.object({ body: z.string().min(1), commit_id: z.string(), path: z.string().min(1), line: z.number().int().positive(), side: z.enum(["LEFT", "RIGHT"]) }).loose();
+/** プルリクエストを出す要求。GitHub の POST /repos/{o}/{r}/pulls */
+const PullRequest = z.object({ title: z.string().min(1), head: z.string().min(1), base: z.string().min(1), body: z.string().optional() }).loose();
 /** Git の API の要求のうち使う所 */
 const BlobRequest = z.object({ content: z.string(), encoding: z.enum(["utf-8", "base64"]) }).loose();
 const TreeRequest = z.object({ base_tree: z.string(), tree: z.array(z.object({ path: z.string(), mode: z.string(), type: z.string(), sha: z.string() }).loose()) }).loose();
@@ -56,6 +58,7 @@ export type FakePulls = {
 };
 
 const invalid = () => Response.json({ message: "Invalid request" }, { status: 422 });
+const notFound = () => Response.json({ message: "Not Found" }, { status: 404 });
 const forbidden = () => Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
 
 /**
@@ -112,6 +115,26 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     return Response.json(comment, { status: 201 });
   };
 
+  const made = new Map<string, unknown>();
+  /**
+   * POST /repos/{o}/{r}/pulls に答える。ブランチの先が無ければ 422
+   * @param repo owner/name
+   * @param body 本文
+   * @param token 鍵
+   * @returns 返事
+   */
+  const open = (repo: string, body: unknown, token: string | null): Response => {
+    if (!deps.allows(token, repo, "pull_requests", "write")) return forbidden();
+    const input = PullRequest.safeParse(body);
+    const head = input.success ? deps.heads.get(`${repo}:${input.data.head}`) : undefined;
+    if (!input.success || head === undefined) return invalid();
+    const number = 5000 + deps.next();
+    const opened1 = { number, title: input.data.title, body: input.data.body ?? "", base: { ref: input.data.base, sha: deps.heads.get(`${repo}:${input.data.base}`) ?? "0".repeat(40) }, head: { ref: input.data.head, sha: head }, state: "open" };
+    made.set(`${repo}#${String(number)}`, opened1);
+    authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key);
+    return Response.json(opened1, { status: 201 });
+  };
+
   /**
    * Git の API の要求に答える
    * @param method メソッド
@@ -137,6 +160,12 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
       commits.set(sha, { parents: input.data.parents, tree: input.data.tree });
       return Response.json({ sha }, { status: 201 });
     }
+    // GET /git/ref/heads/{ブランチ} は先を返し、DELETE /git/refs/heads/{ブランチ} は消す (GitHub の REST API の Git references)
+    if (method === "GET" && what === "ref/heads") {
+      const sha = deps.heads.get(`${repo}:${rest}`);
+      return sha === undefined ? Response.json({ message: "Not Found" }, { status: 404 }) : Response.json({ ref: `refs/heads/${rest}`, object: { sha } });
+    }
+    if (method === "DELETE" && what === "refs/heads") return deps.heads.delete(`${repo}:${rest}`) ? new Response(null, { status: 204 }) : Response.json({ message: "Reference does not exist" }, { status: 422 });
     if (method === "PATCH" && what === "refs/heads") {
       const input = RefRequest.safeParse(body);
       if (!input.success) return invalid();
@@ -191,6 +220,15 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     opened: (repo, number, token) => void authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key),
     answer: (route, text, token) => {
       const body: unknown = text ? JSON.parse(text) : null;
+      // 出した PR は、先をブランチの先と main の先に決めて覚え、GET で本文を読める。置いた返事 (fakeGitHubRoute) がある道は、呼ぶ側がこれより先に答える
+      const created = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route);
+      if (created) return open(created[1] ?? "", body, token);
+      const read = /^GET \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(route);
+      if (read) {
+        if (!deps.allows(token, read[1] ?? "", "pull_requests", "read")) return forbidden();
+        const found = made.get(`${read[1] ?? ""}#${read[2] ?? ""}`);
+        return found === undefined ? notFound() : Response.json(found);
+      }
       const review = /^POST \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/(reviews|comments)$/.exec(route);
       if (review) return pull(review[1] ?? "", Number(review[2]), review[3] ?? "", body, token);
       const list = /^GET \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/(reviews|comments)$/.exec(route);
@@ -214,7 +252,7 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
       }
       const diff = /^GET \/repos\/([^/]+\/[^/]+)\/compare\/([^.]+)\.\.\.([^/]+)$/.exec(route);
       if (diff) return deps.allows(token, diff[1] ?? "", "contents", "read") ? compare(diff[1] ?? "", diff[2] ?? "", diff[3] ?? "") : forbidden();
-      const found = /^(GET|POST|PATCH) \/repos\/([^/]+\/[^/]+)\/git\/(blobs|trees|commits|refs\/heads)(?:\/([^?]+))?(?:\?.*)?$/.exec(route);
+      const found = /^(GET|POST|PATCH|DELETE) \/repos\/([^/]+\/[^/]+)\/git\/(blobs|trees|commits|refs\/heads|ref\/heads)(?:\/([^?]+))?(?:\?.*)?$/.exec(route);
       if (!found) return null;
       const [, method = "", repo = "", what = "", rest = ""] = found;
       if (!deps.allows(token, repo, "contents", method === "GET" ? "read" : "write")) return forbidden();

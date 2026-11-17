@@ -88,7 +88,7 @@ export const GitHubCheckRuns = z
 const GitHubChangedFile = z.object({ filename: z.string().min(1), previous_filename: z.string().min(1).optional(), status: z.string().optional(), patch: z.string().optional() }).loose();
 
 /** GET /repos/{o}/{r}/compare/{base}...{head} の返事のうち使う所。ファイルは比べる全体で 300 件までで、それより多ければ切れる。status は head が base に対して ahead、behind、identical、diverged のどれか */
-export const GitHubCompare = z.object({ status: z.string().optional(), files: z.array(GitHubChangedFile).default([]) }).loose();
+export const GitHubCompare = z.object({ status: z.enum(["ahead", "behind", "identical", "diverged"]).optional(), files: z.array(GitHubChangedFile).default([]) }).loose();
 
 /** GET /repos/{o}/{r}/pulls/{n}/files の 1 ページ。1 ページ 100 件まで、全体で 3,000 件まで */
 export const GitHubPullFiles = z.array(GitHubChangedFile).max(100);
