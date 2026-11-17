@@ -31,7 +31,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("代わりの Claude API の使用の上限の返事は、本物と同じ形で読める", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     for (const kind of SPEND_LIMIT_KINDS) {
       const { status, type, ...extra } = spendLimitError(kind).error;
       claude.pushError(status, type, extra);
@@ -47,7 +47,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("代わりの Claude API は、切り替えた社員の呼び出しにだけ使用の上限を返し続け、戻すと積んだ返事を返す", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     const limit = (body: unknown) => claude.app.request("/__fake/limit", { method: "POST", body: JSON.stringify(body) });
     expect((await limit({ staffId: "reviewer", limit: "monthly" })).status).toBe(204);
     expect((await limit({ staffId: "nobody", limit: "monthly" })).status).toBe(400);
