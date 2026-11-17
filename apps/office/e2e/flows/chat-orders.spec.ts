@@ -78,13 +78,15 @@ test.describe("オーナーの指示に合わせる", () => {
       await expect(bubble.getByText(`${shortToday()} を休みにしました`)).toBeVisible();
       // 指示の一覧にも会話から足した休みが出る
       await page.goto("/staff/reviewer");
-      await expect(page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByText("休み", { exact: true })).toBeVisible();
+      // 前の通しが取り消した休みも並ぶので、取り消せる物だけを数える
+      const activeOff = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("button", { name: "休みの指示を取り消す" });
+      await expect(activeOff).toHaveCount(1);
       // 会話から取り消す
       await page.goto("/staff/reviewer?tab=talk");
       await bubble.getByRole("button", { name: "休みの指示を取り消す" }).click();
       await expect(bubble.getByText(`${shortToday()} を休みにしました (取り消しました)`)).toBeVisible();
       await page.goto("/staff/reviewer");
-      await expect(page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByText(/に取り消した/)).toBeVisible();
+      await expect(activeOff).toHaveCount(0);
       // 先にほかの所で取り消された指示は、会話のボタンから取り消すと「もう取り消されています」と出す
       await scriptOrders(page, [{ kind: "off", day: tomorrow() }]);
       const next = await sayToReviewer(page, `明日は休みにして ${String(Date.now())}`);
@@ -97,7 +99,7 @@ test.describe("オーナーの指示に合わせる", () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
       await page.setViewportSize({ width: 1280, height: 800 });
       const listed = OrderList.parse(await (await page.request.get(`/api/v1/staff/reviewer/orders?day=${tomorrow()}`)).json()).data;
-      for (const o of listed.filter((x) => x.cancelledAt === null)) expect((await page.request.delete(`/api/v1/staff/reviewer/orders/${o.id}`)).status()).toBe(200);
+      for (const o of listed.filter((x) => x.cancelledAt === null)) expect((await page.request.delete(`/api/v1/staff/reviewer/orders/${o.id}`, { headers: { Origin: new URL(page.url()).origin } })).status()).toBe(200);
       await button.click();
       await expect(next.getByRole("status")).toHaveText("もう取り消されています");
       await expect(next.getByText(/を休みにしました \(取り消しました\)/)).toBeVisible();
