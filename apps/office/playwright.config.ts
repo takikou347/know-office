@@ -20,7 +20,7 @@ if (wanted !== vars) writeFileSync(devVars, wanted);
 const widths = [
   { name: "desktop", viewport: { width: 1280, height: 800 }, testMatch: undefined },
   // 幅で形の変わる画面 (切り替え、表、オフィス、差分) だけを狭い幅でも見る
-  { name: "phone", viewport: { width: 360, height: 780 }, testMatch: /(a11y|screens|review|office)\.spec\.ts/ },
+  { name: "phone", viewport: { width: 360, height: 780 }, testMatch: /(a11y|screens|review|office|notices)\.spec\.ts/ },
 ] as const;
 
 // 入れてあるブラウザが版と合わない所では、PW_CHROMIUM_PATH で Chrome の場所を、E2E_BROWSERS で走らせる物を選ぶ

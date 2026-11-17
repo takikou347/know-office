@@ -5,7 +5,7 @@ import { type Navigate, Page, type ToggleExtension } from "./pages.tsx";
 import { useRevealFocus } from "./parts/focus.ts";
 import { LiveProvider } from "./parts/live.tsx";
 import { OfficeNewsFeed } from "./pages/office/news.ts";
-import { LiveNoticeBar, NoticeHold, NoticeProvider } from "./parts/notices.tsx";
+import { LiveNoticeBar, NoticeProvider } from "./parts/notices.tsx";
 import { bottomCurrentOf, bottomItems, headingOf, morePath, screenOf, sideItemsWith } from "./routes.ts";
 
 export interface AppProps {
@@ -30,31 +30,26 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
     <LiveProvider>
       <OfficeNewsFeed />
       <NoticeProvider>
-        <NoticeHold>
-          <AppShell
-            items={sideItemsWith(shown)}
-            current={more ? undefined : screen.id}
-            bottomItems={bottomItems}
-            bottomCurrent={bottomCurrentOf(pathname, shown)}
-            brand={{ name: "know-office" }}
-            header={
-              <>
-                <AppBar title={headingOf(pathname, shown)} position="sticky" />
-                <LiveNoticeBar />
-              </>
-            }
-          >
-            <Page
-              screen={more ? "more" : screen.id}
-              pathname={pathname}
-              query={searchParams}
-              health={health}
-              navigate={navigate}
-              extensions={extensions}
-              toggleExtension={toggleExtension}
-            />
-          </AppShell>
-        </NoticeHold>
+        <AppShell
+          items={sideItemsWith(shown)}
+          current={more ? undefined : screen.id}
+          bottomItems={bottomItems}
+          bottomCurrent={bottomCurrentOf(pathname, shown)}
+          brand={{ name: "know-office" }}
+          header={<AppBar title={headingOf(pathname, shown)} position="sticky" />}
+          // 通知は開いた後にも届くので、中身の下に出す。出ても中身の上の端と見出しは動かない
+          footer={<LiveNoticeBar />}
+        >
+          <Page
+            screen={more ? "more" : screen.id}
+            pathname={pathname}
+            query={searchParams}
+            health={health}
+            navigate={navigate}
+            extensions={extensions}
+            toggleExtension={toggleExtension}
+          />
+        </AppShell>
       </NoticeProvider>
     </LiveProvider>
   );

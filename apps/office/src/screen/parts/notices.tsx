@@ -1,4 +1,4 @@
-// 画面の通知。配信の印で読み直すのを速い道にし、印を取りこぼしても 5 分ごとに (配信が切れている間は 1 分ごとに) 読む。上部の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5、社員と自動の 3.7)
+// 画面の通知。配信の印で読み直すのを速い道にし、印を取りこぼしても 5 分ごとに (配信が切れている間は 1 分ごとに) 読む。中身の下の帯にいちばん新しい未読を、ダッシュボードに一覧を出す (サービスと拡張の 3.5、社員と自動の 3.7)
 import { type Notice, type NoticeLevel, systemClock } from "@know-office/core";
 import { Alert, Link, List, type Tone } from "knowidea-ui";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -22,9 +22,6 @@ export function noticePollMs(connected: boolean): number {
   return connected ? NOTICE_LIVE_POLL_MS : NOTICE_POLL_MS;
 }
 
-/** 開いた時に、初めの通知を待って画面を描かずにおく長さの上限。帯が後から差し込まれて、押そうとした物がずれないようにする */
-export const NOTICE_HOLD_MS = 1_000;
-
 /** 1 度に読む通知の数 */
 const NOTICE_LIMIT = 20;
 
@@ -38,8 +35,6 @@ type NoticesState = {
   state: "loading" | "ok" | "error";
   /** 通知を既読にする */
   markRead: (id: string) => void;
-  /** 初めの通知を待って、画面を描かずにいるか */
-  holding: boolean;
 };
 
 /** 読んだ通知と、読めたか */
@@ -95,39 +90,7 @@ export function watchNotices(pull: () => void, view: NoticeView | null, ms: numb
   };
 }
 
-/** 画面を描き始める時を決める物 */
-export type NoticeHoldTimer = {
-  /** 初めの通知が届いた (読めなかった時も含む) */
-  settled: () => void;
-  /** 待つのを止める。もう release を呼ばない */
-  stop: () => void;
-};
-
-/**
- * 初めの通知が届くか、ms が過ぎるかの早い方で、1 度だけ release を呼ぶ
- * @param release 画面を描き始める関数
- * @param ms 待つ長さの上限
- * @returns 届いた事を伝える関数と、止める関数
- */
-export function holdNotices(release: () => void, ms: number = NOTICE_HOLD_MS): NoticeHoldTimer {
-  let done = false;
-  const once = () => {
-    if (done) return;
-    done = true;
-    clearTimeout(timer);
-    release();
-  };
-  const timer = setTimeout(once, ms);
-  return {
-    settled: once,
-    stop: () => {
-      done = true;
-      clearTimeout(timer);
-    },
-  };
-}
-
-const NoticesContext = createContext<NoticesState>({ notices: [], state: "loading", markRead: () => {}, holding: false });
+const NoticesContext = createContext<NoticesState>({ notices: [], state: "loading", markRead: () => {} });
 
 export interface NoticeProviderProps {
   /** 通知を使う画面 */
@@ -143,19 +106,15 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
   const api = useContext(ApiContext);
   const { connected, subscribe } = useLive();
   const [loaded, setLoaded] = useState<Loaded>({ notices: [], state: "loading" });
-  // 入口を呼ぶ口が無い時は読まないので、待たない
-  const [holding, setHolding] = useState(api !== null);
   useEffect(() => {
     if (!api) return () => {};
     let live = true;
-    const hold = holdNotices(() => setHolding(false));
     // 読み直しが重なると答えの届く順が入れ替わるので、最後に始めた読みの答えだけを使う
     const pull = latestOnly(
       () => fetchNotices(api),
       (value) => {
         if (!live) return;
         setLoaded((before) => (value ? { notices: value, state: "ok" } : { ...before, state: "error" }));
-        hold.settled();
       },
     );
     const onMark = markReloader(pull);
@@ -168,7 +127,6 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
       live = false;
       unsubscribe();
       stop();
-      hold.stop();
     };
   }, [api, connected, subscribe]);
   const markRead = useCallback(
@@ -187,23 +145,7 @@ export function NoticeProvider({ children }: NoticeProviderProps) {
     },
     [api],
   );
-  return <NoticesContext value={{ ...loaded, markRead, holding }}>{children}</NoticesContext>;
-}
-
-export interface NoticeHoldProps {
-  /** 待ってから描く画面 */
-  children: ReactNode;
-}
-
-/**
- * 開いた時に、初めの通知が届くまで (長くて NOTICE_HOLD_MS) 画面を描かず、帯と中身を一緒に描く。
- * 隠して描くと、待つ間に移った画面で focus と Tab の行き先が隠れた物に当たるので、描かずに待つ
- * @param props 画面
- * @returns 画面。待つ間は何も描かない
- */
-export function NoticeHold({ children }: NoticeHoldProps) {
-  const { holding } = useContext(NoticesContext);
-  return holding ? null : children;
+  return <NoticesContext value={{ ...loaded, markRead }}>{children}</NoticesContext>;
 }
 
 export interface NoticeBarProps {
@@ -267,25 +209,50 @@ export function NoticeList({ notices, state }: NoticeListProps) {
   );
 }
 
+/** 帯が出た直後や替わった直後に、押すのを受けない長さ。中身の下の端を押そうとした指の下に帯が来ても、誤って既読にしたり移ったりしない */
+export const NOTICE_FRESH_MS = 300;
+
 /**
- * 入口から読んだ通知で上部の帯を出す
+ * 入口から読んだ通知で、中身の下に帯を出す。中身の上の端は動かさない
  * @returns 帯
  */
 export function LiveNoticeBar() {
   const { notices, markRead } = useContext(NoticesContext);
   const ref = useRef<HTMLDivElement>(null);
+  const topId = notices.find((n) => n.readAt === null)?.id ?? null;
+  // 帯に出す通知が替わった時を、描く間に覚える (React の「前の描画の値を覚える」形)。freshId は押すのを受けない間の通知
+  const [shownId, setShownId] = useState(topId);
+  const [freshId, setFreshId] = useState<string | null>(null);
+  if (shownId !== topId) {
+    setShownId(topId);
+    setFreshId(topId);
+  }
+  useEffect(() => {
+    if (freshId === null) return () => {};
+    const timer = setTimeout(() => setFreshId(null), NOTICE_FRESH_MS);
+    return () => clearTimeout(timer);
+  }, [freshId]);
   useEffect(() => {
     const band = ref.current;
     if (!band || typeof ResizeObserver === "undefined") return () => {};
-    // 帯は中身の上の段にあり、通知は配信でいつでも届く。帯が出たり高くなったりすると中身の段が縮み、focus した物が下へ押し出されて
-    // 隠れる (WCAG 2.2 の 2.4.11)。帯の高さが変わるたびに、中身にある focus した物を見える所へ戻す
+    // 帯は中身の下の段にあり、通知は配信でいつでも届く。帯が出たり高くなったりすると中身の段が下から縮み、中身の下の端で focus した物が
+    // 帯の後ろへ押し出されて隠れる (WCAG 2.2 の 2.4.11)。帯の高さが変わるたびに、中身にある focus した物を見える所へ戻す
     const observer = new ResizeObserver(() => revealFocus(band.ownerDocument));
     observer.observe(band);
     return () => observer.disconnect();
   }, []);
+  const read = useCallback(
+    (id: string) => {
+      // 「読んだ」を押すと帯ごと消えるので、帯の中にあった focus を中身へ戻し、失わない
+      const band = ref.current;
+      if (band?.contains(band.ownerDocument.activeElement)) band.ownerDocument.querySelector("main")?.focus({ preventScroll: true });
+      markRead(id);
+    },
+    [markRead],
+  );
   return (
-    <div ref={ref}>
-      <NoticeBar notices={notices} onRead={markRead} />
+    <div ref={ref} className="ko-notice-band" data-fresh={freshId === null ? undefined : ""}>
+      <NoticeBar notices={notices} onRead={read} />
     </div>
   );
 }

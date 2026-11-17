@@ -45,17 +45,17 @@ importers:
         specifier: 6.2.17
         version: 6.2.17
       knowidea-css:
-        specifier: 0.12.2
-        version: 0.12.2
+        specifier: 0.14.0
+        version: 0.14.0
       knowidea-icons:
-        specifier: 0.12.2
-        version: 0.12.2(react@19.3.1)
+        specifier: 0.14.0
+        version: 0.14.0(react@19.3.1)
       knowidea-tokens:
-        specifier: 0.12.2
-        version: 0.12.2
+        specifier: 0.14.0
+        version: 0.14.0
       knowidea-ui:
-        specifier: 0.12.2
-        version: 0.12.2(@types/react@19.3.0)(knowidea-css@0.12.2)(knowidea-icons@0.12.2(react@19.3.1))(knowidea-tokens@0.12.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 0.14.0
+        version: 0.14.0(@types/react@19.3.0)(knowidea-css@0.14.0)(knowidea-icons@0.14.0(react@19.3.1))(knowidea-tokens@0.14.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -136,17 +136,17 @@ importers:
         specifier: 4.13.17
         version: 4.13.17
       knowidea-css:
-        specifier: 0.12.2
-        version: 0.12.2
+        specifier: 0.14.0
+        version: 0.14.0
       knowidea-icons:
-        specifier: 0.12.2
-        version: 0.12.2(react@19.3.1)
+        specifier: 0.14.0
+        version: 0.14.0(react@19.3.1)
       knowidea-tokens:
-        specifier: 0.12.2
-        version: 0.12.2
+        specifier: 0.14.0
+        version: 0.14.0
       knowidea-ui:
-        specifier: 0.12.2
-        version: 0.12.2(@types/react@19.3.0)(knowidea-css@0.12.2)(knowidea-icons@0.12.2(react@19.3.1))(knowidea-tokens@0.12.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 0.14.0
+        version: 0.14.0(@types/react@19.3.0)(knowidea-css@0.14.0)(knowidea-icons@0.14.0(react@19.3.1))(knowidea-tokens@0.14.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -1940,24 +1940,24 @@ packages:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
 
-  knowidea-css@0.12.2:
-    resolution: {integrity: sha512-AqasCJ/0PX7LyqEuxzNxnVXYKxHL6dxVIkdqUOMFviVczoj09dfYWi0XIlS4fv4VJpnUchXSnTTzPCzcs2ODTQ==}
+  knowidea-css@0.14.0:
+    resolution: {integrity: sha512-ZU/4DvsyLSjm9PCNnOiqQt838h5b+RE6geBUspwP0xKMdYIOQq5ms46getasR82M3hIwZgAJ6j3pp9v1PlsiHw==}
 
-  knowidea-icons@0.12.2:
-    resolution: {integrity: sha512-aFESlCNclt+Ubsh6Ohz99gWoYPvp7lbtcYRxNuduN4YYXFg1ce8SppAA1BWWH4NjYycZO4FHsNFLGctGZ9qAbg==}
+  knowidea-icons@0.14.0:
+    resolution: {integrity: sha512-Zm5QtMdvz1evZmLm0/4WxgYhxNkaLnfmT8bm8VRBG18qktMaRxFvWaU0wm73RYlCiX9BHcXGK5klYojsiErkUw==}
     peerDependencies:
       react: ^19.0.0
 
-  knowidea-tokens@0.12.2:
-    resolution: {integrity: sha512-H9gsjzo8vsPiOI4IKStE7cdSRpaP1qkKdWk7uIprdJSEGLV8NR+bL/7p0hZdBzufyUN2Q8nZDW3w0iWakz13Ag==}
+  knowidea-tokens@0.14.0:
+    resolution: {integrity: sha512-VQZCYpqHVsWemgBjThvQhvmbHceV74phGLrG9+gvNmNV0iRaYzcD8JXrzmo+EiJbkynqBFgjXijiiycUoLLN2w==}
     hasBin: true
 
-  knowidea-ui@0.12.2:
-    resolution: {integrity: sha512-QU0wQrEOxAarGeNGh/vNXuNc9yyfRgIcHocJ/gMNdSlCVnpFfTF/bcR77uliS0LE7hxN1Z/JcqdTdK+cNkaZkw==}
+  knowidea-ui@0.14.0:
+    resolution: {integrity: sha512-SlWvxTItjLowrJnRk49MFpuQDruM8p9Q07GZkvR6d5AiRFUcEQomtmjNgOrR24gh36JQxXgC6wRbU3AjWRAmHg==}
     peerDependencies:
-      knowidea-css: ^0.12.2
-      knowidea-icons: ^0.12.2
-      knowidea-tokens: ^0.12.2
+      knowidea-css: ^0.14.0
+      knowidea-icons: ^0.14.0
+      knowidea-tokens: ^0.14.0
       react: ^19.0.0
       react-dom: ^19.0.0
 
@@ -3958,15 +3958,15 @@ snapshots:
 
   kleur@4.1.5: {}
 
-  knowidea-css@0.12.2: {}
+  knowidea-css@0.14.0: {}
 
-  knowidea-icons@0.12.2(react@19.3.1):
+  knowidea-icons@0.14.0(react@19.3.1):
     dependencies:
       react: 19.3.1
 
-  knowidea-tokens@0.12.2: {}
+  knowidea-tokens@0.14.0: {}
 
-  knowidea-ui@0.12.2(@types/react@19.3.0)(knowidea-css@0.12.2)(knowidea-icons@0.12.2(react@19.3.1))(knowidea-tokens@0.12.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  knowidea-ui@0.14.0(@types/react@19.3.0)(knowidea-css@0.14.0)(knowidea-icons@0.14.0(react@19.3.1))(knowidea-tokens@0.14.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       '@base-ui/react': 1.9.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@codemirror/autocomplete': 6.20.4
@@ -3980,9 +3980,9 @@ snapshots:
       '@codemirror/state': 6.7.6
       '@codemirror/view': 6.43.15
       '@lezer/highlight': 1.2.5
-      knowidea-css: 0.12.2
-      knowidea-icons: 0.12.2(react@19.3.1)
-      knowidea-tokens: 0.12.2
+      knowidea-css: 0.14.0
+      knowidea-icons: 0.14.0(react@19.3.1)
+      knowidea-tokens: 0.14.0
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
     transitivePeerDependencies:

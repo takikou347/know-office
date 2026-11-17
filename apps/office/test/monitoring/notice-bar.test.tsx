@@ -3,7 +3,7 @@ import type { Notice } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Api, createApi } from "../../src/screen/api.ts";
-import { fetchNotices, holdNotices, latestOnly, NOTICE_HOLD_MS, NOTICE_LIVE_POLL_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, noticePollMs, watchNotices } from "../../src/screen/parts/notices.tsx";
+import { fetchNotices, latestOnly, NOTICE_LIVE_POLL_MS, NOTICE_POLL_MS, NoticeBar, NoticeList, noticePollMs, watchNotices } from "../../src/screen/parts/notices.tsx";
 
 /**
  * 通知を作る
@@ -155,46 +155,5 @@ describe("読み直しが重なった時", () => {
     answers[0]?.("古い");
     await first;
     expect(applied).toEqual(["新しい"]);
-  });
-});
-
-describe("開いた時に画面を描かずに待つ長さ", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("初めの通知が届いたら、その時に 1 度だけ画面を描き始める", () => {
-    const release = vi.fn<() => void>();
-    const hold = holdNotices(release);
-    vi.advanceTimersByTime(NOTICE_HOLD_MS / 2);
-    expect(release).not.toHaveBeenCalled();
-    hold.settled();
-    expect(release).toHaveBeenCalledTimes(1);
-    // 後の読み直しや上限の時が来ても、もう呼ばない
-    hold.settled();
-    vi.advanceTimersByTime(NOTICE_HOLD_MS);
-    expect(release).toHaveBeenCalledTimes(1);
-  });
-
-  it("通知が届かなくても、上限の時に画面を描き始める", () => {
-    const release = vi.fn<() => void>();
-    holdNotices(release);
-    vi.advanceTimersByTime(NOTICE_HOLD_MS - 1);
-    expect(release).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(release).toHaveBeenCalledTimes(1);
-  });
-
-  it("止めた後は呼ばない", () => {
-    const release = vi.fn<() => void>();
-    const hold = holdNotices(release);
-    hold.stop();
-    expect(vi.getTimerCount()).toBe(0);
-    hold.settled();
-    vi.advanceTimersByTime(NOTICE_HOLD_MS);
-    expect(release).not.toHaveBeenCalled();
   });
 });

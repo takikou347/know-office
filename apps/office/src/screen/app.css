@@ -22,3 +22,6 @@
     cursor: pointer;
   }
 }
+
+/* 帯が出た直後と替わった直後は押すのを受けない。中身の下の端を押そうとした指の下に帯が来ても、誤って既読にしない (parts/notices.tsx の NOTICE_FRESH_MS) */
+.ko-notice-band[data-fresh] { pointer-events: none; }
