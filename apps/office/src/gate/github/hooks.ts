@@ -30,6 +30,9 @@ import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { receiveDeploymentStatus, receiveWorkflowRun } from "../services/deploys.ts";
+import { receiveDocsPush } from "../devloop/sync.ts";
+import { isDocsRepo } from "../devloop/docs-setting.ts";
+import { DEV_ISSUE_MARK_PREFIX } from "../findings/tracker.ts";
 import { receivePush } from "../services/releases.ts";
 import type { Forge } from "../work/loop.ts";
 
@@ -178,7 +181,8 @@ async function intakeServiceHook(env: Bindings, hook: Hook, ctx: { forge: Forge;
   const taken = await record.run();
   if (taken.meta.changes === 0) return;
   try {
-    if (hook.event === "push") await receivePush(env, ctx.forge, hook.payload, hook.now);
+    // 設計書のリポジトリの push は Issue を合わせるタスクに、ほかは依存と版の読みに回す
+    if (hook.event === "push") await (await isDocsRepo(env.DB, hook.repo) ? receiveDocsPush : receivePush)(env, ctx.forge, hook.payload, hook.now);
     else if (hook.event === "deployment_status") await receiveDeploymentStatus(env, hook.payload, hook.now);
     else await receiveWorkflowRun(env, hook.action, hook.payload, hook.now, ctx.guard);
   } catch (error) {
@@ -282,11 +286,16 @@ async function intakeIssue(env: Bindings, hook: Hook, record: D1PreparedStatemen
     await record.run();
     return;
   }
+  // ゲートウェイが設計書から作った Issue は、本文の隠した印を主に、dev_issues の行を補助に見分け、受けた記録だけを残して社長の分けるタスクにしない
+  const { number, title, body } = issue.data.issue;
+  if ((body ?? "").includes(DEV_ISSUE_MARK_PREFIX) || (await env.DB.prepare("SELECT 1 FROM dev_issues WHERE repo = ? AND number = ?").bind(repo, number).first())) {
+    await record.run();
+    return;
+  }
   const taken = await record.run();
   if (taken.meta.changes === 0) return;
   try {
     const [owner] = await drizzle(env.DB).select({ id: services.id }).from(services).where(eq(services.repo, repo)).orderBy(services.id).limit(1);
-    const { number, title, body } = issue.data.issue;
     await intakeTask(env, { scope: owner?.id ?? "office", title, body: body ?? "", source: "issue", issueNumber: number }, hook.now);
   } catch (error) {
     await env.DB.prepare("DELETE FROM github_deliveries WHERE body_sha256 = ?").bind(hook.digest).run();

@@ -13,9 +13,9 @@ const INDEX = "services/README.md";
 const READABLE = /^(?:README\.md|docs\/(?:01-overview|02-architecture|03-stack|04-detail|05-test|06-operations)\/index\.md|docs\/(?:04-detail|05-test)\/\d+-[a-z0-9]+(?:-[a-z0-9]+)*\.md)$/;
 
 /**
- * 1 回の確かめで中身を読むファイルの上限。Workers の有料プランは 1 回の要求で subrequest を 1,000 まで許す (Cloudflare Workers の Limits)
+ * 1 回の確かめで中身を読むファイルの上限。Workers の有料プランは 1 回の要求で subrequest を 10,000 まで許す (Cloudflare Workers の Limits)
  * 内訳は、中身の読み 60、変えたファイル 1、木 1、ブランチの先か既定のブランチの先 2、README の読み 1、チェック 1、main を進める 1、レビューと承認の GitHub への写し数回、鍵の取得とインストールの確かめ
- * で、これらを足しても 1,000 に十分収まる。当たったら上限を上げる Issue を立てる
+ * で、これらを足しても 10,000 に十分収まる (無料のプランは 50 で、足りない)。当たったら上限を上げる Issue を立てる
  */
 export const DOCS_READ_MAX = 60;
 

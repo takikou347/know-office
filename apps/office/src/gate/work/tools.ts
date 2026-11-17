@@ -8,6 +8,7 @@ import {
   EXTENSION_TOOLS_MAX,
   type ExtensionToolSpec,
   IdeaAddTool,
+  IssuePlanTool,
   newId,
   NodeAssignTool,
   NodeCreateTool,
@@ -41,6 +42,7 @@ import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { repoScope } from "../github/rules.ts";
 import { assertDocsPr } from "../devloop/docs-pr.ts";
+import { issuePlan } from "../devloop/plan.ts";
 import { announceNotice } from "../live/publish.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { readOwnerData } from "./owner-data.ts";
@@ -442,6 +444,8 @@ const TOOLS: Record<string, Tool> = {
   review_submit: { schema: ReviewSubmitTool, run: reviewSubmit },
   idea_add: { schema: IdeaAddTool, run: ideaAdd },
   study_submit: { schema: StudySubmitTool, run: studySubmit },
+  // 社長が設計書から親と子の Issue を作る。題と本文はゲートウェイが決まった形で作る
+  issue_plan: { schema: IssuePlanTool, run: (env, forge, call, input: IssuePlanTool) => issuePlan(env, forge, input, actorOf(call)) },
   service_close_request: { schema: ServiceCloseRequestTool, run: serviceCloseRequest },
   checkpoint: { schema: CheckpointTool, run: checkpoint },
   report: { schema: ReportTool, run: report },
