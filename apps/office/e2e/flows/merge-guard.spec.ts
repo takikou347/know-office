@@ -49,6 +49,9 @@ test.describe("チェックが落ちたままのマージ", () => {
     // 要るチェックの 1 つが落ちている
     await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${HEAD}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "failure" }] });
 
+    // 代わりの GitHub の記録は通しをまたいで残るので、承認の前の長さを控え、承認の後に増えた分だけを見る
+    const before = Requests.parse(await (await page.request.get(`${FAKE_GITHUB}/__fake/requests`)).json()).length;
+
     // 社員と仕事の画面からレビューを開き、オーナーが承認する
     const nav = page.getByRole("navigation", { name: "画面の切り替え" }).first();
     await nav.getByRole("link", { name: "社員と仕事" }).click();
@@ -62,7 +65,7 @@ test.describe("チェックが落ちたままのマージ", () => {
     await expect.poll(async () => State.parse(await (await page.request.get("/api/v1/guard/state")).json()).data.stopped.some((s) => s.scope === "task" && s.target === NODE)).toBe(true);
     expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${NODE}`)).json()).data.status).toBe("stopped");
     const requests = Requests.parse(await (await page.request.get(`${FAKE_GITHUB}/__fake/requests`)).json());
-    expect(requests.filter((r) => r.route === MERGE)).toEqual([]);
+    expect(requests.slice(before).filter((r) => r.route === MERGE)).toEqual([]);
 
     // セキュリティの画面の止めている物に、止めたタスクが出る
     await nav.getByRole("link", { name: "守り" }).click();
