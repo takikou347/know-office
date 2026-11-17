@@ -1,10 +1,10 @@
 // タスクが同じ時に直す設計書の PR の行 task_docs。設計書の PR を出す前に取り (同じサービスの設計書を直す別のタスクがあれば取れず 409)、コードの PR の docsPr で結ぶ (開発の回し方の 3.6)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError } from "@know-office/core";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { taskDocs } from "../db/main.ts";
-import { loadDocsRepo } from "./docs-setting.ts";
+import { services, taskDocs } from "../db/main.ts";
+import { isDocsRepo, loadDocsRepo } from "./docs-setting.ts";
 
 /** 設計書の PR の行 */
 export type DocsRow = typeof taskDocs.$inferSelect;
@@ -106,4 +106,19 @@ export async function linkedRow(db: D1Database, nodeId: string, docsPr: number |
   const docs = await loadDocsRepo(db);
   if (docs === null || docs.repo.toLowerCase() !== row.repo.toLowerCase()) throw new AppError("conflict", "設計書のリポジトリが変わった。今の設計書のリポジトリへ出し直す");
   return row;
+}
+
+/**
+ * タスクが、設計書のリポジトリへ push できるかを見る。サービスのタスク (scope がサービス ID、repo がそのサービスのリポジトリ) だけが、今の設計書のリポジトリ (大文字小文字を区別しない) に push できる
+ * @param db 今の状態の D1
+ * @param task タスクの範囲とリポジトリ
+ * @param task.scope タスクの範囲
+ * @param task.repo タスクのリポジトリ
+ * @param repo push 先のリポジトリ
+ * @returns push できるなら true
+ */
+export async function mayPushDocs(db: D1Database, task: { scope: string; repo: string | null }, repo: string): Promise<boolean> {
+  if (task.repo === null || !(await isDocsRepo(db, repo))) return false;
+  const [service] = await drizzle(db).select({ id: services.id }).from(services).where(and(eq(services.id, task.scope), eq(services.repo, task.repo))).limit(1);
+  return service !== undefined;
 }

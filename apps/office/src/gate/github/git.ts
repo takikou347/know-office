@@ -7,6 +7,7 @@ import { ensureRunning } from "../guard/actions.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
+import { mayPushDocs } from "../devloop/docs-link.ts";
 import { findNode } from "../work/nodes.ts";
 import type { TicketClaims } from "../work/ticket.ts";
 import { callGitHub, GITHUB_USER_AGENT, githubRetryAfter, githubToken, isRedirect, parseGitHub } from "./app.ts";
@@ -261,12 +262,16 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   const decision = decideRepo({ action: push ? "push" : "read", repo: repo.data, paths: [] }, scope);
   if (!decision.allow) return deny(c, ticket, `${repo.data} ${push ? "push" : "read"}`, decision.reason);
   // 書くのはタスクのリポジトリだけ。ほかのリポジトリはタスクの外
-  if (push && (await findNode(c.env.DB, ticket.nodeId)).repo !== repo.data) return deny(c, ticket, `${repo.data} push`, "タスクのリポジトリでない");
+  // ただしサービスのタスクは、設計書のリポジトリの自分のタスクのブランチ (ko/<タスク ID の頭 8 字>-) にも書ける。同じ時に設計書を直す (開発の回し方の 3.6)
+  const task = push ? await findNode(c.env.DB, ticket.nodeId) : null;
+  const docsBranch = task !== null && task.repo !== repo.data && (await mayPushDocs(c.env.DB, task, repo.data)) ? `refs/heads/ko/${task.id.slice(0, 8)}-` : null;
+  if (task !== null && task.repo !== repo.data && docsBranch === null) return deny(c, ticket, `${repo.data} push`, "タスクのリポジトリでない");
   const body = c.req.method === "POST" ? decodedBody(c) : null;
   const commands = push && body ? await readCommands(body) : null;
   const token = await githubToken(c.env, c.var.github, repo.data, { contents: push ? "write" : "read" });
   if (commands) {
-    const refused = refusedRef(commands.updates, await defaultBranchOf(c, repo.data, token.reveal()));
+    const own = docsBranch !== null && commands.updates.some((u) => !u.ref.startsWith(docsBranch)) ? "設計書のリポジトリは自分のタスクのブランチだけ" : null;
+    const refused = own ?? refusedRef(commands.updates, await defaultBranchOf(c, repo.data, token.reveal()));
     if (refused !== null) {
       void commands.relay.stream.cancel();
       return deny(c, ticket, `${repo.data} push`, refused);
