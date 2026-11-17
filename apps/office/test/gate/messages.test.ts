@@ -40,7 +40,7 @@ function wrap<T extends object>(target: T, key: string, replaced: unknown): T {
 }
 
 const Message = z
-  .object({ id: z.string(), at: z.string(), staffId: z.string(), nodeId: z.string().nullable(), sender: z.string(), body: z.string(), deliveredAt: z.string().nullable(), delivery: z.string().nullable() })
+  .object({ id: z.string(), at: z.string(), staffId: z.string(), nodeId: z.string().nullable(), sender: z.string(), body: z.string(), deliveredAt: z.string().nullable(), delivery: z.string().nullable(), orders: z.array(z.unknown()) })
   .strict();
 const Page = z.object({ data: z.array(Message), meta: z.object({ next: z.string().nullable() }).loose() });
 
@@ -82,7 +82,7 @@ describe("会話と配信", () => {
     expect(rest.meta.next).toBeNull();
     // 配信 DO に、足した発言を渡す
     // 配信の発言は渡した印を持たない。印は message_delivered で別に配る
-    const { deliveredAt: _at, delivery: _via, ...shown } = made;
+    const { deliveredAt: _at, delivery: _via, orders: _orders, ...shown } = made;
     expect(gate.live.published).toContainEqual({ type: "message", message: { ...shown, truncated: false } });
   });
 
@@ -131,7 +131,7 @@ describe("速さ", () => {
   it("発言が届く速さ", async () => {
     // 社員の発言は、記録に足したのと同じ処理の中で配信 DO に渡し、間をおいて読み直すのを待たない
     const message = await appendMessage(gate.env, { staffId: "builder", sender: "staff", body: "勤怠の表を作り始めた", nodeId: null, traceId: null }, clock);
-    const { deliveredAt: _at, delivery: _via, ...shown } = message;
+    const { deliveredAt: _at, delivery: _via, orders: _orders, ...shown } = message;
     expect(gate.live.published).toEqual([{ type: "message", message: { ...shown, truncated: false } }]);
     const page = Page.parse(await (await read()).json());
     expect(page.data.map((m) => [m.sender, m.body])).toEqual([["staff", "勤怠の表を作り始めた"]]);
