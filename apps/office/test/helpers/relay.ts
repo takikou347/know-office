@@ -66,9 +66,10 @@ export function relayKit(w: GuardWorld, at: (h: number, m?: number) => number) {
      * @param body 本文
      * @param path 道
      * @param fetcher ゲートウェイが外へ出す fetch。省くと代わりの Claude API に回す
+     * @param signal ワークスペースが呼び出しを切る口
      * @returns 受け手の返事
      */
-    callClaude: async (work: Work, body: Record<string, unknown>, path = "/v1/messages", fetcher: Fetcher = w.gate.fetch): Promise<Response> => {
+    callClaude: async (work: Work, body: Record<string, unknown>, path = "/v1/messages", fetcher: Fetcher = w.gate.fetch, signal?: AbortSignal): Promise<Response> => {
       // ワークスペースは 30 秒ごとにハートビートを送る。届かないと勤怠が workspace_down の待ちに入るので、呼ぶ前に送っておく
       await w.gate.staff[work.staffId].book.heartbeat(w.clock.now());
       const caller: Caller = { staffId: work.staffId, workspaceId: workspaceIdOf(w.gate.env, work.staffId) };
@@ -76,6 +77,7 @@ export function relayKit(w: GuardWorld, at: (h: number, m?: number) => number) {
         method: "POST",
         headers: { "x-api-key": work.token, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
       });
       return routeEgress(request, w.gate.env, caller, { clock: w.clock, guard: w.gate.deps, fetch: fetcher });
     },

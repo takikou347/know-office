@@ -1,5 +1,5 @@
 // Claude の API の上限の通し。代わりの Claude API を使用の上限に切り替え、社員の呼び出しがゲートウェイのプロキシで見分けられて上部の帯に通知が出て、読むまで社員が呼び出しを始めず、読むと続ける事を確かめる。ゲートウェイの返事は差し替えない (サービスと拡張の 3.5)
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { FAKES } from "../helpers/fakes.ts";
@@ -49,6 +49,27 @@ async function clearSpendLimit(page: Page): Promise<void> {
   }
 }
 
+/**
+ * 上部の帯に使用の上限の通知が出るまで待つ。帯は未読を 1 件ずつ出すので、先に出たほかの通知 (前の画面の通しが残した断りや、見本のタスクを進める社員の呼び出しの失敗) は帯で読んで送る
+ * @param page 画面を開いたページ
+ * @returns 使用の上限の通知の帯
+ */
+async function spendBar(page: Page): Promise<Locator> {
+  const bar = page.getByRole("alert").filter({ hasText: SPEND_TITLE });
+  const top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }) });
+  await expect
+    .poll(
+      async () => {
+        if (await bar.isVisible()) return true;
+        if (await top.first().isVisible()) await top.first().getByRole("button", { name: "読んだ" }).click();
+        return false;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  return bar;
+}
+
 test.describe("落ちても続きから", () => {
   test("費用の上限に届く", async ({ page }) => {
     // SDK が上限の返事で終え、Cron を 2 度動かして呼び出しを待つ
@@ -67,8 +88,7 @@ test.describe("落ちても続きから", () => {
 
       // ゲートウェイのプロキシが上限の返事を見分け、上部の帯に止まる強さの通知が出る。SDK は待ち直さずに終え、タスクは待ちに戻る
       await page.goto("/");
-      const bar = page.getByRole("alert").filter({ hasText: SPEND_TITLE });
-      await expect(bar).toBeVisible({ timeout: 60_000 });
+      await spendBar(page);
       await expect.poll(statusOf, { timeout: 60_000 }).toBe("todo");
 
       // 読むまでは、社員がタスクを取り直し、Cron が動いても、呼び出しを始めない
@@ -80,6 +100,7 @@ test.describe("落ちても続きから", () => {
 
       // 上限を直して帯の通知を読むと、次の Cron で社員が続きを始めて終える
       await spendLimit(page, null);
+      const bar = await spendBar(page);
       await bar.getByRole("button", { name: "読んだ" }).click();
       await expect(bar).toBeHidden();
       // 積んだ返事が落ちた通しの後に残らないよう、続きを始める Cron の直前に積む

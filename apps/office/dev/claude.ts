@@ -24,6 +24,20 @@ const ScriptedInput = ScriptedMessage.extend({ staffId: StaffId.optional(), dela
 type Queued = { item: ScriptedMessage | ScriptedError; staffId: StaffId | null; notBefore?: number };
 
 /**
+ * 渡し先を決めずに積んだ物と、その社員に積んだ物のうち、先に積んだ物を取り出す
+ * @param queue 積んだ物
+ * @param staffId 呼び出しの社員
+ * @returns 取り出した物。無ければ undefined
+ */
+function takeQueued(queue: Queued[], staffId: StaffId | null): Queued | undefined {
+  const at = queue.findIndex((q) => q.staffId === null || q.staffId === staffId);
+  return at === -1 ? undefined : queue.splice(at, 1)[0];
+}
+
+/** 待ちを付けた返事を待っている呼び出し。同じ社員の呼び直しが来たら supersede で捨てる */
+type Waiter = { queued: Queued; model: string | undefined; superseded: boolean; supersede: () => void };
+
+/**
  * 待つ。呼び出しが切れたら待つのをやめる
  * @param ms ミリ秒
  * @param signal 呼び出しの signal
@@ -183,6 +197,8 @@ export function createFakeClaude(): FakeClaude {
   const batches: FakeBatch[] = [];
   // 使用の上限に切り替えた社員。戻すまで、その社員の呼び出しに上限の返事を返し続ける
   const limits = new Map<StaffId, SpendLimitKind>();
+  // 待ちを付けた返事を待っている、社員ごとの呼び出し
+  const waiting = new Map<StaffId, Waiter>();
   const toBatch = (b: FakeBatch) => {
     const values = b.answers ? [...b.answers.values()] : [];
     return {
@@ -242,12 +258,23 @@ export function createFakeClaude(): FakeClaude {
       // 本物の使用の上限は、直すまでどの呼び出しも断る
       const limit = staffId === null ? undefined : limits.get(staffId);
       if (limit !== undefined) return errorResponse(spendLimitError(limit));
+      // ゲートウェイのプロキシを通ると、SDK が切った呼び出しは切れたと届かない。同じ社員の同じモデルの呼び直しが来たら、待っている前の呼び出しを捨てて、待っていた返事を呼び直しに渡す
+      const waiter = staffId === null ? undefined : waiting.get(staffId);
+      const taken = waiter?.model === body.model ? waiter : undefined;
+      taken?.supersede();
       // 渡し先を決めずに積んだ物と、この社員に積んだ物のうち、先に積んだ物を返す
-      const at = queue.findIndex((q) => q.staffId === null || q.staffId === staffId);
-      const queued = at === -1 ? undefined : queue.splice(at, 1)[0];
-      if (queued?.notBefore !== undefined && !(await waitUnlessGone(Math.max(0, queued.notBefore - Date.now()), c.req.raw.signal))) {
-        queue.unshift(queued);
-        return new Response(null, { status: 499 });
+      const queued = taken ? taken.queued : takeQueued(queue, staffId);
+      if (queued?.notBefore !== undefined) {
+        const gone = new AbortController();
+        const mine: Waiter = { queued, model: body.model, superseded: false, supersede: () => ((mine.superseded = true), gone.abort()) };
+        if (staffId !== null) waiting.set(staffId, mine);
+        const waited = await waitUnlessGone(Math.max(0, queued.notBefore - Date.now()), AbortSignal.any([c.req.raw.signal, gone.signal]));
+        if (staffId !== null && waiting.get(staffId) === mine) waiting.delete(staffId);
+        // 呼び直しに渡した返事は戻さない。切れた時だけ積んだ物の先頭に戻す
+        if (!waited) {
+          if (!mine.superseded) queue.unshift(queued);
+          return new Response(null, { status: 499 });
+        }
       }
       const next = queued?.item;
       if (!next) {

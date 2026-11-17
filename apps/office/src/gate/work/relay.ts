@@ -40,6 +40,9 @@ const SPEND_BODY_MAX_BYTES = 8 * 1024;
 /** 1 回の呼び出しを待つ上限。流れの返事は長く続くので、SDK の初期値と同じ 10 分にする */
 const RELAY_TIMEOUT_MS = 10 * 60_000;
 
+/** ワークスペースが呼び出しを切った印。Claude の API の失敗と分ける */
+class RelayGone extends Error {}
+
 /** 要求の本文のうち、プロキシが確かめる所。ほかは変えずに送る */
 const ClaudeRequest = z.looseObject({ model: z.string().min(1) });
 
@@ -89,6 +92,8 @@ export async function relayClaude(c: Context<GateEnv>, ticket: TicketClaims): Pr
   try {
     res = await callUpstream(c, path, text, ticket.staffId);
   } catch (error) {
+    // ワークスペースが切った呼び出しは失敗に数えない。返事を受ける相手はもういない
+    if (error instanceof RelayGone) return new Response(null, { status: 499 });
     // 届かない失敗はここで数えて返す。onError に任せると upstream_failed として別に残り、二重に数える
     if (!(error instanceof AppError) || error.code === "unavailable") throw error;
     await noteClaudeFailure(c, path, PROBLEMS[error.code].status, error);
@@ -243,6 +248,7 @@ function safeJson(text: string): unknown {
  * @throws unavailable 鍵が無い時、全体を止めた後でまだ入れ直していない時
  * @throws upstream_timeout 10 分で返らない時
  * @throws upstream_failed 届かない時
+ * @throws RelayGone ワークスペースが呼び出しを切った時
  */
 async function callUpstream(c: Context<GateEnv>, path: string, text: string, staffId: StaffId): Promise<Response> {
   const base = endpoints(c.env).anthropic;
@@ -257,9 +263,11 @@ async function callUpstream(c: Context<GateEnv>, path: string, text: string, sta
       method: "POST",
       headers,
       body: text,
-      signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
+      // ワークスペースが呼び出しを切ったら Claude API への呼び出しも切る。待ち続けて費用と返事を無駄にしない
+      signal: AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(RELAY_TIMEOUT_MS)]),
     });
   } catch (error) {
+    if (c.req.raw.signal.aborted) throw new RelayGone();
     if (error instanceof Error && error.name === "TimeoutError") throw new AppError("upstream_timeout", "Claude API が時間内に返らない");
     throw new AppError("upstream_failed", "Claude API に届かない");
   }

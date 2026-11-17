@@ -146,6 +146,20 @@ describe("開発環境の代わりの物", () => {
     expect(await res.json()).toMatchObject({ content: [{ type: "text", text: "待ってから" }] });
   });
 
+  it("待ちを付けて積んだ返事を待つ間に、同じ社員の呼び直しが来たら呼び直しに渡し、前の呼び出しには返さない", async () => {
+    // ゲートウェイのプロキシを通ると、SDK が切った呼び出しが代わりの Claude API に切れたと届かない。呼び直しが来た事で前の呼び出しを捨てる
+    const claude = createFakeClaude();
+    await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", delay_ms: 200, content: [{ type: "text", text: "待ってから" }] }) });
+    const call = () => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": "dev-fake-anthropic-key", [DEV_STAFF_HEADER]: "reviewer" }, body: BODY });
+    const first = call();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const second = call();
+    expect((await first).status).toBe(499);
+    const res = await second;
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ content: [{ type: "text", text: "待ってから" }] });
+  });
+
   it("社員の形でない渡し先を付けて積もうとすると 400 で断る", async () => {
     const claude = createFakeClaude();
     const res = await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "nobody", content: [{ type: "text", text: "x" }] }) });

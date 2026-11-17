@@ -153,6 +153,31 @@ describe("Claude のプロキシ", () => {
     expect(seen).toEqual(["builder", null, null, null]);
   });
 
+  it("ワークスペースが呼び出しを切ったら、Claude API への呼び出しも切り、Claude の API の失敗に数えない", async () => {
+    // エラーログの 5 分の窓をほかのテストと分ける
+    const work = await startTask("builder", 15);
+    const gone = new AbortController();
+    let upstreamAborted = false;
+    const reached: (() => void)[] = [];
+    const called = new Promise<void>((resolve) => reached.push(resolve));
+    // Claude API は返事を返さずに待ち、ゲートウェイが切った時だけ終える
+    const hanging: Fetcher = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        for (const done of reached) done();
+        init?.signal?.addEventListener("abort", () => {
+          upstreamAborted = true;
+          reject(new DOMException("切れた", "AbortError"));
+        });
+      });
+    const call = Promise.resolve(callClaude(work, messages("直す"), "/v1/messages", hanging, gone.signal)).catch(() => null);
+    await called;
+    gone.abort();
+    await call;
+    expect(upstreamAborted).toBe(true);
+    const failures = await w.d1.REC_2026.prepare("SELECT code FROM error_events WHERE at >= ? AND at < ?").bind(at(15), at(16)).all();
+    expect(failures.results).toEqual([]);
+  });
+
   it("止まっている社員の呼び出しは 409 stopped で断り、外へ出さない", async () => {
     const work = await startTask();
     await w.d1.DB.prepare("INSERT INTO stops (id, at, kind, scope, target, signal, measured, threshold, rules_version, by) VALUES (?, ?, 'stop', 'staff', 'builder', 'tool_rate', 1, 1, 1, 'system')")
