@@ -8,7 +8,7 @@ FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ripgrep ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g pnpm@10.28.0 \
+  && npm install -g npm@12.2.2 pnpm@10.34.9 \
   && groupadd --gid 10001 office \
   && useradd --create-home --shell /bin/bash --uid 10001 --gid office staff \
   && chmod 0700 /home/staff \

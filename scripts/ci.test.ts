@@ -49,7 +49,14 @@ void describe("弱点のチェック", () => {
     // ワークスペースのイメージは、作った後に版を digest で固定した Trivy で見る。依存を変えた PR と週に 1 度の main でも回し、後から見つかった弱点に気づく
     const image = all.get("image") ?? "";
     assert.match(image, /^ {4}if: needs\.changes\.outputs\.code == 'true' \|\| needs\.changes\.outputs\.deps == 'true'$/m);
-    assert.match(image, /docker build -f apps\/workspace\/Dockerfile -t know-office-workspace:test \.\n[\s\S]*aquasec\/trivy:[\d.]+@sha256:[0-9a-f]{64}\n\s+image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress know-office-workspace:test$/m);
+    assert.match(image, /docker build -f apps\/workspace\/Dockerfile -t know-office-workspace:test \.\n[\s\S]*-v "\$PWD\/apps\/workspace\/trivyignore\.yaml:\/trivyignore\.yaml:ro"\n\s+aquasec\/trivy:[\d.]+@sha256:[0-9a-f]{64}\n\s+image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile \/trivyignore\.yaml\n\s+--exit-code 1 --no-progress know-office-workspace:test$/m);
+    // 見ない弱点は 1 件ずつ、ファイルの道と期限を付ける。道の無い除外はイメージの全体で効いてしまう
+    const ignore = readFileSync(join(root, "apps", "workspace", "trivyignore.yaml"), "utf8");
+    const entries = ignore.split(/\n(?= {2}- id: )/).slice(1);
+    assert.ok(entries.length > 0, "除外の一覧に項目が無い");
+    for (const entry of entries) {
+      assert.match(entry, /^ {2}- id: CVE-\d+-\d+\n {4}paths:\n( {6}- "[^"*]+"\n)+ {4}expired_at: \d{4}-\d{2}-\d{2}\n?$/, entry);
+    }
     // 週に 1 度の確かめで、ほかのジョブは回さない
     assert.match(all.get("check") ?? "", /^ {4}if: github\.event_name != 'schedule'$/m);
     // 動く入口への自動の攻撃は、画面の通しのジョブで 1 度だけ流す

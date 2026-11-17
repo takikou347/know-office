@@ -177,11 +177,14 @@ jobs:
       - run: docker build -f apps/workspace/Dockerfile -t know-office-workspace:test .
       # イメージの OS と Node の部品の弱点を Trivy で見て、直した版が出ている HIGH と CRITICAL があれば落とす。
       # GitHub の標準の機能と pnpm audit はイメージの中を見ないため。Trivy は action を使わず、版を digest で固定したイメージで走らせる
+      # 見ない物は apps/workspace/trivyignore.yaml に、訳と期限を付けて置く
       - name: イメージの弱点のチェック
         run: >-
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          -v "$PWD/apps/workspace/trivyignore.yaml:/trivyignore.yaml:ro"
           aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
-          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress know-office-workspace:test
+          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /trivyignore.yaml
+          --exit-code 1 --no-progress know-office-workspace:test
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

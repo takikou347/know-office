@@ -1,0 +1,65 @@
+# ワークスペースのイメージの弱点のチェック (.github/workflows/check.yml の image) で見ない物
+# TypeScript 7.0.2 の tsc は Go の実行物で、中の Go と golang.org/x/text が古い。直した TypeScript の安定版がまだ無い
+# この tsc はエディタの補完だけに使い、社員とサーバーと別の lsp (uid 10002) で、外に繋がず標準入出力だけで動く (src/lsp-tsc.ts)
+# 見ないのはこの tsc の 1 ファイルだけ。期限が来たら TypeScript を上げて消す
+vulnerabilities:
+  - id: CVE-2026-111943
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-33818
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-39821
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-39822
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-46600
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-56851
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-56852
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-56853
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-56858
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-56859
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-56860
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-56862
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-78667
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-78669
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
+  - id: CVE-2026-97031
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
