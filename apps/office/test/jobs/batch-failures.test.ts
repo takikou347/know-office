@@ -128,12 +128,35 @@ describe("週のバッチ処理の切れ目", () => {
     expect(await rows(world.d1.DB, "SELECT status, failures FROM batches")).toEqual([{ status: "submitted", failures: 0 }]);
   });
 
-  it("送りが断られた時は印を戻して次に送り直し、届いたか分からない 5xx は行を残す", async () => {
+  it.each([
+    [400, "failed", 0],
+    [401, "retry", 1],
+    [403, "retry", 1],
+    [404, "failed", 0],
+    [429, "retry", 0],
+    [499, "failed", 0],
+    [500, "unknown", 0],
+    [529, "retry", 0],
+    [599, "unknown", 0],
+  ] as const)("送りが %i で返ったら、印を %s にする", async (code, outcome, notices) => {
     await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
-    await startBatch(world.gate.env, "distill", depsOf(status(529)), dec(7, 3));
-    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
-    await startBatch(world.gate.env, "distill", depsOf(status(502)), dec(7, 3, 1));
-    expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "unknown" }]);
+    await startBatch(world.gate.env, "distill", depsOf(status(code)), dec(7, 3));
+    const left = await rows(world.d1.DB, "SELECT status FROM batches");
+    expect(left).toEqual(outcome === "retry" ? [] : [{ status: outcome }]);
+    expect(await openNotices("sdk_auth_failed")).toHaveLength(notices);
+  });
+
+  it("同時に 2 つの見回りが同じ 404 を見ても 1 回と数え、諦めた通知は 1 件", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3));
+    world.gate.claude.batches.length = 0;
+    await Promise.all([pollBatches(world.gate.env, depsOf(), dec(7, 3, 5)), pollBatches(world.gate.env, depsOf(), dec(7, 3, 5))]);
+    expect(await rows(world.d1.DB, "SELECT failures FROM batches")).toEqual([{ failures: 1 }]);
+    await pollBatches(world.gate.env, depsOf(), dec(7, 3, 10));
+    await Promise.all([pollBatches(world.gate.env, depsOf(), dec(7, 3, 15)), pollBatches(world.gate.env, depsOf(), dec(7, 3, 15))]);
+    expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "failed" }]);
+    expect(await openNotices("batch_failed")).toHaveLength(1);
+    expect(await rows(world.d1.REC_2026, "SELECT count(*) AS n FROM error_events WHERE code = 'distill_batch_failed'")).toEqual([{ n: 1 }]);
   });
 
   it("送る前に落ちて残った印は、時間がたっても送り直さない", async () => {

@@ -90,8 +90,9 @@ const Line = z.looseObject({
  * @throws unavailable 鍵が無い時、全体を止めた後でまだ入れ直していない時
  * @throws unauthenticated Claude の API が鍵を断った時 (401、403)
  * @throws not_found バッチが見つからない時 (404)
+ * @throws rate_limited 上限 (429) か混み合い (529) の時
  * @throws upstream_timeout 返事が無い時か、作られたか分からない 5xx の時
- * @throws upstream_failed ほかの 2xx でない時
+ * @throws upstream_failed ほかの 4xx の時
  */
 async function call(env: Bindings, fetch: Fetcher, path: string, init: { method: "GET" | "POST"; body?: string }, timeoutMs = 10_000): Promise<Response> {
   const secret = await claudeKey(env);
@@ -108,8 +109,9 @@ async function call(env: Bindings, fetch: Fetcher, path: string, init: { method:
   const shown = `Claude のバッチ処理の API が ${String(res.status)} を返した`;
   if (res.status === 401 || res.status === 403) throw new AppError("unauthenticated", shown);
   if (res.status === 404) throw new AppError("not_found", shown);
-  // 4xx と混み合いの 529 は受けていない。ほかの 5xx は途中の物が返した事もあり、作られたか分からない (https://docs.claude.com/en/api/errors)
-  if (res.status >= 500 && res.status !== 529) throw new AppError(UNKNOWN_SUBMIT, shown);
+  // 上限の 429 と混み合いの 529 は受けておらず、待てば通る。ほかの 5xx は途中の物が返した事もあり、作られたか分からない (https://docs.claude.com/en/api/errors)
+  if (res.status === 429 || res.status === 529) throw new AppError("rate_limited", shown);
+  if (res.status >= 500) throw new AppError(UNKNOWN_SUBMIT, shown);
   throw new AppError("upstream_failed", shown);
 }
 
@@ -120,8 +122,9 @@ async function call(env: Bindings, fetch: Fetcher, path: string, init: { method:
  * @param requests 送る物
  * @returns バッチの ID
  * @throws unauthenticated 鍵を断られた時
+ * @throws rate_limited 上限か混み合いで断られた時
  * @throws upstream_timeout 返事が無く、作られたか分からない時
- * @throws upstream_failed 断られた時、返った ID の形が違う時
+ * @throws upstream_failed ほかの理由で断られた時、返った ID の形が違う時
  */
 export async function submitBatch(env: Bindings, fetch: Fetcher, requests: BatchRequest[]): Promise<string> {
   const body = {

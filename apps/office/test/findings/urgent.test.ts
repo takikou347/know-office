@@ -1,4 +1,5 @@
 // 急ぐ故障を見つけた時に調べる事。同じ原因のエラーが 5 分に 3 回を超えたら、週を待たずに 5 分ごとの定期ジョブがバッチ処理で調べて Issue にする (サービスと拡張の 3.7)
+import type { Fetcher } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { fingerprintMark } from "../../src/gate/findings/tracker.ts";
 import { pollBatches } from "../../src/gate/jobs/weekly.ts";
@@ -148,5 +149,20 @@ describe("急ぐ故障の調べの費用の守り", () => {
     await bursts([4, 4], dec(3, 13), "d");
     await Promise.all([poll(dec(3, 13, 5)), poll(dec(3, 13, 5))]);
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM batches WHERE kind = 'urgent'")).toEqual([{ n: 10 }]);
+  });
+
+  it("送ったか分からない送りも 1 日の 10 本に数え、送り直さない", async () => {
+    useRepo(world);
+    // 本物に届いて作られたが、返事が時間切れで返らない
+    const lost: Fetcher = async (url, init) => {
+      await world.gate.fetch(url, init);
+      throw new DOMException("時間切れ", "TimeoutError");
+    };
+    for (const [i, tag] of ["a", "b", "c", "d"].entries()) {
+      await bursts([4, 4, 4], dec(3, 10 + i), tag);
+      await pollBatches(world.gate.env, { fetch: lost, tracker: fakeTracker() }, dec(3, 10 + i, 5));
+    }
+    expect(await rows(world.d1.DB, "SELECT status, count(*) AS n FROM batches WHERE kind = 'urgent' GROUP BY status")).toEqual([{ status: "unknown", n: 10 }]);
+    expect(world.gate.claude.batches).toHaveLength(10);
   });
 });

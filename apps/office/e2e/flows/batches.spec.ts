@@ -23,7 +23,7 @@ test.describe("落ちても続きから", () => {
         await expect(bar).toBeVisible({ timeout: 1000 });
       }).toPass({ timeout: 15_000 });
       await expect(bar.getByText("設定で鍵を確かめ")).toBeVisible();
-      // 鍵を入れ直し、読むと次の回から送る
+      // 鍵を入れ直してから通知を読む。読むまでは送らず、終わりも見ない
       await setClaudeKeys(page.request, keys);
       await bar.getByRole("button", { name: "読んだ" }).click();
       await expect(bar).toBeHidden();

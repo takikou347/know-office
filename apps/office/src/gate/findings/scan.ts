@@ -13,7 +13,6 @@ import { fingerprintMark, type IssueTracker, publicTracker, REPO_PATTERN } from 
 /** 1 度に送るエラーの原因の上限。多い順に送る */
 const MAX_GROUPS = 100;
 
-
 /** Issue を作る印を、作れずに残った物とみなすまでの間 */
 const STALE_CLAIM_MS = 10 * 60_000;
 

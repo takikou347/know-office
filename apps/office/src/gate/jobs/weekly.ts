@@ -139,7 +139,7 @@ export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDep
 }
 
 /**
- * 種類と鍵で 1 つだけのバッチを送る。もう始めた鍵は何もしない。断られた時は始めた印を戻し、届いたか分からない時は印を unknown にして残し、どちらもエラーログに残す。
+ * 種類と鍵で 1 つだけのバッチを送る。もう始めた鍵は何もしない。上限か混み合いか鍵で断られた時は始めた印を戻し、届いたか分からない時は unknown、ほかの断りは failed にして印を残し、どれもエラーログに残す。
  * 印を残すので、上限は送ろうとした回数で数え、同じ鍵を 2 度は送らない
  * @param env バインディング
  * @param kind 種類
@@ -179,14 +179,31 @@ async function submitOnce(
     await env.DB.prepare("UPDATE batches SET batch_id = ?, status = 'submitted' WHERE id = ? AND status = 'pending'").bind(batchId, id).run();
     return id;
   } catch (error) {
-    const unknown = error instanceof AppError && error.code === UNKNOWN_SUBMIT;
-    // 作られたか分からない送りは、送り直すと二重になるので印を残す
-    const sql = unknown ? "UPDATE batches SET status = 'unknown' WHERE id = ? AND status = 'pending'" : "DELETE FROM batches WHERE id = ? AND status = 'pending'";
-    await env.DB.prepare(sql).bind(id).run();
-    if (error instanceof AppError && error.code === "unauthenticated") await noticeAuthFailed(env, now);
-    await recordError(env, { source: "job", level: "error", code: `${kind}_submit_${unknown ? "unknown" : "failed"}`, error }, clockOf(now));
+    const code = error instanceof AppError ? error.code : "internal";
+    const outcome = submitOutcome(code);
+    // 待てば通る断りだけ印を戻して次の回に送り直す。作られたか分からない送りは二重にしないよう、決まって断られる送りは繰り返さないよう、印を残して上限に数える
+    const sql = {
+      retry: "DELETE FROM batches WHERE id = ? AND status = 'pending'",
+      unknown: "UPDATE batches SET status = 'unknown' WHERE id = ? AND status = 'pending'",
+      failed: "UPDATE batches SET status = 'failed', ended_at = ? WHERE id = ? AND status = 'pending'",
+    }[outcome];
+    await (outcome === "failed" ? env.DB.prepare(sql).bind(now, id) : env.DB.prepare(sql).bind(id)).run();
+    if (code === "unauthenticated") await noticeAuthFailed(env, now);
+    await recordError(env, { source: "job", level: "error", code: `${kind}_submit_${outcome === "unknown" ? "unknown" : "failed"}`, error }, clockOf(now));
     return null;
   }
+}
+
+/**
+ * 送れなかった時の印の扱いを決める
+ * @param code 失敗の種類
+ * @returns retry は印を戻す、unknown は送ったか分からないので残す、failed は決まって断られたので残す
+ */
+function submitOutcome(code: string): "retry" | "unknown" | "failed" {
+  // 鍵の断りは通知を読むまで送らないので、読んだ後に送り直せるよう戻す
+  if (code === "rate_limited" || code === "unauthenticated") return "retry";
+  if (code === UNKNOWN_SUBMIT) return "unknown";
+  return "failed";
 }
 
 /**

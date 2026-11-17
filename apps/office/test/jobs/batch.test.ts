@@ -179,6 +179,7 @@ describe("週のバッチ処理", () => {
     await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
     const forged = { fetch: () => Promise.resolve(Response.json({ id: "../../v1/files", type: "message_batch", processing_status: "in_progress" })), tracker: fakeTracker() };
     await startBatch(world.gate.env, "distill", forged, dec(7, 3));
-    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+    // 作られた ID を使えないので、その週は送り直さずに諦める
+    expect(await rows(world.d1.DB, "SELECT status, batch_id FROM batches")).toEqual([{ status: "failed", batch_id: null }]);
   });
 });

@@ -18,6 +18,8 @@ export const BATCH_FAILED_NOTICE = "batch_failed";
 export type SubmittedBatch = {
   /** 行の ID */
   id: string;
+  /** 読んだ時の、続けて見つからなかった回数 */
+  failures: number;
   /** 種類 */
   kind: string;
   /** 週の始めの日。急ぐ故障は日と指紋 */
@@ -31,7 +33,10 @@ export type SubmittedBatch = {
  * @param now 今の時刻
  */
 export async function countNotFound(env: Bindings, p: SubmittedBatch, now: number): Promise<void> {
-  const row = await env.DB.prepare("UPDATE batches SET failures = failures + 1 WHERE id = ? AND status = 'submitted' RETURNING failures").bind(p.id).first<{ failures: number }>();
+  // 同時に走った 2 つの見回りが同じ 404 を 2 度数えないよう、読んだ回数の時だけ足す
+  const row = await env.DB.prepare("UPDATE batches SET failures = failures + 1 WHERE id = ? AND status = 'submitted' AND failures = ? RETURNING failures")
+    .bind(p.id, p.failures)
+    .first<{ failures: number }>();
   if (row && row.failures >= BATCH_NOT_FOUND_LIMIT) await failBatch(env, p, now, `続けて ${String(BATCH_NOT_FOUND_LIMIT)} 回見つからない`);
 }
 

@@ -9,7 +9,6 @@ import { clockAt } from "../work/attendance.ts";
 /** 1 つの原因で送る記録の上限。多い原因も 1 件の要求に収める */
 const MAX_RECORDS = 50;
 
-
 /** 変わらない先頭の指示。毎週同じ文にして読み直しの割引に当てる */
 const SYSTEM = [
   "あなたは know-office のレビュー担当。自動停止が止めた記録と、止めるのに近かった記録を、1 つの原因ごとに読む。",
@@ -71,7 +70,8 @@ async function prepare(env: Bindings, range: WeekRange, maxRequests: number): Pr
           .slice(0, MAX_RECORDS)
           .map((s) => `- ${s.kind === "stop" ? "止めた" : "近かった"} 範囲 ${s.scope} 相手 ${s.target} 数えた値 ${String(s.measured)} 基準 ${String(s.threshold)} 判定 ${s.verdicts ?? "無し"}`),
       ].join("\n"),
-      maxTokens: BATCH_MAX_TOKENS, effort: BATCH_EFFORT,
+      maxTokens: BATCH_MAX_TOKENS,
+      effort: BATCH_EFFORT,
     })),
     detail: { groups: groups.map((g) => ({ customId: g.customId, cause: g.cause, stopIds: g.items.map((s) => s.id) })) },
   };
