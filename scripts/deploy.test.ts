@@ -145,6 +145,15 @@ void describe("自動のデプロイとプレビュー環境", () => {
     assert.equal(config.previews.vars["IDEA_BATCH"], "off");
   });
 
+  void it("プレビューは本番と同じ DO を結び、稼働確認が足りないバインディングを挙げない", () => {
+    type Bound = { name: string };
+    type Config = { durable_objects: { bindings: Bound[] }; previews: { durable_objects: { bindings: Bound[] } } };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- 下の比べで形の違いは落ちる
+    const config = readJsonc(join(root, "apps", "office", "wrangler.jsonc")) as Config;
+    const names = (bound: Bound[]) => bound.map((b) => b.name).toSorted();
+    assert.deepEqual(names(config.previews.durable_objects.bindings), names(config.durable_objects.bindings));
+  });
+
   void it("公開の URL は Access を掛けた workers.dev とプルリクエストごとのプレビュー URL で、独自のドメインを持たない", () => {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- 下の比べで形の違いは落ちる
     const config = readJsonc(join(root, "apps", "office", "wrangler.jsonc")) as Record<string, unknown>;

@@ -18,7 +18,7 @@ const MasterKey = Filled.refine((value) => {
   }
 });
 
-/** ゲートウェイが動くのに要る設定の形。オーナーの情報と鍵の値は返さず、名前だけを使う */
+/** ゲートウェイが動くのに要る設定の形。オーナーの情報と鍵の値は返さず、名前だけを使う。年ごとの記録の D1 (REC_<年>) は年が来るまで無くてよいので、ここでは見ない */
 const GateConfig = z.object({
   DB: Bound,
   FILES: Bound,
