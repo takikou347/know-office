@@ -207,8 +207,18 @@ test.describe("使いやすさ", () => {
       (url) => url.pathname === "/api/v1/notices",
       (route) => route.fulfill({ json: { data: [notice], meta: { ...META, next: null } } }),
     );
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(page.getByText("後から出た通知")).toBeVisible();
+    // CI では 1 度の合図で帯が出ない事がある (通しの帯の待ちと同じく、開いた直後は読み直しを起こせない時がある)。帯が出るまで、確かめるたびに読み直しを起こす
+    const band = page.getByText("後から出た通知");
+    await expect
+      .poll(
+        async () => {
+          if (await band.isVisible()) return true;
+          await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+          return false;
+        },
+        { timeout: 15_000, intervals: [500, 1_000] },
+      )
+      .toBe(true);
     await expect.poll(() => focusProblem(page)).toBeNull();
   });
 
