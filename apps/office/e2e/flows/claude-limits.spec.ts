@@ -56,7 +56,8 @@ async function clearSpendLimit(page: Page): Promise<void> {
  */
 async function spendBar(page: Page): Promise<Locator> {
   const bar = page.getByRole("alert").filter({ hasText: SPEND_TITLE });
-  const top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }) });
+  // 待つ通知が出た直後に読んで送らないよう、ほかの通知だけを送る
+  const top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }), hasNotText: SPEND_TITLE });
   await expect
     .poll(
       async () => {

@@ -135,7 +135,8 @@ async function readRateNotices(page: Page): Promise<void> {
  */
 async function rateBar(page: Page): Promise<Locator> {
   const bar = page.getByRole("status").filter({ hasText: RATE_TITLE });
-  const top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }) });
+  // 待つ通知が出た直後に読んで送らないよう、ほかの通知だけを送る
+  const top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }), hasNotText: RATE_TITLE });
   await expect
     .poll(
       async () => {
