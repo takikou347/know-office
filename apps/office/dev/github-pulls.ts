@@ -59,6 +59,13 @@ export type FakePulls = {
   answer(route: string, text: string, token: string | null, query?: URLSearchParams): Response | null;
 };
 
+const PullState = z.object({ state: z.string() }).loose();
+/**
+ * 覚えた PR の state。読めなければ undefined
+ * @param pr 覚えた PR
+ * @returns open か closed
+ */
+const stateOf = (pr: unknown): string | undefined => PullState.safeParse(pr).data?.state;
 const HeadRef = z.object({ head: z.object({ ref: z.string() }).loose() }).loose();
 /**
  * 覚えた PR の head のブランチ名
@@ -235,7 +242,7 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
         if (!deps.allows(token, listed[1] ?? "", "pull_requests", "read")) return forbidden();
         const branch = (query?.get("head") ?? "").split(":").slice(1).join(":");
         const per = Number(query?.get("per_page") ?? "30");
-        return Response.json([...made.entries()].filter(([key, pr]) => key.startsWith(`${listed[1] ?? ""}#`) && headRef(pr) === branch).map(([, pr]) => pr).slice(0, per));
+        return Response.json([...made.entries()].filter(([key, pr]) => key.startsWith(`${listed[1] ?? ""}#`) && headRef(pr) === branch && stateOf(pr) === (query?.get("state") ?? "open")).map(([, pr]) => pr).slice(0, per));
       }
       // 出した PR は、先をブランチの先と main の先に決めて覚え、GET で本文を読める。置いた返事 (fakeGitHubRoute) がある道は、呼ぶ側がこれより先に答える
       const created = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route);

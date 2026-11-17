@@ -36,8 +36,11 @@ describe("設計書を同じ時に直す", () => {
 
   it("ブランチで開いた PR があれば番号と先を返し、無ければ null", async () => {
     const route = `GET /repos/${REPO}/pulls?head=example%3Ako%2Fabc12345-spec&state=open&per_page=2`;
-    const found = forgeWith({ [route]: { status: 200, body: [{ number: 7, base: { sha: "a".repeat(40) }, head: { sha: SHA } }] } });
+    const found = forgeWith({ [route]: { status: 200, body: [{ number: 7, base: { sha: "a".repeat(40) }, head: { ref: "ko/abc12345-spec", sha: SHA } }] } });
     expect(await found.forge.pullOf(REPO, "ko/abc12345-spec")).toEqual({ number: 7, baseSha: "a".repeat(40), headSha: SHA });
+    // head のブランチが違う PR (GitHub が別の PR を返した時) は使わない
+    const other = forgeWith({ [route]: { status: 200, body: [{ number: 8, base: { sha: "a".repeat(40) }, head: { ref: "ko/other", sha: SHA } }] } });
+    expect(await other.forge.pullOf(REPO, "ko/abc12345-spec")).toBeNull();
     const none = forgeWith({ [route]: { status: 200, body: [] } });
     expect(await none.forge.pullOf(REPO, "ko/abc12345-spec")).toBeNull();
   });

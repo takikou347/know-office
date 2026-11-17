@@ -424,7 +424,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
     pullOf: async (repo, branch) => {
       // GET /repos/{o}/{r}/pulls は head に `<owner>:<ブランチ>` を取り、state=open で開いた PR だけを返す (GitHub の REST API の List pull requests)。同じブランチの開いた PR は 1 本なので 2 件読めば足りる
       const [pull] = await call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls?head=${encodeURIComponent(`${repo.split("/")[0] ?? ""}:${branch}`)}&state=open&per_page=2` }, z.array(GitHubPull));
-      return pull === undefined ? null : { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };
+      return pull === undefined || pull.head.ref !== branch ? null : { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };
     },
     // main が確かめたコミットを含めば、main はコミットから見て ahead か identical
     inMain: async (repo, sha) => ahead(await compareState(repo, `${commitSha(sha)}...main`)),

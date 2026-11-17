@@ -181,6 +181,8 @@ describe("開発環境の代わりの物", () => {
     const listed = async (branch: string) => z.array(z.object({ number: z.number() })).parse(await (await send(`/pulls?head=${encodeURIComponent(`example:${branch}`)}&state=open&per_page=2`, "GET")).json()).map((p) => p.number);
     expect(await listed("ko/x")).toEqual([made.number]);
     expect(await listed("ko/y")).toEqual([]);
+    // state=closed は、開いている PR を返さない (閉じた PR を開いた物として返さない)
+    expect(z.array(z.unknown()).parse(await (await send(`/pulls?head=${encodeURIComponent("example:ko/x")}&state=closed&per_page=2`, "GET")).json())).toEqual([]);
   });
 
   it("代わりの GitHub は /github の下に立てても、Issue と compare に頭を除いた道で答える", async () => {

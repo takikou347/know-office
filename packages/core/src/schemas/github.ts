@@ -97,7 +97,7 @@ export const GitHubPullFiles = z.array(GitHubChangedFile).max(100);
 export const GitHubContent = z.object({ type: z.string(), encoding: z.string(), content: z.string() }).loose();
 
 /** プルリクエストの返事のうち使う所 */
-export const GitHubPull = z.object({ number: z.number().int().positive(), base: z.object({ sha: Sha }).loose(), head: z.object({ sha: Sha }).loose() }).loose();
+export const GitHubPull = z.object({ number: z.number().int().positive(), base: z.object({ sha: Sha }).loose(), head: z.object({ ref: z.string().optional(), sha: Sha }).loose() }).loose();
 
 /** GET /repos/{o}/{r}/git/ref/{ref} の返事のうち使う所 */
 export const GitHubRef = z.object({ object: z.object({ sha: Sha }).loose() }).loose();
