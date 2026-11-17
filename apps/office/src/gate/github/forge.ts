@@ -306,12 +306,14 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess):
       const pull = await call(input.repo, { pull_requests: "write" }, { method: "POST", path: "/pulls" }, GitHubPull, { title: input.title, head: input.branch, base: "main", body: input.body });
       return { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };
     },
-    checksPassed: async (repo, sha) => {
+    checkState: async (repo, sha) => {
       // 確かめたコミットのチェックを読む。プルリクエストの今の先は、確かめた後に進んでいるかもしれない
       const runs = await call(repo, { checks: "read" }, { method: "GET", path: `/commits/${commitSha(sha)}/check-runs` }, GitHubCheckRuns);
-      // チェックが 1 つも無い時と、一覧に入り切らない時は通ったと言えない
-      if (runs.check_runs.length === 0 || runs.total_count > runs.check_runs.length) return false;
-      return runs.check_runs.every((r) => r.status === "completed" && r.conclusion !== null && PASSED.has(r.conclusion));
+      // 読めた中に 1 つでも終えて通らなかった物があれば落ちた
+      if (runs.check_runs.some((r) => r.status === "completed" && (r.conclusion === null || !PASSED.has(r.conclusion)))) return "failed";
+      // チェックが 1 つも無い時と、一覧に入り切らない時は、通ったとも落ちたとも言えない
+      if (runs.check_runs.length === 0 || runs.total_count > runs.check_runs.length) return "pending";
+      return runs.check_runs.every((r) => r.status === "completed") ? "passed" : "pending";
     },
     merge: async (repo, head) => {
       // ブランチの先を読み直さず、変えたファイルとチェックを確かめたコミットまで進める

@@ -1,6 +1,7 @@
 // タスクの繰り返し。社員が自分の山から 1 つ取り、空なら上司に求め、終えたら次を取る (タスクとレビューの 3.1)
-import { AppError, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
-import { and, asc, desc, eq, inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import type { D1Database } from "@cloudflare/workers-types";
+import { AppError, jstDay, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
+import { and, asc, desc, eq, gte, inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { approvals, nodes, staff, workEntries } from "../db/main.ts";
 import type { Bindings, Staff } from "../env.ts";
@@ -9,12 +10,15 @@ import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveN
 /** 2 つのコミットの間で変わった 1 ファイル。patch は統一形式の差分の本文で、GitHub が大きすぎて返さない時は null */
 export type ChangedFile = { path: string; previousPath?: string; status: ReviewFileStatus; patch: string | null };
 
+/** コミットのチェックの今。通った、待っている (走っている、まだ無い、読み切れない)、落ちた */
+export type CheckState = "passed" | "pending" | "failed";
+
 /** GitHub を呼ぶ口。鍵は github/app.ts が vault の App の鍵から作る (タスクとレビューの 3.3、3.4) */
 export type Forge = {
   /** ブランチから main へのプルリクエストを出す */
   openPull(input: { repo: string; branch: string; title: string; body: string }): Promise<{ number: number; baseSha: string; headSha: string }>;
-  /** コミットのチェックがすべて通ったか。sha は確かめたコミット */
-  checksPassed(repo: string, sha: string): Promise<boolean>;
+  /** コミットのチェックの今。すべて通れば passed、1 つでも落ちていれば failed、ほかは pending。sha は確かめたコミット */
+  checkState(repo: string, sha: string): Promise<CheckState>;
   /** main を確かめたコミットへ fast-forward で進める。branch は記録と代わりの GitHub のために渡す */
   merge(repo: string, head: { branch: string; sha: string }): Promise<void>;
   /** main からブランチかコミット (head) までに変わったファイル。動かしたファイルは前の道も入れる。多すぎて全部を読めない時は null */
@@ -46,7 +50,7 @@ export type Forge = {
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
 export const UNCONNECTED_FORGE: Forge = {
   openPull: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
-  checksPassed: () => Promise.resolve(false),
+  checkState: () => Promise.resolve("pending"),
   merge: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   changedPaths: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   protectMain: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
@@ -172,6 +176,45 @@ async function start(env: Bindings, staffId: string, row: NodeRow, now: number, 
   return true;
 }
 
+/** 早い退勤の中央値に使う、直前の日数 */
+const MEDIAN_DAYS = 7;
+const DAY_MS = 24 * 3_600_000;
+/** 中央値に読むした仕事の行の上限。1 日 8 時間で 1 分ずつ区切っても届かない */
+const MEDIAN_ROWS = 4_000;
+
+/**
+ * 同じ社員の同じ種類のタスクが、チェックポイントか終わりに届くまでに働いた時間の、直前 7 日の中央値を出す
+ * した仕事は終えた時 (done) とチェックポイントで退勤して続けた時 (continued) に区切るので、その行の働いた時間を使う
+ * @param db 今の状態の D1
+ * @param staffId 社員 ID
+ * @param taskKind タスクの種類。無ければ null を返す
+ * @param now 今の時刻
+ * @returns 中央値。行が無ければ null
+ */
+async function recentMedian(db: D1Database, staffId: string, taskKind: NodeRow["taskKind"], now: number): Promise<number | null> {
+  if (taskKind === null) return null;
+  const found = await drizzle(db)
+    .select({ activeMs: workEntries.activeMs })
+    .from(workEntries)
+    .innerJoin(nodes, eq(nodes.id, workEntries.nodeId))
+    .where(
+      and(
+        eq(workEntries.staffId, staffId),
+        eq(nodes.taskKind, taskKind),
+        inArray(workEntries.result, ["done", "continued"]),
+        // 日で索引を使って絞り、終えた時刻で 7 日ちょうどに切る
+        gte(workEntries.day, jstDay(now - MEDIAN_DAYS * DAY_MS)),
+        gte(workEntries.endedAt, now - MEDIAN_DAYS * DAY_MS),
+      ),
+    )
+    .orderBy(asc(workEntries.activeMs))
+    .limit(MEDIAN_ROWS);
+  if (found.length === 0) return null;
+  const mid = Math.floor(found.length / 2);
+  const at = (i: number) => found[i]?.activeMs ?? 0;
+  return found.length % 2 === 1 ? at(mid) : Math.round((at(mid - 1) + at(mid)) / 2);
+}
+
 /**
  * 勤務中で手が空いていれば、自分の山から 1 つ取って doing にする。山が空なら上司に次を求める。社員 DO の鎖の中で呼ぶ
  * @param env バインディング
@@ -188,8 +231,8 @@ export async function pullNext(env: Bindings, book: TaskBook, now: number): Prom
     return { taken: false, nodeId: null, carried: false };
   }
   const { row, carried } = next;
-  // TODO(#54): 中央値を直前 7 日のチェックポイントの記録から出す。今は null で渡し、早い退勤を考えない
-  const taken = await start(env, book.staffId, row, now, async (task) => (await book.take(task, null, now)).taken);
+  const medianMs = await recentMedian(env.DB, book.staffId, row.taskKind, now);
+  const taken = await start(env, book.staffId, row, now, async (task) => (await book.take(task, medianMs, now)).taken);
   return taken ? { taken: true, nodeId: row.id, carried } : { taken: false, nodeId: null, carried: false };
 }
 

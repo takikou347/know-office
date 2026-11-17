@@ -1,11 +1,13 @@
 // レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
-import { AppError, CommitSha, decideRepo, missingConditions, ownerGuardedPath, type RepoAction, type ServiceRules } from "@know-office/core";
+import { AppError, CommitSha, decideRepo, StaffId, missingConditions, ownerGuardedPath, type RepoAction, type ServiceRules } from "@know-office/core";
 import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { nodes, reviews, services } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
+import type { GuardDeps } from "../guard/deps.ts";
+import { observe } from "../guard/observe.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
 import { type Actor, appendNodeEvent, findNode, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
@@ -57,8 +59,8 @@ async function checkRepo(
   return { refusal: decision.path === undefined ? { reason: decision.reason } : { reason: decision.reason, path: decision.path }, paths: [], rules: scope.rules };
 }
 
-/** main に入れられるかの答え。入れられる時は、確かめたコミットまで入れる */
-export type MergeGate = { kind: "ready"; sha: string } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string };
+/** main に入れられるかの答え。入れられる時は、確かめたコミットまで入れる。failed は要るチェックが落ちた事 */
+export type MergeGate = { kind: "ready"; sha: string } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string } | { kind: "failed"; reason: string };
 
 /**
  * リポジトリが know-office 自身のサービスのリポジトリかを読む
@@ -98,8 +100,9 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
   const others = missingConditions(when, { checks: true, ...approvals });
   if (others.length > 0) return { kind: "waiting", reason: others.join(",") };
   // チェックが分からない時は入れない
-  const checks = when.includes("checks") ? await forge.checksPassed(review.repo, sha.data) : true;
-  const missing = missingConditions(when, { checks, ...approvals });
+  const checks = when.includes("checks") ? await forge.checkState(review.repo, sha.data) : "passed";
+  if (checks === "failed") return { kind: "failed", reason: "checks" };
+  const missing = missingConditions(when, { checks: checks === "passed", ...approvals });
   return missing.length === 0 ? { kind: "ready", sha: sha.data } : { kind: "waiting", reason: missing.join(",") };
 }
 
@@ -125,7 +128,6 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
     await revertNode(env.DB, made.id, "done", "review", now);
     throw error;
   }
-  // TODO(#54): main に入れた事を guard.observe に渡す
 }
 
 /**
@@ -143,6 +145,7 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
  * @param approved.kind 出来事の種類
  * @param approved.detail 出来事の中身
  * @param actor 誰がいつ
+ * @param guard 自動停止が外へ頼む口。要るチェックが落ちたまま求めた事と、入れた事を自動停止に渡す
  * @returns main に入れたか
  * @throws conflict 確かめたタスクが読んだ後に変わった時
  * @throws upstream_failed GitHub から読めないか、main を進められない時
@@ -154,15 +157,21 @@ export async function mergeIfReady(
   review: { repo: string; branch: string; prNumber: number; reviewer: boolean | null },
   approved: { staffId: string | null; kind: string; detail: Record<string, unknown> },
   actor: Actor,
+  guard: GuardDeps,
 ): Promise<boolean> {
   const gate = await mergeGate(env, forge, made, review);
+  // マージの求めは、作った社員のタスクとして数える。落ちたチェックのままの求めは 1 回でタスクを止める (自動停止の 1 章)
+  const maker = StaffId.safeParse(made.assignee);
+  if (maker.success && (gate.kind === "ready" || gate.kind === "failed")) {
+    await observe(env, { type: "merge_requested", staffId: maker.data, nodeId: made.id, checksPassed: gate.kind === "ready" }, actor.now, guard, actor.traceId);
+  }
   if (gate.kind === "ready") await mergeMade(env, forge, made, { ...review, sha: gate.sha }, actor.now);
   await appendNodeEvent(env, { nodeId: made.id, ...approved }, actor);
   if (gate.kind === "ready") {
     await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch, sha: gate.sha } }, actor);
     return true;
   }
-  await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: gate.kind === "refused" ? "merge_refused" : "merge_waiting", detail: { reason: gate.reason } }, actor);
+  await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: gate.kind === "waiting" ? "merge_waiting" : "merge_refused", detail: { reason: gate.reason } }, actor);
   return false;
 }
 

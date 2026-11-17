@@ -4,7 +4,7 @@ import type { StaffId, ToolResult } from "@know-office/core";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import { z } from "zod";
 import type { Staff } from "../../src/gate/env.ts";
-import type { Forge } from "../../src/gate/work/loop.ts";
+import type { CheckState, Forge } from "../../src/gate/work/loop.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
 import { fixedClock } from "./clock.ts";
 import { createTestD1, resetMain, type TestD1 } from "./d1.ts";
@@ -35,8 +35,8 @@ export type FakeForge = Forge & {
   posted: { repo: string; pr: number; kind: "review" | "comment"; body: unknown }[];
   /** 動かした workflow */
   dispatched: { repo: string; workflow: string; inputs: Record<string, string> }[];
-  /** チェックが通っているか */
-  checks: boolean;
+  /** 確かめたコミットのチェックの今 */
+  checks: CheckState;
   /** プルリクエストを出す間と main に入れる間に、ほかの要求を挟む */
   during: { openPull?: () => Promise<void>; merge?: () => Promise<void> };
 };
@@ -60,14 +60,14 @@ function fakeForge(): FakeForge {
     merged: [],
     posted: [],
     dispatched: [],
-    checks: true,
+    checks: "passed",
     during: {},
     openPull: async (input) => {
       await forge.during.openPull?.();
       forge.pulls.push({ repo: input.repo, branch: input.branch, title: input.title });
       return { number: forge.pulls.length, baseSha: "a".repeat(40), headSha: "b".repeat(40) };
     },
-    checksPassed: () => Promise.resolve(forge.checks),
+    checkState: () => Promise.resolve(forge.checks),
     changedPaths: () => Promise.resolve([]),
     protectMain: () => Promise.resolve("applied"),
     connected: () => Promise.resolve(true),

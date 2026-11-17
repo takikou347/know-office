@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { wrapDb } from "../helpers/github.ts";
 import { api, REPO, rows, useWork } from "../helpers/work.ts";
-import { eventsOf, HEAD, marked, openReview, postedTo, sameBatch, spyBatches } from "../helpers/review.ts";
+import { appForge, eventsOf, HEAD, marked, openReview, postedTo, sameBatch, spyBatches } from "../helpers/review.ts";
+import { runTool } from "../../src/gate/work/tools.ts";
 
 const world = useWork();
 
@@ -100,5 +101,30 @@ describe("know-office の中で確認する", () => {
       restore();
     }
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "review" }]);
+  });
+});
+
+describe("チェックが落ちたままのマージ", () => {
+  it("オーナーが承認しても、要るチェックが落ちていれば main に入れずにタスクを止める", async () => {
+    const { task } = await openReview(world);
+    await world.d1.DB.prepare("UPDATE reviews SET reviewer_verdict = 'approve' WHERE node_id = ?").bind(task).run();
+    world.gate.github.set(`GET /repos/${REPO}/commits/${HEAD}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "failure" }] });
+    await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: "approve", body: "よい", baseSha: HEAD });
+    expect(world.gate.github.requests.filter((r) => r.route === `PATCH /repos/${REPO}/git/refs/heads/main`)).toEqual([]);
+    expect(await rows(world.d1.DB, "SELECT scope, target, signal FROM stops")).toEqual([{ scope: "task", target: task, signal: "unchecked_merge" }]);
+    expect((await eventsOf(world, task)).find((e) => e.kind === "merge_refused")).toMatchObject({ detail: { reason: "checks" } });
+  });
+
+  it("レビュー担当とオーナーの承認が同時に落ちたチェックを読んでも、止めた記録は 1 つ", async () => {
+    const { task } = await openReview(world);
+    world.gate.github.set(`GET /repos/${REPO}/commits/${HEAD}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "failure" }] });
+    const [reviewer, owner] = await Promise.all([
+      runTool(world.gate.env, appForge(world), { staffId: "reviewer", tool: "review_submit", input: { verdict: "approve", summary: "読んだ", headSha: HEAD }, now: world.clock.now(), guard: world.gate.deps }),
+      world.gate.request(`/api/v1/reviews/${task}/verdict`, { method: "POST", headers: { ...world.headers, "Content-Type": "application/json" }, body: JSON.stringify({ verdict: "approve", body: "よい", baseSha: HEAD }) }),
+    ]);
+    expect(reviewer.isError).toBe(false);
+    expect(owner.status).toBe(200);
+    expect(await rows(world.d1.DB, "SELECT scope, target, signal FROM stops")).toEqual([{ scope: "task", target: task, signal: "unchecked_merge" }]);
+    expect(world.gate.github.requests.filter((r) => r.route === `PATCH /repos/${REPO}/git/refs/heads/main`)).toEqual([]);
   });
 });

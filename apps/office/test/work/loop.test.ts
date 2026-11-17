@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { finishTask, intakeTask, pullNext, type TaskBook } from "../../src/gate/work/loop.ts";
-import { createNode } from "../../src/gate/work/nodes.ts";
+import { createNode, recordsOf } from "../../src/gate/work/nodes.ts";
 import { api, at, advance, clockIn, idOf, purposeAndGoal, REPO, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork();
@@ -184,10 +184,28 @@ describe("タスクの繰り返しの決まり", () => {
     await staffOf(world, "builder").pull(world.clock.now());
     await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
-    world.forge.checks = false;
+    world.forge.checks = "pending";
     await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: "b".repeat(40) });
     expect(world.forge.merged).toEqual([]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", tasks[0])).toEqual([{ status: "review" }]);
+    // 待っている間はチェックを通らないマージとして数えない
+    expect(await rows(world.d1.DB, "SELECT signal FROM stops")).toEqual([]);
+  });
+
+  it("要るチェックが落ちたまま承認されると、main に入れずにそのタスクを止める", async () => {
+    const { goal } = await purposeAndGoal(world);
+    await clockIn(world, "president", "builder", "reviewer");
+    await presidentPlans(world);
+    const { tasks } = await split(world, goal, "勤怠の表をつなぐ");
+    await staffOf(world, "builder").pull(world.clock.now());
+    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await staffOf(world, "reviewer").pull(world.clock.now());
+    world.forge.checks = "failed";
+    await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: "b".repeat(40) });
+    expect(world.forge.merged).toEqual([]);
+    expect(await rows(world.d1.DB, "SELECT scope, target, signal FROM stops")).toEqual([{ scope: "task", target: tasks[0], signal: "unchecked_merge" }]);
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", tasks[0])).toEqual([{ status: "stopped" }]);
+    expect(await rows(recordsOf(world.gate.env, world.clock.now()), "SELECT kind, detail FROM node_events WHERE node_id = ? AND kind LIKE 'merge%'", tasks[0])).toEqual([{ kind: "merge_refused", detail: JSON.stringify({ reason: "checks" }) }]);
   });
 
   it("階層に合わない親は 409、無い親は 404 で断る", async () => {

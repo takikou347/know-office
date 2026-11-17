@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { services } from "../../src/gate/db/main.ts";
+import { UNCONNECTED_DEPS } from "../../src/gate/guard/deps.ts";
 import { createNode, findNode } from "../../src/gate/work/nodes.ts";
 import { mergeIfReady } from "../../src/gate/work/review.ts";
 import { runTool } from "../../src/gate/work/tools.ts";
@@ -19,6 +20,16 @@ beforeEach(async () => {
 const UI = "example/knowidea-ui";
 const OFFICE = "example/know-office";
 const SHA = { base: "a".repeat(40), head: "b".repeat(40) };
+
+/**
+ * チェックの 1 行を作る
+ * @param status 状態
+ * @param conclusion 結論
+ * @returns check_runs の 1 行
+ */
+function run(status: string, conclusion: string | null): { name: string; status: string; conclusion: string | null } {
+  return { name: "verify", status, conclusion };
+}
 
 /**
  * サービスを 1 つ置く。登録の流れ (9.2) の代わりに、リポジトリを決めた行を直に入れる
@@ -336,7 +347,7 @@ describe("GitHub のルールの決まり", () => {
       await world.d1.DB.prepare("UPDATE reviews SET head_sha = ?, reviewer_verdict = 'approve'").bind(bad).run();
       const made = await findNode(world.d1.DB, task);
       const before = world.gate.github.requests.length;
-      const merged = await mergeIfReady(world.gate.env, world.gate.forge, made, { repo: UI, branch: made.branch ?? "", prNumber: 1, reviewer: null }, { staffId: "reviewer", kind: "review_approved", detail: {} }, { by: "reviewer", now: world.clock.now() });
+      const merged = await mergeIfReady(world.gate.env, world.gate.forge, made, { repo: UI, branch: made.branch ?? "", prNumber: 1, reviewer: null }, { staffId: "reviewer", kind: "review_approved", detail: {} }, { by: "reviewer", now: world.clock.now() }, UNCONNECTED_DEPS);
       expect(merged).toBe(false);
       expect(writes(world).filter((r) => r.includes("/git/refs/heads/main"))).toEqual([]);
       // プルリクエストを出した後は、GitHub に何も聞かない
@@ -346,9 +357,26 @@ describe("GitHub のルールの決まり", () => {
     });
   }
 
+  for (const [name, list, state] of [
+    ["すべて通った", { total_count: 2, check_runs: [run("completed", "success"), run("completed", "skipped")] }, "passed"],
+    ["完了して failure がある", { total_count: 2, check_runs: [run("completed", "success"), run("completed", "failure")] }, "failed"],
+    ["cancelled も通らない", { total_count: 1, check_runs: [run("completed", "cancelled")] }, "failed"],
+    ["1 つも無い", { total_count: 0, check_runs: [] }, "pending"],
+    ["走っている物がある", { total_count: 2, check_runs: [run("completed", "success"), run("in_progress", null)] }, "pending"],
+    ["読み切れず、読めた中に落ちた物が無い", { total_count: 3, check_runs: [run("completed", "success")] }, "pending"],
+    ["読み切れず、読めた中に落ちた物がある", { total_count: 3, check_runs: [run("completed", "failure")] }, "failed"],
+  ] as const) {
+    it(`チェックの今を読む: ${name}`, async () => {
+      await service(world, UI);
+      repoOnGitHub(world, UI, { private: false });
+      world.gate.github.set(`GET /repos/${UI}/commits/${SHA.head}/check-runs`, list);
+      expect(await world.gate.forge.checkState(UI, SHA.head)).toBe(state);
+    });
+  }
+
   it("GitHub を呼ぶ口は、40 字の 16 進数でない SHA でチェックを読まず main も進めない", async () => {
     for (const bad of ["../../hooks", "b".repeat(39), "B".repeat(40), `${"b".repeat(40)}?x=1`]) {
-      await expect(world.gate.forge.checksPassed(UI, bad)).rejects.toMatchObject({ code: "internal" });
+      await expect(world.gate.forge.checkState(UI, bad)).rejects.toMatchObject({ code: "internal" });
       await expect(world.gate.forge.merge(UI, { branch: "ko/x", sha: bad })).rejects.toMatchObject({ code: "internal" });
     }
     expect(world.gate.github.requests).toEqual([]);

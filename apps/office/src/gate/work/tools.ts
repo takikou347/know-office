@@ -315,7 +315,6 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
     .values({ id: newId(clockAt(call.now)), nodeId: task.id, repo: task.repo, prNumber: pr.number, branch, baseSha: pr.baseSha, headSha: pr.headSha });
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "pr_opened", detail: { prNumber: pr.number, branch } }, actorOf(call));
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "pull_request.open", target: task.id, scope: task.scope, detail: { repo: task.repo, prNumber: pr.number }, traceId: call.traceId });
-  // TODO(#54): プルリクエストを出した事を guard.observe に渡す
   await createNode(
     env,
     { kind: "task", parentId: moved.parentId ?? undefined, scope: moved.scope, title: `レビュー: ${moved.title}`, taskKind: "review", assignee: REVIEWER, repo: task.repo, branch, prNumber: pr.number, source: "review", priority: moved.priority },
@@ -365,7 +364,7 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
   } else {
     const approved = { staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } };
     // 承認は書いた行から読む。書いた後に先が進んでいれば、その通知が承認を消している
-    merged = await mergeIfReady(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: null }, approved, actor);
+    merged = await mergeIfReady(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: null }, approved, actor, call.guard ?? UNCONNECTED_DEPS);
   }
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "review.submit", target: made.id, scope: made.scope, detail: { verdict: input.verdict, merged }, traceId: call.traceId });
   await finishTask(env, call.staffId, review.id, call.now);

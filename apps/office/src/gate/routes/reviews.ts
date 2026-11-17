@@ -118,7 +118,7 @@ export const reviewRoutes = router
     } else {
       const made = await findNode(db, nodeId);
       if (made.status === "review") {
-        merged = await mergeIfReady(c.env, c.var.forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: null }, { staffId: null, kind: "owner_approved", detail }, actor);
+        merged = await mergeIfReady(c.env, c.var.forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: null }, { staffId: null, kind: "owner_approved", detail }, actor, c.var.guard);
       } else {
         await appendNodeEvent(c.env, { nodeId, staffId: null, kind: "owner_approved", detail }, actor);
       }
