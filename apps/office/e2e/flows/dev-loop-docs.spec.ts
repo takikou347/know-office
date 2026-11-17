@@ -142,7 +142,8 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
     }
     // 開発担当が持ったままのタスクを消すと、続きを呼んで落ち、後の通しの社員を塞ぐ。見送りにして離させ、離れてから消す。済みのタスクが溜まると、前処理の 100 件の数えを超える
     try {
-      await releaseBuilderTask(page, ids.task);
+      // 待ちに戻した間に開発担当が取ると版が食い違うので、読み直して取り消す
+      await expect(() => releaseBuilderTask(page, ids.task)).toPass({ timeout: 10_000 });
       await expect
         .poll(async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((x) => x.id === "builder")?.nodeId ?? null, { timeout: 30_000 })
         .not.toBe(ids.task);
