@@ -27,16 +27,17 @@ export type PrCall = { staffId: StaffId; now: number; traceId?: string | undefin
  * @param call 呼んだ社員と時刻
  * @param task 出すタスク
  * @param branch ブランチ
+ * @param pin ブランチの先を必ず固定するか。出し直しは、レビューの行に書く先を読むので true
  * @returns 確かめた先。ブランチの先を固定した時はそのコミット、そうでなければブランチの名前
  * @throws rule_denied ルールの外の時
  * @throws validation_failed 設計書の形が違う時、bug と feature の子がテストのファイルを変えていない時
  * @throws upstream_failed 設計書の木を読み切れない時、GitHub から読めない時
  */
-async function guardPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow & { repo: string }, branch: string): Promise<string> {
+async function guardPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow & { repo: string }, branch: string, pin: boolean): Promise<string> {
   const docs = (await repoScope(env.DB, task.repo)).docs;
   const child = await childOf(env.DB, task);
   // 設計書と子のタスクは、ブランチの先を 1 つのコミットに固定し、変えたファイルと形の確かめを同じコミットで読む
-  const head = docs || child !== null ? await forge.branchHead(task.repo, branch) : branch;
+  const head = pin || docs || child !== null ? await forge.branchHead(task.repo, branch) : branch;
   let found: PrFiles | null = null;
   if (child !== null) found = await readPrFiles(forge, task.repo, head);
   const refusal = await repoRefusal(env, forge, { action: "pull_request", repo: task.repo, branch: head, ...(found === null || found.truncated ? {} : { paths: found.paths }) });
@@ -120,12 +121,12 @@ export async function openPr(env: Bindings, forge: Forge, call: PrCall, task: No
   if (task.prNumber !== null) {
     // 出し直し。別の name でも、PR は最初のブランチの 1 本だけ
     const review = await findReview(env.DB, task.id);
-    const head = await guardPr(env, forge, call, own, review.branch);
+    const head = await guardPr(env, forge, call, own, review.branch, true);
     await hand(env, call, own, { branch: review.branch, number: review.prNumber, baseSha: review.baseSha, headSha: head, first: false });
     return { number: review.prNumber, branch: review.branch };
   }
   const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
-  await guardPr(env, forge, call, own, branch);
+  await guardPr(env, forge, call, own, branch, false);
   const child = await childOf(env.DB, task);
   const pr = await forge.openPull({ repo: task.repo, branch, title: input.title, body: child === null ? input.body : withCloses(input.body, child.number) });
   await hand(env, call, own, { branch, number: pr.number, baseSha: pr.baseSha, headSha: pr.headSha, first: true });

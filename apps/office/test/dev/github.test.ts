@@ -133,6 +133,29 @@ describe("開発環境の代わりの物", () => {
     expect(github.requests.map((r) => r.route)).toEqual(["GET /repos/o/r/pulls", "GET /repos/o/r/labels"]);
   });
 
+  it("代わりの GitHub は main を fast-forward でだけ進め、compare で main との関係を返す", async () => {
+    const github = createFakeGitHub();
+    const token = await mintToken(github, { contents: "write" });
+    const headers = { authorization: `Bearer ${token}` };
+    const repo = "example/knowidea-ui";
+    const commit = async (parents: string[]) => z.object({ sha: z.string() }).parse(await (await ask(github.app, `/repos/${repo}/git/commits`, { method: "POST", headers, body: JSON.stringify({ message: "m", tree: "t".repeat(40), parents }) })).json()).sha;
+    const move = (sha: string) => ask(github.app, `/repos/${repo}/git/refs/heads/main`, { method: "PATCH", headers, body: JSON.stringify({ sha, force: false }) });
+    const state = async (path: string) => z.object({ status: z.string(), files: z.array(z.object({ filename: z.string() })) }).parse(await (await ask(github.app, `/repos/${repo}/compare/${path}`, { headers })).json());
+    const a = await commit([]);
+    expect((await move(a)).status).toBe(200);
+    const b = await commit([a]);
+    // a から分かれた 2 つのうち、1 つ目だけが main を進められる
+    const c = await commit([a]);
+    expect((await move(b)).status).toBe(200);
+    expect((await move(c)).status).toBe(422);
+    expect((await state(`main...${c}`)).status).toBe("diverged");
+    expect((await state(`${a}...main`)).status).toBe("ahead");
+    expect((await state(`${b}...main`)).status).toBe("identical");
+    expect((await state(`${c}...main`)).status).toBe("diverged");
+    expect((await state(`main...${a}`)).status).toBe("behind");
+    expect((await state(`main...${c}`)).files).toEqual([{ filename: "src/feature.test.ts" }]);
+  });
+
   it("代わりの GitHub は鍵が無ければ 401 を返す", async () => {
     const res = await ask(createFakeGitHub().app, "/repos/o/r/pulls");
     expect(res.status).toBe(401);

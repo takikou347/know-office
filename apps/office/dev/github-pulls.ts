@@ -150,6 +150,43 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     return null;
   };
 
+  /**
+   * コミットの祖先 (自分を含む) を、親をたどって集める。知らないコミットは自分だけ
+   * @param sha コミット
+   * @returns 祖先の sha
+   */
+  const ancestors = (sha: string): Set<string> => {
+    const seen = new Set<string>();
+    const pending = [sha];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      pending.push(...(commits.get(next)?.parents ?? []));
+    }
+    return seen;
+  };
+
+  /**
+   * GET /repos/{o}/{r}/compare/{base}...{head} に答える。status は head が base に対して identical、ahead (base を含む)、behind (base に含まれる)、diverged のどれか。
+   * main は PATCH で進めた先で、まだ進めていなければ全部のコミットの祖先とみなす。変わったファイルは、テストのファイル 1 つ (置いた返事が無い時の既定)
+   * @param repo owner/name
+   * @param base 比べる元。main かコミット
+   * @param head 比べる先。main かコミット
+   * @returns 返事
+   */
+  const compare = (repo: string, base: string, head: string): Response => {
+    const main = deps.heads.get(`${repo}:main`);
+    const unset = (name: string) => name === "main" && main === undefined;
+    const [from, to] = [base === "main" ? (main ?? "") : base, head === "main" ? (main ?? "") : head];
+    let status = "diverged";
+    if (unset(base)) status = "ahead";
+    else if (unset(head)) status = "diverged";
+    else if (from === to) status = "identical";
+    else if (ancestors(to).has(from)) status = "ahead";
+    else if (ancestors(from).has(to)) status = "behind";
+    return Response.json({ status, files: [{ filename: "src/feature.test.ts", status: "added", patch: "@@ -0,0 +1 @@\n+test" }] });
+  };
+
   return {
     opened: (repo, number, token) => void authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key),
     answer: (route, text, token) => {
@@ -175,6 +212,8 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
         // GitHub は受けると本文の無い 204 を返す
         return DispatchRequest.safeParse(body).success ? new Response(null, { status: 204 }) : invalid();
       }
+      const diff = /^GET \/repos\/([^/]+\/[^/]+)\/compare\/([^.]+)\.\.\.([^/]+)$/.exec(route);
+      if (diff) return deps.allows(token, diff[1] ?? "", "contents", "read") ? compare(diff[1] ?? "", diff[2] ?? "", diff[3] ?? "") : forbidden();
       const found = /^(GET|POST|PATCH) \/repos\/([^/]+\/[^/]+)\/git\/(blobs|trees|commits|refs\/heads)(?:\/([^?]+))?(?:\?.*)?$/.exec(route);
       if (!found) return null;
       const [, method = "", repo = "", what = "", rest = ""] = found;
