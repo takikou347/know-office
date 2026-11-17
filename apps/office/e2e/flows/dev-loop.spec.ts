@@ -243,21 +243,24 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
       await expect(row).toBeVisible();
       await expect(row.getByText("済", { exact: true })).toBeVisible();
     } finally {
-      // 後の通しに残さない。main は前の先に戻し (前が無ければ消し)、出したブランチも消す
-      if (previous === null) await page.request.delete(`${ref}/main`, github);
-      else await page.request.patch(`${ref}/main`, { ...github, data: { sha: previous, force: true } });
-      await page.request.delete(`${ref}/${branch}`, github);
-      // レビュー担当が持つ「レビュー: …」のタスクは、消さずに取り消して離させる。消すと、持ったまま続きを呼んで落ち、後の通しの社員を塞ぐ
-      const list: unknown = await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json();
-      const reviewId = findTaskId(list, `レビュー: #${String(issue)} 動画を作る`);
-      if (reviewId !== null) {
-        const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
-        await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } });
+      try {
+        // 後の通しに残さない。main は前の先に戻し (前が無ければ消し)、出したブランチも消す
+        if (previous === null) await page.request.delete(`${ref}/main`, github);
+        else await page.request.patch(`${ref}/main`, { ...github, data: { sha: previous, force: true } });
+        await page.request.delete(`${ref}/${branch}`, github);
+        // レビュー担当が持つ「レビュー: …」のタスクは、消さずに取り消して離させる。消すと、持ったまま続きを呼んで落ち、後の通しの社員を塞ぐ
+        const list: unknown = await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json();
+        const reviewId = findTaskId(list, `レビュー: #${String(issue)} 動画を作る`);
+        if (reviewId !== null) {
+          const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
+          await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } });
+        }
+        // 済みの子のタスクは、開発担当が離れているので消してよい。ミラーとレビューも消す
+        seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
+      } finally {
+        // 後始末が落ちても勤務の時刻を戻す。外したタスクを開発担当に戻すのはその後 (外の finally)。逆だと、広げた勤務の間に開発担当が戻したタスクを取りうる
+        await restoreSchedule?.();
       }
-      // 済みの子のタスクは、開発担当が離れているので消してよい。ミラーとレビューも消す
-      seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
-      // 勤務の時刻を戻してから、外したタスクを開発担当に戻す (外の finally)。逆だと、広げた勤務の間に開発担当が戻したタスクを取りうる
-      await restoreSchedule?.();
     }
   } finally {
     giveBackBuilderTasks(aside);
