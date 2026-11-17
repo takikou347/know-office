@@ -85,7 +85,7 @@ export async function openDocsPr(env: Bindings, forge: Forge, call: PrCall, task
   if (docs === null || docs.repo.toLowerCase() === task.repo.toLowerCase()) throw new AppError("conflict", "設計書のリポジトリを設定で選んでいない");
   const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
   let row = await docsOf(env.DB, task.id);
-  if (row?.prNumber != null) {
+  if (row !== null && row.prNumber !== null) {
     // 出した PR が main に入っていれば、新しいブランチで出し直す。入っていなければ新しい PR は出さず、確かめ直す
     if (await forge.inMain(row.repo, await forge.branchHead(row.repo, row.branch))) {
       if (branch === row.branch) throw new AppError("validation_failed", "出した設計書の PR はもう main に入った。別の name で出し直す", { errors: [{ pointer: "#/name", detail: "新しいブランチの名前にする" }] });

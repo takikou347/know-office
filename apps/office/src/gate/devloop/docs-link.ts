@@ -3,13 +3,14 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { AppError } from "@know-office/core";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 import { services, taskDocs } from "../db/main.ts";
 import { isDocsRepo, loadDocsRepo } from "./docs-setting.ts";
 
 /** 設計書の PR の行 */
 export type DocsRow = typeof taskDocs.$inferSelect;
 
-const Changed = { meta: { changes: 0 } };
+const Changed = z.object({ meta: z.object({ changes: z.number() }) });
 
 /**
  * 書いた行の数を読む
@@ -17,8 +18,8 @@ const Changed = { meta: { changes: 0 } };
  * @returns 変えた行の数
  */
 function changes(result: unknown): number {
-  const meta = (result as typeof Changed | null)?.meta;
-  return meta?.changes ?? 0;
+  const parsed = Changed.safeParse(result);
+  return parsed.success ? parsed.data.meta.changes : 0;
 }
 
 /**
@@ -102,7 +103,7 @@ export async function replaceDocsBranch(db: D1Database, row: DocsRow, branch: st
 export async function linkedRow(db: D1Database, nodeId: string, docsPr: number | undefined): Promise<DocsRow | null> {
   const row = await docsOf(db, nodeId);
   if (row === null && docsPr === undefined) return null;
-  if (row?.prNumber == null || row.prNumber !== docsPr) throw new AppError("validation_failed", "docsPr は同じタスクで docs_pr_open で出した設計書の PR の番号にする", { errors: [{ pointer: "#/docsPr", detail: row === null ? "このタスクは設計書の PR を出していない" : "設計書の PR を出したので、docsPr にその番号を書く" }] });
+  if (row === null || row.prNumber === null || row.prNumber !== docsPr) throw new AppError("validation_failed", "docsPr は同じタスクで docs_pr_open で出した設計書の PR の番号にする", { errors: [{ pointer: "#/docsPr", detail: row === null ? "このタスクは設計書の PR を出していない" : "設計書の PR を出したので、docsPr にその番号を書く" }] });
   const docs = await loadDocsRepo(db);
   if (docs === null || docs.repo.toLowerCase() !== row.repo.toLowerCase()) throw new AppError("conflict", "設計書のリポジトリが変わった。今の設計書のリポジトリへ出し直す");
   return row;

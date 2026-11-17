@@ -59,6 +59,13 @@ export type FakePulls = {
   answer(route: string, text: string, token: string | null, query?: URLSearchParams): Response | null;
 };
 
+const HeadRef = z.object({ head: z.object({ ref: z.string() }).loose() }).loose();
+/**
+ * 覚えた PR の head のブランチ名
+ * @param pr 覚えた PR
+ * @returns ブランチ名。読めなければ undefined
+ */
+const headRef = (pr: unknown): string | undefined => HeadRef.safeParse(pr).data?.head.ref;
 const invalid = () => Response.json({ message: "Invalid request" }, { status: 422 });
 const notFound = () => Response.json({ message: "Not Found" }, { status: 404 });
 const forbidden = () => Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
@@ -228,7 +235,7 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
         if (!deps.allows(token, listed[1] ?? "", "pull_requests", "read")) return forbidden();
         const branch = (query?.get("head") ?? "").split(":").slice(1).join(":");
         const per = Number(query?.get("per_page") ?? "30");
-        return Response.json([...made.entries()].filter(([key, pr]) => key.startsWith(`${listed[1] ?? ""}#`) && (pr as { head?: { ref?: string } }).head?.ref === branch).map(([, pr]) => pr).slice(0, per));
+        return Response.json([...made.entries()].filter(([key, pr]) => key.startsWith(`${listed[1] ?? ""}#`) && headRef(pr) === branch).map(([, pr]) => pr).slice(0, per));
       }
       // 出した PR は、先をブランチの先と main の先に決めて覚え、GET で本文を読める。置いた返事 (fakeGitHubRoute) がある道は、呼ぶ側がこれより先に答える
       const created = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route);

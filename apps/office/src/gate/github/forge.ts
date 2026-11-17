@@ -76,6 +76,13 @@ export type ForgeOptions = { pause?: (ms: number) => Promise<void> };
 const FILE_STATUS: Readonly<Record<string, ChangedFile["status"]>> = { added: "added", copied: "added", removed: "removed", renamed: "renamed" };
 
 /**
+ * compare の status が、head が base の先 (ahead か identical) かどうか
+ * @param state status
+ * @returns 先なら true
+ */
+const ahead = (state: string | undefined): boolean => state === "ahead" || state === "identical";
+
+/**
  * GitHub の変わったファイルを、ゲートウェイの形にする
  * @param f compare かプルリクエストのファイルの一覧の 1 件
  * @returns 道、前の道、種類、差分の本文
@@ -217,6 +224,13 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
   const read: Permissions = { metadata: "read" };
   const writePulls: Permissions = { pull_requests: "write" };
   const readContents: Permissions = { contents: "read" };
+  /**
+   * compare の range (base...head) の status。head が base に対して identical、ahead、behind、diverged のどれか
+   * @param repo リポジトリ
+   * @param range base...head
+   * @returns status
+   */
+  const compareState = async (repo: string, range: string): Promise<string | undefined> => (await call(repo, readContents, { method: "GET", path: `/compare/${range}` }, GitHubCompare)).status;
 
   /**
    * 書き換えるファイルの今の mode を、親のコミットの木から 1 階ずつ読む
@@ -405,27 +419,18 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
       }
       if (res.status !== 422) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
       // 422 は fast-forward にならない時のほか、ルールセットが断った時もある。main と確かめたコミットを比べ、main が先に進んでいる (behind か diverged) 時だけ behind にする
-      const state = (await call(repo, readContents, { method: "GET", path: `/compare/main...${commitSha(head.sha)}` }, GitHubCompare)).status;
-      if (state === "diverged" || state === "behind") return "behind";
+      if (["diverged", "behind"].includes((await compareState(repo, `main...${commitSha(head.sha)}`)) ?? "")) return "behind";
       throw new AppError("upstream_failed", "GitHub が main を進める更新を断った");
     },
-    fastForwardable: async (repo, sha) => {
-      // main からコミットまでが ahead (main がコミットの祖先) か identical なら、fast-forward で進められる
-      const state = (await call(repo, readContents, { method: "GET", path: `/compare/main...${commitSha(sha)}` }, GitHubCompare)).status;
-      return state === "ahead" || state === "identical";
-    },
+    // main からコミットまでが ahead (main がコミットの祖先) か identical なら、fast-forward で進められる
+    fastForwardable: async (repo, sha) => ahead(await compareState(repo, `main...${commitSha(sha)}`)),
     pullOf: async (repo, branch) => {
       // GET /repos/{o}/{r}/pulls は head に `<owner>:<ブランチ>` を取り、state=open で開いた PR だけを返す (GitHub の REST API の List pull requests)。同じブランチの開いた PR は 1 本なので 2 件読めば足りる
-      const owner = repo.split("/")[0] ?? "";
-      const list = await call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=open&per_page=2` }, z.array(GitHubPull));
-      const [pull] = list;
+      const [pull] = await call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls?head=${encodeURIComponent(`${repo.split("/")[0] ?? ""}:${branch}`)}&state=open&per_page=2` }, z.array(GitHubPull));
       return pull === undefined ? null : { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };
     },
-    inMain: async (repo, sha) => {
-      // main が確かめたコミットを含めば、main はコミットから見て ahead か identical
-      const state = (await call(repo, readContents, { method: "GET", path: `/compare/${commitSha(sha)}...main` }, GitHubCompare)).status;
-      return state === "ahead" || state === "identical";
-    },
+    // main が確かめたコミットを含めば、main はコミットから見て ahead か identical
+    inMain: async (repo, sha) => ahead(await compareState(repo, `${commitSha(sha)}...main`)),
     changedPaths: async (repo, branch) => {
       const compare = await call(repo, { contents: "read" }, { method: "GET", path: `/compare/main...${branchPath(branch)}` }, GitHubCompare);
       if (compare.files.length >= COMPARE_FILES) return null;

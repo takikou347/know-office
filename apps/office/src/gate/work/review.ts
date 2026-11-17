@@ -13,7 +13,7 @@ import { observe } from "../guard/observe.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
 import { type DocsTarget, linkedGate } from "./docs-merge.ts";
 import { mergeMade } from "./merge-made.ts";
-import { type Actor, appendNodeEvent, findNode, moveNode, type NodeRow } from "./nodes.ts";
+import { type Actor, appendNodeEvent, findNode, type NodeRow } from "./nodes.ts";
 
 /** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.7) */
 const SELF_SERVICE_ID = "00000000-0000-7000-8000-000000000102";
