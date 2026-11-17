@@ -19,7 +19,7 @@ const TARBALL = gzipSync(Buffer.from("木の中身"));
 const OLD = "d".repeat(40);
 
 /** 社員 1 人の補完の DO の中身と、開いた接続 */
-type LspWorld = { box: FakeBox; editor: EditorLsp; timers: ManualTimers; screens: FakeSocket[]; closes: unknown[]; opened: Record<string, string>[] };
+type LspWorld = { box: FakeBox; editor: EditorLsp; timers: ManualTimers; screens: FakeSocket[]; closes: unknown[]; opened: Record<string, string>[]; heldAtOpen: unknown[][]; failOpen: boolean };
 
 /** 開いたレビュー */
 let task = "";
@@ -37,7 +37,7 @@ function lspWorld(w: WorkWorld): LspWorld {
   const box = fakeBox();
   const timers = new ManualTimers(w.clock.now());
   const editor = new EditorLsp({ box, storage: memory(), timers, setAlarm: () => Promise.resolve() });
-  return { box, editor, timers, screens: [], closes: [], opened: [] };
+  return { box, editor, timers, screens: [], closes: [], opened: [], heldAtOpen: [], failOpen: false };
 }
 
 /**
@@ -65,6 +65,8 @@ function wire(w: WorkWorld): void {
         fetch: (_url: string, init?: { headers?: Record<string, string> }) => {
           const headers = init?.headers ?? {};
           l.opened.push(headers);
+          l.heldAtOpen.push([...w.gate.live.lsp]);
+          if (l.failOpen) return Promise.resolve(new Response(null, { status: 503 }));
           const screen = fakeSocket();
           l.screens.push(screen);
           l.editor.attach(screen, fakeSocket(), { sessionId: headers["x-lsp-session"] ?? "", ip: headers["x-lsp-ip"] ?? "", openedAt: Number(headers["x-lsp-at"]) });
@@ -166,6 +168,15 @@ describe("ワークスペースを起こす時", () => {
     // 勤務の外に起こした事を監査ログに残し、配信の同時の数に入れる
     expect(world.gate.audits.filter((a) => a.action === "workspace.wake").map((a) => a.target)).toEqual(["builder"]);
     expect(world.gate.live.lsp).toEqual([{ staffId: "builder", openedAt: world.clock.now() }]);
+  });
+
+  it("補完の接続は中継を始める前に配信の同時の数に入れ、ワークスペースにつながらなければ放す", async () => {
+    lsp.builder.box.trees.set(task, HEAD);
+    lsp.builder.failOpen = true;
+    const res = await open();
+    expect(await problem(res)).toBe("503 unavailable");
+    expect(lsp.builder.heldAtOpen).toEqual([[{ staffId: "builder", openedAt: world.clock.now() }]]);
+    expect(world.gate.live.lsp).toEqual([]);
   });
 
   it("Origin が違えば配信の作業トークンを使わずに 403", async () => {

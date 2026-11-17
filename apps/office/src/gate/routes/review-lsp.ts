@@ -12,7 +12,7 @@ import { repoScope } from "../github/rules.ts";
 import { openStops, staffOf } from "../guard/actions.ts";
 import { recordError } from "../ledger/errors.ts";
 import { audit } from "../ledger/record.ts";
-import { holdLspSlot } from "../live/lsp.ts";
+import { holdLspSlot, releaseLspSlot } from "../live/lsp.ts";
 import { upgradeOrigin } from "../live/origin.ts";
 import { liveOf } from "../live/publish.ts";
 import { problems } from "../openapi.ts";
@@ -43,7 +43,7 @@ const openReviewLspRoute = createRoute({
     "全体か作った社員が止まっていれば起こさない。勤務の外で `EDITOR_WAKE` が `on` で、ログインセッションが今も生きている時だけ、止まっているワークスペースを 1 回だけ起こしてよいとする",
     "`WorkspaceDO` で、止めている最中なら止め終わりを待ち、止まっていれば起こしてよい時だけ 1 回起こす (やり直しと通知はしない)。勤務の外に起こした時は監査ログに `workspace.wake` を残す",
     "ワークスペースの木が今の先でなければ、読む鍵で GitHub の tarball を取り、302 は `codeload.github.com` の下だけを `Authorization` を付けずに 1 回追い、ためずに流す。同じ木を同時に開いた時は 1 本だけが取り、ほかは渡し終えるのを 90 秒まで待ち、過ぎたら自分で取る",
-    "`WorkspaceDO` がワークスペースの `/v1/lsp` に WebSocket を開き、101 を返して中継する。配信の同時の数に入れる",
+    "配信の同時の数に入れてから、`WorkspaceDO` がワークスペースの `/v1/lsp` に WebSocket を開き、101 を返して中継する。つなげなければ数から外す",
   ],
   "x-errors": [
     "400 `malformed_request`: `Upgrade: websocket` がない",
@@ -174,11 +174,17 @@ export const reviewLspRoutes = router.openapi(openReviewLspRoute, async (c) => {
       rethrowWorkspace(error);
     }
   }
-  const res = await workspace.fetch("https://workspace.internal/lsp", {
-    headers: { Upgrade: "websocket", "x-lsp-node": nodeId, "x-lsp-sha": sha, "x-lsp-session": session.id, "x-lsp-ip": c.var.ip, "x-lsp-at": String(now) },
-  });
-  if (res.status >= 400) throw new AppError("unavailable", "ワークスペースにつながらない", { headers: { "Retry-After": String(RETRY_AFTER_S) } });
+  // 中継を始める前に配信の同時の数に入れる。中継が閉じれば WorkspaceDO が同じ時刻で外し、つなげなければここで外す
   await holdLspSlot(c.env, c.var.clock, staffId, now);
+  const res = await workspace
+    .fetch("https://workspace.internal/lsp", {
+      headers: { Upgrade: "websocket", "x-lsp-node": nodeId, "x-lsp-sha": sha, "x-lsp-session": session.id, "x-lsp-ip": c.var.ip, "x-lsp-at": String(now) },
+    })
+    .catch(() => null);
+  if (res === null || res.status >= 400) {
+    await releaseLspSlot(c.env, c.var.clock, staffId, now);
+    throw new AppError("unavailable", "ワークスペースにつながらない", { headers: { "Retry-After": String(RETRY_AFTER_S) } });
+  }
   // DO の返事のヘッダーは変えられないので、セキュリティヘッダーを足せるよう、WebSocket だけを持つ返事に作り直す
   const init = { status: res.status, webSocket: res.webSocket };
   return new Response(null, init);

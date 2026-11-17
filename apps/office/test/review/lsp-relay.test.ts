@@ -161,4 +161,47 @@ describe("ワークスペースの起こし方と止め方", () => {
     await expect(box.wakeOnce()).rejects.toMatchObject({ code: "unavailable" });
     expect([started, downs.length]).toEqual([1, 0]);
   });
+
+  it("補完の切り替えは 10 秒で諦めるが、切り替えた後の接続は期限で切らない", async () => {
+    const signals: AbortSignal[] = [];
+    let answer: "now" | "never" = "now";
+    const container: ContainerLike<null> = {
+      running: true,
+      intercepts: false,
+      start: () => undefined,
+      interceptOutboundHttp: () => Promise.resolve(),
+      interceptOutboundHttps: () => Promise.resolve(),
+      getTcpPort: () => ({
+        fetch: (_url: string, init?: RequestInit) => {
+          const signal = init?.signal;
+          if (!signal) return Promise.reject(new Error("期限が無い"));
+          signals.push(signal);
+          // workerd は 101 を返すが、Node の Response は 101 を作れないので 200 で代える
+          if (answer === "now") return Promise.resolve(new Response(null, { status: 200 }));
+          return new Promise<Response>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("切った"))));
+        },
+      }),
+      destroy: () => Promise.resolve(),
+    };
+    const timers = new ManualTimers(T0);
+    const box = new WorkspaceBox(container, () => null, { staffId: "builder", workspaceId: "ws-builder" }, {
+      wait: () => Promise.resolve(),
+      keys: { get: () => Promise.resolve("a".repeat(64)), put: () => Promise.resolve() },
+      notifyDown: () => Promise.resolve(),
+      after: timers.after,
+    });
+    const sha = "c".repeat(40);
+    await box.connectLsp("0190f4a8-0000-7000-8000-000000000101", sha);
+    timers.advance(60 * 60_000);
+    expect(signals[0]?.aborted).toBe(false);
+    // 切り替えが返らなければ 10 秒で切る
+    answer = "never";
+    const opening = box.connectLsp("0190f4a8-0000-7000-8000-000000000101", sha).then(() => "つながった", (e: unknown) => (e instanceof Error && "code" in e ? String(e.code) : ""));
+    await new Promise((resolve) => setImmediate(resolve));
+    timers.advance(10_000 - 1);
+    expect(signals[1]?.aborted).toBe(false);
+    timers.advance(1);
+    expect(signals[1]?.aborted).toBe(true);
+    expect(await opening).toBe("unavailable");
+  });
 });

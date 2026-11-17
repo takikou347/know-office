@@ -39,7 +39,20 @@ export type BoxDeps = {
   keys: { get(): Promise<string | undefined>; put(key: string): Promise<void> };
   /** やり直しても起きなかった事をオーナーに知らせる */
   notifyDown(): Promise<void>;
+  /** ms の後に fn を呼び、取り消す関数を返す。補完の切り替えの期限に使う。省くと setTimeout */
+  after?: (ms: number, fn: () => void) => () => void;
 };
+
+/**
+ * setTimeout で ms の後に fn を呼ぶ
+ * @param ms 待つ長さ
+ * @param fn 呼ぶ物
+ * @returns 取り消す関数
+ */
+function afterTimeout(ms: number, fn: () => void): () => void {
+  const timer = setTimeout(fn, ms);
+  return () => clearTimeout(timer);
+}
 
 /**
  * ワークスペースが起きなかった事を通知に出す。同じ社員の通知は、オーナーが読むまで重ねて出さない
@@ -271,13 +284,20 @@ export class WorkspaceBox<F = unknown> {
    * @param sha 先のコミット
    * @returns ワークスペースの返事。101 の時は webSocket を持つ
    * @throws upstream_failed 形が違う時
-   * @throws unavailable ワークスペースに届かない時
+   * @throws unavailable ワークスペースに届かない時、10 秒で切り替わらない時
    */
   async connectLsp(nodeId: string, sha: string): Promise<Response> {
     const params = LspTreeParams.safeParse({ nodeId, sha });
     if (!params.success) throw new AppError("upstream_failed", "木の名前の形が違う");
     const query = new URLSearchParams(params.data).toString();
-    return this.#send("GET", `/v1/lsp?${query}`, { upgrade: "websocket" });
+    // 切り替えまでの 10 秒だけを期限にし、101 の後は切らない。AbortSignal.timeout は返事の後の WebSocket も切りうる
+    const controller = new AbortController();
+    const cancel = (this.deps.after ?? afterTimeout)(CALL_TIMEOUT_MS, () => controller.abort());
+    try {
+      return await this.#send("GET", `/v1/lsp?${query}`, { upgrade: "websocket" }, undefined, controller.signal);
+    } finally {
+      cancel();
+    }
   }
 
   /**
@@ -436,11 +456,11 @@ export class WorkspaceBox<F = unknown> {
    * @param path 道。確かめた名前だけで組んだ物
    * @param headers 足す見出し
    * @param body 本文
-   * @param timeoutMs 待つ長さ
+   * @param limit 待つ長さ (ミリ秒) か、切る合図
    * @returns 返事
    * @throws unavailable 止まっている、鍵が無い、届かない時
    */
-  async #send(method: string, path: string, headers: Record<string, string>, body?: ReadableStream<Uint8Array>, timeoutMs = CALL_TIMEOUT_MS): Promise<Response> {
+  async #send(method: string, path: string, headers: Record<string, string>, body?: ReadableStream<Uint8Array>, limit: number | AbortSignal = CALL_TIMEOUT_MS): Promise<Response> {
     const key = this.container.running ? await this.deps.keys.get() : undefined;
     if (key === undefined) throw new AppError("unavailable", "ワークスペースが動いていない");
     try {
@@ -448,7 +468,7 @@ export class WorkspaceBox<F = unknown> {
         method,
         headers: { ...headers, authorization: `Bearer ${key}` },
         ...(body === undefined ? {} : { body, duplex: "half" }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: typeof limit === "number" ? AbortSignal.timeout(limit) : limit,
       });
     } catch {
       throw new AppError("unavailable", "ワークスペースに届かない");

@@ -35,3 +35,18 @@ export async function holdLspSlot(env: Bindings, clock: Clock, staffId: StaffId,
     await recordError(env, { source: "live_do", level: "warn", code: "lsp_hold_failed", error }, clock);
   }
 }
+
+/**
+ * 配信の同時の数に入れた補完の接続を外す。つなげなかった時に呼ぶ。届かなくてもエラーログに lsp_release_failed を残すだけにする
+ * @param env バインディング
+ * @param clock 時刻
+ * @param staffId ワークスペースの社員
+ * @param openedAt 開いた時刻。入れた時と同じ物
+ */
+export async function releaseLspSlot(env: Bindings, clock: Clock, staffId: StaffId, openedAt: number): Promise<void> {
+  try {
+    await liveOf(env).releaseLsp(staffId, openedAt);
+  } catch (error) {
+    await recordError(env, { source: "live_do", level: "warn", code: "lsp_release_failed", error }, clock);
+  }
+}
