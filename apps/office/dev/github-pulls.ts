@@ -54,7 +54,7 @@ export type FakePulls = {
   /** プルリクエストを出した者を覚える */
   opened(repo: string, number: number, token: string | null): void;
   /** 要求に答える。当たらなければ null */
-  answer(route: string, text: string, token: string | null): Response | null;
+  answer(route: string, text: string, token: string | null, query?: URLSearchParams): Response | null;
 };
 
 const invalid = () => Response.json({ message: "Invalid request" }, { status: 422 });
@@ -218,8 +218,16 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
 
   return {
     opened: (repo, number, token) => void authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key),
-    answer: (route, text, token) => {
+    answer: (route, text, token, query) => {
       const body: unknown = text ? JSON.parse(text) : null;
+      // GET /repos/{o}/{r}/pulls?head=<owner>:<ブランチ>&state=open は、そのブランチで開いている PR を返す (GitHub の REST API の List pull requests)
+      const listed = /^GET \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route);
+      if (listed) {
+        if (!deps.allows(token, listed[1] ?? "", "pull_requests", "read")) return forbidden();
+        const branch = (query?.get("head") ?? "").split(":").slice(1).join(":");
+        const per = Number(query?.get("per_page") ?? "30");
+        return Response.json([...made.entries()].filter(([key, pr]) => key.startsWith(`${listed[1] ?? ""}#`) && (pr as { head?: { ref?: string } }).head?.ref === branch).map(([, pr]) => pr).slice(0, per));
+      }
       // 出した PR は、先をブランチの先と main の先に決めて覚え、GET で本文を読める。置いた返事 (fakeGitHubRoute) がある道は、呼ぶ側がこれより先に答える
       const created = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route);
       if (created) return open(created[1] ?? "", body, token);

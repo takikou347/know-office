@@ -175,6 +175,10 @@ describe("開発環境の代わりの物", () => {
     expect(made.head.sha).toBe(sha);
     expect(z.object({ body: z.string() }).parse(await (await send(`/pulls/${String(made.number)}`, "GET")).json()).body).toBe("本文\n\nCloses #3");
     expect((await send("/pulls/1", "GET")).status).toBe(404);
+    // ブランチで開いている PR を探す。head は <owner>:<ブランチ>、別のブランチと無いブランチは空
+    const listed = async (branch: string) => z.array(z.object({ number: z.number() })).parse(await (await send(`/pulls?head=${encodeURIComponent(`example:${branch}`)}&state=open&per_page=2`, "GET")).json()).map((p) => p.number);
+    expect(await listed("ko/x")).toEqual([made.number]);
+    expect(await listed("ko/y")).toEqual([]);
   });
 
   it("代わりの GitHub は /github の下に立てても、Issue と compare に頭を除いた道で答える", async () => {

@@ -312,7 +312,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       if (failed) return failed;
       // Issue とプルリクエストと Git の答えは、/github の下に立てた時の頭 (/github) を除いた道で探す
       const bare = `${c.req.method} ${c.req.path.slice(mountedAt(c.req.routePath).length)}`;
-      if (!routes.has(route)) return issues.answer(bare, text, token, new URL(c.req.url).searchParams) ?? pulls.answer(bare, text, token) ?? c.json({ message: "Not Found" }, 404);
+      if (!routes.has(route)) return issues.answer(bare, text, token, new URL(c.req.url).searchParams) ?? pulls.answer(bare, text, token, new URL(c.req.url).searchParams) ?? c.json({ message: "Not Found" }, 404);
       const body = routes.get(route);
       // 出したプルリクエストは、出した者を覚える。自分で可を付ける事を断るのに使う
       const opened = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
