@@ -5,7 +5,6 @@ import { FAKES } from "../helpers/fakes.ts";
 import { noticeBar, readNoticesTitled, SPEND_TITLE } from "./helpers/notice-bar.ts";
 import { addTask, clockInReviewer, NodeDetail, NodeStatus, openTree, PURPOSE, Runs, scriptFinish, type Tree, Trees } from "./helpers/staff-work.ts";
 
-
 /** 使用の上限で止めるタスクの題の頭。前の通しが落ちて残した物を探す */
 const SPEND_TASK = "上限で止まるタスク";
 

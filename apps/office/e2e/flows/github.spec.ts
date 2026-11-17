@@ -10,7 +10,6 @@ import { createClaudeKey, FAKES } from "../helpers/fakes.ts";
 /** 開発の代わりの GitHub。.dev.vars の DEV_FAKES_URL */
 const FAKE_GITHUB = `${FAKES}/github`;
 
-
 /** 代わりの GitHub がインストールで選ぶリポジトリ */
 const REPOS = ["example/knowidea-ui", "example/know-office"];
 

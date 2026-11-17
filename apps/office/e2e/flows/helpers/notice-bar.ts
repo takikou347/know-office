@@ -42,8 +42,8 @@ export async function noticeBar(page: Page, role: "alert" | "status", title: str
       async () => {
         if (await bar.isVisible()) return true;
         if (await top.first().isVisible()) await top.first().getByRole("button", { name: "読んだ" }).click();
-        // 開いた直後に足された通知は、画面の配りの印を受ける前に出ている事がある。読み直す間 (1 分) を待たず、画面が見えた時の読み直しを起こす
-        else await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+        // 開いた直後に足された通知は、画面の配りの印を受ける前に出ている事がある。読み直す間 (1 分) を待たず、画面が見えた時の読み直しを起こす。移動の途中で起こせない時は次の確かめに任せる
+        else await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))).catch(() => {});
         return false;
       },
       { timeout, intervals: [1_000, 2_000] },
