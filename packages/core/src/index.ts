@@ -246,6 +246,7 @@ export { AskOwnerTool } from "./schemas/tools/ask-owner.ts";
 export { IdeaAddTool } from "./schemas/tools/idea-add.ts";
 export { ServiceCloseRequestTool } from "./schemas/tools/service-close-request.ts";
 export { devIssueKey, devIssueText, type DevIssueKind, type DevIssueSource, featureTitle, ISSUE_KINDS, ISSUE_LABELS, type IssueKind, type IssueLabel, parseRequirements } from "./devloop/issues.ts";
+export { globHead, globsOverlap, hasTestFile } from "./devloop/glob.ts";
 export { FEATURE_NAME, ISSUE_PLAN_CHILDREN_MAX, ISSUE_PLAN_PARENTS_MAX, IssuePlanTool } from "./schemas/tools/issue-plan.ts";
 export { StudySubmitTool } from "./schemas/tools/study-submit.ts";
 export { NodeAssignTool } from "./schemas/tools/node-assign.ts";
