@@ -89,7 +89,7 @@ async function hand(env: Bindings, call: PrCall, task: NodeRow & { repo: string 
   }
   const actor = { by: call.staffId, now: call.now, traceId: call.traceId };
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "pr_opened", detail: { prNumber: pr.number, branch: pr.branch, ...(pr.first ? {} : { again: true }) } }, actor);
-  await auditFrom(env, { at: call.now, actor: call.staffId, action: "pull_request.open", target: task.id, scope: task.scope, detail: { repo: task.repo, prNumber: pr.number, again: !pr.first }, traceId: call.traceId });
+  await auditFrom(env, { at: call.now, actor: call.staffId, action: "pull_request.open", target: task.id, scope: task.scope, detail: { repo: task.repo, prNumber: pr.number, ...(pr.first ? {} : { again: true }) }, traceId: call.traceId });
   await createNode(
     env,
     { kind: "task", parentId: moved.parentId ?? undefined, scope: moved.scope, title: `レビュー: ${moved.title}`, taskKind: "review", assignee: REVIEWER, repo: task.repo, branch: pr.branch, prNumber: pr.number, source: "review", priority: moved.priority },
