@@ -173,6 +173,9 @@ describe("開発環境の代わりの物", () => {
     expect((await send("/git/refs/heads/ko/x", "PATCH", { sha, force: true })).status).toBe(200);
     const made = z.object({ number: z.number(), head: z.object({ sha: z.string() }) }).parse(await (await open("ko/x")).json());
     expect(made.head.sha).toBe(sha);
+    // 同じ head の開いた PR があれば、本物と同じく 422 にし、番号は進めない
+    const again = await open("ko/x");
+    expect({ status: again.status, text: JSON.stringify(await again.json()).includes("A pull request already exists") }).toEqual({ status: 422, text: true });
     expect(z.object({ body: z.string() }).parse(await (await send(`/pulls/${String(made.number)}`, "GET")).json()).body).toBe("本文\n\nCloses #3");
     expect((await send("/pulls/999", "GET")).status).toBe(404);
     // 番号は Issue と同じ、リポジトリごとの続き番号

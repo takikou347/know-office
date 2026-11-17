@@ -133,7 +133,7 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
 
   const made = new Map<string, unknown>();
   /**
-   * POST /repos/{o}/{r}/pulls に答える。ブランチの先が無ければ 422
+   * POST /repos/{o}/{r}/pulls に答える。ブランチの先が無いか、同じ head の開いた PR があれば 422
    * @param repo owner/name
    * @param body 本文
    * @param token 鍵
@@ -144,6 +144,9 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     const input = PullRequest.safeParse(body);
     const head = input.success ? deps.heads.get(`${repo}:${input.data.head}`) : undefined;
     if (!input.success || head === undefined) return invalid();
+    // 同じリポジトリで同じ head の開いた PR があれば、本物と同じく 422 (A pull request already exists)
+    const exists = [...made.entries()].some(([key, pr]) => key.startsWith(`${repo}#`) && headRef(pr) === input.data.head && stateOf(pr) === "open");
+    if (exists) return Response.json({ message: "Validation Failed", errors: [{ resource: "PullRequest", code: "custom", message: `A pull request already exists for ${repo.split("/")[0] ?? ""}:${input.data.head}.` }] }, { status: 422 });
     const number = deps.claimNumber(repo, input.data.title);
     const opened1 = { number, title: input.data.title, body: input.data.body ?? "", base: { ref: input.data.base, sha: deps.heads.get(`${repo}:${input.data.base}`) ?? "0".repeat(40) }, head: { ref: input.data.head, sha: head }, state: "open" };
     made.set(`${repo}#${String(number)}`, opened1);

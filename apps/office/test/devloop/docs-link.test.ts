@@ -1,4 +1,5 @@
 // 設計書を同じ時に直す、設計書の PR を出して結ぶ所。同じサービスの設計書を直す別のタスクがある間は出せず、結ぶのは同じタスクで出した PR だけ (開発の回し方の 3.6)
+import { AppError } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { DOCS, DOCS2, failure, seedSetting, synchronize } from "../helpers/docs.ts";
@@ -127,7 +128,8 @@ describe("設計書を同じ時に直す", () => {
     await expect(openDocs()).rejects.toThrow("PR を出した後に落ちた");
     // 行は残り、PR の番号はまだ無い
     expect(await docsRows()).toEqual([{ node_id: task, pr_number: null, branch: `ko/${task.slice(0, 8)}-spec` }]);
-    world.forge.openPull = real;
+    // 本物の GitHub は、同じ head の開いた PR があれば 422 を返す。次の呼びは出さずに、開いた PR を使う
+    world.forge.openPull = () => Promise.reject(new AppError("upstream_failed", "GitHub が 422 を返した"));
     expect(await openDocs()).toMatchObject({ isError: false });
     expect(repos.opened).toHaveLength(1);
     expect(await docsRows()).toEqual([{ node_id: task, pr_number: 11, branch: `ko/${task.slice(0, 8)}-spec` }]);
