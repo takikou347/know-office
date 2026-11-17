@@ -265,10 +265,25 @@ export async function notifyStaff(env: Bindings, staffId: string, now: number, c
   if (status.state !== "off" || !call) return;
   const next = await nextTodo(env, id.data);
   if (!next) return;
-  await start(env, id.data, next.row, now, async (task) => {
-    await target.call(task, now, traceId);
-    return true;
-  });
+  // 社員 DO が呼び出さなかった時 (退勤していなかった時) は、start がタスクを todo に戻す
+  await start(env, id.data, next.row, now, (task) => target.call(task, now, traceId));
+}
+
+/**
+ * 時間外に話しかけた時に、退勤している社員に次のタスクを取らせて呼び出す。発言は最初の呼び出しの頭で渡る
+ * 取るタスクが無い時と、社員 DO が 1 日の回数の上限で断った時は呼び出さず、タスクを todo に戻す
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param now 今の時刻
+ * @param perDay 社員ごとの 1 日の回数
+ * @param traceId 話しかけた要求の traceId
+ * @returns 呼び出したか
+ */
+export async function callForMessage(env: Bindings, staffId: StaffId, now: number, perDay: number, traceId?: string): Promise<boolean> {
+  const next = await nextTodo(env, staffId);
+  if (!next) return false;
+  const target = staffDo(env, staffId);
+  return start(env, staffId, next.row, now, (task) => target.call(task, now, traceId, { perDay }));
 }
 
 /**

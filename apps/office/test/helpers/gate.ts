@@ -270,10 +270,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
         await book.order(order, now);
         return null;
       }),
-      call: overRpc(async (task: unknown, now: number) => {
-        await book.call(task, now);
-        return null;
-      }),
+      call: overRpc((task: unknown, now: number, _traceId?: string, limit?: { perDay: number }) => book.call(task, now, limit)),
       // 社員 DO と同じく、続きにしたタスクかは呼び出しの始め方に使うだけで返さない
       pull: async (now: number) => {
         const { carried: _carried, ...pulled } = await pullNext(env, book, now);

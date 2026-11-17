@@ -84,8 +84,8 @@ export interface Staff extends Rpc.DurableObjectBranded {
   markRun(nodeId: string, mark: "started" | "failed" | "done"): Promise<{ failures: number }>;
   /** その日だけの指示を受ける */
   order(order: unknown, now: number): Promise<null>;
-  /** 時間外に呼び出す */
-  call(task: unknown, now: number, traceId?: string): Promise<null>;
+  /** 時間外に呼び出す。呼び出したかを返し、話しかけた時は 1 日の回数の上限を渡す */
+  call(task: unknown, now: number, traceId?: string, limit?: { perDay: number }): Promise<boolean>;
   /** API の上限で待ち始める */
   waitStart(reason: unknown, now: number): Promise<null>;
   /** API の上限の待ちを解き、待っていた時間を返す */

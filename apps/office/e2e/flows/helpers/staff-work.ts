@@ -215,3 +215,56 @@ export async function scriptWork(page: Page, said: string): Promise<void> {
   await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_checkpoint", name: "mcp__staff__checkpoint", input: { kind: "note", note: "通しの経過" } }], "tool_use");
   await scriptFinish(page);
 }
+
+/**
+ * 社員と仕事の画面の会話から、レビュー担当に話しかけ、送った発言の吹き出しを返す
+ * @param page 画面を開いたページ
+ * @param said 発言の本文
+ * @returns 送った発言の吹き出し
+ */
+export async function sayToReviewer(page: Page, said: string): Promise<Locator> {
+  await page.goto("/staff/reviewer?tab=talk");
+  await page.getByRole("textbox", { name: "レビュー担当への言葉" }).fill(said);
+  await page.getByRole("button", { name: "送る" }).click();
+  return page.getByRole("log", { name: "レビュー担当との会話" }).getByRole("listitem").filter({ hasText: said });
+}
+
+/**
+ * 代わりの Claude API に届いた呼び出しに、その文が入っているか
+ * @param page 画面を開いたページ
+ * @param text 探す文
+ * @returns 入っていれば true
+ */
+export async function claudeReceived(page: Page, text: string): Promise<boolean> {
+  return (await (await page.request.get(`${FAKES}/anthropic/__fake/requests`)).text()).includes(text);
+}
+
+/** 続けるタスクの題の頭。前の通しが落ちて残した物を探す */
+export const CARRY_TITLE = "続けるタスク";
+
+/**
+ * 前の通しが落ちて残した、続けるタスクを見送りにする。止めたままのタスクは再開し、社員が持っていれば終わりの返事で終えさせて離れさせてから、残りを見送りにする
+ * @param page 画面を開いたページ
+ */
+export async function dropLeftovers(page: Page): Promise<void> {
+  const left = Trees.parse(await (await page.request.get(`/api/v1/nodes?rootId=${PURPOSE}`)).json())
+    .data.flatMap(function walk(n: Tree): Tree[] {
+      return [n, ...n.children.flatMap(walk)];
+    })
+    .filter((n) => n.title.startsWith(`${CARRY_TITLE} `));
+  const ids = new Set(left.map((n) => n.id));
+  const state = State.parse(await (await page.request.get("/api/v1/guard/state")).json());
+  for (const s of state.data.stopped.filter((x) => x.scope === "task" && ids.has(x.target))) expect(await post(page, `/api/v1/guard/stops/${s.stopId}/resume`)).toBe(200);
+  const holding = async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "reviewer")?.nodeId ?? null;
+  const held = await holding();
+  if (held !== null && ids.has(held)) {
+    await scriptFinish(page);
+    // 途中で落ちた通しは、待ちを付けたチェックポイントの返事を先に返してから終える
+    await expect.poll(holding, { timeout: 240_000 }).not.toBe(held);
+  }
+  for (const n of left) {
+    const { status, version } = NodeDetail.parse(await (await page.request.get(`/api/v1/nodes/${n.id}`)).json()).data;
+    if (status === "done" || status === "dropped") continue;
+    expect((await page.request.patch(`/api/v1/nodes/${n.id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+  }
+}

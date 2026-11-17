@@ -1,6 +1,6 @@
 // 会話: 社員とのメッセージを読む、送る (社員と自動の 3.7、API の conversation)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, codePoints, CreateMessageInput, headChars, jstYear, Message, MESSAGE_INLINE_CHARS, newId, StaffId } from "@know-office/core";
+import { AppError, codePoints, log, CreateMessageInput, headChars, jstYear, Message, MESSAGE_INLINE_CHARS, newId, StaffId } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { createRouter } from "../app.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
@@ -8,7 +8,10 @@ import { recordError } from "../ledger/errors.ts";
 import { announce } from "../live/publish.ts";
 import { createdResponse, listQuery, listResponse, problems } from "../openapi.ts";
 import { created, list } from "../respond.ts";
+import { loadOffHoursCall } from "../services/settings.ts";
+import { clockAt } from "../work/attendance.ts";
 import { DELIVERY_WINDOW_MS, type DeliveryMark, deliveriesOf, deliverToRun } from "../work/deliver.ts";
+import { callForMessage } from "../work/loop.ts";
 import { recordsOf } from "../work/nodes.ts";
 
 const router = createRouter();
@@ -38,10 +41,11 @@ const createMessageRoute = createRoute({
   operationId: "createMessage",
   tags: ["conversation"],
   summary: "社員にメッセージを送る",
-  description: "勤務時間外の場合は社員を呼び出す。字数はコードポイントで数える。",
+  description: "勤務時間外で時間外の呼び出しを開いている場合は社員を呼び出す。字数はコードポイントで数える。",
   "x-steps": [
     "`messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く",
-    "タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す。時間外の呼び出しは #208",
+    "タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す",
+    "社員が退勤していて、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す",
     "発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する (#209)",
     "`LiveDO` に渡して画面に配信する",
   ],
@@ -198,6 +202,25 @@ export async function appendMessage(
   return message;
 }
 
+/**
+ * 時間外の呼び出しを開いていれば、退勤している社員を呼び出す。呼び出せなくても発言は残すので、投げずにログとエラーログに残す
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param now 今の時刻
+ * @param traceId 話しかけた要求の traceId
+ */
+async function callOffHours(env: Bindings, staffId: StaffId, now: number, traceId: string): Promise<void> {
+  try {
+    const setting = await loadOffHoursCall(env.DB);
+    if (!setting.value.enabled) return;
+    const called = await callForMessage(env, staffId, now, setting.value.perDay, traceId);
+    log("info", "message_call", { staffId, called });
+  } catch (error) {
+    log("warn", "message_call_failed", { staffId, error: error instanceof Error ? error.message.slice(0, 200) : "unknown" });
+    await recordError(env, { source: "gate", level: "warn", code: "message_call_failed", error, traceId }, clockAt(now));
+  }
+}
+
 /** 会話のルート */
 export const messageRoutes = router
   .openapi(listMessagesRoute, async (c) => {
@@ -212,7 +235,7 @@ export const messageRoutes = router
     const message = await appendMessage(c.env, { staffId, sender: "owner", body: input.body, nodeId: input.nodeId ?? null, traceId: c.var.traceId }, c.var.clock);
     // 発言は足した後に渡す。渡せなくても発言は残り、次の呼び出しの頭で渡す
     const deliveredAt = await deliverToRun(c.env, { staffId, ...status }, { id: message.id, at: Date.parse(message.at), body: input.body }, c.var.clock.now());
-    // TODO(#208): 勤務時間外なら StaffDO.call で呼び出す
+    if (status.state === "off") await callOffHours(c.env, staffId, c.var.clock.now(), c.var.traceId);
     // TODO(#209): 発言に含まれる勤務の指示を軽いモデルで抜き出す
     const answer: Message = deliveredAt === null ? message : { ...message, deliveredAt: new Date(deliveredAt).toISOString(), delivery: "run" };
     return created(c, answer, `/api/v1/staff/${staffId}/messages`);

@@ -70,3 +70,20 @@ describe("社員 DO", () => {
     await expect(worker.staff("builder", "rebuildDay", "2030-1-7", jst(24, 5))).rejects.toThrow(/code=validation_failed$/);
   });
 });
+
+describe("オーナーの指示に合わせる", () => {
+  let worker: TestWorker;
+  beforeEach(async () => {
+    worker = await startTestWorker();
+  }, 30_000);
+  afterEach(() => worker.dispose());
+
+  it("同時の話しかけで 1 回だけ呼び出す", async () => {
+    const limit = { perDay: 2 };
+    const answers = await Promise.all([worker.staff("builder", "call", TASK, jst(21), undefined, limit), worker.staff("builder", "call", CALL_TASK, jst(21), undefined, limit)]);
+    expect(answers.filter((a) => a === true)).toHaveLength(1);
+    expect(answers.filter((a) => a === false)).toHaveLength(1);
+    const held = answers[0] === true ? TASK : CALL_TASK;
+    expect(await worker.staff("builder", "status", jst(21))).toMatchObject({ state: "called", nodeId: held.nodeId });
+  });
+});

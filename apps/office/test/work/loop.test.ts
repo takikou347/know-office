@@ -252,6 +252,17 @@ describe("タスクの繰り返しの決まり", () => {
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
   });
 
+  it("社員 DO が呼び出しを断ったら、頼んだタスクを todo に戻す", async () => {
+    const { goal } = await purposeAndGoal(world);
+    const project = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "project", parentId: goal, scope: "office", title: "急ぎ" }, 201));
+    await advance(world, at(21));
+    world.headers = await world.gate.signIn();
+    // 状態を読んだ後に、ほかの道で出勤していた時と同じく、社員 DO が呼び出さない
+    world.gate.staff.builder.book.call = () => Promise.resolve(false);
+    const task = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "task", parentId: project, scope: "office", title: "急ぎの直し", taskKind: "fix", assignee: "builder" }, 201));
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "todo" }]);
+  });
+
   it("取る間に担当が変わったタスクを 2 人で取らない", async () => {
     const { goal } = await purposeAndGoal(world);
     const project = idOf(await api(world, "POST", "/api/v1/nodes", { kind: "project", parentId: goal, scope: "office", title: "勤怠" }, 201));

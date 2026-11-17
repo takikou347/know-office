@@ -83,6 +83,8 @@ export const Memory = z
     retryAt: z.number().nullable(),
     /** day の閉じた区分のうち、働いた時間に入る分の和 */
     workedMs: z.number(),
+    /** 時間外の話しかけで呼び出した日本時間の日と、その日の回数。タスクを頼んだ時の呼び出しは数えない */
+    talkCalls: z.object({ day: z.string(), count: z.number().int().nonnegative() }).strict().nullable().default(null),
     /** 次に集計を作り直す時に足す、勤怠の行に出ない理由 (`<出来事>:<理由>`) */
     reasons: z.array(z.string()),
     /** まだ D1 に書いたと確かめていない行と、まだ作り直したと確かめていない集計。起き直したら同じ ID で書き直し、集計を作り直す */
@@ -109,6 +111,7 @@ export const EMPTY_MEMORY: Memory = {
   pausedFrom: null,
   retryAt: null,
   workedMs: 0,
+  talkCalls: null,
   reasons: [],
   pending: { attendance: [], work: [], totals: [], events: [] },
 };

@@ -195,22 +195,30 @@ export class StaffBook {
 
   /**
    * 時間外に呼び出す。この社員だけが出勤し、頼まれたタスクがチェックポイントに届くまで働く
+   * 話しかけた時の呼び出しは limit を渡し、日本時間の日ごとに数えて上限の日は呼び出さない
    * @param input StaffTask
    * @param now 今の時刻
-   * @returns 無し
+   * @param limit 話しかけた時の 1 日の回数の上限。タスクを頼んだ時は渡さず、数えない
+   * @param limit.perDay 1 日の回数
+   * @returns 呼び出したか。退勤していない時と上限の日は false で、タスクは渡されていない
    * @throws validation_failed 形が違う時
    */
-  async call(input: unknown, now: number): Promise<void> {
+  async call(input: unknown, now: number, limit?: { perDay: number }): Promise<boolean> {
     const parsed = StaffTask.safeParse(input);
     if (!parsed.success) throw new AppError("validation_failed", "タスクの形が違う");
     const s = await this.#load();
     await this.#process(s, now);
-    // 勤務中ならゲートウェイがワークスペースに渡すので、ここでは何もしない
-    if (s.m.state === "off") {
-      await this.#clockIn(s, now, jstDay(now), "called", "call", "owner_instruction");
+    const day = jstDay(now);
+    const used = s.m.talkCalls?.day === day ? s.m.talkCalls.count : 0;
+    // 勤務中ならゲートウェイがワークスペースに渡すので、ここでは呼び出さない
+    const called = s.m.state === "off" && (limit === undefined || used < limit.perDay);
+    if (called) {
+      await this.#clockIn(s, now, day, "called", "call", "owner_instruction");
       s.m.task = { ...parsed.data, startedAt: now, pausedMs: 0, pausedAt: null };
+      if (limit) s.m.talkCalls = { day, count: used + 1 };
     }
     await this.#save(s, now);
+    return called;
   }
 
   /**

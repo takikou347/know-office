@@ -1,11 +1,10 @@
 // 社員の仕事の通し。オーナーが目的と組織図の画面でタスクを足して頼み、社員が取り、開発のコンテナの代わりがタスクの開始 (POST /v1/runs) を受け、社員がツールで発言とチェックポイントを伝え、SDK が終えた知らせがゲートウェイに届いてタスクが done になる。ゲートウェイの返事は差し替えず、SDK はゲートウェイの Claude のプロキシを通って手元の代わりの Claude API を呼ぶ (社員が考えるの 3.3)
-import type { Locator, Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
 import { part, post } from "./helpers/screen.ts";
 import { FAKES } from "../helpers/fakes.ts";
-import { Held, NodeDetail, NodeStatus, NodeVersion, PROJECT, PURPOSE, Runs, State, type Tree, Trees, addTask, clockInReviewer, finishedBy, openTree, ownerPasskey, reviewerState, scriptFinish, scriptReply, scriptWork } from "./helpers/staff-work.ts";
+import { CARRY_TITLE, claudeReceived, dropLeftovers, NodeStatus, NodeVersion, PROJECT, Runs, addTask, clockInReviewer, finishedBy, openTree, ownerPasskey, reviewerState, sayToReviewer, scriptFinish, scriptReply, scriptWork } from "./helpers/staff-work.ts";
 
 test("オーナーが画面で頼んだタスクを社員が取り、発言とチェックポイントを伝えて終え、記録に残る", async ({ page }) => {
   // 勤務の時刻を変え、SDK が 3 度呼ぶのを待つ
@@ -38,29 +37,6 @@ test("オーナーが画面で頼んだタスクを社員が取り、発言と�
     await restore();
   }
 });
-
-/**
- * 社員と仕事の画面の会話から、レビュー担当に話しかけ、送った発言の吹き出しを返す
- * @param page 画面を開いたページ
- * @param said 発言の本文
- * @returns 送った発言の吹き出し
- */
-async function sayToReviewer(page: Page, said: string): Promise<Locator> {
-  await page.goto("/staff/reviewer?tab=talk");
-  await page.getByRole("textbox", { name: "レビュー担当への言葉" }).fill(said);
-  await page.getByRole("button", { name: "送る" }).click();
-  return page.getByRole("log", { name: "レビュー担当との会話" }).getByRole("listitem").filter({ hasText: said });
-}
-
-/**
- * 代わりの Claude API に届いた呼び出しに、その文が入っているか
- * @param page 画面を開いたページ
- * @param text 探す文
- * @returns 入っていれば true
- */
-async function claudeReceived(page: Page, text: string): Promise<boolean> {
-  return (await (await page.request.get(`${FAKES}/anthropic/__fake/requests`)).text()).includes(text);
-}
 
 test.describe("オーナーの発言を社員に渡す", () => {
   test("タスクの途中に話しかけると「社員に渡しました」", async ({ page }) => {
@@ -196,36 +172,6 @@ test("ほかで先に頼む先が変わっていたら、木の上に知らせ�
   await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
   await finishedBy(page, nodeId);
 });
-
-/** 続けるタスクの題の頭。前の通しが落ちて残した物を探す */
-const CARRY_TITLE = "続けるタスク";
-
-/**
- * 前の通しが落ちて残した、続けるタスクを見送りにする。止めたままのタスクは再開し、社員が持っていれば終わりの返事で終えさせて離れさせてから、残りを見送りにする
- * @param page 画面を開いたページ
- */
-async function dropLeftovers(page: Page): Promise<void> {
-  const left = Trees.parse(await (await page.request.get(`/api/v1/nodes?rootId=${PURPOSE}`)).json())
-    .data.flatMap(function walk(n: Tree): Tree[] {
-      return [n, ...n.children.flatMap(walk)];
-    })
-    .filter((n) => n.title.startsWith(`${CARRY_TITLE} `));
-  const ids = new Set(left.map((n) => n.id));
-  const state = State.parse(await (await page.request.get("/api/v1/guard/state")).json());
-  for (const s of state.data.stopped.filter((x) => x.scope === "task" && ids.has(x.target))) expect(await post(page, `/api/v1/guard/stops/${s.stopId}/resume`)).toBe(200);
-  const holding = async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "reviewer")?.nodeId ?? null;
-  const held = await holding();
-  if (held !== null && ids.has(held)) {
-    await scriptFinish(page);
-    // 途中で落ちた通しは、待ちを付けたチェックポイントの返事を先に返してから終える
-    await expect.poll(holding, { timeout: 240_000 }).not.toBe(held);
-  }
-  for (const n of left) {
-    const { status, version } = NodeDetail.parse(await (await page.request.get(`/api/v1/nodes/${n.id}`)).json()).data;
-    if (status === "done" || status === "dropped") continue;
-    expect((await page.request.patch(`/api/v1/nodes/${n.id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
-  }
-}
 
 /**
  * 日本時間の今から 2 分後の「HH:MM」と、その時刻を返す。早退の指示は今より後の分にしか出せない

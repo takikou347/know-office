@@ -196,14 +196,31 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param task StaffTask
    * @param now 今の時刻
    * @param traceId 呼び出した要求の traceId
-   * @returns 無し
+   * @param limit 話しかけた時の 1 日の回数の上限。タスクを頼んだ時は渡さない
+   * @param limit.perDay 1 日の回数
+   * @returns 呼び出したか。false の時はタスクを渡していないので、呼んだ側が todo に戻す
    */
-  async call(task: unknown, now: number, traceId?: string): Promise<null> {
-    await this.#run((book) => book.call(task, now), now);
-    // 前の勤務で続きにしたタスクを呼ばれた時は、最後の会話の記録から続ける
-    const { nodeId } = await this.status(now);
-    this.#begin(nodeId !== null && (await wasCarried(this.env, (await this.#open()).staffId, nodeId)) ? "continue" : "start", now, traceId);
-    return null;
+  async call(task: unknown, now: number, traceId?: string, limit?: { perDay: number }): Promise<boolean> {
+    const called = await this.#serial((book) => book.call(task, now, limit), now);
+    if (!called) return false;
+    // 出勤を書いた後は true を返す。ここで投げると呼んだ側がタスクを todo に戻し、記憶の持つタスクと食い違う
+    this.#begin((await this.#carried(now)) ? "continue" : "start", now, traceId);
+    return true;
+  }
+
+  /**
+   * 持っているタスクが前の勤務で続きにしたタスクかを見る。読めなければ最初からの呼び出しにし、ログに残す
+   * @param now 今の時刻
+   * @returns 続きのタスクなら true
+   */
+  async #carried(now: number): Promise<boolean> {
+    try {
+      const { nodeId } = await this.status(now);
+      return nodeId !== null && (await wasCarried(this.env, (await this.#open()).staffId, nodeId));
+    } catch (error) {
+      log("warn", "call_carried_read_failed", { error: error instanceof Error ? error.message.slice(0, 200) : "unknown" });
+      return false;
+    }
   }
 
   /**

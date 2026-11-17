@@ -55,6 +55,20 @@ export type WorkSchedule = z.infer<typeof WorkSchedule>;
 /** 勤務の時刻の初期値。毎日 9 時から 17 時 */
 export const DEFAULT_SCHEDULE: WorkSchedule = { start: "09:00", end: "17:00", days: [0, 1, 2, 3, 4, 5, 6] };
 
+/** 時間外の話しかけで社員を呼び出すか。設定 `workday.offHoursCall` の値。perDay は社員ごとの 1 日の回数 */
+export const OffHoursCall = z
+  .object({
+    enabled: z.boolean().meta({ description: "時間外に話しかけた時に社員を呼び出すか。開くと Claude の費用が出る" }),
+    perDay: z.number().int().min(1).max(10).meta({ description: "社員ごとの 1 日の呼び出しの回数。1 回は 2 時間まで" }),
+  })
+  .strict();
+
+/** 時間外の呼び出しの設定の型 */
+export type OffHoursCall = z.infer<typeof OffHoursCall>;
+
+/** 時間外の呼び出しの初期値。閉じて 1 日 2 回 */
+export const DEFAULT_OFF_HOURS_CALL: OffHoursCall = { enabled: false, perDay: 2 };
+
 /** ワークスペースが届けるチェックポイント。テストが通る、コミット、プルリクエスト、経過を書き残す */
 export const CheckpointInput = z
   .object({
