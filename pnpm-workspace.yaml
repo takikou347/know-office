@@ -9,3 +9,8 @@ ignoredBuiltDependencies:
 # drizzle-kit の中の @esbuild-kit が引く esbuild 0.18 には開発サーバーの脆弱性 (GHSA-67mh-4wv8-2f99) があるので、直った版にそろえる
 overrides:
   "@esbuild-kit/core-utils>esbuild": 0.25.12
+# 直した版がまだ無い弱点で、使い方で届かない物だけを、訳と期限を付けて pnpm audit で見ない。期限は scripts/ci.test.ts が確かめ、過ぎたら落ちる
+auditConfig:
+  ignoreGhsas:
+    # picomatch の ReDoS。vite がビルドの時に使うだけで、形は設定の glob から来て、外の入力を受けない。2027-02-17 まで
+    - GHSA-fc5q-39xc-vjpf

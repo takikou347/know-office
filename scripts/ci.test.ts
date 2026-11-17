@@ -62,6 +62,12 @@ void describe("弱点のチェック", () => {
     assert.ok(manager, "package.json に packageManager が無い");
     const dockerfile = readFileSync(join(root, "apps", "workspace", "Dockerfile"), "utf8");
     assert.match(dockerfile, new RegExp(`npm install -g npm@[\\d.]+ ${manager.replaceAll(".", "\\.")} `), `Dockerfile の pnpm が ${manager} でない`);
+    // pnpm audit で見ない弱点は、1 件ずつ訳と期限の行を前に置き、期限を過ぎたら落とす。期限が来たら直した版に上げるか、訳を見直す
+    const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
+    const ignored = [...workspace.matchAll(/^ {4}# (.+?) ?(\d{4}-\d{2}-\d{2}) まで\n {4}- (GHSA-[\w-]+)$/gm)];
+    const listed = /^ {2}ignoreGhsas:\n((?: {4}.*\n?)*)/m.exec(workspace)?.[1] ?? "";
+    assert.equal(ignored.length, [...listed.matchAll(/^ {4}- GHSA-/gm)].length, "訳と期限の行の無い ignoreGhsas がある");
+    for (const [, , until, id] of ignored) assert.ok(new Date(`${until ?? ""}T23:59:59+09:00`).getTime() >= Date.now(), `${id ?? ""} の期限 ${until ?? ""} を過ぎた`);
     // 週に 1 度の確かめで、ほかのジョブは回さない
     assert.match(all.get("check") ?? "", /^ {4}if: github\.event_name != 'schedule'$/m);
     // 動く入口への自動の攻撃は、画面の通しのジョブで 1 度だけ流す
