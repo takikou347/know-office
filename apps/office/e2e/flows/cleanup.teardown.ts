@@ -13,8 +13,13 @@ teardown("通しが出した通知を既読にする", async ({ page }) => {
   const body: unknown = await res.json();
   const notices = typeof body === "object" && body !== null && "data" in body && Array.isArray(body.data) ? body.data : [];
   const unread = notices.flatMap((n: unknown) => (typeof n === "object" && n !== null && "id" in n && "readAt" in n && typeof n.id === "string" && n.readAt === null ? [n.id] : []));
-  const replies = await Promise.all(unread.map((id) => page.request.put(`/api/v1/notices/${id}/read`, { headers })));
-  expect(replies.map((r) => r.status()).filter((s) => s >= 300)).toEqual([]);
+  // 夜は通しのログインごとの通知が数十件溜まる。一度に送ると手元の D1 が塞がって 500 を返すので、1 件ずつ送る
+  const failed: number[] = [];
+  for (const id of unread) {
+    const status = (await page.request.put(`/api/v1/notices/${id}/read`, { headers })).status();
+    if (status >= 300) failed.push(status);
+  }
+  expect(failed).toEqual([]);
 
   await page.reload();
   await expect(page.getByRole("button", { name: "読んだ" })).toHaveCount(0);
