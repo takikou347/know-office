@@ -9,11 +9,20 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.325",
-    "@know-office/core": "workspace:*"
+    "@know-office/core": "workspace:*",
+    "@types/react": "19.3.0",
+    "hono": "4.13.17",
+    "knowidea-css": "0.12.1",
+    "knowidea-icons": "0.12.1",
+    "knowidea-tokens": "0.12.1",
+    "knowidea-ui": "0.12.1",
+    "react": "19.3.1",
+    "typescript": "7.0.2",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
-    "typescript": "7.0.2",
+    "@types/ws": "8.18.2",
     "vitest": "5.1.0"
   }
 }
