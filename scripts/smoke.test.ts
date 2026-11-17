@@ -2,12 +2,18 @@
 // node:test の describe と it は Promise を返すが、node:test が待つので void で示す
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { runSmokeCli, type SmokeFetch } from "./smoke.ts";
+import { readFileSync } from "node:fs";
+import { gatewayRoutes, runSmokeCli, type SmokeFetch, type SmokeRoute } from "./smoke.ts";
 
 const BASE = "https://know-office.example.workers.dev";
 const ID = "smoke-client.access";
 const SECRET = "smoke-secret-0123456789abcdef";
 const KEYS = { SMOKE_URL: BASE, CF_ACCESS_CLIENT_ID: ID, CF_ACCESS_CLIENT_SECRET: SECRET };
+/** 確かめるルートの見本。v1.yaml の全部は gatewayRoutes のテストで読む */
+const ROUTES: SmokeRoute[] = [
+  { method: "GET", path: "/api/v1/me" },
+  { method: "POST", path: "/api/v1/staff/builder/stop" },
+];
 
 /** 届いた要求の記録 */
 type Seen = { url: string; headers: Headers; redirect: RequestInit["redirect"]; signal: boolean; method: string };
@@ -45,11 +51,12 @@ function deployed(change?: (url: string, authed: boolean) => Response | undefine
  * 確かめを走らせ、出した文と終わりのコードを返す
  * @param env 環境変数
  * @param fetch 要求を送る関数
+ * @param routes 鍵を付けずに聞くルート
  * @returns 出した文と終わりのコード
  */
-async function run(env: Record<string, string | undefined>, fetch: SmokeFetch): Promise<{ text: string; code: number }> {
+async function run(env: Record<string, string | undefined>, fetch: SmokeFetch, routes: SmokeRoute[] = ROUTES): Promise<{ text: string; code: number }> {
   const lines: string[] = [];
-  const code = await runSmokeCli(env, fetch, (line) => lines.push(line));
+  const code = await runSmokeCli(env, fetch, (line) => lines.push(line), routes);
   return { text: lines.join("\n"), code };
 }
 
@@ -62,6 +69,7 @@ void describe("デプロイした後に画面と API が返る", () => {
     assert.match(text, /ok {3}API/);
     assert.match(text, /ok {3}鍵の無い要求/);
     assert.match(text, /ok {3}GitHub の通知の道/);
+    assert.match(text, /ok {3}全部のルートが Access の後ろ \(2 本\)/);
     assert.deepEqual(
       seen.map((s) => [s.method, s.url, s.headers.has("CF-Access-Client-Secret")]),
       [
@@ -69,6 +77,8 @@ void describe("デプロイした後に画面と API が返る", () => {
         ["GET", `${BASE}/api/v1/health`, true],
         ["GET", `${BASE}/api/v1/health`, false],
         ["POST", `${BASE}/hooks/v1/github`, false],
+        ["GET", `${BASE}/api/v1/me`, false],
+        ["POST", `${BASE}/api/v1/staff/builder/stop`, false],
       ],
     );
     // 転送を追うと鍵を別の宛先へ送りうるので追わない。どの要求も時間で切る
@@ -89,6 +99,36 @@ void describe("デプロイした後に画面と API が返る", () => {
       assert.equal(code, 1, text);
       assert.match(text, /FAIL GitHub の通知の道/);
     }
+  });
+
+  void it("鍵の無い要求がゲートウェイに届くルートがあれば、そのルートを出して落とす", async () => {
+    // Access のアプリの道が狭いと、鍵の無い要求がゲートウェイに届き、ゲートウェイの problem+json が返る
+    const leak = deployed((url, authed) => (!authed && url === `${BASE}/api/v1/me` ? Response.json({ status: 401, code: "unauthenticated" }, { status: 401, headers: { "Content-Type": "application/problem+json" } }) : undefined));
+    const { text, code } = await run(KEYS, leak.fetch);
+    assert.equal(code, 1, text);
+    assert.match(text, /FAIL 全部のルートが Access の後ろ .*GET \/api\/v1\/me/);
+    assert.doesNotMatch(text, /stop/);
+    // 確かめるルートが無いのは v1.yaml の読み違いなので落とす
+    const empty = await run(KEYS, deployed().fetch, []);
+    assert.equal(empty.code, 1, empty.text);
+  });
+
+  void it("v1.yaml から、ゲートウェイの外向きのルートを、変数を埋めて全部読む", () => {
+    const routes = gatewayRoutes(readFileSync(new URL("../apps/office/openapi/v1.yaml", import.meta.url), "utf8"));
+    const keys = new Set(routes.map((r) => `${r.method} ${r.path}`));
+    assert.ok(routes.length > 50, String(routes.length));
+    assert.ok(keys.has("GET /api/v1/me"));
+    assert.ok(routes.some((r) => r.path.startsWith("/ws/v1/")));
+    // Bypass の通知の道と、コンテナの中のワークスペースのルート (/v1/) は入れない
+    assert.ok(routes.every((r) => r.path.startsWith("/api/") || r.path.startsWith("/ws/")));
+    assert.ok(routes.every((r) => !r.path.includes("{")));
+  });
+
+  void it("手元の宛先には Access が無いので、ルートの確かめは飛ばす", async () => {
+    const local = deployed((url, authed) => (authed ? undefined : new Response(null, { status: 401 })));
+    const { text } = await run({ ...KEYS, SMOKE_URL: "http://localhost:8787" }, local.fetch);
+    assert.match(text, /ok {3}全部のルートが Access の後ろ \(手元は見ない\)/);
+    assert.ok(!local.seen.some((s) => s.url.endsWith("/api/v1/me")));
   });
 
   void it("宛先の末尾の / と道は無視して入口から聞く", async () => {

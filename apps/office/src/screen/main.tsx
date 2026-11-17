@@ -1,10 +1,11 @@
+// 画面の入口。Zod は設定を済ませた物を最初に読み、ほかの物が Zod を使う前に設定を効かせる
+import { z } from "./zod-config.ts";
 import "knowidea-tokens/tokens.css";
 import "knowidea-css/index.css";
 import "./app.css";
 import { Extension, type Health } from "@know-office/core";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { z } from "zod";
 import { App } from "./App.tsx";
 import { ApiContext, createApi, sessionFetch } from "./api.ts";
 import { ExtensionFetchContext, withScreens } from "./extensions.ts";

@@ -1,8 +1,12 @@
 // デプロイした先の画面と API が返る事を、Access の作業用の鍵で聞いて確かめる。deploy.yml のデプロイの後と、手元の wrangler dev に向けて走らせる
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /** 要求を送る関数。テストは決まった返事を返す物を渡す */
 export type SmokeFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+/** 鍵を付けずに聞くルート。パスの変数は埋めてある */
+export type SmokeRoute = { method: string; path: string };
 
 /** 1 つの確かめの結果 */
 type Check = { name: string; ok: boolean; detail: string };
@@ -103,13 +107,50 @@ function isGateHealth(body: string): boolean {
   }
 }
 
+// パスの変数に入れる値。形は UUID v7 で、どの物にも当たらない
+const SAMPLE_ID = "0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+const METHOD = /^ {4}(get|post|put|patch|delete):$/;
+
 /**
- * 画面、API、鍵の無い要求、GitHub の通知の道の 4 つを確かめる
+ * v1.yaml から、ゲートウェイが外へ開くルート (/api/ と /ws/) を読む。Access の Bypass の通知の道 (/hooks/) と、コンテナの中のワークスペースのルート (/v1/) は入れない
+ * @param yaml v1.yaml の中身
+ * @returns パスの変数を埋めたルートの並び
+ */
+export function gatewayRoutes(yaml: string): SmokeRoute[] {
+  const routes: SmokeRoute[] = [];
+  let path: string | null = null;
+  for (const line of yaml.split("\n")) {
+    // paths の下のキーは 2 字下げ。ほかの 2 字下げのキー (components の下など) や 0 字下げのキーでルートを閉じる
+    const key = /^ {0,2}(\S.*):$/.exec(line);
+    if (key) {
+      const name = key[1] ?? "";
+      path = line.startsWith("  ") && (name.startsWith("/api/") || name.startsWith("/ws/")) ? name : null;
+      continue;
+    }
+    const method = METHOD.exec(line)?.[1];
+    if (path !== null && method !== undefined) routes.push({ method: method.toUpperCase(), path: path.replaceAll(/\{\w+\}/g, SAMPLE_ID) });
+  }
+  return routes;
+}
+
+/**
+ * 返事がゲートウェイの物か (Access に止められていないか) を見る
+ * @param res 返事
+ * @returns 2xx か、ゲートウェイの JSON (problem+json を含む) なら true
+ */
+function fromGate(res: Response): boolean {
+  const type = res.headers.get("Content-Type") ?? "";
+  return (res.status >= 200 && res.status < 300) || type.startsWith("application/problem+json") || type.startsWith("application/json");
+}
+
+/**
+ * 画面、API、鍵の無い要求、GitHub の通知の道、全部のルートが Access の後ろかの 5 つを確かめる
  * @param target 確かめる先と鍵
  * @param fetch 要求を送る関数
+ * @param routes 鍵を付けずに聞くルート
  * @returns 確かめの結果の並び
  */
-async function runChecks(target: Target, fetch: SmokeFetch): Promise<Check[]> {
+async function runChecks(target: Target, fetch: SmokeFetch, routes: SmokeRoute[]): Promise<Check[]> {
   // Access の作業用の鍵 (サービストークン) のヘッダー。Access が証明に替えてゲートウェイへ渡す
   const keys = { "CF-Access-Client-Id": target.clientId, "CF-Access-Client-Secret": target.clientSecret };
   const health = new URL("/api/v1/health", target.base);
@@ -149,7 +190,44 @@ async function runChecks(target: Target, fetch: SmokeFetch): Promise<Check[]> {
     const gate = hook.status === 401 && (hook.headers.get("Content-Type") ?? "").startsWith("application/problem+json");
     checks.push({ name: "GitHub の通知の道", ok: gate, detail: `${hook.status}${gate ? "" : " ゲートウェイに届かない (Access の Bypass を確かめる)"}` });
   }
+
+  checks.push(await accessCovers(target, fetch, routes));
   return checks;
+}
+
+/**
+ * 鍵を付けずに v1.yaml の全部のルートへ悪い要求 (ほかのサイトからの書き込み、壊れた本文) を送り、どれも Access に止まってゲートウェイに届かない事を見る。
+ * 届いた先の守りは画面の通しの e2e/attack.spec.ts が同じコードで確かめるので、デプロイした先では Access の道の誤りだけを見る
+ * @param target 確かめる先
+ * @param fetch 要求を送る関数
+ * @param routes 聞くルート
+ * @returns 確かめの結果
+ */
+async function accessCovers(target: Target, fetch: SmokeFetch, routes: SmokeRoute[]): Promise<Check> {
+  const name = "全部のルートが Access の後ろ";
+  // 手元の wrangler dev には Access が無く、ゲートウェイが 401 で断る
+  if (target.base.protocol === "http:") return { name, ok: true, detail: "手元は見ない" };
+  if (routes.length === 0) return { name, ok: false, detail: "v1.yaml からルートを読めない" };
+  const reached: string[] = [];
+  // Access に止まった要求はゲートウェイの 1 分 300 回の制限に数えないので、1 本ずつ順に送る
+  for (const route of routes) {
+    const write = route.method !== "GET";
+    const res = await ask(fetch, new URL(route.path, target.base), write ? { Origin: "https://evil.example", "Content-Type": "application/json" } : {}, write ? { method: route.method, body: '{"unknown":' } : {});
+    if (typeof res === "string") reached.push(`${route.method} ${route.path} ${res}`);
+    else {
+      await text(res);
+      if (fromGate(res)) reached.push(`${route.method} ${route.path} ${res.status}`);
+    }
+  }
+  return { name, ok: reached.length === 0, detail: reached.length === 0 ? `${routes.length} 本` : `ゲートウェイに届いた: ${reached.slice(0, 5).join("、")}` };
+}
+
+/**
+ * v1.yaml からゲートウェイのルートを読む
+ * @returns ルートの並び
+ */
+function routesOfV1(): SmokeRoute[] {
+  return gatewayRoutes(readFileSync(new URL("../apps/office/openapi/v1.yaml", import.meta.url), "utf8"));
 }
 
 /**
@@ -157,16 +235,17 @@ async function runChecks(target: Target, fetch: SmokeFetch): Promise<Check[]> {
  * @param env 環境変数
  * @param fetch 要求を送る関数
  * @param write 1 行を出す関数
+ * @param routes 鍵を付けずに聞くルート。初期値は v1.yaml の全部
  * @returns 終わりのコード。宛先が無い時は手元なら 0、CI なら 1
  */
-export async function runSmokeCli(env: Readonly<Record<string, string | undefined>>, fetch: SmokeFetch, write: (line: string) => void): Promise<number> {
+export async function runSmokeCli(env: Readonly<Record<string, string | undefined>>, fetch: SmokeFetch, write: (line: string) => void, routes: SmokeRoute[] = routesOfV1()): Promise<number> {
   const target = readTarget(env);
   if (!("base" in target)) {
     write(target.message);
     return target.code;
   }
   write(`確かめる先: ${target.base.origin}`);
-  const checks = await runChecks(target, fetch);
+  const checks = await runChecks(target, fetch, routes);
   for (const check of checks) write(`${check.ok ? "ok  " : "FAIL"} ${check.name} (${check.detail})`);
   return checks.every((check) => check.ok) ? 0 : 1;
 }
