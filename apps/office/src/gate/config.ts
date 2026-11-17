@@ -37,6 +37,7 @@ const GateConfig = z.object({
   IDEA_BATCH: Flag,
   DISTILL_BATCH: Flag,
   FINDINGS_BATCH: Flag,
+  EDITOR_WAKE: Flag,
 });
 
 /**

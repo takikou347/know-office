@@ -214,6 +214,8 @@ export type Bindings = {
   DISTILL_BATCH?: string;
   /** 週に 1 度の見つけて直す調べ。費用が出るので、オーナーの はい の後に on にする。初期値は off */
   FINDINGS_BATCH?: string;
+  /** 勤務の外にエディタの補完でワークスペースを起こすか。Containers の費用が出るので、オーナーの はい の後に on にする。初期値は off */
+  EDITOR_WAKE?: string;
 } & Partial<Record<RecordBinding, D1Database>>;
 
 /** ゲートウェイの Hono に渡す型。バインディングとミドルウェアが置く値の型を持つ */
