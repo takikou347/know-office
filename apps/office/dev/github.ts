@@ -122,7 +122,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
 
   const archives = createFakeArchives(options.codeloadBase ?? "https://codeload.github.com");
   const issues = createFakeIssues({ allows, next, now });
-  const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, sent, heads, trees, posted });
+  const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, claimNumber: (repo, title) => issues.seed(repo, { title, pull: true }).number, sent, heads, trees, posted });
 
   const app = new Hono().use("*", requireUserAgent)
     .post("/__fake/routes", async (c) => {

@@ -3144,6 +3144,7 @@ components:
               - issue_plan
               - service_close_request
               - pr_open
+              - docs_pr_open
               - review_submit
               - idea_add
               - ask_boss
@@ -3151,7 +3152,7 @@ components:
               - checkpoint
               - report
               - owner_info_read
-          maxItems: 14
+          maxItems: 15
           description: 社員の役で使える社員のツール。ワークスペースはこの名前のツールだけを MCP の受け手 staff に出す
         extensionTools:
           type: array

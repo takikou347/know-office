@@ -30,6 +30,8 @@ export type PullsDeps = {
   installationOf(token: string | null): number;
   /** 続き番号 */
   next(): number;
+  /** PR の番号を取る。GitHub は Issue と PR でリポジトリごとの 1 つの番号を使うので、Issue と同じ数え方で取る */
+  claimNumber(repo: string, title: string): number;
   /** 受けたレビューと行のコメントの後に GitHub が送る通知 */
   sent: { event: string; payload: unknown }[];
   /** ブランチの先のコミット。「owner/name:ブランチ」から */
@@ -128,7 +130,7 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     const input = PullRequest.safeParse(body);
     const head = input.success ? deps.heads.get(`${repo}:${input.data.head}`) : undefined;
     if (!input.success || head === undefined) return invalid();
-    const number = 5000 + deps.next();
+    const number = deps.claimNumber(repo, input.data.title);
     const opened1 = { number, title: input.data.title, body: input.data.body ?? "", base: { ref: input.data.base, sha: deps.heads.get(`${repo}:${input.data.base}`) ?? "0".repeat(40) }, head: { ref: input.data.head, sha: head }, state: "open" };
     made.set(`${repo}#${String(number)}`, opened1);
     authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key);
