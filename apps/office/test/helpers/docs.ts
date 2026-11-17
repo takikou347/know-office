@@ -241,9 +241,10 @@ export function pullsOpened(w: WorkWorld): number {
  * @param w テストの物
  * @param repo リポジトリ
  * @param sha 新しい先
+ * @param number PR の番号
  */
-export async function synchronize(w: WorkWorld, repo: string, sha: string): Promise<void> {
-  const payload = { action: "synchronize", pull_request: { number: 1, head: { sha } }, repository: { full_name: repo }, installation: { id: linked.installationId } };
+export async function synchronize(w: WorkWorld, repo: string, sha: string, number = 1): Promise<void> {
+  const payload = { action: "synchronize", pull_request: { number, head: { sha } }, repository: { full_name: repo }, installation: { id: linked.installationId } };
   expect((await hook(w, { event: "pull_request", payload, secret: linked.webhookSecret })).status).toBe(204);
 }
 

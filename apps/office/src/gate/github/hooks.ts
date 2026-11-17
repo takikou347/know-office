@@ -257,6 +257,12 @@ function changes(env: Bindings, hook: Hook): D1PreparedStatement[] {
           `UPDATE reviews SET owner_verdict = CASE WHEN head_sha = ? THEN owner_verdict ELSE NULL END, reviewer_verdict = CASE WHEN head_sha = ? THEN reviewer_verdict ELSE NULL END, head_sha = ?, checks = '[]' WHERE repo = ? AND pr_number = ? AND ${FRESH}`,
         )
         .bind(head.sha, head.sha, head.sha, hook.repo, number, hook.digest),
+      // 結んだ設計書の PR に押された時も同じ。設計書の PR は task_docs から (リポジトリ、番号) で引き、承認した先と違えば承認とチェックを消して先を直す。同じ先の通知の受け直しは消さない
+      db
+        .prepare(
+          `UPDATE reviews SET owner_verdict = CASE WHEN docs_head_sha IS ?1 THEN owner_verdict ELSE NULL END, reviewer_verdict = CASE WHEN docs_head_sha IS ?1 THEN reviewer_verdict ELSE NULL END, checks = CASE WHEN docs_head_sha IS ?1 THEN checks ELSE '[]' END, docs_head_sha = ?1 WHERE node_id IN (SELECT node_id FROM task_docs WHERE repo = ?2 AND pr_number = ?3) AND ${FRESH}`,
+        )
+        .bind(head.sha, hook.repo, number, hook.digest),
     ];
   }
   const installation = hook.link.installation;

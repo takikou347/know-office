@@ -15,6 +15,7 @@ import {
   OWNER_INFO_ITEM,
   OwnerInfoReadTool,
   PrOpenTool,
+  DocsPrOpenTool,
   ReportTool,
   ReviewSubmitTool,
   ServiceCloseRequestTool,
@@ -40,6 +41,7 @@ import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { issuePlan } from "../devloop/plan.ts";
+import { openDocsPr } from "./docs-pr-open.ts";
 import { openPr } from "./pr-open.ts";
 import { announceNotice } from "../live/publish.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
@@ -295,6 +297,19 @@ async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpen
 }
 
 /**
+ * 開発担当が今のタスクで、設計書のリポジトリに PR を出す。中身は docs-pr-open.ts
+ * @param env バインディング
+ * @param forge GitHub
+ * @param call 呼び出し
+ * @param input DocsPrOpenTool
+ * @returns プルリクエストの番号とブランチ
+ * @throws conflict 今のタスクが無い時、そのほかは openDocsPr の通り
+ */
+async function docsPrOpen(env: Bindings, forge: Forge, call: ToolCall, input: DocsPrOpenTool): Promise<{ number: number; branch: string }> {
+  return openDocsPr(env, forge, call, await currentTask(env, call), input);
+}
+
+/**
  * レビュー担当が今のレビューのタスクに承認か差し戻しを出す。差し戻しは理由と一緒に作った社員のタスクに戻し、承認はチェックが通っていれば main に入れる
  * @param env バインディング
  * @param forge GitHub
@@ -399,6 +414,7 @@ const TOOLS: Record<string, Tool> = {
   ask_boss: { schema: AskBossTool, run: askBossTool },
   ask_owner: { schema: AskOwnerTool, run: askOwner },
   pr_open: { schema: PrOpenTool, run: prOpen },
+  docs_pr_open: { schema: DocsPrOpenTool, run: docsPrOpen },
   review_submit: { schema: ReviewSubmitTool, run: reviewSubmit },
   idea_add: { schema: IdeaAddTool, run: ideaAdd },
   study_submit: { schema: StudySubmitTool, run: studySubmit },

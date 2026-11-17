@@ -144,12 +144,13 @@ export async function expectedDocsName(db: D1Database, task: { scope: string; so
  * @param task.source タスクの出どころ
  * @param head ブランチの先として固定したコミット
  * @param expected 期待する置き場の名前。コードのタスクが結ぶ設計書の PR は、そのサービスの名前を渡す。無ければタスクの出どころから決める
+ * @param known 変えた道が分かっている時に渡す (ルールの確かめと同じ 1 回の読みを使う)
  * @throws validation_failed 設計書の形が違う時、設計書を書くタスクが別のサービスの置き場を変える時
  * @throws upstream_failed 設計書の木を読み切れない時、GitHub から読めない時
  */
-export async function assertDocsPr(db: D1Database, forge: Forge, task: { repo: string | null; scope: string; source: string | null }, head: string, expected?: string): Promise<void> {
+export async function assertDocsPr(db: D1Database, forge: Forge, task: { repo: string | null; scope: string; source: string | null }, head: string, expected?: string, known?: readonly string[] | null): Promise<void> {
   if (task.repo === null) throw new AppError("internal", "設計書のタスクにリポジトリが無い");
-  const shape = await verifyDocsPr(forge, task.repo, head, undefined, expected ?? (await expectedDocsName(db, task)));
+  const shape = await verifyDocsPr(forge, task.repo, head, known, expected ?? (await expectedDocsName(db, task)));
   if (shape.kind === "refused") throw new AppError("validation_failed", shape.reason, { errors: shape.errors });
   if (shape.kind === "waiting") throw new AppError("upstream_failed", shape.reason);
 }
