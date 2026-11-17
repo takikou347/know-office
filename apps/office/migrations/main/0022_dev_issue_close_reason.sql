@@ -1,0 +1,1 @@
+ALTER TABLE `dev_issues` ADD `close_reason` text;

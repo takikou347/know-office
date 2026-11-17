@@ -7,6 +7,7 @@ import { insertedWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
 import { intakeProject, newNodeRow, recordCreated } from "../work/nodes.ts";
 import { type Forge, notifyStaff } from "../work/loop.ts";
+import { OPERATIONS } from "./release.ts";
 
 /** Issue を合わせるのは、この段階のサービスだけ */
 const STAGES = ["prototype", "service", "operation"] as const;
@@ -75,9 +76,9 @@ async function compareLines(env: Bindings, forge: Forge, input: { docs: string; 
       else if (!mine.some((r) => r.reqHash === req.hash)) changed.push(`${file.feature} ${req.name}`);
     }
   }
-  // 読み切れなかった機能のファイルの分は、消えたと言えない
+  // 読み切れなかった機能のファイルの分は、消えたと言えない。運用の子は設計書の要件でないので、消えたとしない
   const complete = files.length <= SYNC_READ_MAX;
-  const gone = complete ? rows.filter((r) => r.state === "open" && !seen.has(`${r.feature}\n${r.requirement ?? ""}`)).map((r) => `${r.feature} ${r.requirement ?? ""}`) : [];
+  const gone = complete ? rows.filter((r) => r.state === "open" && r.feature !== OPERATIONS && !seen.has(`${r.feature}\n${r.requirement ?? ""}`)).map((r) => `${r.feature} ${r.requirement ?? ""}`) : [];
   return [
     `足した要件: ${added.join("、") || "なし"}`,
     `本文が変わった要件: ${changed.join("、") || "なし"}`,

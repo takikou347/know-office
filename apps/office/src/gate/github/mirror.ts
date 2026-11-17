@@ -3,6 +3,7 @@ import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import { AppError, type Clock, MirrorCommentPayload, MirrorIssueClosePayload, MirrorReviewPayload, MirrorStatusPayload, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
+import { settleParent } from "../devloop/release.ts";
 import { noticeGitHubRateLimit } from "./limits.ts";
 import { GitHubRateLimited } from "./rate-error.ts";
 import type { Forge } from "../work/loop.ts";
@@ -107,7 +108,7 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
 
 /**
  * main に入った子 Issue を閉じ、dev_issues を closed にする。閉じるのは、積んだコミットを main が含む事を確かめてからで、main に入れる前に積んだ行が、入らなかった PR の Issue を閉じない。
- * 送る時の dev_issues の今を読み、開いている時だけ閉じる。設計書の変更で not_planned に閉じた Issue を completed で上書きしない。閉じている Issue をもう一度閉じても GitHub は成功を返すので、行を直す前に落ちても送り直せる
+ * 送る時の dev_issues の今を読み、開いている時だけ閉じる (理由は completed)。閉じた後は、親の子がすべて閉じていれば親も閉じる。設計書の変更で not_planned に閉じた Issue を completed で上書きしない。閉じている Issue をもう一度閉じても GitHub は成功を返すので、行を直す前に落ちても送り直せる
  * @param env バインディング
  * @param forge GitHub
  * @param repo リポジトリ
@@ -120,9 +121,13 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
 async function closeIssue(env: Bindings, forge: Forge, repo: string, close: MirrorIssueClosePayload, now: number): Promise<null> {
   if (!(await forge.inMain(repo, close.sha))) throw new AppError("conflict", "積んだコミットがまだ main に入っていない");
   const row = await env.DB.prepare("SELECT state FROM dev_issues WHERE repo = ? AND number = ?").bind(repo, close.issueNumber).first<{ state: string }>();
-  if (row?.state !== "open") return null;
-  await forge.issues.close(repo, close.issueNumber, "completed");
-  await env.DB.prepare("UPDATE dev_issues SET state = 'closed', closed_at = ? WHERE repo = ? AND number = ? AND state = 'open'").bind(now, repo, close.issueNumber).run();
+  if (row === null) return null;
+  if (row.state === "open") {
+    await forge.issues.close(repo, close.issueNumber, "completed");
+    await env.DB.prepare("UPDATE dev_issues SET state = 'closed', closed_at = ?, close_reason = 'completed' WHERE repo = ? AND number = ? AND state = 'open'").bind(now, repo, close.issueNumber).run();
+  }
+  // 閉じた後 (送り直しで閉じていた時も) 親の子がすべて閉じていれば親を閉じる。親が閉じられなければここで落ち、順番待ちが送り直す
+  await settleParent(env, forge.issues, repo, close.issueNumber, now);
   return null;
 }
 

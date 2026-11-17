@@ -1,6 +1,7 @@
 // サービスの返す形と入力。アイデアから運用までの流れ (サービスと拡張の 3.1、データの 2 章)
 import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";
+import { NodeStatus } from "./work.ts";
 import { z } from "./zod.ts";
 
 /** サービスの種類。ライブラリ、Web アプリ、コンテンツ */
@@ -241,3 +242,51 @@ export const DeployDetail = z.union([
 
 /** service_events の rollback の detail */
 export const RollbackDetail = z.object({ reason: z.string().max(2000), ref: z.string().max(255), stopId: z.uuid().nullable() }).strict();
+
+/** Issue の状態。closed の理由は completed か not_planned */
+export const DevIssueState = z.enum(["open", "closed"]);
+
+/** 子 Issue 1 件。task は同じ番号の開発担当のタスクで、まだ無ければ null */
+export const ServiceIssueChild = z
+  .object({
+    number: z.number().int().positive(),
+    requirement: z.string().nullable(),
+    kind: z.enum(["bug", "feature", "chore"]).nullable(),
+    state: DevIssueState,
+    task: z.object({ id: z.uuid(), status: NodeStatus, prNumber: z.number().int().positive().nullable() }).strict().nullable(),
+  })
+  .strict();
+
+/** 親 Issue 1 件と、その子 */
+export const ServiceIssueParent = z
+  .object({
+    number: z.number().int().positive(),
+    feature: z.string(),
+    state: DevIssueState,
+    /** 運用の親か (機能の親でなく、見つけて直す仕組みが作った Issue をまとめる親) */
+    operations: z.boolean(),
+    children: z.array(ServiceIssueChild),
+  })
+  .strict();
+
+/** 設計書の PR 1 件。design は設計書を書くタスクの PR、together は同じ時に直す設計書の PR */
+export const ServiceDocsPr = z
+  .object({
+    repo: z.string(),
+    number: z.number().int().positive(),
+    kind: z.enum(["design", "together"]),
+    task: z.object({ id: z.uuid(), status: NodeStatus }).strict(),
+  })
+  .strict();
+
+/** GET /api/v1/services/{serviceId}/issues の返事。ready は機能の親がすべて閉じていて、入れて閉じた親が 1 つ以上ある事 */
+export const ServiceIssues = z
+  .object({
+    ready: z.boolean(),
+    docsPrs: z.array(ServiceDocsPr),
+    parents: z.array(ServiceIssueParent),
+  })
+  .strict();
+
+/** GET /api/v1/services/{serviceId}/issues の返事の型 */
+export type ServiceIssues = z.infer<typeof ServiceIssues>;

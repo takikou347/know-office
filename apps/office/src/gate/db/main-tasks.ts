@@ -283,6 +283,8 @@ export const devIssues = sqliteTable(
     state: text("state", { enum: ["pending", "open", "closed"] }).notNull(),
     createdAt: time("created_at").notNull(),
     closedAt: time("closed_at"),
+    /** 閉じた理由。入れて閉じたら completed、設計書から消えて閉じたら not_planned。前に閉じた行は null で、completed とみなす */
+    closeReason: text("close_reason", { enum: ["completed", "not_planned"] }),
   },
   (t) => [
     uniqueIndex("dev_issues_parent").on(t.serviceId, t.feature).where(sql`${t.kind} = 'parent'`),

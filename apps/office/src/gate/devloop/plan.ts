@@ -15,6 +15,7 @@ import { notifyStaff, type Forge } from "../work/loop.ts";
 import { auditFrom } from "../ledger/record.ts";
 import type { DevIssue } from "./dev-issues.ts";
 import { loadDocsRepo } from "./docs-setting.ts";
+import { settleParent } from "./release.ts";
 
 /** pending の行を、書いた呼び出しが落ちたとみて引き取るまでの時間 (2 分)。1 回の issue_plan は書きの間を空けても 1 分に収まる */
 export const PENDING_STALE_MS = 2 * 60_000;
@@ -101,6 +102,7 @@ async function claim(env: Bindings, ids: { id: string; repo: string }, spec: Spe
     state: "pending",
     createdAt: now,
     closedAt: null,
+    closeReason: null,
   };
   const same = and(eq(devIssues.serviceId, ids.id), eq(devIssues.kind, spec.kind), eq(devIssues.feature, spec.feature), spec.requirement === null ? isNull(devIssues.requirement) : eq(devIssues.requirement, spec.requirement), spec.hash === null ? isNull(devIssues.reqHash) : eq(devIssues.reqHash, spec.hash));
   // 1 文で、同じ物がまだ無い時だけ取る。同時の 2 つの呼び出しのうち取れるのは 1 つ
@@ -241,11 +243,15 @@ async function closeChild(ctx: Ctx, row: Row, why: keyof typeof CLOSE_TEXT): Pro
     await issues.close(row.repo, number, "not_planned");
   }
   const [, dropped] = await orm.batch([
-    orm.update(devIssues).set({ state: "closed", closedAt: actor.now }).where(and(eq(devIssues.id, row.id), eq(devIssues.state, "open"))),
+    orm.update(devIssues).set({ state: "closed", closedAt: actor.now, closeReason: "not_planned" }).where(and(eq(devIssues.id, row.id), eq(devIssues.state, "open"))),
     // 取り消せるのは取り掛かる前の todo だけ。doing と review は社長に知らせるだけにする
     orm.update(nodes).set({ status: "dropped", updatedAt: actor.now }).where(and(eq(nodes.source, source), eq(nodes.scope, row.serviceId), eq(nodes.status, "todo"))).returning({ id: nodes.id }),
   ]);
   for (const task of dropped) await appendNodeEvent(env, { nodeId: task.id, staffId: null, kind: "dropped", detail: { by: actor.by, why: CLOSE_TEXT[why] } }, actor);
+  // 親の子がすべて閉じたら親も閉じる。閉じられなくても閉じ残しは 5 分ごとの見直しが拾うので、組の処理は止めない
+  await settleParent(env, issues, row.repo, number, actor.now).catch((error: unknown) => {
+    if (!(error instanceof AppError)) throw error;
+  });
   return false;
 }
 
@@ -348,11 +354,18 @@ export async function issuePlan(env: Bindings, forge: Forge, input: IssuePlanToo
     for (const spec of f.specs) {
       const childClaim = await claim(env, ctx.service, spec, actor.now);
       if (childClaim.owned) {
-        // 閉じた親に新しい子を付ける時は、親を開き直す
-        if (parent.state === "closed" && parent.number !== null) {
-          await pub.reopen(parent.repo, parent.number);
-          await orm.update(devIssues).set({ state: "open", closedAt: null }).where(and(eq(devIssues.id, parent.id), eq(devIssues.state, "closed")));
-          parent = { ...parent, state: "open", closedAt: null };
+        // 閉じた親に新しい子を付ける時は、親を開き直す。行を開く文は 1 文の条件付きで、書けた時だけ GitHub を開き直す (親を閉じる側も同じ行を条件にするので、どちらかだけが GitHub を動かす)。GitHub が断ったら行を閉じに戻す
+        if (parent.number !== null) {
+          const [reopened] = await orm.update(devIssues).set({ state: "open", closedAt: null, closeReason: null }).where(and(eq(devIssues.id, parent.id), eq(devIssues.state, "closed"))).returning({ id: devIssues.id });
+          if (reopened !== undefined) {
+            try {
+              await pub.reopen(parent.repo, parent.number);
+            } catch (error) {
+              await orm.update(devIssues).set({ state: "closed", closedAt: parent.closedAt, closeReason: parent.closeReason }).where(and(eq(devIssues.id, parent.id), eq(devIssues.state, "open")));
+              throw error;
+            }
+            parent = { ...parent, state: "open", closedAt: null, closeReason: null };
+          }
         }
         const done = await materialize(ctx, childClaim.row, spec, { number: parent.number ?? 0, id: parent.issueId ?? 0 });
         result.children.push({ feature: f.feature, requirement: spec.requirement ?? "", number: done.number ?? 0, created: true });
