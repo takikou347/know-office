@@ -1,7 +1,7 @@
 // 要るチェックが落ちたままのプルリクエストをオーナーが承認すると、main に入れずにそのタスクを止め、セキュリティの画面の止めている物に出る。GitHub は手元の代わりにつなぎ、チェックの結果だけを置く (タスクとレビューの 3.1、自動停止の 1 章)
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
-import { connectGitHub, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
+import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { post } from "./helpers/screen.ts";
 import { seedMain } from "./helpers/seed.ts";
@@ -14,6 +14,9 @@ const REPO = "example/know-office";
 
 const State = z.object({ data: z.object({ stopped: z.array(z.object({ scope: z.string(), target: z.string(), stopId: z.string() })) }) });
 const NodeStatus = z.object({ data: z.object({ status: z.string() }).loose() });
+const Requests = z.array(z.object({ route: z.string() }).loose());
+/** main を進める要求。代わりの GitHub は /github の下に立つ */
+const MERGE = `PATCH /github/repos/${REPO}/git/refs/heads/main`;
 
 /** 通しが置いた行を消す */
 function clearSeed(): void {
@@ -23,8 +26,10 @@ function clearSeed(): void {
 test.describe("チェックが落ちたままのマージ", () => {
   test.afterEach(async ({ page }) => {
     // 止めたタスクを再開してから、置いた行と GitHub の連携を消す。後の通しは止めた物の無い前提で流れる
+    // 再開はタスクを todo に戻して社員に配りうるので、先に済にして戻らないようにする
+    seedMain(`UPDATE nodes SET status = 'done' WHERE id = '${NODE}'`);
     const state = State.parse(await (await page.request.get("/api/v1/guard/state")).json());
-    for (const s of state.data.stopped.filter((x) => x.scope === "task" && x.target === NODE)) await post(page, `/api/v1/guard/stops/${s.stopId}/resume`);
+    for (const s of state.data.stopped.filter((x) => x.scope === "task" && x.target === NODE)) expect(await post(page, `/api/v1/guard/stops/${s.stopId}/resume`)).toBe(200);
     clearSeed();
     forgetGitHub();
   });
@@ -53,9 +58,11 @@ test.describe("チェックが落ちたままのマージ", () => {
     await expect(page.getByRole("heading", { level: 2, name: "変更のレビュー" })).toBeVisible();
     await page.getByRole("button", { name: "承認する" }).click();
 
-    // main に入れず、タスクは済にならない
+    // main に入れず、タスクを止める
     await expect.poll(async () => State.parse(await (await page.request.get("/api/v1/guard/state")).json()).data.stopped.some((s) => s.scope === "task" && s.target === NODE)).toBe(true);
-    expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${NODE}`)).json()).data.status).not.toBe("done");
+    expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${NODE}`)).json()).data.status).toBe("stopped");
+    const requests = Requests.parse(await (await page.request.get(`${FAKE_GITHUB}/__fake/requests`)).json());
+    expect(requests.filter((r) => r.route === MERGE)).toEqual([]);
 
     // セキュリティの画面の止めている物に、止めたタスクが出る
     await nav.getByRole("link", { name: "守り" }).click();
