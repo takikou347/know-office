@@ -1,6 +1,6 @@
 // 社員 1 人のワークスペースのコンテナを起こし、外向きの通信をゲートウェイの受け手だけに絞り、Node のサーバーを鍵を付けて呼ぶ。起きなければ知らせる (社員が考えるの 2 章、3.2)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, CONTAINER_CA, Health, log, newId, ReasonInput, RestoreInput, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV, WorkspaceMessageInput } from "@know-office/core";
+import { AppError, CONTAINER_CA, Health, log, LspTreeParams, newId, ReasonInput, RestoreInput, RunInput, type StaffId, TicketInput, WORKSPACE_KEY_ENV, WorkspaceMessageInput } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -26,6 +26,10 @@ const MESSAGE_TIMEOUT_MS = 60_000;
 const POLL_MS = 1000;
 
 const HealthAnswer = z.object({ data: Health }).loose();
+/** 木の今の先の返事 */
+const TreeAnswer = z.object({ data: z.object({ sha: LspTreeParams.shape.sha }) }).loose();
+/** 木を渡す待ち (60 秒)。ワークスペースは確かめて広げ終えてから返す */
+const TREE_TIMEOUT_MS = 60_000;
 
 /** WorkspaceBox の依り所。WorkspaceDO は DO の記憶と setTimeout、テストは代わりの物を渡す */
 export type BoxDeps = {
@@ -106,6 +110,8 @@ async function digest(value: string): Promise<Uint8Array> {
 export class WorkspaceBox<F = unknown> {
   /** 起こしている途中の物。同じ時の start() はこれを待ち、鍵を作って置く順が食い違わないようにする */
   #starting: Promise<void> | undefined;
+  /** 止めている途中の物。start() はこれを待ってから起こすので、止める最中に来た start() の後も動いている */
+  #stopping: Promise<void> | undefined;
 
   /**
    * 社員 1 人のコンテナを、送ったワークスペースを結んだ受け手と一緒に包む
@@ -128,7 +134,7 @@ export class WorkspaceBox<F = unknown> {
    * @throws unavailable 4 回とも起きなかった時
    */
   start(): Promise<void> {
-    this.#starting ??= this.#start().finally(() => {
+    this.#starting ??= this.#afterStop(() => this.#start()).finally(() => {
       this.#starting = undefined;
     });
     return this.#starting;
@@ -162,9 +168,115 @@ export class WorkspaceBox<F = unknown> {
   /**
    * 止める。起こしている途中なら、起こし終えてから止める。途中で止めると、やり直しで起こし直してしまう
    */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    // 待つ物は呼んだ時に決める。後から来た start() はこの止め終わりを待つので、それを待つと終わらない
+    const [previous, starting] = [this.#stopping, this.#starting];
+    const stopping = (async () => {
+      await previous?.catch(() => undefined);
+      await starting?.catch(() => undefined);
+      if (this.container.running) await this.container.destroy();
+    })();
+    const held = stopping.finally(() => {
+      if (this.#stopping === held) this.#stopping = undefined;
+    });
+    this.#stopping = held;
+    return held;
+  }
+
+  /**
+   * 動いているか
+   * @returns コンテナが動いていれば true
+   */
+  get running(): boolean {
+    return this.container.running;
+  }
+
+  /**
+   * 起こしている途中と止めている途中の物が終わるまで待つ
+   * @returns 終わり
+   */
+  async settled(): Promise<void> {
+    await this.#stopping?.catch(() => undefined);
     await this.#starting?.catch(() => undefined);
-    if (this.container.running) await this.container.destroy();
+  }
+
+  /**
+   * エディタの補完のために 1 回だけ起こす。勤務の start() と違い、やり直さず、起きなくても知らせない (タスクとレビューの 3.6)
+   * @returns 起き終わり
+   * @throws unavailable 起きなかった時
+   */
+  wakeOnce(): Promise<void> {
+    this.#starting ??= this.#afterStop(async () => {
+      if (this.container.running && (await this.deps.keys.get()) !== undefined && (await this.#healthy())) return;
+      if (this.container.running) await this.container.destroy();
+      await this.#boot();
+      if (await this.#healthy()) return;
+      log("warn", "workspace_wake_failed", { staffId: this.caller.staffId });
+      await this.container.destroy().catch(() => undefined);
+      throw new AppError("unavailable", "ワークスペースが起きない");
+    }).finally(() => {
+      this.#starting = undefined;
+    });
+    return this.#starting;
+  }
+
+  /**
+   * 止めている途中の物を待ってから動かす
+   * @param step 動かす物
+   * @returns 終わり
+   */
+  async #afterStop(step: () => Promise<void>): Promise<void> {
+    await this.#stopping?.catch(() => undefined);
+    await step();
+  }
+
+  /**
+   * エディタの補完の木の今の先を読む (GET /v1/lsp/trees/{nodeId})
+   * @param nodeId タスク。小文字の UUID
+   * @returns 先のコミット。木が無ければ null
+   * @throws upstream_failed 形が違う時
+   * @throws unavailable ワークスペースが答えない時
+   */
+  async lspTreeSha(nodeId: string): Promise<string | null> {
+    const params = LspTreeParams.safeParse({ nodeId, sha: "0".repeat(40) });
+    if (!params.success) throw new AppError("upstream_failed", "木の名前の形が違う");
+    const res = await this.#send("GET", `/v1/lsp/trees/${params.data.nodeId}`, {});
+    if (res.status === 404) return null;
+    const body = TreeAnswer.safeParse(res.ok ? await res.json().catch(() => null) : null);
+    if (!body.success) throw new AppError("unavailable", `ワークスペースが ${String(res.status)} を返した`);
+    return body.data.data.sha;
+  }
+
+  /**
+   * エディタの補完の木 (tar.gz) を渡す (PUT /v1/lsp/trees/{nodeId}/{sha})。ワークスペースは確かめてから入れ替え、断っても前の木を残す
+   * @param nodeId タスク
+   * @param sha 先のコミット
+   * @param body tar.gz の流れ
+   * @throws upstream_failed 形が違う時、ワークスペースが木を断った時
+   * @throws unavailable ワークスペースが答えない時
+   */
+  async putLspTree(nodeId: string, sha: string, body: ReadableStream<Uint8Array>): Promise<void> {
+    const params = LspTreeParams.safeParse({ nodeId, sha });
+    if (!params.success) throw new AppError("upstream_failed", "木の名前の形が違う");
+    const res = await this.#send("PUT", `/v1/lsp/trees/${params.data.nodeId}/${params.data.sha}`, { "content-type": "application/gzip" }, body, TREE_TIMEOUT_MS);
+    await res.body?.cancel();
+    if (res.status === 413 || res.status === 422 || res.status === 400) throw new AppError("upstream_failed", "ワークスペースが木を断った");
+    if (res.status !== 204) throw new AppError("unavailable", `ワークスペースが ${String(res.status)} を返した`);
+  }
+
+  /**
+   * エディタの補完の WebSocket をワークスペースに開く (GET /v1/lsp?nodeId=&sha=)。返事の webSocket を中継が使う
+   * @param nodeId タスク
+   * @param sha 先のコミット
+   * @returns ワークスペースの返事。101 の時は webSocket を持つ
+   * @throws upstream_failed 形が違う時
+   * @throws unavailable ワークスペースに届かない時
+   */
+  async connectLsp(nodeId: string, sha: string): Promise<Response> {
+    const params = LspTreeParams.safeParse({ nodeId, sha });
+    if (!params.success) throw new AppError("upstream_failed", "木の名前の形が違う");
+    const query = new URLSearchParams(params.data).toString();
+    return this.#send("GET", `/v1/lsp?${query}`, { upgrade: "websocket" });
   }
 
   /**
@@ -316,5 +428,29 @@ export class WorkspaceBox<F = unknown> {
     }
     if (res.status === 409) throw new AppError("conflict", "ワークスペースがもう走っている");
     if (res.status !== expected) throw new AppError("unavailable", `ワークスペースが ${String(res.status)} を返した`);
+  }
+  /**
+   * 動いている Node のサーバーを鍵を付けて呼び、返事をそのまま返す。補完の口が使う。止まっていても起こさない
+   * @param method メソッド
+   * @param path 道。確かめた名前だけで組んだ物
+   * @param headers 足す見出し
+   * @param body 本文
+   * @param timeoutMs 待つ長さ
+   * @returns 返事
+   * @throws unavailable 止まっている、鍵が無い、届かない時
+   */
+  async #send(method: string, path: string, headers: Record<string, string>, body?: ReadableStream<Uint8Array>, timeoutMs = CALL_TIMEOUT_MS): Promise<Response> {
+    const key = this.container.running ? await this.deps.keys.get() : undefined;
+    if (key === undefined) throw new AppError("unavailable", "ワークスペースが動いていない");
+    try {
+      return await this.container.getTcpPort(WORKSPACE_PORT).fetch(`http://workspace${path}`, {
+        method,
+        headers: { ...headers, authorization: `Bearer ${key}` },
+        ...(body === undefined ? {} : { body, duplex: "half" }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      throw new AppError("unavailable", "ワークスペースに届かない");
+    }
   }
 }
