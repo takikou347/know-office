@@ -1,7 +1,7 @@
 // オフィスの画面。社員を入口から読み、配信で届いた出来事を、3D を出せる時は部屋の動きで見せ、出せない時は 2D の一覧で社員を出す
 import { StaffOverview } from "@know-office/core";
 import { Button, List } from "knowidea-ui";
-import { Component, type ReactNode, Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { Component, type ReactNode, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { useLiveTick } from "../../parts/live.tsx";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
@@ -56,16 +56,27 @@ class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode
 }
 
 /**
- * オフィスを開いている間、配信で届いてためた出来事を受け取る。開いた時は、前にオフィスを開いた時からの出来事を受け取る
+ * オフィスを開いている間、配信で届いてためた出来事を受け取る。開いた時は、前にオフィスを開いた時からの出来事を受け取る。
+ * 描く前に続けて届くと前のまとまりが描かれずに消え、読み上げも動きも欠けるので、まだ描いていないまとまりには後の出来事を足す
  * @returns 出来事のまとまり
  */
 function useOfficeEvents(): EventBatch | null {
   const [batch, setBatch] = useState<EventBatch | null>(null);
+  // 描いたまとまりの番号。描いた直後 (絵を出す前) に覚え、出来事が間に入らないようにする
+  const drawn = useRef(0);
+  useLayoutEffect(() => {
+    drawn.current = batch?.id ?? 0;
+  }, [batch]);
   useEffect(() => {
-    let id = 0;
     const take = () => {
       const { before, events } = officeNews.take();
-      if (events.length > 0) setBatch({ id: ++id, before, events });
+      if (events.length === 0) return;
+      // updater は描く時に呼ばれ、drawn は描いた後にだけ変わるので、ref を読んでも同じ prev には同じ答えを返す
+      setBatch((prev) => {
+        const id = (prev?.id ?? 0) + 1;
+        if (prev && prev.id !== drawn.current) return { id, before: prev.before, events: [...prev.events, ...events] };
+        return { id, before, events };
+      });
     };
     take();
     return officeNews.subscribe(take);
