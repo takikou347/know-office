@@ -4,13 +4,12 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { seedMain } from "./helpers/seed.ts";
+import { noticeBar, RATE_TITLE, readNoticesTitled } from "./helpers/notice-bar.ts";
 import { createClaudeKey, FAKES } from "../helpers/fakes.ts";
 
 /** 開発の代わりの GitHub。.dev.vars の DEV_FAKES_URL */
 const FAKE_GITHUB = `${FAKES}/github`;
 
-/** GitHub のレート制限の通知の題 (サービスと拡張の 3.5) */
-const RATE_TITLE = "GitHub の API のレート制限に届いた";
 
 /** 代わりの GitHub がインストールで選ぶリポジトリ */
 const REPOS = ["example/knowidea-ui", "example/know-office"];
@@ -118,38 +117,6 @@ async function linkFromScreen(page: Page): Promise<string> {
   return slug ?? "";
 }
 
-/**
- * 読んでいない GitHub のレート制限の通知を読む。残すと次の通しの帯に出る
- * @param page 画面を開いたページ
- */
-async function readRateNotices(page: Page): Promise<void> {
-  const headers = { Origin: new URL(page.url()).origin };
-  const notices = z.object({ data: z.array(z.object({ id: z.string(), title: z.string(), readAt: z.string().nullable() }).loose()) }).parse(await (await page.request.get("/api/v1/notices?limit=100")).json());
-  for (const n of notices.data.filter((x) => x.title === RATE_TITLE && x.readAt === null)) expect((await page.request.put(`/api/v1/notices/${n.id}/read`, { headers })).status()).toBe(204);
-}
-
-/**
- * 上部の帯に GitHub のレート制限の通知が出るまで待つ。帯は未読を 1 件ずつ出すので、先に出たほかの通知は帯で読んで送る
- * @param page 画面を開いたページ
- * @returns レート制限の通知の帯
- */
-async function rateBar(page: Page): Promise<Locator> {
-  const bar = page.getByRole("status").filter({ hasText: RATE_TITLE });
-  // 待つ通知が出た直後に読んで送らないよう、ほかの通知だけを送る
-  const top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }), hasNotText: RATE_TITLE });
-  await expect
-    .poll(
-      async () => {
-        if (await bar.isVisible()) return true;
-        if (await top.first().isVisible()) await top.first().getByRole("button", { name: "読んだ" }).click();
-        return false;
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(true);
-  return bar;
-}
-
 let linked: string | null = null;
 
 test.beforeEach(() => {
@@ -186,20 +153,22 @@ test.describe("ボタン 1 つで連携する", () => {
 
 test.describe("落ちても続きから", () => {
   test("GitHub のレート制限に届く", async ({ page }) => {
+    // 連携と帯の待ちで 30 秒を超える事がある
+    test.slow();
     await useOwnerPasskey(page);
     linked = await linkFromScreen(page);
-    await readRateNotices(page);
+    await readNoticesTitled(page, RATE_TITLE);
     // 開発の画面は読み込みを 2 度走らせるので、2 度ともレート制限で断る
     const res = await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: "GET /installation/repositories", status: 403, times: 4, headers: { "x-ratelimit-remaining": "0", "retry-after": "60" } } });
     expect(res.status()).toBe(204);
     try {
       await page.reload();
-      const bar = await rateBar(page);
+      const bar = await noticeBar(page, "status", RATE_TITLE, 60_000);
       await expect(bar.getByText("60 秒後から送り直せる")).toBeVisible();
       await bar.getByRole("button", { name: "読んだ" }).click();
       await expect(bar).toHaveCount(0);
     } finally {
-      await readRateNotices(page);
+      await readNoticesTitled(page, RATE_TITLE);
     }
   });
 });

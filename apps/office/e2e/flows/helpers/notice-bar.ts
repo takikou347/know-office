@@ -1,0 +1,53 @@
+// 上部の帯に出る通知を待つ通しの道具。通しが待つ通知は、ほかの通しの道具が帯で読んで送らない
+import type { Locator, Page } from "@playwright/test";
+import { z } from "zod";
+import { expect } from "../../helpers/test.ts";
+
+/** 使用の上限の通知の題 (サービスと拡張の 3.5) */
+export const SPEND_TITLE = "Claude の API の使用の上限に届いた";
+
+/** GitHub のレート制限の通知の題 (サービスと拡張の 3.5) */
+export const RATE_TITLE = "GitHub の API のレート制限に届いた";
+
+/** 通しが帯に出るのを待つ通知の題。ほかの通しの道具はこれを読んで送らない */
+const AWAITED_TITLES = [SPEND_TITLE, RATE_TITLE] as const;
+
+const Notices = z.object({ data: z.array(z.object({ id: z.string(), title: z.string(), readAt: z.string().nullable() }).loose()) });
+
+/**
+ * 題の合う読んでいない通知を入口で読む。残すと次の通しの帯に出る
+ * @param page 画面を開いたページ
+ * @param title 読む通知の題
+ */
+export async function readNoticesTitled(page: Page, title: string): Promise<void> {
+  const headers = { Origin: new URL(page.url()).origin };
+  const notices = Notices.parse(await (await page.request.get("/api/v1/notices?limit=100")).json());
+  for (const n of notices.data.filter((x) => x.title === title && x.readAt === null)) expect((await page.request.put(`/api/v1/notices/${n.id}/read`, { headers })).status()).toBe(204);
+}
+
+/**
+ * 上部の帯に題の合う通知が出るまで待つ。帯は未読を 1 件ずつ出すので、先に出たほかの通知は帯で読んで送る。ほかの通しが待つ通知は送らない
+ * @param page 画面を開いたページ
+ * @param role 帯の役 (止まる強さは alert、ほかは status)
+ * @param title 待つ通知の題
+ * @param timeout 待つ長さのミリ秒
+ * @returns 待った通知の帯
+ */
+export async function noticeBar(page: Page, role: "alert" | "status", title: string, timeout: number): Promise<Locator> {
+  const bar = page.getByRole(role).filter({ hasText: title });
+  let top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }) });
+  for (const awaited of AWAITED_TITLES) top = top.filter({ hasNotText: awaited });
+  await expect
+    .poll(
+      async () => {
+        if (await bar.isVisible()) return true;
+        if (await top.first().isVisible()) await top.first().getByRole("button", { name: "読んだ" }).click();
+        // 開いた直後に足された通知は、画面の配りの印を受ける前に出ている事がある。読み直す間 (1 分) を待たず、画面が見えた時の読み直しを起こす
+        else await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+        return false;
+      },
+      { timeout, intervals: [1_000, 2_000] },
+    )
+    .toBe(true);
+  return bar;
+}

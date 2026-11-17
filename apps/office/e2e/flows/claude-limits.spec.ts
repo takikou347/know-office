@@ -1,12 +1,10 @@
 // Claude の API の上限の通し。代わりの Claude API を使用の上限に切り替え、社員の呼び出しがゲートウェイのプロキシで見分けられて上部の帯に通知が出て、読むまで社員が呼び出しを始めず、読むと続ける事を確かめる。ゲートウェイの返事は差し替えない (サービスと拡張の 3.5)
-import type { Locator, Page } from "@playwright/test";
-import { z } from "zod";
+import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/test.ts";
 import { FAKES } from "../helpers/fakes.ts";
+import { noticeBar, readNoticesTitled, SPEND_TITLE } from "./helpers/notice-bar.ts";
 import { addTask, clockInReviewer, NodeDetail, NodeStatus, openTree, PURPOSE, Runs, scriptFinish, type Tree, Trees } from "./helpers/staff-work.ts";
 
-/** 使用の上限の通知の題 (サービスと拡張の 3.5) */
-const SPEND_TITLE = "Claude の API の使用の上限に届いた";
 
 /** 使用の上限で止めるタスクの題の頭。前の通しが落ちて残した物を探す */
 const SPEND_TASK = "上限で止まるタスク";
@@ -35,8 +33,7 @@ async function fireCron(page: Page): Promise<void> {
 async function clearSpendLimit(page: Page): Promise<void> {
   const headers = { Origin: new URL(page.url()).origin };
   await spendLimit(page, null);
-  const notices = z.object({ data: z.array(z.object({ id: z.string(), title: z.string(), readAt: z.string().nullable() }).loose()) }).parse(await (await page.request.get("/api/v1/notices?limit=100")).json());
-  for (const n of notices.data.filter((x) => x.title === SPEND_TITLE && x.readAt === null)) expect((await page.request.put(`/api/v1/notices/${n.id}/read`, { headers })).status()).toBe(204);
+  await readNoticesTitled(page, SPEND_TITLE);
   const left = Trees.parse(await (await page.request.get(`/api/v1/nodes?rootId=${PURPOSE}`)).json())
     .data.flatMap(function walk(n: Tree): Tree[] {
       return [n, ...n.children.flatMap(walk)];
@@ -47,28 +44,6 @@ async function clearSpendLimit(page: Page): Promise<void> {
     if (status === "done" || status === "dropped") continue;
     expect((await page.request.patch(`/api/v1/nodes/${n.id}`, { headers, data: { version, status: "dropped" } })).status()).toBe(200);
   }
-}
-
-/**
- * 上部の帯に使用の上限の通知が出るまで待つ。帯は未読を 1 件ずつ出すので、先に出たほかの通知 (前の画面の通しが残した断りや、見本のタスクを進める社員の呼び出しの失敗) は帯で読んで送る
- * @param page 画面を開いたページ
- * @returns 使用の上限の通知の帯
- */
-async function spendBar(page: Page): Promise<Locator> {
-  const bar = page.getByRole("alert").filter({ hasText: SPEND_TITLE });
-  // 待つ通知が出た直後に読んで送らないよう、ほかの通知だけを送る
-  const top = page.getByRole("alert").or(page.getByRole("status")).filter({ has: page.getByRole("button", { name: "読んだ" }), hasNotText: SPEND_TITLE });
-  await expect
-    .poll(
-      async () => {
-        if (await bar.isVisible()) return true;
-        if (await top.first().isVisible()) await top.first().getByRole("button", { name: "読んだ" }).click();
-        return false;
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true);
-  return bar;
 }
 
 test.describe("落ちても続きから", () => {
@@ -89,7 +64,7 @@ test.describe("落ちても続きから", () => {
 
       // ゲートウェイのプロキシが上限の返事を見分け、上部の帯に止まる強さの通知が出る。SDK は待ち直さずに終え、タスクは待ちに戻る
       await page.goto("/");
-      await spendBar(page);
+      await noticeBar(page, "alert", SPEND_TITLE, 60_000);
       await expect.poll(statusOf, { timeout: 60_000 }).toBe("todo");
 
       // 読むまでは、社員がタスクを取り直し、Cron が動いても、呼び出しを始めない
@@ -101,7 +76,7 @@ test.describe("落ちても続きから", () => {
 
       // 上限を直して帯の通知を読むと、次の Cron で社員が続きを始めて終える
       await spendLimit(page, null);
-      const bar = await spendBar(page);
+      const bar = await noticeBar(page, "alert", SPEND_TITLE, 60_000);
       await bar.getByRole("button", { name: "読んだ" }).click();
       await expect(bar).toBeHidden();
       // 積んだ返事が落ちた通しの後に残らないよう、続きを始める Cron の直前に積む
