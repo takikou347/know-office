@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { boxOf, pictureOf, roomOf } from "../helpers/room.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
@@ -28,9 +28,9 @@ test.describe("オフィスの部屋", () => {
     await fakeGitHubRoute(page, `GET /repos/example/know-office/pulls/${String(PR)}/files`, [{ filename: "src/attendance.ts", status: "modified", patch: "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;" }]);
     await fakeGitHubRoute(page, "GET /repos/example/know-office/contents/src/attendance.ts", { type: "file", encoding: "base64", content: Buffer.from("const a = 2;\n").toString("base64") });
 
-    // 部屋を開いたままにする。初めて読み込んだ時の様子は出来事にしない
-    const nav = page.getByRole("navigation", { name: "画面の切り替え" }).first();
-    await nav.getByRole("link", { name: "オフィス" }).click();
+    // 部屋を開いたままにする。初めて読み込んだ時の様子は出来事にしない。
+    // 画面の中で移ると、設定の画面の間に届いた社員の出来事 (代わりのワークスペースで働く社員の出勤など) を持ち込むので、読み込み直して開く
+    await page.goto("/office");
     const room = page.getByRole("region", { name: "オフィスの部屋" });
     await expect(room.getByRole("status")).toHaveText("直近の出来事はまだありません");
 

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../helpers/test.ts";
 import { part } from "./helpers/screen.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { runLocalWrangler, seedMain } from "./helpers/seed.ts";
