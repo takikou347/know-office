@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { LOGIN_PROJECT, sessionState } from "./e2e/helpers/session.ts";
+import { E2E_STATE, PERSIST_ENV } from "./e2e/helpers/state.ts";
 
 // 画面を本物のブラウザで開いて確かめる。手元の入口 (workerd) を起こし、Chrome の幅 1,280 で全部、幅 360 で形の変わる画面を見る。
 // Safari は毎回流さず、デプロイの前に Mac で E2E_BROWSERS=safari を付けて 1 度流す
@@ -85,7 +86,9 @@ export default defineConfig({
   use: { baseURL: `http://localhost:${port}`, trace: "off", screenshot: "only-on-failure" },
   projects: [
     // 記録は 1 度だけ置き、ログインセッションはブラウザーごとに作る。クッキーの扱いがブラウザーで違うため
-    { name: "records", testMatch: /records\.setup\.ts/ },
+    // 全部の通しの後に、開発の置き場が変わっていない事を確かめる
+    { name: "records", testMatch: /records\.setup\.ts/, teardown: "dev-state" },
+    { name: "dev-state", testMatch: /dev-state\.teardown\.ts/ },
     // 自動の攻撃のチェックはブラウザーを使わず要求だけを送るので、ブラウザーと幅ごとに回さず 1 度だけ流す。
     // 断った要求の通知 (denied_burst) を出し、ほかの画面の帯を途中で変えるので、画面の通しの後に流す
     { name: "attack", testMatch: /attack\.spec\.ts/, dependencies: ["records", ...screenProjects.map((p) => p.name)] },
@@ -95,6 +98,8 @@ export default defineConfig({
   ],
   webServer: {
     command: `pnpm run dev --port ${port} --strictPort`,
+    // D1 と DO は開発 (pnpm dev) と別の置き場を使い、通しの片付けが開発の状態を変えないようにする
+    env: { [PERSIST_ENV]: E2E_STATE },
     url: `http://localhost:${port}/api/v1/health`,
     // 作業ツリーのポートが重なった時に別のツリーのサーバーを使い回さず、起動の失敗で気づく
     reuseExistingServer: false,

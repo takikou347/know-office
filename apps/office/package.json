@@ -8,7 +8,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "test": "vitest run",
     "e2e": "playwright test",
-    "db:local": "for db in DB REC_2026 REC_2027 REC_2028 REC_2029 REC_2030 REC_2031; do wrangler d1 migrations apply $db --local || exit 1; done",
+    "db:local": "for db in DB REC_2026 REC_2027 REC_2028 REC_2029 REC_2030 REC_2031; do wrangler d1 migrations apply $db --local --persist-to \"${KO_PERSIST_DIR:-.wrangler/state}\" || exit 1; done",
     "openapi": "vitest run test/gate/openapi.test.ts --update"
   },
   "dependencies": {

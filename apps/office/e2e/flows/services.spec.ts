@@ -1,6 +1,5 @@
 // アイデアとサービスの画面の通し。オーナーが画面で案を足し、検討して元の案をたどり、リポジトリを選んで作ると決め、設定でリポジトリを変え、前のバージョンに戻す。見送る案も画面で見送る。
 // 画面から作れない検討の材料 (社長が出す) とデプロイの記録 (GitHub の通知が作る) だけを手元の D1 と R2 に置き、ゲートウェイの返事は差し替えない (サービスと拡張の 3.1 から 3.3)
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +8,8 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { seedMain } from "./helpers/seed.ts";
+import { runLocalD1, seedMain } from "./helpers/seed.ts";
 
-const office = join(import.meta.dirname, "../..");
 
 /** 代わりの GitHub がインストールで選ぶリポジトリ */
 const REPO = "example/know-office";
@@ -41,7 +39,7 @@ function seedStudy(serviceId: string, body: string): void {
   const key = `studies/${serviceId}/${crypto.randomUUID()}.md`;
   const file = join(mkdtempSync(join(tmpdir(), "study-")), "study.md");
   writeFileSync(file, body);
-  execFileSync("pnpm", ["exec", "wrangler", "r2", "object", "put", `know-office-files/${key}`, "--local", `--file=${file}`], { cwd: office, stdio: "pipe" });
+  runLocalD1(["exec", "wrangler", "r2", "object", "put", `know-office-files/${key}`, "--local", `--file=${file}`]);
   seedMain(`UPDATE services SET study_key = '${key}' WHERE id = '${serviceId}'`);
 }
 

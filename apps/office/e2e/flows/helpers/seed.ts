@@ -1,6 +1,7 @@
-// 利用場面の通しの種。画面からは作れない前提 (社員が出した承認、止めた記録など) を、開発の入口が使う手元の D1 に SQL で置く
+// 利用場面の通しの種。画面からは作れない前提 (社員が出した承認、止めた記録など) を、通しの入口が使う手元の D1 (開発と別の置き場) に SQL で置く
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { E2E_STATE, PERSIST_ENV } from "../../helpers/state.ts";
 
 const office = join(import.meta.dirname, "../../..");
 
@@ -20,13 +21,22 @@ function busy(error: unknown): boolean {
 }
 
 /**
- * 手元の D1 に pnpm のコマンドを流す。開発の入口の書き込みと重なって SQLITE_BUSY で断られた時は、間を空けて 3 回まで流し、ほかの失敗はそのまま投げる。流すコマンドは何度流しても同じ結果になる物だけにする
+ * wrangler の手元の置き場を使う引数 (--local) に、通しの置き場を足す。開発の置き場 (.wrangler/state) に書かないため
+ * @param args pnpm に渡す引数
+ * @returns 置き場を足した引数
+ */
+function withE2eState(args: string[]): string[] {
+  return args.includes("--local") && !args.some((a) => a.startsWith("--persist-to")) ? [...args, `--persist-to=${E2E_STATE}`] : args;
+}
+
+/**
+ * 通しの置き場の手元の D1 と R2 に pnpm のコマンドを流す。開発の入口の書き込みと重なって SQLITE_BUSY で断られた時は、間を空けて 3 回まで流し、ほかの失敗はそのまま投げる。流すコマンドは何度流しても同じ結果になる物だけにする
  * @param args pnpm に渡す引数
  */
 export function runLocalD1(args: string[]): void {
   for (let tried = 1; ; tried += 1) {
     try {
-      execFileSync("pnpm", args, { cwd: office, stdio: "pipe" });
+      execFileSync("pnpm", withE2eState(args), { cwd: office, stdio: "pipe", env: { ...process.env, [PERSIST_ENV]: E2E_STATE } });
       return;
     } catch (error) {
       if (tried >= BUSY_TRIES || !busy(error)) throw error;
@@ -36,7 +46,7 @@ export function runLocalD1(args: string[]): void {
 }
 
 /**
- * 手元の主の D1 (DB) に SQL を流す。開発の入口 (vite の cloudflare) と同じ .wrangler/state を使うので、流した行は次の要求から読める
+ * 手元の主の D1 (DB) に SQL を流す。通しの入口 (vite の cloudflare) と同じ通しの置き場を使うので、流した行は次の要求から読める
  * @param sql 流す SQL。値はテストが決めた物だけを入れ、外から来た文字を入れない
  */
 export function seedMain(sql: string): void {
