@@ -79,8 +79,8 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
     }
   }
   if (weekly) {
-    ctx.waitUntil(pollBatches(env, weekly, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "batch_poll_failed", error }, clock)));
     const forge = vaultForge(env, { fetcher: weekly.fetch, clock, cache: SHARED_TOKENS });
+    ctx.waitUntil(pollBatches(env, weekly, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "batch_poll_failed", error }, clock)));
     ctx.waitUntil(retryMirrors(env, forge, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "mirror_retry_failed", error }, clock)));
     ctx.waitUntil(settleReleases(env, forge.issues, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "release_settle_failed", error }, clock)));
     // サービスの様子を読み、デプロイの後の失敗で止めた時は rollback.yml で戻す。分析の口は #131 までつながず、何も書かない

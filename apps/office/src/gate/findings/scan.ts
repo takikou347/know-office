@@ -8,6 +8,8 @@ import { BURST_LIMIT, BURST_WINDOW_MS, CLAUDE_FAILED, recordError } from "../led
 import { clockAt } from "../work/attendance.ts";
 import { type RecordDb, recordDbs } from "./records.ts";
 import { costSignals, type Signal, slowSignals } from "./slow-cost.ts";
+import { opsIssue } from "../devloop/ops.ts";
+import type { DevIssues } from "../devloop/dev-issues.ts";
 import { fingerprintMark, type IssueTracker, publicTracker, REPO_PATTERN } from "./tracker.ts";
 
 /** 1 度に送るエラーの原因の上限。多い順に送る */
@@ -266,7 +268,7 @@ async function apply(env: Bindings, deps: WeeklyDeps, row: BatchRow, results: Ba
     // 急ぐ故障の Issue には、findings に足さなかったこの回の回数と時刻を書く
     const shown = urgent ? { ...finding, count: g.count, first_at: g.firstAt, last_at: g.lastAt } : finding;
     try {
-      if (had === null) await ensureIssue(env, tracker, shown, answer, { now, owned: true }, { facts: g.facts, urgent });
+      if (had === null) await ensureIssue(env, tracker, shown, answer, { now, owned: true }, { facts: g.facts, urgent }, deps.issues);
       else await tracker.comment(finding.repo, had, urgent ? urgentComment(g.count, answer) : weekComment(g, finding.count, answer));
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: "finding_issue_failed", error }, clockOf(now));
@@ -319,6 +321,7 @@ type IssueExtra = {
  * @param claim.now 今の時刻。印の値にもする
  * @param claim.owned true なら結果を入れた時に付けた印 (値は now) を引き継ぐ。false なら印の無い物か古い印の物だけを取る
  * @param extra 根拠の行と、急ぐ故障か
+ * @param issues 設計書から作る Issue の口。渡せば、運用の段階のサービスの原因を運用の親の子にする
  * @throws Error GitHub に届かない時。印は外す
  */
 async function ensureIssue(
@@ -328,6 +331,7 @@ async function ensureIssue(
   answer: FindingAnswer | null,
   claim: { now: number; owned: boolean },
   extra: IssueExtra = { facts: [], urgent: false },
+  issues?: DevIssues,
 ): Promise<void> {
   if (finding.repo === null) return;
   const now = claim.now;
@@ -338,7 +342,9 @@ async function ensureIssue(
         .run();
   if (claimed.meta.changes !== 1) return;
   try {
-    const number = (await tracker.findIssue(finding.repo, finding.fingerprint)) ?? (await tracker.createIssue(finding.repo, issueOf(finding, answer, extra)));
+    const text = issueOf(finding, answer, extra);
+    const ops = issues === undefined ? null : await opsIssue(env, issues, finding.repo, { fingerprint: finding.fingerprint, kind: finding.kind, ...text }, now);
+    const number = ops ?? (await tracker.findIssue(finding.repo, finding.fingerprint)) ?? (await tracker.createIssue(finding.repo, text));
     await env.DB.prepare("UPDATE findings SET issue_number = ?, claimed_at = NULL WHERE id = ? AND claimed_at = ?").bind(number, finding.id, now).run();
   } catch (error) {
     await env.DB.prepare("UPDATE findings SET claimed_at = NULL WHERE id = ? AND claimed_at = ?").bind(finding.id, now).run();
@@ -424,8 +430,9 @@ function clockOf(now: number): Clock {
  * @param env バインディング
  * @param tracker GitHub の Issue
  * @param now 今の時刻
+ * @param issues 設計書から作る Issue の口。渡せば、運用の段階のサービスの原因を運用の親の子にする
  */
-export async function syncIssues(env: Bindings, tracker: IssueTracker, now: number): Promise<void> {
+export async function syncIssues(env: Bindings, tracker: IssueTracker, now: number, issues?: DevIssues): Promise<void> {
   const { results } = await env.DB.prepare(
     "SELECT id, fingerprint, repo, issue_number, kind, count, first_at, last_at FROM findings WHERE issue_number IS NULL AND repo IS NOT NULL AND (claimed_at IS NULL OR claimed_at < ?) ORDER BY id",
   )
@@ -433,7 +440,7 @@ export async function syncIssues(env: Bindings, tracker: IssueTracker, now: numb
     .all();
   for (const finding of z.array(FindingRow).parse(results)) {
     try {
-      await ensureIssue(env, publicTracker(tracker), finding, null, { now, owned: false });
+      await ensureIssue(env, publicTracker(tracker), finding, null, { now, owned: false }, undefined, issues);
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: "finding_issue_failed", error }, clockOf(now));
     }

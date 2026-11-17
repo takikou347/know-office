@@ -105,10 +105,7 @@ describe("リリースと運用につなぐ", () => {
     const { parent, kids } = await planned();
     await closeKids(kids);
     // 1 つ目の呼びが GitHub の親を閉じる所で待つ間に、2 つ目の呼びが閉じて通知を足し、オーナーが読む。1 つ目の閉じる文は取れず、通知を足さない
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
     const real = pacedForge(world).issues;
     const first = settle(kids[0] ?? 0, {
       ...real,

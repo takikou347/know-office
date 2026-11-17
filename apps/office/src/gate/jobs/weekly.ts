@@ -3,6 +3,7 @@ import { AppError, type Clock, type Fetcher, jstDay, jstDayStart, newId } from "
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
 import { FINDINGS_JOB, syncIssues, URGENT_JOB, URGENT_PER_DAY, urgentBatches } from "../findings/scan.ts";
+import type { DevIssues } from "../devloop/dev-issues.ts";
 import type { IssueTracker } from "../findings/tracker.ts";
 import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
@@ -47,6 +48,8 @@ export type WeeklyDeps = {
   fetch: Fetcher;
   /** GitHub の Issue */
   tracker: IssueTracker;
+  /** 設計書から作る Issue の口。つないでいる時だけ渡し、運用の段階のサービスの原因を運用の親の子にする */
+  issues?: DevIssues | undefined;
 };
 
 /** 前の週。日本時間の月曜 0 時から次の月曜 0 時まで */
@@ -220,7 +223,7 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
   const claudeOpen = !(await claudeBlocked(env.DB));
   if (claudeOpen) await pollSubmitted(env, deps, now);
   // 前の回に作れなかった Issue を作り直す。GitHub だけを呼ぶので鍵の断りに関わらず行う
-  await syncIssues(env, deps.tracker, now);
+  await syncIssues(env, deps.tracker, now, deps.issues);
   // 終わりを見る間に鍵を断られたら、急ぐ故障も送らない
   if (!claudeOpen || (await claudeBlocked(env.DB))) return;
   // 急ぐ故障は週を待たずに調べる。結果は次の 5 分で入れる

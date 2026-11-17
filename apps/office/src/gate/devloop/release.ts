@@ -4,6 +4,9 @@ import { AppError, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { announceNotice } from "../live/publish.ts";
 import { clockAt } from "../work/attendance.ts";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { devIssues } from "../db/main.ts";
 import type { DevIssues } from "./dev-issues.ts";
 
 /** 運用の親の機能の名前。見つけて直す仕組みが作った Issue をまとめる親で、サービスごとに 1 つ */
@@ -130,4 +133,26 @@ export async function settleReleases(env: Bindings, issues: DevIssues, now: numb
     }
   }
   return failed;
+}
+
+/**
+ * 閉じた親に新しい子が付く時に、親を開き直す。行を開く文は 1 文の条件付きで、書けた時だけ GitHub を開き直す (親を閉じる側も同じ行を条件にするので、どちらかだけが GitHub を動かす)。GitHub が断ったら行を閉じに戻す
+ * @param env バインディング
+ * @param issues GitHub の口
+ * @param parent 親の行 (閉じていて、番号がある物)
+ * @returns 開き直した時は true
+ * @throws upstream_failed GitHub が開き直しを断った時
+ */
+export async function reopenParent(env: Bindings, issues: DevIssues, parent: typeof devIssues.$inferSelect): Promise<boolean> {
+  if (parent.number === null) return false;
+  const orm = drizzle(env.DB);
+  const [wrote] = await orm.update(devIssues).set({ state: "open", closedAt: null, closeReason: null }).where(and(eq(devIssues.id, parent.id), eq(devIssues.state, "closed"))).returning({ id: devIssues.id });
+  if (wrote === undefined) return false;
+  try {
+    await issues.reopen(parent.repo, parent.number);
+  } catch (error) {
+    await orm.update(devIssues).set({ state: "closed", closedAt: parent.closedAt, closeReason: parent.closeReason }).where(and(eq(devIssues.id, parent.id), eq(devIssues.state, "open")));
+    throw error;
+  }
+  return true;
 }

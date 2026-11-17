@@ -143,6 +143,16 @@ describe("Issue を合わせるタスク", () => {
     expect(body).toContain("消えた要件: 1-video 動画を見る");
   });
 
+  it("運用の親の子は設計書に無いが、消えた要件に数えない", async () => {
+    const id = await withDocs(world);
+    await plan(world, planOf(id, [child("動画を作る"), child("動画を見る")]));
+    await world.d1.DB.prepare(
+      "INSERT INTO dev_issues (id, service_id, repo, number, parent_number, kind, feature, requirement, req_hash, issue_kind, paths, mark_key, state, created_at) SELECT 'ops-child', service_id, repo, 900, 899, 'child', 'operations', '直す', 'ops', 'bug', NULL, ?, 'open', 0 FROM dev_issues WHERE kind = 'parent' LIMIT 1",
+    ).bind("c".repeat(64)).run();
+    await pushDocs();
+    expect(String((await syncTasks())[0]?.["body"])).toContain("消えた要件: なし");
+  });
+
   it("機能のファイルが 60 件までは読み、61 件目からは読み切れないと書く", async () => {
     await withDocs(world);
     for (const [n, sha] of [[60, NEXT], [61, MAIN]] as const) {

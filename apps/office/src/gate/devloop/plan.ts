@@ -15,7 +15,7 @@ import { notifyStaff, type Forge } from "../work/loop.ts";
 import { auditFrom } from "../ledger/record.ts";
 import type { DevIssue } from "./dev-issues.ts";
 import { loadDocsRepo } from "./docs-setting.ts";
-import { settleParent } from "./release.ts";
+import { reopenParent, settleParent } from "./release.ts";
 
 /** pending の行を、書いた呼び出しが落ちたとみて引き取るまでの時間 (2 分)。1 回の issue_plan は書きの間を空けても 1 分に収まる */
 export const PENDING_STALE_MS = 2 * 60_000;
@@ -38,10 +38,10 @@ export type IssuePlanResult = {
   more: boolean;
 };
 
-type Row = typeof devIssues.$inferSelect;
+export type Row = typeof devIssues.$inferSelect;
 
 /** 作る 1 件の決まり */
-type Spec = {
+export type Spec = {
   kind: "parent" | "child";
   feature: string;
   requirement: string | null;
@@ -83,7 +83,7 @@ function invalid(errors: { pointer: string; detail: string }[]): AppError {
  * @returns 行と、この呼び出しが GitHub に送る側か
  * @throws conflict 別の呼び出しが新しい pending の行を持っている時
  */
-async function claim(env: Bindings, ids: { id: string; repo: string }, spec: Spec, now: number): Promise<{ row: Row; owned: boolean }> {
+export async function claim(env: Bindings, ids: { id: string; repo: string }, spec: Spec, now: number): Promise<{ row: Row; owned: boolean }> {
   const row: Row = {
     id: newId(clockAt(now)),
     serviceId: ids.id,
@@ -97,7 +97,7 @@ async function claim(env: Bindings, ids: { id: string; repo: string }, spec: Spe
     reqHash: spec.hash,
     issueKind: spec.issueKind,
     paths: spec.paths,
-    heads: spec.paths === null ? null : spec.paths.map(globHead),
+    heads: spec.paths === null ? [""] : spec.paths.map(globHead),
     markKey: spec.key,
     state: "pending",
     createdAt: now,
@@ -150,7 +150,7 @@ function taskBody(input: { repo: string; docs: string; spec: Spec; number: numbe
  * @param parent 子の時の親の番号と ID
  * @returns 書いた後の行
  */
-async function materialize(ctx: Ctx, row: Row, spec: Spec, parent: { number: number; id: number } | null): Promise<Row> {
+export async function materialize(ctx: Ctx, row: Row, spec: Spec, parent: { number: number; id: number } | null): Promise<Row> {
   const { env, issues, actor } = ctx;
   const found = ctx.byKey.get(spec.key);
   const made = found ?? (await issues.createIssue(row.repo, { title: spec.title, body: `${spec.body}\n${devIssueMark(spec.key)}`, labels: [...(spec.issueKind === null ? [] : [spec.issueKind]), ...(spec.high ? ["priority: high"] : [])] }));
@@ -207,7 +207,7 @@ async function childTask(ctx: Ctx, spec: Spec, number: number) {
 }
 
 /** 呼び出しの材料 */
-type Ctx = {
+export type Ctx = {
   env: Bindings;
   issues: ReturnType<typeof publicDevIssues>;
   actor: Actor;
@@ -354,19 +354,8 @@ export async function issuePlan(env: Bindings, forge: Forge, input: IssuePlanToo
     for (const spec of f.specs) {
       const childClaim = await claim(env, ctx.service, spec, actor.now);
       if (childClaim.owned) {
-        // 閉じた親に新しい子を付ける時は、親を開き直す。行を開く文は 1 文の条件付きで、書けた時だけ GitHub を開き直す (親を閉じる側も同じ行を条件にするので、どちらかだけが GitHub を動かす)。GitHub が断ったら行を閉じに戻す
-        if (parent.number !== null) {
-          const [reopened] = await orm.update(devIssues).set({ state: "open", closedAt: null, closeReason: null }).where(and(eq(devIssues.id, parent.id), eq(devIssues.state, "closed"))).returning({ id: devIssues.id });
-          if (reopened !== undefined) {
-            try {
-              await pub.reopen(parent.repo, parent.number);
-            } catch (error) {
-              await orm.update(devIssues).set({ state: "closed", closedAt: parent.closedAt, closeReason: parent.closeReason }).where(and(eq(devIssues.id, parent.id), eq(devIssues.state, "open")));
-              throw error;
-            }
-            parent = { ...parent, state: "open", closedAt: null, closeReason: null };
-          }
-        }
+        // 閉じた親に新しい子を付ける時は、親を開き直す
+        if (await reopenParent(env, pub, parent)) parent = { ...parent, state: "open", closedAt: null, closeReason: null };
         const done = await materialize(ctx, childClaim.row, spec, { number: parent.number ?? 0, id: parent.issueId ?? 0 });
         result.children.push({ feature: f.feature, requirement: spec.requirement ?? "", number: done.number ?? 0, created: true });
         // 同じ機能と要件でハッシュが違う開いた子は、新しい子に置き換わった
