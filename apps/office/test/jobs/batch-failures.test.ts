@@ -2,6 +2,7 @@
 import type { Fetcher } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { pollBatches, startBatch } from "../../src/gate/jobs/weekly.ts";
+import { noticeOnce, SPEND_LIMIT_NOTICE } from "../../src/gate/work/run.ts";
 import { rows } from "../helpers/work.ts";
 import { addStop, answerJson, dec, fakeTracker, runBatch, useWeekly } from "../helpers/weekly.ts";
 import { ANTHROPIC_KEY } from "../helpers/gate.ts";
@@ -126,6 +127,25 @@ describe("週のバッチ処理の切れ目", () => {
     await pollBatches(world.gate.env, depsOf(), dec(7, 3, 10));
     expect(world.gate.claude.keys).toHaveLength(calls);
     expect(await rows(world.d1.DB, "SELECT status, failures FROM batches")).toEqual([{ status: "submitted", failures: 0 }]);
+  });
+
+  it("使用の上限の通知を読むまで、送らず終わりも見ず、読むと続きを行う", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    const limit = async (at: number) => noticeOnce(world.gate.env, { kind: SPEND_LIMIT_NOTICE, title: "Claude の API の使用の上限に届いた", body: "上限を上げると続きを始める" }, at);
+    const read = async (at: number) => world.d1.DB.prepare("UPDATE notices SET read_at = ? WHERE kind = ?").bind(at, SPEND_LIMIT_NOTICE).run();
+    await limit(dec(7, 2));
+    expect(await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3))).toBeNull();
+    expect(world.gate.claude.batches).toHaveLength(0);
+    await read(dec(7, 3, 1));
+    await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3, 2));
+    expect(world.gate.claude.batches).toHaveLength(1);
+    await limit(dec(7, 3, 3));
+    const calls = world.gate.claude.keys.length;
+    await pollBatches(world.gate.env, depsOf(), dec(7, 3, 5));
+    expect(world.gate.claude.keys).toHaveLength(calls);
+    await read(dec(7, 3, 6));
+    await pollBatches(world.gate.env, depsOf(), dec(7, 3, 10));
+    expect(world.gate.claude.keys.length).toBeGreaterThan(calls);
   });
 
   it.each([
