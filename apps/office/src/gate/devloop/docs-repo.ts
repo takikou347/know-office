@@ -55,6 +55,15 @@ async function ownedByService(db: D1Database, repo: string): Promise<boolean> {
 }
 
 /**
+ * 設計書のリポジトリに選べない理由を 422 にする
+ * @param detail 理由
+ * @returns 422 の AppError
+ */
+function refuse(detail: string): AppError {
+  return new AppError("validation_failed", detail, { errors: [{ pointer: "#/repo", detail }] });
+}
+
+/**
  * 設計書のリポジトリを選ぶ。触れて非公開でサービスのリポジトリでない物だけを、読んだ版のままの時だけ 1 文で書く
  * @param env バインディング
  * @param deps GitHub の鍵の出し手
@@ -72,7 +81,6 @@ export async function setDocsRepo(env: Bindings, deps: TokenDeps, input: { repo:
   const link = await loadLink(env);
   if (!link.app || !link.installation) throw new AppError("conflict", "GitHub とまだつないでいないので、リポジトリを選べない");
   const found = await findInstallationRepo(env, deps, input.repo);
-  const refuse = (detail: string) => new AppError("validation_failed", detail, { errors: [{ pointer: "#/repo", detail }] });
   if (found === null) throw refuse("GitHub App のインストールで選んだリポジトリから選ぶ");
   if (!found.private) throw refuse("設計書のリポジトリは非公開の物から選ぶ");
   if (await ownedByService(env.DB, found.fullName)) throw refuse("サービスのリポジトリは設計書のリポジトリに選べない");

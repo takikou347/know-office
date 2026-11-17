@@ -1,10 +1,10 @@
 // アイデアとサービスの画面の通しで使う、画面の操作。案を足し、段階を移し、設計書のリポジトリを選ぶ
 import type { Page } from "@playwright/test";
 import { expect } from "../../helpers/test.ts";
-import { seedMain } from "./seed.ts";
+import { z } from "zod";
 
-/** 代わりの GitHub が初めから入れる非公開のリポジトリ。設計書のリポジトリに選ぶ */
-export const DOCS_REPO = "example/knowidea-docs";
+/** 代わりの GitHub が初めから入れる非公開のリポジトリ 2 つ。設計書のリポジトリに交互に選ぶ */
+const DOCS_REPOS = ["example/knowidea-docs", "example/other-docs"] as const;
 
 /**
  * Knowidea-ui の選ぶ欄で 1 つ選ぶ
@@ -51,17 +51,19 @@ export async function move(page: Page, button: string, reason: string): Promise<
 }
 
 /**
- * 設定の画面で、設計書のリポジトリを選んで保存する。前の通しが選んだ物は消して、選ぶ所から流す。useOwnerPasskey を付けたページで呼ぶ
+ * 設定の画面で、設計書のリポジトリを選んで保存する。設定は消せないので、前の通しが選んだ物と別の方を選ぶ。useOwnerPasskey を付けたページで呼ぶ
  * @param page 開いているページ
+ * @returns 選んだリポジトリ
  */
-export async function chooseDocsRepo(page: Page): Promise<void> {
-  seedMain("DELETE FROM settings WHERE key = 'devloop.docs_repo'");
+export async function chooseDocsRepo(page: Page): Promise<string> {
   await page.goto("/settings");
   const docs = page.getByRole("main").locator("section", { has: page.getByRole("heading", { level: 2, name: "設計書のリポジトリ", exact: true }) });
-  await expect(docs.getByText("まだ選んでいません")).toBeVisible();
+  const now = z.object({ data: z.object({ repo: z.string().nullable() }) }).parse(await (await page.request.get("/api/v1/devloop/docs-repo")).json()).data.repo;
+  const repo = DOCS_REPOS.find((r) => r !== now) ?? DOCS_REPOS[0];
   await docs.getByRole("combobox", { name: "設計書のリポジトリ" }).click();
-  await page.getByRole("option", { name: DOCS_REPO, exact: true }).click();
+  await page.getByRole("option", { name: repo, exact: true }).click();
   await docs.getByLabel("選ぶ理由").fill("設計書を置く");
   await docs.getByRole("button", { name: "設計書のリポジトリを保存する" }).click();
-  await expect(docs.getByText(`${DOCS_REPO} を設計書のリポジトリにしました`)).toBeVisible();
+  await expect(docs.getByText(`${repo} を設計書のリポジトリにしました`)).toBeVisible();
+  return repo;
 }

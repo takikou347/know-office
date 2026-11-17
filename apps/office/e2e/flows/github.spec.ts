@@ -138,7 +138,7 @@ test.describe("ボタン 1 つで連携する", () => {
   test("連携していても GitHub がリポジトリを返さなければ、読めなかった事を出す", async ({ page }) => {
     await useOwnerPasskey(page);
     linked = await linkFromScreen(page);
-    const res = await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: "GET /installation/repositories", status: 500, times: 2 } });
+    const res = await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: "GET /installation/repositories", status: 500, times: 4 } });
     expect(res.status()).toBe(204);
     await page.reload();
     await expect(githubCard(page).getByText("連携済み")).toBeVisible();

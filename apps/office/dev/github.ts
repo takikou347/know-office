@@ -44,10 +44,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const trees = new Map<string, FakeTreeEntry[]>();
   const posted: FakePosted = { reviews: [], comments: [] };
   const pick: FakeGitHub["pick"] = [
-    { fullName: "example/knowidea-ui", private: false },
-    { fullName: "example/know-office", private: false },
-    // 設計書のリポジトリに選ぶ非公開のリポジトリ
-    { fullName: "example/knowidea-docs", private: true },
+    { fullName: "example/knowidea-ui", private: false }, { fullName: "example/know-office", private: false },
+    { fullName: "example/knowidea-docs", private: true }, { fullName: "example/other-docs", private: true },
   ];
   let serial = 0;
   const next = () => (serial += 1);

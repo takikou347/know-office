@@ -30,6 +30,15 @@ function docs(change: Record<string, string | null> = {}): Map<string, string> {
 }
 
 /**
+ * n 行の文書を作る
+ * @param n 行の数
+ * @returns 文書
+ */
+function lines(n: number): string {
+  return Array.from({ length: n }, (_, i) => `行 ${String(i)}`).join("\n");
+}
+
+/**
  * 外れた所の道だけを返す
  * @param change 変える所
  * @param name サービスの名前
@@ -47,7 +56,7 @@ describe("決まった形の設計書", () => {
     // README.md の値の組。name の食い違い、種類と状態と公開の外れ、repo と summary の欠け、無い README
     expect(problemPaths({ "README.md": README.replace("name: demo", "name: other") })).toEqual(["README.md"]);
     for (const [from, to] of [["kind: app", "kind: game"], ["status: planning", "status: done"], ["visibility: private", "visibility: secret"], ["repo: example/demo\n", ""], ["summary: 小さな物\n", ""]] as const) {
-      expect(problemPaths({ "README.md": README.replace(from, to) }), from).toEqual(["README.md"]);
+      expect(problemPaths({ "README.md": README.replace(from, to) })).toEqual(["README.md"]);
     }
     expect(problemPaths({ "README.md": "# 値の組が無い" })).toEqual(["README.md"]);
     expect(problemPaths({ "README.md": null })).toEqual(["README.md"]);
@@ -58,7 +67,6 @@ describe("決まった形の設計書", () => {
     expect(problemPaths({ "docs/01-overview/extra.md": "# 余り" })).toEqual(["docs/01-overview/extra.md"]);
 
     // 1 ファイル 200 行まで。ちょうど 200 行は通り、201 行は外れる
-    const lines = (n: number) => Array.from({ length: n }, (_, i) => `行 ${String(i)}`).join("\n");
     expect(problemPaths({ "docs/01-overview/index.md": lines(200) })).toEqual([]);
     expect(problemPaths({ "docs/01-overview/index.md": lines(201) })).toEqual(["docs/01-overview/index.md"]);
 

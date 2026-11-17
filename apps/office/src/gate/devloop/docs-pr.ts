@@ -22,6 +22,16 @@ export type DocsPrCheck =
   | { kind: "waiting"; reason: string };
 
 /**
+ * 断る結果を作る
+ * @param reason 理由
+ * @param errors 直す所
+ * @returns 断る結果
+ */
+function refuse(reason: string, errors: { pointer: string; detail: string }[] = []): DocsPrCheck {
+  return { kind: "refused", reason, errors };
+}
+
+/**
  * 設計書のリポジトリの PR を、確かめたコミットについて確かめる。変えた道が 1 つの `services/<名前>/` の下だけで、その下の設計書が決まった形である事を見る
  * @param forge GitHub
  * @param repo 設計書のリポジトリ
@@ -32,7 +42,6 @@ export type DocsPrCheck =
  */
 export async function verifyDocsPr(forge: Forge, repo: string, sha: string, known?: readonly string[] | null): Promise<DocsPrCheck> {
   const paths = known === undefined ? await forge.changedPaths(repo, sha) : known;
-  const refuse = (reason: string, errors: { pointer: string; detail: string }[] = []): DocsPrCheck => ({ kind: "refused", reason, errors });
   if (paths === null) return refuse("変えたファイルを確かめ切れない");
   if (paths.length === 0) return refuse("変えたファイルが無い");
   const [name, ...others] = serviceDirs(paths);

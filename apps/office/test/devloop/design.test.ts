@@ -1,4 +1,5 @@
 // 試作に進めた案の設計書を開発担当が書き、最初の設計書をオーナーが決める (開発の回し方の 3.1、3.2)
+import { AppError } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type Connected, connect, hook, stepUp, wrapDb } from "../helpers/github.ts";
@@ -29,11 +30,25 @@ const GOOD: Record<string, string> = { "services/video-maker/README.md": README,
 let linked: Connected;
 
 /**
+ * 失敗するはずの呼び出しを待ち、投げた AppError を返す
+ * @param call 呼び出し
+ * @returns 投げた AppError
+ */
+async function failure(call: Promise<unknown>): Promise<AppError> {
+  const error = await call.then(
+    () => null,
+    (e: unknown) => e,
+  );
+  if (!(error instanceof AppError)) throw new Error("AppError で失敗しなかった");
+  return error;
+}
+
+/**
  * 非公開のリポジトリを 2 つ足して GitHub につなぎ、パスキーの確認を済ませる
  * @param w テストの物
  */
 async function link(w: WorkWorld): Promise<void> {
-  w.gate.github.pick.push({ fullName: REPO, private: false }, { fullName: DOCS2, private: true }, { fullName: "example2/video-maker", private: false });
+  w.gate.github.pick.push({ fullName: REPO, private: false }, { fullName: "example2/video-maker", private: false });
   linked = await connect(w);
   await stepUp(w);
 }
@@ -243,7 +258,7 @@ describe("決まった形の設計書", () => {
     expect(await designTasks(world)).toEqual([]);
 
     // 公開のリポジトリ、触れる外、形の違う名前は 422
-    for (const repo of [REPO, "example/elsewhere", "../x"]) expect(await putDocs(world, repo, 0, 422), repo).toMatchObject({ code: "validation_failed" });
+    for (const repo of [REPO, "example/elsewhere", "../x"]) expect(await putDocs(world, repo, 0, 422)).toMatchObject({ code: "validation_failed" });
     // 版違いは 409
     expect(await putDocs(world, DOCS, 5, 409)).toMatchObject({ code: "conflict" });
     // サービスのリポジトリは選べない
@@ -271,8 +286,9 @@ describe("決まった形の設計書", () => {
     pullOnGitHub(world, Object.keys(bad));
     docsAt(world, HEAD, bad);
     // GitHub に出す前に 422 で断り、直す所を返す。PR は出さず、タスクは作業中のまま
-    const refused = await tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }).catch((e: unknown) => e);
-    expect(refused).toMatchObject({ code: "validation_failed", errors: expect.arrayContaining([{ pointer: "#/files/docs/04-detail/1-x.md", detail: expect.any(String) }]) });
+    const refused = await failure(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }));
+    expect(refused.code).toBe("validation_failed");
+    expect(refused.errors?.map((e) => e.pointer)).toContain("#/files/docs/04-detail/1-x.md");
     expect(pullsOpened(world)).toBe(0);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
 
@@ -386,7 +402,8 @@ describe("決まった形の設計書", () => {
     // 変えた道が無い、services/<名前>/ の外、2 つのサービスにまたがる、形の違う名前は、PR を出す前に断る
     for (const changed of [[], ["WRITING.md"], ["services/video-maker/README.md", "services/other/README.md"], ["services/video-maker/README.md", "README.md"], ["services/.hidden/README.md"], ["services/A_b/README.md"], ["services/../README.md"]]) {
       pullOnGitHub(world, changed);
-      await expect(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }), changed.join(",")).rejects.toMatchObject({ code: expect.stringMatching(/^(validation_failed|rule_denied)$/) });
+      // 変えた道が無い時と外れた時は 422、道が確かめ切れない時の形は rule_denied
+      expect(["validation_failed", "rule_denied"]).toContain((await failure(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }))).code);
     }
     expect(pullsOpened(world)).toBe(0);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);

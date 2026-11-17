@@ -200,7 +200,9 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
   const docs = prototype ? await requireDocsRepo(env, github) : null;
   const linked = prototype && input.repo !== undefined ? await chooseRepo(env, github, input.repo, "#/repo") : undefined;
   const sameName = prototype && input.repo !== undefined ? await sameNameCondition(env.DB, serviceId, input.repo) : undefined;
-  const task = input.to === "study" ? await studyTask(env, row, actor) : docs !== null && input.repo !== undefined ? await designTask(env, row, input.repo, docs.repo, actor) : null;
+  let task: NodeRow | null = null;
+  if (input.to === "study") task = await studyTask(env, row, actor);
+  else if (docs !== null && input.repo !== undefined) task = await designTask(env, row, input.repo, docs.repo, actor);
   // 設計書のリポジトリの版、連携、同じ名前のサービスが無い事も、書く時に重ねる
   const conditions = [stillAt(serviceId, row.stage), linked, docs?.still, sameName].filter((c): c is SQL => c !== undefined);
   const still = and(...conditions) ?? stillAt(serviceId, row.stage);

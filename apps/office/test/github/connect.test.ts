@@ -67,7 +67,7 @@ describe("ボタン 1 つで連携する", () => {
     expect({ status: done.status, location: done.headers.get("location") }).toEqual({ status: 302, location: "/settings" });
 
     const repos = await browse(world, "/api/v1/github/repos");
-    expect(await repos.json()).toMatchObject({ data: [{ fullName: "example/knowidea-ui", private: false }, { fullName: "example/know-office", private: false }], meta: { next: null } });
+    expect(await repos.json()).toMatchObject({ data: [{ fullName: "example/knowidea-ui", private: false }, { fullName: "example/know-office", private: false }, { fullName: "example/knowidea-docs", private: true }, { fullName: "example/other-docs", private: true }], meta: { next: null } });
     // 元の鍵は暗号にして置き、平文を残さない
     expect(await liveVault()).toEqual({ github_app: 1, github_installation: 1 });
     const stored = await rows(world.d1.DB, "SELECT ciphertext FROM vault WHERE name = 'github_app'");
