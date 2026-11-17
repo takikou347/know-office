@@ -13,6 +13,7 @@ import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, 
 export type { FakeApp, FakeGitHub, FakeGitHubOptions, FakeToken, GitHubRequest } from "./github-types.ts";
 
 const FakeRoute = z.object({ route: z.string(), body: z.unknown() });
+
 const TokenRequest = z.object({ repositories: z.array(z.string()).optional(), permissions: z.record(z.string(), Permission).optional() }).strict();
 
 /** 1 時間の鍵の長さ */
@@ -320,7 +321,10 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       return c.json(body);
     });
 
-  const set = (route: string, body: unknown): void => void (body === undefined ? routes.delete(route) : routes.set(route, body));
+  const set = (route: string, body: unknown): void => {
+    if (body === undefined) routes.delete(route);
+    else routes.set(route, body);
+  };
   return {
     app,
     requests,

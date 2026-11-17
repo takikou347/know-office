@@ -1,0 +1,1 @@
+ALTER TABLE `dev_issues` ADD `heads` text;

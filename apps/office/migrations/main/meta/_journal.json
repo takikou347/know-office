@@ -127,6 +127,13 @@
       "when": 1794921680098,
       "tag": "0017_chat_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1794927958187,
+      "tag": "0018_dev_issue_heads",
+      "breakpoints": true
     }
   ]
 }

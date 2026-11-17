@@ -197,6 +197,7 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
       const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
       await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } });
     }
-    seedMain(`DELETE FROM dev_issues WHERE id = '${ids.dev}'`);
+    // 済みの子のタスクは、開発担当が離れているので消してよい。ミラーとレビューも消す
+    seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
   }
 });
