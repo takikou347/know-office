@@ -3,13 +3,21 @@ import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { ALL_DAY, Held, openTree, scheduleCard, scriptReply, setSchedule, Staff } from "./helpers/staff-work.ts";
+import { clockInStaff, Held, openTree, scriptReply } from "./helpers/staff-work.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { freeRepoNames, restoreSeedServices, seedMain } from "./helpers/seed.ts";
 import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
 
 /** 代わりの GitHub がインストールで選ぶ、サービスのリポジトリ */
 const REPO = "example/know-office";
+
+/**
+ * setAsideBuilderTasks で外したタスクを、待ちのタスクとして開発担当に戻す
+ * @param ids 外したタスクの ID を SQL の並びにした物
+ */
+function giveBackBuilderTasks(ids: string): void {
+  if (ids !== "") seedMain(`UPDATE nodes SET assignee = 'builder', status = 'todo' WHERE id IN (${ids})`);
+}
 
 /**
  * 開発担当のまだ済んでいないタスクを開発担当から外す。持っているタスクは見送りにして離させる
@@ -19,45 +27,37 @@ const REPO = "example/know-office";
 async function setAsideBuilderTasks(page: Page): Promise<string> {
   const Assigned = z.object({ data: z.array(z.object({ id: z.string(), status: z.string() }).loose()) });
   const Version = z.object({ data: z.object({ version: z.number() }).loose() });
-  const left = Assigned.parse(await (await page.request.get("/api/v1/nodes?assignee=builder&limit=100")).json()).data.filter((n) => n.status === "todo" || n.status === "doing");
-  for (const n of left.filter((x) => x.status === "doing")) {
-    // 作業中のタスクは画面から取り消せないので、待ちに戻してから取り消し、社員を離れさせる。呼び出し中の社員が同じ時に版を進めるので、読み直す
-    seedMain(`UPDATE nodes SET status = 'todo' WHERE id = '${n.id}'`);
-    await expect(async () => {
-      const { version } = Version.parse(await (await page.request.get(`/api/v1/nodes/${n.id}`)).json()).data;
-      expect((await page.request.patch(`/api/v1/nodes/${n.id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
-    }).toPass({ timeout: 10_000 });
-  }
-  const ids = left.map((n) => `'${n.id}'`).join(", ");
-  if (ids !== "") seedMain(`UPDATE nodes SET assignee = NULL WHERE id IN (${ids})`);
+  const aside = new Set<string>();
+  const listed = () => [...aside].map((id) => `'${id}'`).join(", ");
   const held = async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "builder")?.nodeId ?? null;
-  await expect.poll(held, { timeout: 60_000 }).toBeNull();
-  return ids;
-}
-
-/**
- * 開発担当を勤務の中にする。夜に流すと勤務の外で、呼び出されない
- * @param page 画面を開いたページ。勤務の時刻を広げる変更はパスキーで確かめるので、useOwnerPasskey を付けておく
- * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
- */
-async function clockInBuilder(page: Page): Promise<() => Promise<void>> {
-  const state = async () => Staff.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "builder")?.state;
-  if ((await state()) === "working") return () => Promise.resolve();
-  const box = await scheduleCard(page);
-  const read = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
-  // 前の通しが広げたまま残した時刻は元にせず、勤務の時刻の初期値に戻す
-  const was = read.start === ALL_DAY.start && read.end === ALL_DAY.end ? { start: "09:00", end: "17:00" } : read;
-  const restore = () => setSchedule(page, was.start, was.end);
-  await setSchedule(page, ALL_DAY.start, ALL_DAY.end);
+  // 作業中のタスクは画面から取り消せないので、待ちに戻し、担当を開発担当にしてから取り消す。取り消しが前の担当の社員を離れさせる。
+  // 待ちに戻してから取り消すので、Issue を持つタスクでも重なって待つ兄弟を起こさない (起こすのは作業中かレビューの見送りだけ)
+  const release = async (id: string) => {
+    aside.add(id);
+    seedMain(`UPDATE nodes SET status = 'todo', assignee = 'builder' WHERE id = '${id}'`);
+    const { version } = Version.parse(await (await page.request.get(`/api/v1/nodes/${id}`)).json()).data;
+    expect((await page.request.patch(`/api/v1/nodes/${id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+  };
   try {
-    // 同じ日に一度退勤した社員はその日にもう出勤しないので、退勤した日の印を消す
-    expect((await page.request.post("/__dev/staff/builder/forget-day")).status()).toBe(204);
-    await expect.poll(state, { timeout: 30_000 }).toBe("working");
+    // 外す間にも開発担当は待ちのタスクを取り、呼び出し中の社員は版を進めるので、持つ物も待つ物も無くなるまで読み直す
+    await expect(async () => {
+      const holding = await held();
+      if (holding !== null) await release(holding);
+      const all = Assigned.parse(await (await page.request.get("/api/v1/nodes?assignee=builder&limit=100")).json()).data;
+      // 上限の 100 件に当たったら取りこぼすので、外し切れないとして落とす
+      expect(all.length).toBeLessThan(100);
+      for (const n of all.filter((x) => x.status === "doing")) await release(n.id);
+      const todo = all.filter((x) => x.status === "todo").map((x) => x.id);
+      for (const id of todo) aside.add(id);
+      if (todo.length > 0) seedMain(`UPDATE nodes SET assignee = NULL WHERE id IN (${todo.map((id) => `'${id}'`).join(", ")})`);
+      expect(await held()).toBeNull();
+    }).toPass({ timeout: 60_000 });
   } catch (error) {
-    await restore();
+    // 離れずに落ちても、外したタスクを後の通しに残さない
+    giveBackBuilderTasks(listed());
     throw error;
   }
-  return restore;
+  return listed();
 }
 
 /**
@@ -172,91 +172,94 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
   // 前の通しが残した読んでいない鍵と上限の通知は、どの社員の呼び出しも止めるので、先に読んだ事にする
   seedMain(`UPDATE notices SET read_at = ${String(Date.now())} WHERE kind IN ('sdk_auth_failed', 'claude_spend_limit') AND read_at IS NULL`);
   // 前の通しが開発担当に残したタスク (見本のタスクや設計書のタスク) は、先に取られて積んだ返事を使われるので、通しの間だけ開発担当から外し、終わりに戻す。
-  // 持って呼び出し中の物は、止めて再開しても続きから呼ぶので、取り消して離させる
+  // 持って呼び出し中の物は、止めて再開しても続きから呼ぶので、見送りにして離させる
   const aside = await setAsideBuilderTasks(page);
-  // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
-  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
-  expect(stopped.status()).toBe(201);
-  // 子 Issue のタスクの親にする、通しの木 (開発担当の作業の開始が祖先の木を読む)。止めた社員もここで再開する
-  await openTree(page);
-  let restoreSchedule: (() => Promise<void>) | null = null;
-  const ids = { task: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, dev: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}` };
-  const github = { headers: { authorization: "Bearer e2e", "user-agent": "know-office-e2e" } };
-  const ref = `${FAKE_GITHUB}/repos/${REPO}/git/refs/heads`;
-
-  // 代わりの GitHub に、main の先と、その上に出す前のブランチの先を置く。main は前の通しが進めているので、前の先を覚え、終わりに戻す
-  const commit = async (parents: string[]): Promise<string> => {
-    const res = await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/git/commits`, { ...github, data: { message: "m", tree: "1".repeat(40), parents } });
-    if (!res.ok()) throw new Error(`コミットを置けない: ${String(res.status())} ${await res.text()}`);
-    return z.object({ sha: z.string() }).parse(await res.json()).sha;
-  };
-  const before = await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/git/ref/heads/main`, github);
-  const previous = before.ok() ? z.object({ object: z.object({ sha: z.string() }) }).parse(await before.json()).object.sha : null;
-  const base = await commit([]);
-  const head = await commit([base]);
-  const branch = `ko/019a7b00-make${crypto.randomUUID().slice(0, 6)}`;
-  const put = async (name: string, sha: string) => expect((await page.request.patch(`${ref}/${name}`, { ...github, data: { sha, force: true } })).status()).toBe(200);
-  const issue = z.object({ number: z.number() }).parse(await (await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/issues`, { ...github, data: { title: "動画を作る", body: "設計書: 詳細設計 1-video の要件「動画を作る」", labels: ["feature"] } })).json()).number;
-  await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${head}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] });
-
-  // 子 Issue のタスクと行は、設計書から Issue を立てる道 (社長の issue_plan) の結果なので、手元の D1 に置く。PR は置かず、開発担当に出させる
-  const now = String(Date.now());
-  const mark = `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
-  seedMain(
-    `INSERT INTO nodes (id, kind, parent_id, scope, title, status, priority, repo, issue_number, source, assignee, task_kind, version, created_by, created_at, updated_at) VALUES ('${ids.task}', 'task', '019a7b00-0000-7000-8000-0000000000e3', '${serviceId}', '#${String(issue)} 動画を作る', 'todo', 0, '${REPO}', ${String(issue)}, 'issue:${String(issue)}', NULL, 'build', 1, 'system', ${now}, ${now})`,
-  );
-  seedMain(
-    `INSERT INTO dev_issues (id, service_id, repo, number, issue_id, kind, feature, requirement, req_hash, issue_kind, paths, heads, mark_key, state, created_at) VALUES ('${ids.dev}', '${serviceId}', '${REPO}', ${String(issue)}, ${String(issue)}, 'child', '1-video', '動画を作る', 'e2e', 'feature', '["src/a.ts"]', '["src/a.ts"]', '${mark}', 'open', ${now})`,
-  );
-
   try {
-    restoreSchedule = await clockInBuilder(page);
-    await put("main", base);
-    await put(branch, head);
-    // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチ名は ko/<タスク ID の頭 8 字>-<name>
-    const name = branch.slice("ko/019a7b00-".length);
-    await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use", undefined, "builder");
-    await scriptReply(page, [{ type: "text", text: "PR を出した" }], "end_turn", undefined, "builder");
-    // 開発担当に頼むと、開発担当がタスクを取って始める
-    expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: new URL(page.url()).origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
+    // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
+    const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
+    expect(stopped.status()).toBe(201);
+    // 子 Issue のタスクの親にする、通しの木 (開発担当の作業の開始が祖先の木を読む)。止めた社員もここで再開する
+    await openTree(page);
+    let restoreSchedule: (() => Promise<void>) | null = null;
+    const ids = { task: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, dev: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}` };
+    const github = { headers: { authorization: "Bearer e2e", "user-agent": "know-office-e2e" } };
+    const ref = `${FAKE_GITHUB}/repos/${REPO}/git/refs/heads`;
 
-    // タスクがレビューに移り、代わりの GitHub が受けた PR の本文の最後に Closes が付いている
-    const status = async () => z.object({ data: z.object({ status: z.string() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data;
-    await expect.poll(async () => (await status()).status, { timeout: 60_000 }).toBe("review");
-    const opened = z.object({ data: z.object({ events: z.array(z.object({ kind: z.string(), detail: z.record(z.string(), z.unknown()) }).loose()) }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data.events.find((e) => e.kind === "pr_opened");
-    const pr = z.number().parse(opened?.detail["prNumber"]);
-    const body = z.object({ body: z.string() }).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/pulls/${String(pr)}`, github)).json()).body;
-    expect(body.endsWith(`Closes #${String(issue)}`)).toBe(true);
+    // 代わりの GitHub に、main の先と、その上に出す前のブランチの先を置く。main は前の通しが進めているので、前の先を覚え、終わりに戻す
+    const commit = async (parents: string[]): Promise<string> => {
+      const res = await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/git/commits`, { ...github, data: { message: "m", tree: "1".repeat(40), parents } });
+      if (!res.ok()) throw new Error(`コミットを置けない: ${String(res.status())} ${await res.text()}`);
+      return z.object({ sha: z.string() }).parse(await res.json()).sha;
+    };
+    const before = await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/git/ref/heads/main`, github);
+    const previous = before.ok() ? z.object({ object: z.object({ sha: z.string() }) }).parse(await before.json()).object.sha : null;
+    const base = await commit([]);
+    const head = await commit([base]);
+    const branch = `ko/019a7b00-make${crypto.randomUUID().slice(0, 6)}`;
+    const put = async (name: string, sha: string) => expect((await page.request.patch(`${ref}/${name}`, { ...github, data: { sha, force: true } })).status()).toBe(200);
+    const issue = z.object({ number: z.number() }).parse(await (await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/issues`, { ...github, data: { title: "動画を作る", body: "設計書: 詳細設計 1-video の要件「動画を作る」", labels: ["feature"] } })).json()).number;
+    await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${head}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] });
 
-    // レビュー担当の承認は社員のツールなので手元の D1 に置く。オーナーが承認すると、チェックとレビュー担当の承認がそろっているので、main が進み、Issue が閉じる
-    seedMain(`UPDATE reviews SET reviewer_verdict = 'approve', reviewer_summary = '確かめた' WHERE node_id = '${ids.task}'`);
-    const verdict = await page.request.post(`/api/v1/reviews/${ids.task}/verdict`, { data: { verdict: "approve", body: "よい", baseSha: head }, headers: { Origin: new URL(page.url()).origin } });
-    expect(verdict.status()).toBe(200);
-    await expect
-      .poll(async () => z.object({ state: z.string(), state_reason: z.string().nullable() }).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/issues/${String(issue)}`, github)).json()), { timeout: 20_000 })
-      .toEqual({ state: "closed", state_reason: "completed" });
-    expect((await status()).status).toBe("done");
-    // 画面のタスクが済みになっている
-    await page.goto("/staff/builder?tab=tasks");
-    const row = page.getByRole("main").locator("li", { hasText: `#${String(issue)} 動画を作る` }).first();
-    await expect(row).toBeVisible();
-    await expect(row.getByText("済", { exact: true })).toBeVisible();
-  } finally {
-    // 後の通しに残さない。main は前の先に戻し (前が無ければ消し)、出したブランチも消す
-    if (previous === null) await page.request.delete(`${ref}/main`, github);
-    else await page.request.patch(`${ref}/main`, { ...github, data: { sha: previous, force: true } });
-    await page.request.delete(`${ref}/${branch}`, github);
-    // レビュー担当が持つ「レビュー: …」のタスクは、消さずに取り消して離させる。消すと、持ったまま続きを呼んで落ち、後の通しの社員を塞ぐ
-    const list: unknown = await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json();
-    const reviewId = findTaskId(list, `レビュー: #${String(issue)} 動画を作る`);
-    if (reviewId !== null) {
-      const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
-      await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } });
+    // 子 Issue のタスクと行は、設計書から Issue を立てる道 (社長の issue_plan) の結果なので、手元の D1 に置く。PR は置かず、開発担当に出させる
+    const now = String(Date.now());
+    const mark = `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
+    seedMain(
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, status, priority, repo, issue_number, source, assignee, task_kind, version, created_by, created_at, updated_at) VALUES ('${ids.task}', 'task', '019a7b00-0000-7000-8000-0000000000e3', '${serviceId}', '#${String(issue)} 動画を作る', 'todo', 0, '${REPO}', ${String(issue)}, 'issue:${String(issue)}', NULL, 'build', 1, 'system', ${now}, ${now})`,
+    );
+    seedMain(
+      `INSERT INTO dev_issues (id, service_id, repo, number, issue_id, kind, feature, requirement, req_hash, issue_kind, paths, heads, mark_key, state, created_at) VALUES ('${ids.dev}', '${serviceId}', '${REPO}', ${String(issue)}, ${String(issue)}, 'child', '1-video', '動画を作る', 'e2e', 'feature', '["src/a.ts"]', '["src/a.ts"]', '${mark}', 'open', ${now})`,
+    );
+
+    try {
+      restoreSchedule = await clockInStaff(page, "builder");
+      await put("main", base);
+      await put(branch, head);
+      // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチ名は ko/<タスク ID の頭 8 字>-<name>
+      const name = branch.slice("ko/019a7b00-".length);
+      await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use", undefined, "builder");
+      await scriptReply(page, [{ type: "text", text: "PR を出した" }], "end_turn", undefined, "builder");
+      // 開発担当に頼むと、開発担当がタスクを取って始める
+      expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: new URL(page.url()).origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
+
+      // タスクがレビューに移り、代わりの GitHub が受けた PR の本文の最後に Closes が付いている
+      const status = async () => z.object({ data: z.object({ status: z.string() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data;
+      await expect.poll(async () => (await status()).status, { timeout: 60_000 }).toBe("review");
+      const opened = z.object({ data: z.object({ events: z.array(z.object({ kind: z.string(), detail: z.record(z.string(), z.unknown()) }).loose()) }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data.events.find((e) => e.kind === "pr_opened");
+      const pr = z.number().parse(opened?.detail["prNumber"]);
+      const body = z.object({ body: z.string() }).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/pulls/${String(pr)}`, github)).json()).body;
+      expect(body.endsWith(`Closes #${String(issue)}`)).toBe(true);
+
+      // レビュー担当の承認は社員のツールなので手元の D1 に置く。オーナーが承認すると、チェックとレビュー担当の承認がそろっているので、main が進み、Issue が閉じる
+      seedMain(`UPDATE reviews SET reviewer_verdict = 'approve', reviewer_summary = '確かめた' WHERE node_id = '${ids.task}'`);
+      const verdict = await page.request.post(`/api/v1/reviews/${ids.task}/verdict`, { data: { verdict: "approve", body: "よい", baseSha: head }, headers: { Origin: new URL(page.url()).origin } });
+      expect(verdict.status()).toBe(200);
+      await expect
+        .poll(async () => z.object({ state: z.string(), state_reason: z.string().nullable() }).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/issues/${String(issue)}`, github)).json()), { timeout: 20_000 })
+        .toEqual({ state: "closed", state_reason: "completed" });
+      expect((await status()).status).toBe("done");
+      // 画面のタスクが済みになっている
+      await page.goto("/staff/builder?tab=tasks");
+      const row = page.getByRole("main").locator("li", { hasText: `#${String(issue)} 動画を作る` }).first();
+      await expect(row).toBeVisible();
+      await expect(row.getByText("済", { exact: true })).toBeVisible();
+    } finally {
+      // 後の通しに残さない。main は前の先に戻し (前が無ければ消し)、出したブランチも消す
+      if (previous === null) await page.request.delete(`${ref}/main`, github);
+      else await page.request.patch(`${ref}/main`, { ...github, data: { sha: previous, force: true } });
+      await page.request.delete(`${ref}/${branch}`, github);
+      // レビュー担当が持つ「レビュー: …」のタスクは、消さずに取り消して離させる。消すと、持ったまま続きを呼んで落ち、後の通しの社員を塞ぐ
+      const list: unknown = await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json();
+      const reviewId = findTaskId(list, `レビュー: #${String(issue)} 動画を作る`);
+      if (reviewId !== null) {
+        const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
+        await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } });
+      }
+      // 済みの子のタスクは、開発担当が離れているので消してよい。ミラーとレビューも消す
+      seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
+      // 勤務の時刻を戻してから、外したタスクを開発担当に戻す (外の finally)。逆だと、広げた勤務の間に開発担当が戻したタスクを取りうる
+      await restoreSchedule?.();
     }
-    // 済みの子のタスクは、開発担当が離れているので消してよい。ミラーとレビューも消す
-    seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
-    // 勤務の時刻を戻してから、外したタスクを開発担当に戻す
-    await restoreSchedule?.();
-    if (aside !== "") seedMain(`UPDATE nodes SET assignee = 'builder', status = 'todo' WHERE id IN (${aside})`);
+  } finally {
+    giveBackBuilderTasks(aside);
   }
 });
