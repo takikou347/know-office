@@ -23,6 +23,8 @@ export type Endpoints = {
   githubWeb: string;
   /** GitHub の git の受け口 */
   githubGit: string;
+  /** GitHub の tarball の 302 の先。この下の道だけを鍵を付けずに追う (タスクとレビューの 3.6) */
+  codeload: string;
 };
 
 const TEAM = /^[a-z0-9-]+$/;
@@ -43,6 +45,7 @@ export function endpoints(env: EndpointEnv): Endpoints {
       github: "https://api.github.com",
       githubWeb: "https://github.com",
       githubGit: "https://github.com",
+      codeload: "https://codeload.github.com",
     };
   }
   const base = env.DEV_FAKES_URL ?? "";
@@ -54,6 +57,7 @@ export function endpoints(env: EndpointEnv): Endpoints {
     github: `${base}/github`,
     githubWeb: `${base}/github/web`,
     githubGit: `${base}/github/git`,
+    codeload: `${base}/codeload`,
   };
 }
 

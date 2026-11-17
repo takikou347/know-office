@@ -8,6 +8,7 @@ const REAL = {
   github: "https://api.github.com",
   githubWeb: "https://github.com",
   githubGit: "https://github.com",
+  codeload: "https://codeload.github.com",
 };
 const FAKES = {
   accessCerts: "http://localhost:5199/access/cdn-cgi/access/certs",
@@ -15,6 +16,7 @@ const FAKES = {
   github: "http://localhost:5199/github",
   githubWeb: "http://localhost:5199/github/web",
   githubGit: "http://localhost:5199/github/git",
+  codeload: "http://localhost:5199/codeload",
 };
 
 describe("開発環境の代わりの物", () => {

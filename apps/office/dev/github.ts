@@ -5,6 +5,7 @@ import { type FakeFailures, failureTaker, flowRoutes, requireUserAgent } from ".
 import { renewAppKey } from "./github-keys.ts";
 import { decodeJwt, jwtVerify } from "jose";
 import { z } from "zod";
+import { createFakeArchives } from "./github-archive.ts";
 import { createFakePulls, type FakeActor, type FakePosted, type FakeTreeEntry } from "./github-pulls.ts";
 import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, type GitHubRequest, Manifest, Permission } from "./github-types.ts";
 
@@ -137,6 +138,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     return t !== null && reaches(t, repo, { name, level });
   };
 
+  const archives = createFakeArchives(options.codeloadBase ?? "https://codeload.github.com");
   const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, sent, heads, trees, posted });
 
   const app = new Hono().use("*", requireUserAgent)
@@ -313,6 +315,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         const repo = /^\/repos\/([^/]+\/[^/]+)/.exec(c.req.path)?.[1];
         if (repo !== undefined && !reaches(t, repo)) return c.json({ message: "Not Found" }, 404);
       }
+      const archived = archives.answer(route);
+      if (archived) return archived;
       // 入れたリポジトリの情報は、置いた返事が無ければ公開か非公開と既定のブランチを返す
       const info = /^GET \/repos\/([^/]+\/[^/]+)$/.exec(route)?.[1];
       if (info !== undefined && !routes.has(route) && visibility.has(info)) {
@@ -366,5 +370,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     heads,
     trees,
     posted,
+    archives: archives.archives,
+    codeload: archives.codeload,
   };
 }

@@ -96,6 +96,10 @@ export type FakeGitHub = {
   trees: Map<string, FakeTreeEntry[]>;
   /** 受けたレビューと行のコメント。一覧の API が返す */
   posted: FakePosted;
+  /** tarball の中身 (tar.gz)。「owner/name:sha」から。API は 302 で codeload の形の道を返す */
+  archives: Map<string, Uint8Array>;
+  /** codeload の形の道 (/{o}/{r}/legacy.tar.gz/{sha}?token=)。代わりの物の置き場の /codeload に付ける */
+  codeload: Hono;
 };
 
 /** 代わりの GitHub の設定 */
@@ -104,4 +108,6 @@ export type FakeGitHubOptions = {
   now?: () => number;
   /** App を作る時の RSA の鍵の組を作る。無ければその場で作る。テストは作った鍵を使い回して速くする */
   appKey?: () => { privateKey: KeyObject; publicKey: KeyObject };
+  /** tarball の 302 の先。無ければ https://codeload.github.com */
+  codeloadBase?: string;
 };
