@@ -159,8 +159,8 @@ describe("Issue を合わせるタスク", () => {
   });
 });
 
-describe("自分で作った Issue の通知", () => {
-  it("ゲートウェイが作った Issue の通知は、分けるタスクにしない", async () => {
+describe("設計書から Issue を作る", () => {
+  it("自分で作った Issue の通知", async () => {
     const id = await withDocs(world);
     await plan(world, planOf(id, [child("動画を作る")]));
     const made = issuesOf(world);
