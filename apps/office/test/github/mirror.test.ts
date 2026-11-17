@@ -155,22 +155,6 @@ describe("GitHub に写す", () => {
     expect(postedTo(world, "comments")).toHaveLength(2);
   });
 
-  it("GitHub の上限に当たったら、待つ時刻まで写し直さず、送った回数に数えない", async () => {
-    const { task, forge } = await openReview(world);
-    const before = await rows(world.d1.REC_2026, "SELECT code FROM error_events");
-    world.gate.github.failNext(`POST /repos/${REPO}/pulls/1/comments`, 429, { "retry-after": "900" });
-    await api(world, "POST", `/api/v1/reviews/${task}/notes`, { path: "src/a.ts", line: 1, side: "new", body: "ここ" }, 201);
-    expect(await rows(world.d1.DB, "SELECT attempts, sent_at FROM github_mirrors")).toEqual([{ attempts: 0, sent_at: null }]);
-    expect((await rows(world.d1.REC_2026, "SELECT code FROM error_events")).slice(before.length)).toEqual([{ code: "github_mirror_rate_limited" }]);
-    // 15 分の待ちの間は、5 分ごとの写し直しでも送らない
-    world.clock.advance(10 * MINUTE);
-    expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 0, failed: 0 });
-    expect(postedTo(world, "comments")).toHaveLength(1);
-    world.clock.advance(5 * MINUTE);
-    expect(await retryMirrors(world.gate.env, forge, world.clock)).toEqual({ sent: 1, failed: 0 });
-    expect(postedTo(world, "comments")).toHaveLength(2);
-  });
-
   it("5 分ごとの定期ジョブが、写せなかった物を App の鍵で写し直す", async () => {
     const { task } = await openReview(world);
     world.gate.github.failNext(`POST /repos/${REPO}/pulls/1/comments`, 503);

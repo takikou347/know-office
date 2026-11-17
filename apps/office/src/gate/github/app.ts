@@ -162,7 +162,8 @@ export function githubRetryAfter(res: Response): number | null {
   const retryAfter = res.headers.get("retry-after");
   const limited = res.status === 429 || (res.status === 403 && (retryAfter !== null || remaining === "0"));
   if (!limited) return null;
-  const after = Number(retryAfter ?? Number.NaN);
+  // 秒の数字だけを読む。空や HTTP 日付の retry-after は無い物として扱う
+  const after = /^\d+$/.test(retryAfter?.trim() ?? "") ? Number(retryAfter) : Number.NaN;
   const reset = Number(res.headers.get("x-ratelimit-reset") ?? Number.NaN);
   const date = Date.parse(res.headers.get("date") ?? "");
   let seconds = RATE_LIMIT_FALLBACK_S;

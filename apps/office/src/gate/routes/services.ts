@@ -72,6 +72,7 @@ const advanceServiceRoute = createRoute({
     "404 `not_found`: サービスが存在しない",
     "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、または確かめた後に連携が変わった",
     "422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した",
   ],
   request: { params: ServiceParam, body: jsonBody(AdvanceInput) },
@@ -95,6 +96,7 @@ const rollbackServiceRoute = createRoute({
   "x-errors": [
     "404 `not_found`: サービスが存在しない",
     "409 `conflict`: Web アプリではない、リポジトリが無い、または直前 10 分の間に戻したか戻している最中",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した",
   ],
   "x-step-up": true,

@@ -52,11 +52,12 @@ type Claimed = { id: string; kind: string; payload: string; attempts: number; re
  */
 export async function sendMirror(env: Bindings, forge: Forge, id: string, clock: Clock): Promise<"sent" | "failed" | "skipped"> {
   const now = clock.now();
+  const claim = now + CLAIM_MS;
   const row = await env.DB.prepare(
     `UPDATE github_mirrors SET claimed_until = ?, attempts = attempts + 1 WHERE id = ? AND sent_at IS NULL AND attempts < ? AND (claimed_until IS NULL OR claimed_until <= ?)
      RETURNING review_id, kind, payload, attempts`,
   )
-    .bind(now + CLAIM_MS, id, MIRROR_ATTEMPTS, now)
+    .bind(claim, id, MIRROR_ATTEMPTS, now)
     .first<{ review_id: string; kind: string; payload: string; attempts: number }>();
   if (!row) return "skipped";
   const target = await env.DB.prepare("SELECT repo, pr_number FROM reviews WHERE id = ?").bind(row.review_id).first<{ repo: string; pr_number: number }>();
@@ -66,9 +67,10 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
     githubId = await post(forge, claimed);
   } catch (error) {
     if (error instanceof AppError && error.code === "rate_limited") {
-      // GitHub の上限は送り方の誤りでないので回数に数えず、待つ時刻まで印を残して写し直しに取らせない
+      // GitHub の上限は送り方の誤りでないので回数に数えず、待つ時刻まで印を残して写し直しに取らせない。
+      // 送る間に印が切れて別の者が取り直していれば、その者の印と数えを変えない
       const until = clock.now() + Number(error.headers["Retry-After"] ?? "60") * 1000;
-      await env.DB.prepare("UPDATE github_mirrors SET claimed_until = ?, attempts = attempts - 1 WHERE id = ? AND sent_at IS NULL").bind(until, id).run();
+      await env.DB.prepare("UPDATE github_mirrors SET claimed_until = ?, attempts = attempts - 1 WHERE id = ? AND sent_at IS NULL AND claimed_until = ?").bind(until, id, claim).run();
       await recordError(env, { source: "job", level: "warn", code: "github_mirror_rate_limited", error }, clock);
       return "failed";
     }

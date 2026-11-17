@@ -41,6 +41,7 @@ const submitReviewVerdictRoute = createRoute({
   "x-errors": [
     "404 `not_found`: レビューが存在しない",
     "409 `conflict`: 確認した後に変更が追加された",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: main を進める時に GitHub がエラーを返した",
   ],
   request: { params: NodeParam, body: jsonBody(ReviewVerdictInput) },
@@ -84,6 +85,7 @@ const createReviewCommitRoute = createRoute({
     "403 `rule_denied`: 変更禁止のパスを含む",
     "404 `not_found`: レビューが存在しない",
     "409 `conflict`: 確認した後に変更が追加された、または GitHub の側でブランチの先が進んだ",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した",
   ],
   request: { params: NodeParam, body: jsonBody(CreateCommitInput) },

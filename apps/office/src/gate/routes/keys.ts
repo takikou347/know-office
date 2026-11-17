@@ -37,6 +37,7 @@ const replaceGitHubAppKeyRoute = createRoute({
   "x-errors": [
     "409 `conflict`: 全体が止まっていない、止める前の連携が無い、インストールが外れている、または同じ時に別の鍵を保存した",
     "422 `validation_failed`: 秘密鍵の形が違う、または秘密鍵が App と合わない",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した",
   ],
   "x-step-up": true,

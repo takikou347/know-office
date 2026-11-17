@@ -17,7 +17,7 @@ const Doc = z.object({
   paths: z.record(z.string(), z.record(z.string(), z.unknown())),
   components: z.record(z.string(), z.record(z.string(), z.unknown())),
 });
-const Operation = z.object({ parameters: z.array(z.object({ name: z.string().optional(), in: z.string().optional() })).optional() });
+const Operation = z.object({ parameters: z.array(z.object({ name: z.string().optional(), in: z.string().optional() })).optional(), "x-errors": z.array(z.string()).optional() });
 
 const text = readFileSync(V1, "utf8");
 const v1 = Doc.parse(parse(text));
@@ -80,5 +80,11 @@ describe("OpenAPI の文書", () => {
       wanted[key] = [...path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).toSorted((a = "", b = "") => a.localeCompare(b));
     }
     expect(declared).toEqual(wanted);
+  });
+
+  it("GitHub を呼んで 502 を返しうるルートは、GitHub の上限の 429 も書く", () => {
+    const calls = [...specOps].filter(([, op]) => (op["x-errors"] ?? []).some((e) => e.startsWith("502 `upstream_failed`")) && (op["x-errors"] ?? []).join(" ").includes("GitHub"));
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.filter(([, op]) => !(op["x-errors"] ?? []).some((e) => e.startsWith("429 `rate_limited`: GitHub"))).map(([key]) => key)).toEqual([]);
   });
 });

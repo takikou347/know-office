@@ -83,7 +83,7 @@ const getReviewRoute = createRoute({
     "プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない",
     "`last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする",
   ],
-  "x-errors": ["404 `not_found`: レビューが存在しない", "502 `upstream_failed`: GitHub がエラーを返した"],
+  "x-errors": ["404 `not_found`: レビューが存在しない", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: GitHub がエラーを返した"],
   request: { params: NodeParam },
   responses: { 200: okResponse(ReviewHead), ...problems(401, 403, 404, 429, 500, 502) },
 });
@@ -98,7 +98,7 @@ const getReviewDiffRoute = createRoute({
   "x-steps": [
     "`since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す。compare が 300 件ちょうどなら 502。ワークスペースは起こさない",
   ],
-  "x-errors": ["404 `not_found`: ファイルが存在しない", "502 `upstream_failed`: GitHub がエラーを返した"],
+  "x-errors": ["404 `not_found`: ファイルが存在しない", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: GitHub がエラーを返した"],
   request: { params: NodeParam, query: ReviewDiffQuery },
   responses: { 200: okResponse(FileDiff), ...problems(400, 401, 403, 404, 422, 429, 500, 502) },
 });
@@ -110,7 +110,7 @@ const getReviewFileRoute = createRoute({
   tags: ["reviews"],
   summary: "変更前または変更後のファイル内容",
   "x-steps": ["変更前または変更後のファイル内容を contents API から取得する"],
-  "x-errors": ["404 `not_found`: ファイルが存在しない", "502 `upstream_failed`: GitHub がエラーを返した"],
+  "x-errors": ["404 `not_found`: ファイルが存在しない", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: GitHub がエラーを返した"],
   request: { params: NodeParam, query: ReviewFileQuery },
   responses: { 200: okResponse(FileContent), ...problems(400, 401, 403, 404, 422, 429, 500, 502) },
 });

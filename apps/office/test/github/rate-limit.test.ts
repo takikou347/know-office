@@ -25,6 +25,8 @@ describe("GitHub の上限の待ち", () => {
 
   it("待つ時刻が無い 429 は 1 分待ち、待ちは 1 秒から 1 時間に収める", () => {
     expect(githubRetryAfter(reply(429))).toBe(60);
+    expect(githubRetryAfter(reply(429, { "retry-after": "" }))).toBe(60);
+    expect(githubRetryAfter(reply(429, { "retry-after": "Wed, 01 Jan 2031 00:00:00 GMT" }))).toBe(60);
     expect(githubRetryAfter(reply(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(RESET_AT_DATE - 5) }))).toBe(1);
     expect(githubRetryAfter(reply(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(RESET_AT_DATE + 86_400) }))).toBe(3600);
   });

@@ -287,11 +287,11 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         bytes += chunk.value.byteLength;
       }
       gitBodies.push({ route, bytes, encoding: c.req.header("content-encoding") ?? null });
-      if (state.gitStatus !== null) {
-        const status = state.gitStatus;
-        state.gitStatus = null;
-        return new Response("fake failure", { status });
-      }
+      const status = state.gitStatus;
+      state.gitStatus = null;
+      if (status !== null) return new Response("fake failure", { status });
+      const failed = takeFailure(route);
+      if (failed) return failed;
       const t = user === "x-access-token" ? live(token) : null;
       if (!t) return c.text("Authentication failed", 401);
       const repo = `${c.req.param("owner")}/${c.req.param("name").replace(/\.git$/, "")}`;

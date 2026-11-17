@@ -4951,6 +4951,7 @@ paths:
 
         - 409 `conflict`: 全体が止まっていない、止める前の連携が無い、インストールが外れている、または同じ時に別の鍵を保存した
         - 422 `validation_failed`: 秘密鍵の形が違う、または秘密鍵が App と合わない
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
         - パスキーの確認を求め、全体が止まっていることを確認する
@@ -4961,6 +4962,7 @@ paths:
       x-errors:
         - "409 `conflict`: 全体が止まっていない、止める前の連携が無い、インストールが外れている、または同じ時に別の鍵を保存した"
         - "422 `validation_failed`: 秘密鍵の形が違う、または秘密鍵が App と合わない"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       x-step-up: true
       requestBody:
@@ -5630,6 +5632,7 @@ paths:
 
         - 404 `not_found`: レビューが存在しない
         - 409 `conflict`: 確認した後に変更が追加された
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: main を進める時に GitHub がエラーを返した
       x-steps:
         - "`baseSha` が現在の `head_sha` と一致する時だけ、`owner_verdict` の更新と、GitHub に写す順番待ち (`github_mirrors`) への追加を 1 回のバッチで書く"
@@ -5639,6 +5642,7 @@ paths:
       x-errors:
         - "404 `not_found`: レビューが存在しない"
         - "409 `conflict`: 確認した後に変更が追加された"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: main を進める時に GitHub がエラーを返した"
       parameters:
         - schema:
@@ -5789,6 +5793,7 @@ paths:
         - "403 `rule_denied`: 変更禁止のパスを含む"
         - "404 `not_found`: レビューが存在しない"
         - "409 `conflict`: 確認した後に変更が追加された、または GitHub の側でブランチの先が進んだ"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       parameters:
         - schema:
@@ -5862,6 +5867,7 @@ paths:
         - 403 `rule_denied`: 変更禁止のパスを含む
         - 404 `not_found`: レビューが存在しない
         - 409 `conflict`: 確認した後に変更が追加された、または GitHub の側でブランチの先が進んだ
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       security: *a1
   /api/v1/reviews/{nodeId}:
@@ -5882,6 +5888,7 @@ paths:
         このルート固有のエラー:
 
         - 404 `not_found`: レビューが存在しない
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
         - "`reviews` を取得する"
@@ -5889,6 +5896,7 @@ paths:
         - "`last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする"
       x-errors:
         - "404 `not_found`: レビューが存在しない"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       parameters:
         - schema:
@@ -5944,11 +5952,13 @@ paths:
         このルート固有のエラー:
 
         - 404 `not_found`: ファイルが存在しない
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
         - "`since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す。compare が 300 件ちょうどなら 502。ワークスペースは起こさない"
       x-errors:
         - "404 `not_found`: ファイルが存在しない"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       parameters:
         - schema:
@@ -6019,6 +6029,7 @@ paths:
         - 変更前または変更後のファイル内容を contents API から取得する
       x-errors:
         - "404 `not_found`: ファイルが存在しない"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       parameters:
         - schema:
@@ -6086,6 +6097,7 @@ paths:
         このルート固有のエラー:
 
         - 404 `not_found`: ファイルが存在しない
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       security: *a1
   /api/v1/reviews/{nodeId}/seen:
@@ -6613,6 +6625,7 @@ paths:
         - "404 `not_found`: サービスが存在しない"
         - "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、または確かめた後に連携が変わった"
         - "422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       parameters:
         - schema:
@@ -6682,6 +6695,7 @@ paths:
         - 404 `not_found`: サービスが存在しない
         - 409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、または確かめた後に連携が変わった
         - 422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       security: *a1
   /api/v1/services/{serviceId}/rollback:
@@ -6705,6 +6719,7 @@ paths:
 
         - 404 `not_found`: サービスが存在しない
         - 409 `conflict`: Web アプリではない、リポジトリが無い、または直前 10 分の間に戻したか戻している最中
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
         - サービスを取得し、Web アプリで、リポジトリがある事を確かめる
@@ -6715,6 +6730,7 @@ paths:
       x-errors:
         - "404 `not_found`: サービスが存在しない"
         - "409 `conflict`: Web アプリではない、リポジトリが無い、または直前 10 分の間に戻したか戻している最中"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       x-step-up: true
       parameters:
@@ -6861,6 +6877,7 @@ paths:
         - 401 `step_up_required`: 守りを弱める変更で、パスキーの確認がない
         - 409 `conflict`: バージョンが異なる、初期値に戻す間に office の初期値が変わった、GitHub と連携していないのにリポジトリを変える、または確かめた後に連携が変わった
         - 422 `validation_failed`: 値が項目の形に合わない、初期値を持たない項目に `null` を送った、またはリポジトリが触れるリポジトリに無い
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した。変えた設定と監査ログは残る
       x-steps:
         - サービスを取得し、`key` がサービスの設定項目かを確認し、キーごとの Zod スキーマで値を検証する。`null` は初期値を持つ項目だけに使える
@@ -6874,6 +6891,7 @@ paths:
         - "401 `step_up_required`: 守りを弱める変更で、パスキーの確認がない"
         - "409 `conflict`: バージョンが異なる、初期値に戻す間に office の初期値が変わった、GitHub と連携していないのにリポジトリを変える、または確かめた後に連携が変わった"
         - "422 `validation_failed`: 値が項目の形に合わない、初期値を持たない項目に `null` を送った、またはリポジトリが触れるリポジトリに無い"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した。変えた設定と監査ログは残る"
       x-step-up: conditional
       parameters:
@@ -7006,6 +7024,7 @@ paths:
         - 401 `step_up_required`: 守りを弱める変更か勤務を延ばす変更で、パスキーの確認がない
         - 409 `conflict`: バージョンが異なる
         - 422 `validation_failed`: 値が項目の形に合わない、または `null` を送った
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した。変えた設定と監査ログは残る
       x-steps:
         - "`key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>` と勤務の時刻の `workday.schedule`) かを確認し、キーごとの Zod スキーマで値を検証する。勤務の時刻は始まりと終わりが違い、曜日が 1 つ以上で重ならない事も確かめる。`guard.thresholds` と `github.rules` は専用のルートで変更する"
@@ -7018,6 +7037,7 @@ paths:
         - "401 `step_up_required`: 守りを弱める変更か勤務を延ばす変更で、パスキーの確認がない"
         - "409 `conflict`: バージョンが異なる"
         - "422 `validation_failed`: 値が項目の形に合わない、または `null` を送った"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した。変えた設定と監査ログは残る"
       x-step-up: conditional
       parameters:
@@ -8235,6 +8255,7 @@ paths:
         このルート固有のエラー:
 
         - 409 `conflict`: すでに連携済み
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: `GET /app` が 404 のほかの失敗を返した
       x-steps:
         - パスキーの確認を求め、まだ連携していない (`vault` にまだ使えるインストールが無い) ことを確認する
@@ -8243,6 +8264,7 @@ paths:
         - GitHub App の manifest と GitHub の URL を返す
       x-errors:
         - "409 `conflict`: すでに連携済み"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: `GET /app` が 404 のほかの失敗を返した"
       x-step-up: true
       responses:
@@ -8295,6 +8317,7 @@ paths:
 
         - 403 `forbidden`: `state` が一致しない、期限を過ぎた、またはもう使った
         - 409 `conflict`: すでに連携済み、インストールの前の App がある、または同じ時に別の App を保存した
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
         - "`state` の署名と有効期限を検証し、`github_states` から使い捨ての値を 1 文で消す。消せなければ断る"
@@ -8305,6 +8328,7 @@ paths:
       x-errors:
         - "403 `forbidden`: `state` が一致しない、期限を過ぎた、またはもう使った"
         - "409 `conflict`: すでに連携済み、インストールの前の App がある、または同じ時に別の App を保存した"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       security:
         - accessJwt: []
@@ -8364,6 +8388,7 @@ paths:
 
         - 403 `forbidden`: 自分の App のインストールではない、または App を作っていない
         - 409 `conflict`: 同じ時に連携が変わった
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
         - "`installation_id` が自分の App のものかを GitHub に問い合わせる"
@@ -8373,6 +8398,7 @@ paths:
       x-errors:
         - "403 `forbidden`: 自分の App のインストールではない、または App を作っていない"
         - "409 `conflict`: 同じ時に連携が変わった"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       security:
         - accessJwt: []
@@ -8467,6 +8493,7 @@ paths:
         - インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号
       x-errors:
         - "422 `validation_failed`: `cursor` の形が違う"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した"
       parameters:
         - $ref: "#/components/parameters/Cursor"
@@ -8512,6 +8539,7 @@ paths:
         このルート固有のエラー:
 
         - 422 `validation_failed`: `cursor` の形が違う
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した
       security: *a1
   /api/v1/github/rules:
@@ -8568,6 +8596,7 @@ paths:
         このルート固有のエラー:
 
         - 409 `conflict`: バージョンが異なる
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した。変えたルールと監査ログは残る
       x-steps:
         - パスキーの確認を求め、`version` が現在と一致する時だけ `settings` に `github.rules` を追加する
@@ -8575,6 +8604,7 @@ paths:
         - 触れるリポジトリのうち公開のリポジトリに、main に入れる条件と同じルールセット「know-office」を設定し直す
       x-errors:
         - "409 `conflict`: バージョンが異なる"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した。変えたルールと監査ログは残る"
       x-step-up: true
       requestBody:
@@ -8641,6 +8671,7 @@ paths:
         このルート固有のエラー:
 
         - 409 `conflict`: GitHub と連携していない、または同じ時に別の掛け直しが動いている
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した。それまでに掛けたリポジトリは掛かったままで、監査ログは残る。押し直すと残りを掛ける
       x-steps:
         - パスキーの確認を求める
@@ -8651,6 +8682,7 @@ paths:
         - 錠を外す
       x-errors:
         - "409 `conflict`: GitHub と連携していない、または同じ時に別の掛け直しが動いている"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した。それまでに掛けたリポジトリは掛かったままで、監査ログは残る。押し直すと残りを掛ける"
       x-step-up: true
       responses:
@@ -9112,6 +9144,7 @@ paths:
         - 409 `stopped`: 社員かタスクが停止中
         - 409 `conflict`: 作業トークンのタスクが担当中のタスクと異なる、読んだ後にタスクが変わった
         - 422 `validation_failed`: ツールの名前かツールの入力の形が違う
+        - 429 `rate_limited`: GitHub を呼ぶツールが GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
       x-steps:
         - 作業トークンを検証する
         - 全体、社員、タスクのどれかが止まっていれば 409 `stopped`
@@ -9125,6 +9158,7 @@ paths:
         - "409 `stopped`: 社員かタスクが停止中"
         - "409 `conflict`: 作業トークンのタスクが担当中のタスクと異なる、読んだ後にタスクが変わった"
         - "422 `validation_failed`: ツールの名前かツールの入力の形が違う"
+        - "429 `rate_limited`: GitHub を呼ぶツールが GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
       security:
         - workToken: []
       parameters:
@@ -9174,6 +9208,8 @@ paths:
           $ref: "#/components/responses/UnsupportedMediaType"
         "422":
           $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalError"
   /v1/health:

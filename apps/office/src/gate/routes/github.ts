@@ -33,7 +33,7 @@ const connectGitHubRoute = createRoute({
     "使い捨ての値を `github_states` に置き、ログインセッションの署名鍵で、その値を入れた 10 分間有効な `state` を生成する",
     "GitHub App の manifest と GitHub の URL を返す",
   ],
-  "x-errors": ["409 `conflict`: すでに連携済み", "502 `upstream_failed`: `GET /app` が 404 のほかの失敗を返した"],
+  "x-errors": ["409 `conflict`: すでに連携済み", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: `GET /app` が 404 のほかの失敗を返した"],
   "x-step-up": true,
   // 外部連携を始めるのでパスキーで確かめる
   middleware: [stepUpGate] as const,
@@ -59,6 +59,7 @@ const receiveGitHubAppRoute = createRoute({
   "x-errors": [
     "403 `forbidden`: `state` が一致しない、期限を過ぎた、またはもう使った",
     "409 `conflict`: すでに連携済み、インストールの前の App がある、または同じ時に別の App を保存した",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した",
   ],
   security: [{ accessJwt: [] }],
@@ -82,6 +83,7 @@ const receiveGitHubInstallRoute = createRoute({
   "x-errors": [
     "403 `forbidden`: 自分の App のインストールではない、または App を作っていない",
     "409 `conflict`: 同じ時に連携が変わった",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した",
   ],
   security: [{ accessJwt: [] }],
@@ -110,7 +112,7 @@ const listGitHubReposRoute = createRoute({
   tags: ["github"],
   summary: "連携したリポジトリ",
   "x-steps": ["インストールで選んだすべてのリポジトリに届く、メタデータを読むだけの 1 時間の鍵を作る", "インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号"],
-  "x-errors": ["422 `validation_failed`: `cursor` の形が違う", "502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した"],
+  "x-errors": ["422 `validation_failed`: `cursor` の形が違う", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(Repo), ...problems(400, 401, 403, 422, 429, 500, 502) },
 });
@@ -161,7 +163,7 @@ const updateGitHubRulesRoute = createRoute({
     "監査ログに `github.rules` を記録する",
     "触れるリポジトリのうち公開のリポジトリに、main に入れる条件と同じルールセット「know-office」を設定し直す",
   ],
-  "x-errors": ["409 `conflict`: バージョンが異なる", "502 `upstream_failed`: GitHub がエラーを返した。変えたルールと監査ログは残る"],
+  "x-errors": ["409 `conflict`: バージョンが異なる", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: GitHub がエラーを返した。変えたルールと監査ログは残る"],
   "x-step-up": true,
   // 触れるリポジトリを広げると守りが弱まるので、どの変更もパスキーで確かめる
   middleware: [stepUpGate] as const,
@@ -186,6 +188,7 @@ const applyGitHubRulesRoute = createRoute({
   ],
   "x-errors": [
     "409 `conflict`: GitHub と連携していない、または同じ時に別の掛け直しが動いている",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した。それまでに掛けたリポジトリは掛かったままで、監査ログは残る。押し直すと残りを掛ける",
   ],
   "x-step-up": true,

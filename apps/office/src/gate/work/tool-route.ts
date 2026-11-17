@@ -35,10 +35,11 @@ const toolRoute = createRoute({
     "409 `stopped`: 社員かタスクが停止中",
     "409 `conflict`: 作業トークンのタスクが担当中のタスクと異なる、読んだ後にタスクが変わった",
     "422 `validation_failed`: ツールの名前かツールの入力の形が違う",
+    "429 `rate_limited`: GitHub を呼ぶツールが GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
   ],
   security: [{ workToken: [] }],
   request: { params: ToolParam, body: { content: { "application/json": { schema: ToolCallInput } }, required: true } },
-  responses: { 200: okResponse(ToolResult), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 500) },
+  responses: { 200: okResponse(ToolResult), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
 
 /**
