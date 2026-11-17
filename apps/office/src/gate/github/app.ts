@@ -439,9 +439,8 @@ export class TokenCache {
  */
 export async function revokeTokens(env: Bindings, deps: { fetcher: Fetcher; cache: TokenCache }): Promise<void> {
   const tokens = deps.cache.drain();
-  await Promise.all(
-    tokens.map((token) => callGitHub(env, deps.fetcher, "installation/token", { method: "DELETE", headers: { authorization: `Bearer ${token.reveal()}` } }).catch(() => null)),
-  );
+  const revoke = (token: Secret) => callGitHub(env, deps.fetcher, "installation/token", { method: "DELETE", headers: { authorization: `Bearer ${token.reveal()}` } }).catch(() => null);
+  await Promise.all(tokens.map(revoke));
 }
 
 /** Worker の中で共にためる所。要求ごとに作る受け手も同じ所を使う */
