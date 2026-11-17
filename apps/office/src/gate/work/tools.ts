@@ -18,7 +18,6 @@ import {
   ReportTool,
   ReviewSubmitTool,
   ServiceCloseRequestTool,
-  recordedText,
   ROLE_TOOLS,
   type StaffId,
   StaffRequestTool,
@@ -29,7 +28,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z, type ZodType } from "zod";
-import { approvals, nodes, notices, reviews, staff } from "../db/main.ts";
+import { approvals, nodes, notices, staff } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import type { ExtensionDefinition, ExtensionTool } from "../extensions/define.ts";
 import { INSTALLED } from "../extensions/installed.ts";
@@ -40,15 +39,14 @@ import { auditFrom } from "../ledger/record.ts";
 import { closableService, createIdea, submitStudy } from "../services/flow.ts";
 import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
-import { repoScope } from "../github/rules.ts";
-import { assertDocsPr } from "../devloop/docs-pr.ts";
 import { issuePlan } from "../devloop/plan.ts";
+import { openPr } from "./pr-open.ts";
 import { announceNotice } from "../live/publish.ts";
 import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { readOwnerData } from "./owner-data.ts";
 import { addStaffMessage, reachCheckpoint } from "./progress.ts";
-import { type Actor, appendNodeEvent, checkPair, createNode, findNode, moveNode, type NodeRow, updateNode } from "./nodes.ts";
-import { backToTodo, findReview, madeTaskOf, mergeIfReady, repoRefusal } from "./review.ts";
+import { type Actor, appendNodeEvent, createNode, findNode, type NodeRow, updateNode } from "./nodes.ts";
+import { backToTodo, findReview, madeTaskOf, mergeIfReady } from "./review.ts";
 
 /** 呼び出し 1 回 */
 export type ToolCall = {
@@ -73,9 +71,6 @@ type Tool = { schema: ZodType; run: Run };
 
 /** 役ごとに使えるツール。正本は core の ROLE_TOOLS で、ルールの判断と同じ一覧を使う。ここに無いツールは not_found で断る */
 const ROLE_TOOL_NAMES: Record<StaffId, readonly string[]> = ROLE_TOOLS;
-
-/** レビューのタスクを割り振る社員 */
-const REVIEWER: StaffId = "reviewer";
 
 /**
  * ツールの呼び出しから、誰がいつを作る
@@ -287,53 +282,16 @@ async function askBossTool(env: Bindings, _forge: Forge, call: ToolCall, input: 
 }
 
 /**
- * 開発担当が今のタスクのブランチからプルリクエストを出す。タスクはレビューを待ち、レビュー担当にレビューのタスクを足す
+ * 開発担当が今のタスクのブランチからプルリクエストを出す。中身は pr-open.ts
  * @param env バインディング
  * @param forge GitHub
  * @param call 呼び出し
  * @param input PrOpenTool
  * @returns プルリクエストの番号とブランチ
- * @throws conflict 今のタスクが無いか、直すリポジトリが無い時、レビュー担当が作った社員と同じモデルの時、出す間にタスクの担当か状態が変わった時
- * @throws validation_failed 設計書のリポジトリで、設計書の形が違う時
- * @throws upstream_failed 設計書の木を読み切れない時
+ * @throws conflict 今のタスクが無い時、そのほかは openPr の通り
  */
 async function prOpen(env: Bindings, forge: Forge, call: ToolCall, input: PrOpenTool): Promise<{ number: number; branch: string }> {
-  const task = await currentTask(env, call);
-  if (task.repo === null) throw new AppError("conflict", "タスクに直すリポジトリが無い");
-  // レビューを割り振れないなら、GitHub に出す前に断る
-  await checkPair(env.DB, call.staffId, REVIEWER);
-  const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
-  // 設計書のリポジトリは、ブランチの先を 1 つのコミットに固定し、変えた道と形の確かめを同じコミットで読む
-  const docs = (await repoScope(env.DB, task.repo)).docs;
-  const head = docs ? await forge.branchHead(task.repo, branch) : branch;
-  const refusal = await repoRefusal(env, forge, { action: "pull_request", repo: task.repo, branch: head });
-  if (refusal !== null) {
-    // ルールの外の操作として数える。触れない所に当たった時は、そのファイルへの書き込みとして数える
-    const op = refusal.path === undefined ? { operation: "office.tool" as const, target: `${task.repo} pull_request` } : { operation: "file.write" as const, target: `${task.repo}/${refusal.path}` };
-    await observe(env, { type: "rule_denied", staffId: call.staffId, nodeId: task.id, operation: op.operation, target: recordedText(op.target) }, call.now, call.guard ?? UNCONNECTED_DEPS, call.traceId);
-    throw new AppError("rule_denied", refusal.reason);
-  }
-  // 形の外れた設計書と、別のサービスの置き場を変える設計書のタスクは、GitHub に PR を出す前に断る
-  if (docs) await assertDocsPr(env.DB, forge, task, head);
-  const pr = await forge.openPull({ repo: task.repo, branch, title: input.title, body: input.body });
-  // 出す間にオーナーが名前などを直すとバージョンが進むので、読み直して、まだこの社員の作業中の時だけ移す
-  const fresh = await findNode(env.DB, task.id);
-  if (fresh.status !== "doing" || fresh.assignee !== call.staffId) throw new AppError("conflict", "タスクが変わった");
-  const moved = await moveNode(env.DB, fresh, "review", call.now, { branch, prNumber: pr.number });
-  if (!moved) throw new AppError("conflict", "タスクが変わった");
-  await drizzle(env.DB)
-    .insert(reviews)
-    .values({ id: newId(clockAt(call.now)), nodeId: task.id, repo: task.repo, prNumber: pr.number, branch, baseSha: pr.baseSha, headSha: pr.headSha });
-  await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "pr_opened", detail: { prNumber: pr.number, branch } }, actorOf(call));
-  await auditFrom(env, { at: call.now, actor: call.staffId, action: "pull_request.open", target: task.id, scope: task.scope, detail: { repo: task.repo, prNumber: pr.number }, traceId: call.traceId });
-  await createNode(
-    env,
-    { kind: "task", parentId: moved.parentId ?? undefined, scope: moved.scope, title: `レビュー: ${moved.title}`, taskKind: "review", assignee: REVIEWER, repo: task.repo, branch, prNumber: pr.number, source: "review", priority: moved.priority },
-    { by: "system", now: call.now, traceId: call.traceId },
-  );
-  await leaveTask(env, call.staffId, "done", call.now);
-  await notifyStaff(env, REVIEWER, call.now, false);
-  return { number: pr.number, branch };
+  return openPr(env, forge, call, await currentTask(env, call), input);
 }
 
 /**

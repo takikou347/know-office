@@ -14,8 +14,8 @@ export type DevIssues = {
   linkSubIssue(repo: string, parent: number, childId: number): Promise<void>;
   /** 閉じた Issue を開き直す */
   reopen(repo: string, number: number): Promise<void>;
-  /** Issue を not_planned で閉じる */
-  closeNotPlanned(repo: string, number: number): Promise<void>;
+  /** Issue を閉じる。reason は GitHub の state_reason で、作り終えた completed か、外れた not_planned。閉じている Issue をもう一度閉じても成功する */
+  close(repo: string, number: number, reason: "completed" | "not_planned"): Promise<void>;
   /** Issue にコメントを書く */
   comment(repo: string, number: number, body: string): Promise<void>;
   /** 本文に目印を含むコメントが Issue にあるかを、一覧の 1,000 件まで読んで返す。読み切れなければ upstream_failed で断る */
@@ -28,7 +28,7 @@ export const UNCONNECTED_DEV_ISSUES: DevIssues = {
   createIssue: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   linkSubIssue: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   reopen: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
-  closeNotPlanned: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  close: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   comment: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   hasComment: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
 };
@@ -44,7 +44,7 @@ export function lazyDevIssues(load: () => Promise<DevIssues>): DevIssues {
     createIssue: async (repo, input) => (await load()).createIssue(repo, input),
     linkSubIssue: async (repo, parent, childId) => (await load()).linkSubIssue(repo, parent, childId),
     reopen: async (repo, number) => (await load()).reopen(repo, number),
-    closeNotPlanned: async (repo, number) => (await load()).closeNotPlanned(repo, number),
+    close: async (repo, number, reason) => (await load()).close(repo, number, reason),
     comment: async (repo, number, body) => (await load()).comment(repo, number, body),
     hasComment: async (repo, number, marker) => (await load()).hasComment(repo, number, marker),
   };

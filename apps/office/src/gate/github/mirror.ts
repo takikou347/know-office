@@ -1,6 +1,6 @@
 // know-office の中のレビューを GitHub のプルリクエストに写す。書く時に順番待ちに入れ、すぐに送り、送れなければエラーログに残して 5 分ごとに送り直す (タスクとレビューの 3.6)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
-import { AppError, type Clock, MirrorCommentPayload, MirrorReviewPayload, MirrorStatusPayload, newId } from "@know-office/core";
+import { AppError, type Clock, MirrorCommentPayload, MirrorIssueClosePayload, MirrorReviewPayload, MirrorStatusPayload, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { noticeGitHubRateLimit } from "./limits.ts";
@@ -14,8 +14,12 @@ export const MIRROR_ATTEMPTS = 12;
 /** 1 回の送り直しで送る数の上限 */
 const RETRY_BATCH = 20;
 
-/** 写す物 1 つ。review は可か不可のレビュー、comment は行のコメント、status はオーナーの判断のコミットのステータス */
-export type Mirror = { kind: "review"; payload: MirrorReviewPayload } | { kind: "comment"; payload: MirrorCommentPayload } | { kind: "status"; payload: MirrorStatusPayload };
+/** 写す物 1 つ。review は可か不可のレビュー、comment は行のコメント、status はオーナーの判断のコミットのステータス、issue_close は main に入った子 Issue の閉じ */
+export type Mirror =
+  | { kind: "review"; payload: MirrorReviewPayload }
+  | { kind: "comment"; payload: MirrorCommentPayload }
+  | { kind: "status"; payload: MirrorStatusPayload }
+  | { kind: "issue_close"; payload: MirrorIssueClosePayload };
 
 /** オーナーの判断から、出すステータス */
 const VERDICT_STATE: Partial<Record<string, "success" | "failure">> = { approve: "success", request_changes: "failure" };
@@ -74,7 +78,7 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
   const claimed: Claimed = { ...row, id, repo: target?.repo ?? null, pr_number: target?.pr_number ?? null, head_sha: target?.head_sha ?? null, owner_verdict: target?.owner_verdict ?? null };
   let githubId: number | null;
   try {
-    githubId = await post(forge, claimed);
+    githubId = await post(env, forge, claimed, clock.now());
   } catch (error) {
     if (error instanceof AppError && error.code === "rate_limited") {
       // GitHub の上限は送り方の誤りでないので回数に数えず、待つ時刻まで印を残して写し直しに取らせない。
@@ -102,6 +106,27 @@ export async function sendMirror(env: Bindings, forge: Forge, id: string, clock:
 }
 
 /**
+ * main に入った子 Issue を閉じ、dev_issues を closed にする。閉じるのは、積んだコミットを main が含む事を確かめてからで、main に入れる前に積んだ行が、入らなかった PR の Issue を閉じない。
+ * 送る時の dev_issues の今を読み、開いている時だけ閉じる。設計書の変更で not_planned に閉じた Issue を completed で上書きしない。閉じている Issue をもう一度閉じても GitHub は成功を返すので、行を直す前に落ちても送り直せる
+ * @param env バインディング
+ * @param forge GitHub
+ * @param repo リポジトリ
+ * @param close 閉じる Issue の番号と、積んだコミット
+ * @param now 今の時刻
+ * @returns 常に null (GitHub の ID は無い)
+ * @throws conflict 積んだコミットがまだ main に入っていない時
+ * @throws upstream_failed GitHub が失敗を返した時
+ */
+async function closeIssue(env: Bindings, forge: Forge, repo: string, close: MirrorIssueClosePayload, now: number): Promise<null> {
+  if (!(await forge.inMain(repo, close.sha))) throw new AppError("conflict", "積んだコミットがまだ main に入っていない");
+  const row = await env.DB.prepare("SELECT state FROM dev_issues WHERE repo = ? AND number = ?").bind(repo, close.issueNumber).first<{ state: string }>();
+  if (row?.state !== "open") return null;
+  await forge.issues.close(repo, close.issueNumber, "completed");
+  await env.DB.prepare("UPDATE dev_issues SET state = 'closed', closed_at = ? WHERE repo = ? AND number = ? AND state = 'open'").bind(now, repo, close.issueNumber).run();
+  return null;
+}
+
+/**
  * 順番待ちの ID から、写す本文の末尾に付ける見えない目印を作る。GitHub の画面では HTML のコメントとして隠れる
  * @param id 順番待ちの ID
  * @returns 目印
@@ -113,15 +138,19 @@ export function mirrorMarker(id: string): string {
 /**
  * 取った行の中身を形で確かめ、本文の末尾に目印を付けて GitHub に送る
  * 2 回目からは、前の回が GitHub に送れた後に印を書けずに落ちたかもしれないので、先に GitHub の一覧で目印を探し、あればその ID を返して送らない
+ * @param env バインディング
  * @param forge GitHub
  * @param claimed 取った行
- * @returns GitHub のレビューかコメントかステータスの ID。出す物が無くなったステータスは null
+ * @param now 今の時刻
+ * @returns GitHub のレビューかコメントかステータスの ID。出す物が無くなったステータスと、子 Issue の閉じは null
  * @throws Error 中身の形が違う時、レビューが無い時
+ * @throws conflict 子 Issue の閉じで、積んだコミットがまだ main に入っていない時
  * @throws upstream_failed GitHub が失敗を返した時、一覧を読み切れない時
  */
-async function post(forge: Forge, claimed: Claimed): Promise<number | null> {
+async function post(env: Bindings, forge: Forge, claimed: Claimed, now: number): Promise<number | null> {
   if (claimed.repo === null || claimed.pr_number === null) throw new Error("写す先のレビューが無い");
   const raw: unknown = JSON.parse(claimed.payload);
+  if (claimed.kind === "issue_close") return closeIssue(env, forge, claimed.repo, MirrorIssueClosePayload.parse(raw), now);
   // ステータスは同じ sha と名前なら GitHub が最後に受けた物を今の値にする。出し直しが後の判断より遅れて届いても今の判断に合うよう、
   // 積んだ時の判断でなく送る時のレビューの判断を出し、先が進んだか判断が消えていれば出さない
   if (claimed.kind === "status") {

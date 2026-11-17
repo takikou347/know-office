@@ -107,6 +107,7 @@ export {
   languageOfPath,
   MirrorCommentPayload,
   MirrorReviewPayload,
+  MirrorIssueClosePayload,
   MirrorStatusPayload,
   OWNER_APPROVAL_CONTEXT,
   NoteSide,

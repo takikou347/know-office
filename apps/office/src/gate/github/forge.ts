@@ -42,7 +42,7 @@ export type GitHubAccess = {
   token(repo: string, permissions: Permissions): Promise<string>;
 };
 
-/** compare API が 1 回で返すファイルの上限。届いたら残りがあるとみる */
+/** compare API が 1 回で返すファイルの上限。届いたら残りがあるとみる。GET /repos/{o}/{r}/compare/{base}...{head} は、変わったファイルを最初のページだけに入れ、比べる全体で 300 件までしか返さない (GitHub の REST API の Compare two commits) */
 const COMPARE_FILES = 300;
 
 /** listFiles が返す件数の上限。超えたら null */
@@ -301,7 +301,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
         if (!subs.some((i) => i.id === childId)) throw new AppError("upstream_failed", "GitHub が sub-issue のつなぎを断った");
       }),
     reopen: (repo, number) => paced(() => call(repo, issuesWrite, { method: "PATCH", path: `/issues/${String(number)}` }, GitHubIssueCreated, { state: "open", state_reason: "reopened" })).then(() => undefined),
-    closeNotPlanned: (repo, number) => paced(() => call(repo, issuesWrite, { method: "PATCH", path: `/issues/${String(number)}` }, GitHubIssueCreated, { state: "closed", state_reason: "not_planned" })).then(() => undefined),
+    close: (repo, number, reason) => paced(() => call(repo, issuesWrite, { method: "PATCH", path: `/issues/${String(number)}` }, GitHubIssueCreated, { state: "closed", state_reason: reason })).then(() => undefined),
     comment: (repo, number, body) => paced(() => call(repo, issuesWrite, { method: "POST", path: `/issues/${String(number)}/comments` }, GitHubPosted, { body })).then(() => undefined),
     hasComment: async (repo, number, marker) => (await allPages(repo, `/issues/${String(number)}/comments`, GitHubPostedList)).some((c) => c.body?.includes(marker) === true),
   };
@@ -397,7 +397,18 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
     },
     merge: async (repo, head) => {
       // ブランチの先を読み直さず、変えたファイルとチェックを確かめたコミットまで進める
-      await call(repo, { contents: "write" }, { method: "PATCH", path: "/git/refs/heads/main" }, GitHubRef, { sha: commitSha(head.sha), force: false });
+      const res = await send(repo, { contents: "write" }, { method: "PATCH", path: "/git/refs/heads/main" }, { sha: commitSha(head.sha), force: false });
+      if (res.ok) return "merged";
+      if (res.status !== 422) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
+      // 422 は fast-forward にならない時のほか、ルールセットが断った時もある。main と確かめたコミットを比べ、main が先に進んでいる (behind か diverged) 時だけ behind にする
+      const state = (await call(repo, readContents, { method: "GET", path: `/compare/main...${commitSha(head.sha)}` }, GitHubCompare)).status;
+      if (state === "diverged" || state === "behind") return "behind";
+      throw new AppError("upstream_failed", "GitHub が main を進める更新を断った");
+    },
+    inMain: async (repo, sha) => {
+      // main が確かめたコミットを含めば、main はコミットから見て ahead か identical
+      const state = (await call(repo, readContents, { method: "GET", path: `/compare/${commitSha(sha)}...main` }, GitHubCompare)).status;
+      return state === "ahead" || state === "identical";
     },
     changedPaths: async (repo, branch) => {
       const compare = await call(repo, { contents: "read" }, { method: "GET", path: `/compare/main...${branchPath(branch)}` }, GitHubCompare);

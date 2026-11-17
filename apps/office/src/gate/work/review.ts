@@ -5,13 +5,16 @@ import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { nodes, reviews, services } from "../db/main.ts";
 import { expectedDocsName, isFirstDocs, verifyDocsPr } from "../devloop/docs-pr.ts";
+import { childOf, missingTests, readPrFiles } from "../devloop/pr-issue.ts";
+import { enqueueMirror, sendMirror } from "../github/mirror.ts";
+import { clockAt } from "./attendance.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
 import { wakeWaiting } from "./wake.ts";
-import { type Actor, appendNodeEvent, findNode, moveNode, type NodeRow, revertNode } from "./nodes.ts";
+import { type Actor, appendNodeEvent, findNode, moveNode, type NodeRow } from "./nodes.ts";
 
 /** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.7) */
 const SELF_SERVICE_ID = "00000000-0000-7000-8000-000000000102";
@@ -94,8 +97,13 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
   // 確かめたコミットが分からなければ、何を入れるか決められないので断る
   const sha = CommitSha.safeParse(row?.headSha);
   if (!row || !sha.success) return { kind: "refused", reason: "確かめたコミットが分からない" };
-  const checked = await checkRepo(env, forge, { action: "merge", repo: review.repo, branch: sha.data });
+  // 子 Issue のタスクは、確かめたコミットで変えたファイルを 1 回だけ読み、ルールの確かめとテストの確かめの両方に使う
+  const child = await childOf(env.DB, made);
+  const found = child === null ? null : await readPrFiles(forge, review.repo, sha.data);
+  const checked = await checkRepo(env, forge, { action: "merge", repo: review.repo, branch: sha.data, ...(found === null || found.truncated ? {} : { paths: found.paths }) });
   if (checked.refusal !== null) return { kind: "refused", reason: checked.refusal.reason };
+  const noTests = child === null || found === null ? null : missingTests(child, found);
+  if (noTests !== null) return { kind: "refused", reason: noTests };
   let when: readonly ReleaseCondition[];
   if (checked.docs) {
     // 設計書のリポジトリは、確かめたコミットの形をここでも確かめる。PR を出した後に押された物を、形の外れたまま入れない
@@ -119,7 +127,8 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
 }
 
 /**
- * 承認されたタスクを done にしてから、main を確かめたコミットまで進める。入れられなければ review に戻す
+ * 承認されたタスクを done にしてから、main を確かめたコミットまで進める。入れられなければ review に戻し、main が先に進んでいて進められない時は作った社員に todo で戻す
+ * 子 Issue のタスクは、done にする文と同じバッチで、入った後に Issue を閉じる順番待ちを積む。main に入らなければ積んだ行を消し、入れば閉じる
  * @param env バインディング
  * @param forge GitHub
  * @param made 確かめたタスク
@@ -128,20 +137,56 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
  * @param review.branch ブランチ
  * @param review.sha mergeGate が確かめたコミット
  * @param now 今の時刻
+ * @returns main に入れたら merged、main が先に進んでいて入れられなければ behind
  * @throws conflict 確かめたタスクが読んだ後に変わった時
+ * @throws upstream_failed GitHub が main を進める更新を断った時 (main が先に進んだ時を除く)
  */
-export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; sha: string }, now: number): Promise<void> {
-  // 先に done にして、同じタスクを 2 度入れない
-  const done = await moveNode(env.DB, made, "done", now);
-  if (!done) throw new AppError("conflict", "確かめるタスクが変わった");
+export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; sha: string }, now: number): Promise<"merged" | "behind"> {
+  // 先に done にして、同じタスクを 2 度入れない。子 Issue のタスクは、同じバッチで閉じる順番待ちも積む
+  const child = await childOf(env.DB, made);
+  let closeId: string | null = null;
+  if (child === null) {
+    if (!(await moveNode(env.DB, made, "done", now))) throw new AppError("conflict", "確かめるタスクが変わった");
+  } else {
+    const clock = clockAt(now);
+    const close = enqueueMirror(env, (await findReview(env.DB, made.id)).id, { kind: "issue_close", payload: { issueNumber: child.number, sha: review.sha } }, clock, {
+      sql: "EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'done')",
+      args: [made.id, made.version + 1],
+    });
+    const [done] = await env.DB.batch([env.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ? AND version = ?").bind(now, made.id, made.version), close.statement]);
+    if ((done?.meta.changes ?? 0) === 0) throw new AppError("conflict", "確かめるタスクが変わった");
+    closeId = close.id;
+  }
+  let outcome: "merged" | "behind";
   try {
-    await forge.merge(review.repo, { branch: review.branch, sha: review.sha });
+    outcome = await forge.merge(review.repo, { branch: review.branch, sha: review.sha });
   } catch (error) {
-    await revertNode(env.DB, made.id, "done", "review", now);
+    await undoMerge(env, made.id, "review", closeId, now);
     throw error;
+  }
+  if (outcome === "behind") {
+    // main が先に進んでいる。作った社員に戻して rebase させる。積んだ閉じは、タスクを戻す文と同じバッチで消す
+    await undoMerge(env, made.id, "todo", closeId, now);
+    return "behind";
   }
   // 入った子と重なって待っていた子を、取らせる
   if (made.repo !== null) await wakeWaiting(env, made.repo, now);
+  if (closeId !== null) await sendMirror(env, forge, closeId, clockAt(now));
+  return "merged";
+}
+
+/**
+ * main に入れられなかったタスクを done から戻し、積んだ閉じの順番待ちを消す。同じバッチで書き、片方だけ残さない
+ * @param env バインディング
+ * @param nodeId タスク ID
+ * @param to 戻す状態。入れられなかっただけなら review、main が進んでいたなら todo
+ * @param closeId 積んだ閉じの順番待ちの ID。無ければ null
+ * @param now 今の時刻
+ */
+async function undoMerge(env: Bindings, nodeId: string, to: "review" | "todo", closeId: string | null, now: number): Promise<void> {
+  const statements = [env.DB.prepare("UPDATE nodes SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'done'").bind(to, now, nodeId)];
+  if (closeId !== null) statements.push(env.DB.prepare("DELETE FROM github_mirrors WHERE id = ? AND sent_at IS NULL").bind(closeId));
+  await env.DB.batch(statements);
 }
 
 /**
@@ -179,11 +224,17 @@ export async function mergeIfReady(
   if (maker.success && (gate.kind === "ready" || gate.kind === "failed")) {
     await observe(env, { type: "merge_requested", staffId: maker.data, nodeId: made.id, checksPassed: gate.kind === "ready" }, actor.now, guard, actor.traceId);
   }
-  if (gate.kind === "ready") await mergeMade(env, forge, made, { ...review, sha: gate.sha }, actor.now);
+  const outcome = gate.kind === "ready" ? await mergeMade(env, forge, made, { ...review, sha: gate.sha }, actor.now) : null;
   await appendNodeEvent(env, { nodeId: made.id, ...approved }, actor);
-  if (gate.kind === "ready") {
+  if (gate.kind === "ready" && outcome === "merged") {
     await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch, sha: gate.sha } }, actor);
     return true;
+  }
+  if (gate.kind === "ready") {
+    // main が先に進んでいた。例外にせず、作った社員に rebase を求める出来事を残し、勤務中なら次に取らせる (勤務時間外の社員は呼び出さない)
+    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "main_advanced", detail: { branch: review.branch, sha: gate.sha } }, actor);
+    if (made.assignee !== null) await notifyStaff(env, made.assignee, actor.now, false);
+    return false;
   }
   await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: gate.kind === "waiting" ? "merge_waiting" : "merge_refused", detail: { reason: gate.reason } }, actor);
   return false;

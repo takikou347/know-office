@@ -45,7 +45,7 @@ describe("設計書から作る Issue を呼ぶ口", () => {
     const made = await forge.issues.createIssue(REPO, { title: "子", body: "b", labels: ["feature"] });
     await forge.issues.linkSubIssue(REPO, parent.number, made.id);
     await forge.issues.comment(REPO, made.number, "コメント");
-    await forge.issues.closeNotPlanned(REPO, made.number);
+    await forge.issues.close(REPO, made.number, "not_planned");
     await forge.issues.reopen(REPO, made.number);
     expect(pauses).toEqual([1000, 1000, 1000, 1000, 1000]);
   });

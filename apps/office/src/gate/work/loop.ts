@@ -20,8 +20,10 @@ export type Forge = {
   openPull(input: { repo: string; branch: string; title: string; body: string }): Promise<{ number: number; baseSha: string; headSha: string }>;
   /** コミットのチェックの今。すべて通れば passed、1 つでも落ちていれば failed、ほかは pending。sha は確かめたコミット */
   checkState(repo: string, sha: string): Promise<CheckState>;
-  /** main を確かめたコミットへ fast-forward で進める。branch は記録と代わりの GitHub のために渡す */
-  merge(repo: string, head: { branch: string; sha: string }): Promise<void>;
+  /** main を確かめたコミットへ fast-forward で進める。進めたら merged、main が先に進んでいて進められなければ behind (作った社員が rebase する)。branch は記録と代わりの GitHub のために渡す。ほかの断りは upstream_failed */
+  merge(repo: string, head: { branch: string; sha: string }): Promise<"merged" | "behind">;
+  /** main が、そのコミットを含むか。main に入った事を、閉じる前に確かめる */
+  inMain(repo: string, sha: string): Promise<boolean>;
   /** main からブランチかコミット (head) までに変わったファイル。動かしたファイルは前の道も入れる。多すぎて全部を読めない時は null */
   changedPaths(repo: string, head: string): Promise<string[] | null>;
   /** 公開のリポジトリの既定のブランチに、main に入れる条件と同じルールセットを掛ける。非公開なら何もせず private を返す */
@@ -61,6 +63,7 @@ export const UNCONNECTED_FORGE: Forge = {
   openPull: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   checkState: () => Promise.resolve("pending"),
   merge: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  inMain: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   changedPaths: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   protectMain: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   connected: () => Promise.resolve(false),

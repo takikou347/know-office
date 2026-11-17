@@ -238,7 +238,7 @@ async function closeChild(ctx: Ctx, row: Row, why: keyof typeof CLOSE_TEXT): Pro
     // 閉じるコメントは決まった文に印を付け、あれば書かない。書いた後に落ちて送り直しても二重にしない
     const marker = devIssueMark(row.markKey);
     if (!(await issues.hasComment(row.repo, number, marker))) await issues.comment(row.repo, number, `${CLOSE_TEXT[why]}\n${marker}`);
-    await issues.closeNotPlanned(row.repo, number);
+    await issues.close(row.repo, number, "not_planned");
   }
   const [, dropped] = await orm.batch([
     orm.update(devIssues).set({ state: "closed", closedAt: actor.now }).where(and(eq(devIssues.id, row.id), eq(devIssues.state, "open"))),

@@ -30,8 +30,16 @@ export function at(h: number, m = 0): number {
 export type FakeForge = Forge & {
   /** 出したプルリクエスト */
   pulls: { repo: string; branch: string; title: string }[];
+  /** 出したプルリクエストの本文。pulls と同じ順 */
+  bodies: string[];
   /** main に入れたブランチ */
   merged: string[];
+  /** main の今の先。入れるたびに進む。ブランチは出した時の main の先を覚え、今の先と違えば fast-forward にならず behind になる */
+  main: string;
+  /** ブランチごとの、出した時か rebase した時の main の先 */
+  baseOf: Record<string, string>;
+  /** main に入れたコミット */
+  landed: Set<string>;
   /** 出したレビューと行のコメント */
   posted: { repo: string; pr: number; kind: "review" | "comment" | "status"; body: unknown }[];
   /** 動かした workflow */
@@ -58,7 +66,11 @@ export type WorkWorld = {
 function fakeForge(): FakeForge {
   const forge: FakeForge = {
     pulls: [],
+    bodies: [],
     merged: [],
+    main: "a".repeat(40),
+    baseOf: {},
+    landed: new Set(),
     posted: [],
     dispatched: [],
     checks: "passed",
@@ -66,6 +78,8 @@ function fakeForge(): FakeForge {
     openPull: async (input) => {
       await forge.during.openPull?.();
       forge.pulls.push({ repo: input.repo, branch: input.branch, title: input.title });
+      forge.bodies.push(input.body);
+      forge.baseOf[input.branch] = forge.main;
       return { number: forge.pulls.length, baseSha: "a".repeat(40), headSha: "b".repeat(40) };
     },
     checkState: () => Promise.resolve(forge.checks),
@@ -74,8 +88,14 @@ function fakeForge(): FakeForge {
     connected: () => Promise.resolve(true),
     merge: async (_repo, head) => {
       await forge.during.merge?.();
+      // 本物の GitHub と同じく、出した時の main の先が今の先のままの時だけ進められる
+      if ((forge.baseOf[head.branch] ?? forge.main) !== forge.main) return "behind";
       forge.merged.push(head.branch);
+      forge.landed.add(head.sha);
+      forge.main = String(forge.merged.length).padEnd(40, "m");
+      return "merged";
     },
+    inMain: (_repo, sha) => Promise.resolve(forge.landed.has(sha)),
     postReview: (repo, pr, review) => Promise.resolve(forge.posted.push({ repo, pr, kind: "review", body: review })),
     postComment: (repo, pr, comment) => Promise.resolve(forge.posted.push({ repo, pr, kind: "comment", body: comment })),
     postStatus: (repo, sha, status) => Promise.resolve(forge.posted.push({ repo, pr: 0, kind: "status", body: { sha, ...status } })),

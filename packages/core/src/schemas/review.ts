@@ -102,6 +102,12 @@ export const MirrorStatusPayload = z.object({ state: z.enum(["success", "failure
 /** GitHub に写すコミットのステータスの中身の型 */
 export type MirrorStatusPayload = z.infer<typeof MirrorStatusPayload>;
 
+/** GitHub に写す子 Issue の閉じの中身。sha は main に入れた確かめたコミットで、閉じる前に main がこれを含む事を確かめる */
+export const MirrorIssueClosePayload = z.object({ issueNumber: z.number().int().positive(), sha: CommitSha }).strict();
+
+/** GitHub に写す子 Issue の閉じの中身の型 */
+export type MirrorIssueClosePayload = z.infer<typeof MirrorIssueClosePayload>;
+
 /** GitHub に写す行のコメントの中身。side は GitHub の LEFT (前) と RIGHT (後) */
 export const MirrorCommentPayload = z
   .object({ noteId: Uuid, path: RepoPath, line: z.number().int().positive(), side: z.enum(["LEFT", "RIGHT"]), body: z.string().min(1).max(65_536), commitId: CommitSha })
