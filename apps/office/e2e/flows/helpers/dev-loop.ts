@@ -69,23 +69,30 @@ export function giveBackBuilderTasks(ids: string): void {
 }
 
 /**
+ * 開発担当が持つ (持っているかもしれない) タスクを、見送りにして離させる。作業中のタスクは画面から取り消せないので、待ちに戻し、担当を開発担当にしてから取り消す。取り消しが前の担当の社員を離れさせる
+ * @param page 画面を開いたページ
+ * @param id タスク ID
+ */
+export async function releaseBuilderTask(page: Page, id: string): Promise<void> {
+  seedMain(`UPDATE nodes SET status = 'todo', assignee = 'builder' WHERE id = '${id}'`);
+  const { version } = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${id}`)).json()).data;
+  expect((await page.request.patch(`/api/v1/nodes/${id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+}
+
+/**
  * 開発担当のまだ済んでいないタスクを開発担当から外す。持っているタスクは見送りにして離させる
  * @param page 画面を開いたページ
  * @returns 外したタスクの ID を SQL の並びにした物。戻す時は、待ちのタスクとして開発担当に戻す
  */
 export async function setAsideBuilderTasks(page: Page): Promise<string> {
   const Assigned = z.object({ data: z.array(z.object({ id: z.string(), status: z.string() }).loose()) });
-  const Version = z.object({ data: z.object({ version: z.number() }).loose() });
   const aside = new Set<string>();
   const listed = () => [...aside].map((id) => `'${id}'`).join(", ");
   const held = async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "builder")?.nodeId ?? null;
-  // 作業中のタスクは画面から取り消せないので、待ちに戻し、担当を開発担当にしてから取り消す。取り消しが前の担当の社員を離れさせる。
   // 待ちに戻してから取り消すので、Issue を持つタスクでも重なって待つ兄弟を起こさない (起こすのは作業中かレビューの見送りだけ)
   const release = async (id: string) => {
     aside.add(id);
-    seedMain(`UPDATE nodes SET status = 'todo', assignee = 'builder' WHERE id = '${id}'`);
-    const { version } = Version.parse(await (await page.request.get(`/api/v1/nodes/${id}`)).json()).data;
-    expect((await page.request.patch(`/api/v1/nodes/${id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+    await releaseBuilderTask(page, id);
   };
   try {
     // 外す間にも開発担当は待ちのタスクを取り、呼び出し中の社員は版を進めるので、持つ物も待つ物も無くなるまで読み直す

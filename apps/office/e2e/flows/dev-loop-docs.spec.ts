@@ -2,9 +2,9 @@
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, giveBackBuilderTasks, prototypeService, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
+import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
 import { restoreSeedServices, seedMain } from "./helpers/seed.ts";
-import { clockInStaff, openTree, scriptReply } from "./helpers/staff-work.ts";
+import { clockInStaff, Held, openTree, scriptReply } from "./helpers/staff-work.ts";
 
 /** 通しの間だけ開発担当から外したタスクの ID。後始末で戻す */
 const state = { aside: "" };
@@ -140,9 +140,13 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
       const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
       await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: origin }, data: { version, status: "dropped" } });
     }
-    // 子のタスクは消さない。開発担当がまだ持っている事があり、消すと続きを呼んで落ち、後の通しの社員を塞ぐ (次の通しの前処理が、持つ物を外す)
+    // 開発担当が持ったままのタスクを消すと、続きを呼んで落ち、後の通しの社員を塞ぐ。見送りにして離させ、離れてから消す。済みのタスクが溜まると、前処理の 100 件の数えを超える
     try {
-      seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM task_docs WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'`);
+      await releaseBuilderTask(page, ids.task);
+      await expect
+        .poll(async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((x) => x.id === "builder")?.nodeId ?? null, { timeout: 30_000 })
+        .not.toBe(ids.task);
+      seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM task_docs WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
     } finally {
       // 後始末が落ちても勤務の時刻を戻す。外したタスクを開発担当に戻すのはその後 (afterEach)
       await restoreSchedule?.();
