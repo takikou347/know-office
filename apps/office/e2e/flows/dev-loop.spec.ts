@@ -3,13 +3,62 @@ import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { openTree, scriptReply } from "./helpers/staff-work.ts";
+import { ALL_DAY, Held, openTree, scheduleCard, scriptReply, setSchedule, Staff } from "./helpers/staff-work.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { freeRepoNames, restoreSeedServices, seedMain } from "./helpers/seed.ts";
 import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
 
 /** 代わりの GitHub がインストールで選ぶ、サービスのリポジトリ */
 const REPO = "example/know-office";
+
+/**
+ * 開発担当のまだ済んでいないタスクを開発担当から外す。持っているタスクは見送りにして離させる
+ * @param page 画面を開いたページ
+ * @returns 外したタスクの ID を SQL の並びにした物。戻す時は、待ちのタスクとして開発担当に戻す
+ */
+async function setAsideBuilderTasks(page: Page): Promise<string> {
+  const Assigned = z.object({ data: z.array(z.object({ id: z.string(), status: z.string() }).loose()) });
+  const Version = z.object({ data: z.object({ version: z.number() }).loose() });
+  const left = Assigned.parse(await (await page.request.get("/api/v1/nodes?assignee=builder&limit=100")).json()).data.filter((n) => n.status === "todo" || n.status === "doing");
+  for (const n of left.filter((x) => x.status === "doing")) {
+    // 作業中のタスクは画面から取り消せないので、待ちに戻してから取り消し、社員を離れさせる。呼び出し中の社員が同じ時に版を進めるので、読み直す
+    seedMain(`UPDATE nodes SET status = 'todo' WHERE id = '${n.id}'`);
+    await expect(async () => {
+      const { version } = Version.parse(await (await page.request.get(`/api/v1/nodes/${n.id}`)).json()).data;
+      expect((await page.request.patch(`/api/v1/nodes/${n.id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+    }).toPass({ timeout: 10_000 });
+  }
+  const ids = left.map((n) => `'${n.id}'`).join(", ");
+  if (ids !== "") seedMain(`UPDATE nodes SET assignee = NULL WHERE id IN (${ids})`);
+  const held = async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "builder")?.nodeId ?? null;
+  await expect.poll(held, { timeout: 60_000 }).toBeNull();
+  return ids;
+}
+
+/**
+ * 開発担当を勤務の中にする。夜に流すと勤務の外で、呼び出されない
+ * @param page 画面を開いたページ。勤務の時刻を広げる変更はパスキーで確かめるので、useOwnerPasskey を付けておく
+ * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
+ */
+async function clockInBuilder(page: Page): Promise<() => Promise<void>> {
+  const state = async () => Staff.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "builder")?.state;
+  if ((await state()) === "working") return () => Promise.resolve();
+  const box = await scheduleCard(page);
+  const read = { start: await box.getByLabel("始まり (日本時間)").inputValue(), end: await box.getByLabel("終わり (日本時間)").inputValue() };
+  // 前の通しが広げたまま残した時刻は元にせず、勤務の時刻の初期値に戻す
+  const was = read.start === ALL_DAY.start && read.end === ALL_DAY.end ? { start: "09:00", end: "17:00" } : read;
+  const restore = () => setSchedule(page, was.start, was.end);
+  await setSchedule(page, ALL_DAY.start, ALL_DAY.end);
+  try {
+    // 同じ日に一度退勤した社員はその日にもう出勤しないので、退勤した日の印を消す
+    expect((await page.request.post("/__dev/staff/builder/forget-day")).status()).toBe(204);
+    await expect.poll(state, { timeout: 30_000 }).toBe("working");
+  } catch (error) {
+    await restore();
+    throw error;
+  }
+  return restore;
+}
 
 /**
  * 木の返事から、題が合うタスクの ID を探す
@@ -122,11 +171,15 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
   const { serviceId } = await prototypeService(page, "入れる案");
   // 前の通しが残した読んでいない鍵と上限の通知は、どの社員の呼び出しも止めるので、先に読んだ事にする
   seedMain(`UPDATE notices SET read_at = ${String(Date.now())} WHERE kind IN ('sdk_auth_failed', 'claude_spend_limit') AND read_at IS NULL`);
+  // 前の通しが開発担当に残したタスク (見本のタスクや設計書のタスク) は、先に取られて積んだ返事を使われるので、通しの間だけ開発担当から外し、終わりに戻す。
+  // 持って呼び出し中の物は、止めて再開しても続きから呼ぶので、取り消して離させる
+  const aside = await setAsideBuilderTasks(page);
   // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
   const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
   expect(stopped.status()).toBe(201);
   // 子 Issue のタスクの親にする、通しの木 (開発担当の作業の開始が祖先の木を読む)。止めた社員もここで再開する
   await openTree(page);
+  let restoreSchedule: (() => Promise<void>) | null = null;
   const ids = { task: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, dev: `019a7b00-0000-7000-8000-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}` };
   const github = { headers: { authorization: "Bearer e2e", "user-agent": "know-office-e2e" } };
   const ref = `${FAKE_GITHUB}/repos/${REPO}/git/refs/heads`;
@@ -157,6 +210,7 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
   );
 
   try {
+    restoreSchedule = await clockInBuilder(page);
     await put("main", base);
     await put(branch, head);
     // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチ名は ko/<タスク ID の頭 8 字>-<name>
@@ -201,5 +255,8 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
     }
     // 済みの子のタスクは、開発担当が離れているので消してよい。ミラーとレビューも消す
     seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
+    // 勤務の時刻を戻してから、外したタスクを開発担当に戻す
+    await restoreSchedule?.();
+    if (aside !== "") seedMain(`UPDATE nodes SET assignee = 'builder', status = 'todo' WHERE id IN (${aside})`);
   }
 });
