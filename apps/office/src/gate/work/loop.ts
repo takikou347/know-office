@@ -1,7 +1,7 @@
 // タスクの繰り返し。社員が自分の山から 1 つ取り、空なら上司に求め、終えたら次を取る (タスクとレビューの 3.1)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, jstDay, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
-import { and, asc, desc, eq, gte, inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gte, inArray, not, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { approvals, nodes, staff, workEntries } from "../db/main.ts";
 import { type DevIssues, UNCONNECTED_DEV_ISSUES } from "../devloop/dev-issues.ts";
@@ -129,20 +129,72 @@ export async function wasCarried(env: Bindings, staffId: string, nodeId: string)
 }
 
 /**
- * 社員の次の todo のタスクを 1 つ読む。前の勤務で続きにしたタスク (この社員の最後のした仕事が continued) を先に、ほかは優先度の小さい順、作った順
+ * 子 Issue のタスクが、同じリポジトリの doing か review の子と触るファイルが重ならない事の条件。重なりは glob の固定の頭 (dev_issues.heads) で比べ、
+ * どちらかの頭が他方の頭で始まれば重なる。頭が空か、heads の無い行はすべてと重なる (開発の回し方の 3.5)。dev_issues を持たないタスク (設計書、レビュー) とは比べない
+ * @param self 取るタスクの、リポジトリと Issue の番号と ID を指す式
+ * @param self.repo リポジトリ
+ * @param self.issue Issue の番号
+ * @param self.id タスク ID
+ * @returns SQL の条件
+ */
+function noOverlap(self: { repo: SQLWrapper; issue: SQLWrapper; id: SQLWrapper }): SQL {
+  return not(
+    exists(sql`(
+      SELECT 1 FROM nodes o
+      JOIN dev_issues oi ON oi.repo = o.repo AND oi.number = o.issue_number AND oi.kind = 'child' AND o.source = 'issue:' || oi.number
+      JOIN dev_issues mi ON mi.repo = ${self.repo} AND mi.number = ${self.issue} AND mi.kind = 'child',
+      json_each(coalesce(oi.heads, '[""]')) a, json_each(coalesce(mi.heads, '[""]')) b
+      WHERE o.repo = ${self.repo} AND o.status IN ('doing', 'review') AND o.id <> ${self.id}
+        AND (a.value = '' OR b.value = '' OR substr(a.value, 1, length(b.value)) = b.value OR substr(b.value, 1, length(a.value)) = a.value))`),
+  );
+}
+
+/**
+ * 社員の次の todo のタスクを 1 つ読む。前の勤務で続きにしたタスク (この社員の最後のした仕事が continued) を先に、ほかは優先度の小さい順、作った順。
+ * 触るファイルが doing か review の子と重なる子 Issue のタスクは飛ばす
  * @param env バインディング
  * @param staffId 社員 ID
  * @returns タスクと、続きにしたタスクか。無ければ undefined
  */
 async function nextTodo(env: Bindings, staffId: string): Promise<{ row: NodeRow; carried: boolean } | undefined> {
+  // 副問い合わせの中で外の nodes を指すので、列は表の名前を付けて書く (drizzle は 1 つの表の問い合わせでは列に表の名前を付けない)
   const carried = carriedBy(staffId, nodes.id);
   const [found] = await drizzle(env.DB)
     .select({ row: nodes, carried })
     .from(nodes)
-    .where(and(eq(nodes.kind, "task"), eq(nodes.assignee, staffId), eq(nodes.status, "todo")))
+    .where(and(eq(nodes.kind, "task"), eq(nodes.assignee, staffId), eq(nodes.status, "todo"), noOverlap({ repo: sql.raw('"nodes"."repo"'), issue: sql.raw('"nodes"."issue_number"'), id: sql.raw('"nodes"."id"') })))
     .orderBy(desc(carried), asc(nodes.priority), asc(nodes.createdAt), asc(nodes.id))
     .limit(1);
   return found ? { row: found.row, carried: found.carried === 1 } : undefined;
+}
+
+/**
+ * 社員に todo のタスクが 1 つでもあるか。重なりで飛ばされた物も数える
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @returns あれば true
+ */
+async function hasTodo(env: Bindings, staffId: string): Promise<boolean> {
+  const [found] = await drizzle(env.DB).select({ id: nodes.id }).from(nodes).where(and(eq(nodes.kind, "task"), eq(nodes.assignee, staffId), eq(nodes.status, "todo"))).limit(1);
+  return found !== undefined;
+}
+
+/**
+ * タスクを doing に取る。読んだ時から版が進んでいれば取らない。子 Issue のタスクは、同じ文の中で重なる doing か review の子が無い事も確かめる。
+ * 同時に重なる 2 つが取りに来ても、書きは 1 つずつなので、後から書く方は先の doing を見て取れない
+ * @param env バインディング
+ * @param row 読んだ時のタスクの行
+ * @param now 今の時刻
+ * @returns 取った行。取れなければ null
+ */
+export async function claimNode(env: Bindings, row: NodeRow, now: number): Promise<NodeRow | null> {
+  if (row.issueNumber === null || row.repo === null) return moveNode(env.DB, row, "doing", now);
+  const done = await drizzle(env.DB)
+    .update(nodes)
+    .set({ status: "doing", version: row.version + 1, updatedAt: now })
+    .where(and(eq(nodes.id, row.id), eq(nodes.version, row.version), eq(nodes.status, "todo"), noOverlap({ repo: sql`${row.repo}`, issue: sql`${row.issueNumber}`, id: sql`${row.id}` })))
+    .returning({ id: nodes.id });
+  return done.length > 0 ? { ...row, status: "doing", version: row.version + 1, updatedAt: now } : null;
 }
 
 /**
@@ -162,12 +214,12 @@ function taskOf(row: NodeRow, promptVersion: number | undefined): StaffTask {
  * @param row 読んだ時のタスクの行
  * @param now 今の時刻
  * @param hand 社員に渡す。受け取ったかを返す
- * @returns 始めたか。読んでから担当か状態が変わっていれば始めない
+ * @returns 始めたら started。読んでから担当か状態が変わったか、重なる子ができて取れなければ lost、社員が受け取らなければ refused
  */
-async function start(env: Bindings, staffId: string, row: NodeRow, now: number, hand: (task: StaffTask) => Promise<boolean>): Promise<boolean> {
+async function start(env: Bindings, staffId: string, row: NodeRow, now: number, hand: (task: StaffTask) => Promise<boolean>): Promise<"started" | "lost" | "refused"> {
   // 読んでからオーナーが担当を変えるとバージョンが進むので、先に doing にして取れた時だけ渡す。2 人が同じタスクを取らない
-  const claimed = await moveNode(env.DB, row, "doing", now);
-  if (!claimed) return false;
+  const claimed = await claimNode(env, row, now);
+  if (!claimed) return "lost";
   // 版は渡す前に読み、社員 DO の記憶にタスクと一緒に置く。続きの呼び出しもこの版で呼ぶ
   const [who] = await drizzle(env.DB).select({ promptVersion: staff.promptVersion }).from(staff).where(eq(staff.id, staffId)).limit(1);
   let handed = false;
@@ -176,7 +228,7 @@ async function start(env: Bindings, staffId: string, row: NodeRow, now: number, 
   } finally {
     if (!handed) await revertNode(env.DB, claimed.id, "doing", "todo", now);
   }
-  if (!handed) return false;
+  if (!handed) return "refused";
   // 承認を待って戻ったタスクは、直近の答え (承認か差し戻しと理由) をタスクの文脈に入れ、社員が読んで続ける
   const [answer] = await drizzle(env.DB)
     .select({ id: approvals.id, kind: approvals.kind, status: approvals.status, reason: approvals.reason })
@@ -186,8 +238,11 @@ async function start(env: Bindings, staffId: string, row: NodeRow, now: number, 
     .limit(1);
   const detail = { promptVersion: who?.promptVersion ?? null, ...(answer ? { approval: answer } : {}) };
   await appendNodeEvent(env, { nodeId: row.id, staffId, kind: "started", detail }, { by: staffId, now });
-  return true;
+  return "started";
 }
+
+/** 重なる子が先に doing になって取れなかった時に、次の候補を選び直す回数の上限 */
+const PULL_TRIES = 3;
 
 /** 早い退勤の中央値に使う、直前の日数 */
 const MEDIAN_DAYS = 7;
@@ -238,15 +293,21 @@ async function recentMedian(db: D1Database, staffId: string, taskKind: NodeRow["
 export async function pullNext(env: Bindings, book: TaskBook, now: number): Promise<PulledNext> {
   const status = await book.status(now);
   if (status.state !== "working" || status.nodeId !== null) return { taken: false, nodeId: status.nodeId, carried: false };
-  const next = await nextTodo(env, book.staffId);
-  if (!next) {
-    await askBoss(env, book.staffId, "山が空になった", now);
-    return { taken: false, nodeId: null, carried: false };
+  // 読んだ後に重なる子が doing になって取れなかった時は、次の候補を選び直す。選び直しは 3 回まで
+  for (let attempt = 0; attempt < PULL_TRIES; attempt += 1) {
+    const next = await nextTodo(env, book.staffId);
+    if (!next) {
+      // 重なりで飛ばした todo が残っている間は、山が空ではない。上司に求めず、重なっていた作業が出るのを待つ
+      if (!(await hasTodo(env, book.staffId))) await askBoss(env, book.staffId, "山が空になった", now);
+      return { taken: false, nodeId: null, carried: false };
+    }
+    const { row, carried } = next;
+    const medianMs = await recentMedian(env.DB, book.staffId, row.taskKind, now);
+    const started = await start(env, book.staffId, row, now, async (task) => (await book.take(task, medianMs, now)).taken);
+    if (started === "started") return { taken: true, nodeId: row.id, carried };
+    if (started === "refused") break;
   }
-  const { row, carried } = next;
-  const medianMs = await recentMedian(env.DB, book.staffId, row.taskKind, now);
-  const taken = await start(env, book.staffId, row, now, async (task) => (await book.take(task, medianMs, now)).taken);
-  return taken ? { taken: true, nodeId: row.id, carried } : { taken: false, nodeId: null, carried: false };
+  return { taken: false, nodeId: null, carried: false };
 }
 
 /**

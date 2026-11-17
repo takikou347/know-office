@@ -255,7 +255,7 @@ export const ownerDataReads = sqliteTable("owner_data_reads", {
 
 /**
  * 設計書から作った Issue。1 行が親か子の Issue 1 件。GitHub に送る前に pending の行を取り、作れたら open にする (開発の回し方の 3.3)
- * 一意は、親が (サービス、機能)、子が (サービス、機能、要件、本文のハッシュ)。mark_key は本文の隠した印の鍵で、送り直しで同じ Issue を探す
+ * 一意は、親が (サービス、機能)、子が (サービス、機能、要件、本文のハッシュ)。mark_key は本文の隠した印の鍵で、送り直しで同じ Issue を探す。heads は paths の各 glob の固定の頭で、取る時の重なりを SQL で比べる (NULL はすべてと重なる)
  */
 export const devIssues = sqliteTable(
   "dev_issues",
@@ -272,6 +272,7 @@ export const devIssues = sqliteTable(
     reqHash: text("req_hash"),
     issueKind: text("issue_kind", { enum: ["bug", "feature", "chore"] }),
     paths: json("paths"),
+    heads: json("heads"),
     markKey: text("mark_key").notNull(),
     state: text("state", { enum: ["pending", "open", "closed"] }).notNull(),
     createdAt: time("created_at").notNull(),

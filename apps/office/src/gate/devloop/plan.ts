@@ -1,5 +1,5 @@
 // 設計書から親と子の Issue を作る。社長が送った組を今の設計書で確かめ、題と本文を決まった形で作り、sub-issue でつなぎ、子ごとに開発担当のタスクを足す (開発の回し方の 3.3、3.4)
-import { AppError, devIssueKey, devIssueText, featureTitle, type IssueKind, type IssuePlanTool, isRedactedName, newId, parseRequirements, SERVICE_NAME } from "@know-office/core";
+import { AppError, devIssueKey, devIssueText, featureTitle, globHead, type IssueKind, type IssuePlanTool, isRedactedName, newId, parseRequirements, SERVICE_NAME } from "@know-office/core";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -96,6 +96,7 @@ async function claim(env: Bindings, ids: { id: string; repo: string }, spec: Spe
     reqHash: spec.hash,
     issueKind: spec.issueKind,
     paths: spec.paths,
+    heads: spec.paths === null ? null : spec.paths.map(globHead),
     markKey: spec.key,
     state: "pending",
     createdAt: now,
