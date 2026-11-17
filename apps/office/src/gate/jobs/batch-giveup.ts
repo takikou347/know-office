@@ -50,8 +50,21 @@ export async function countNotFound(env: Bindings, p: SubmittedBatch, now: numbe
 export async function failBatch(env: Bindings, p: SubmittedBatch, now: number, reason: string): Promise<void> {
   const res = await env.DB.prepare("UPDATE batches SET status = 'failed', ended_at = ? WHERE id = ? AND status = 'submitted'").bind(now, p.id).run();
   if (res.meta.changes !== 1) return;
+  await noticeGiveUp(env, p, now, `送ったが、${reason}`);
+}
+
+/**
+ * 諦めたバッチをエラーログに残し、種類ごとに 1 件だけ知らせる
+ * @param env バインディング
+ * @param p batches の行
+ * @param p.kind 種類
+ * @param p.week 週の始めの日。急ぐ故障は日と指紋
+ * @param now 今の時刻
+ * @param reason 諦めた理由
+ */
+export async function noticeGiveUp(env: Bindings, p: { kind: string; week: string }, now: number, reason: string): Promise<void> {
   await recordError(env, { source: "job", level: "error", code: `${p.kind}_batch_failed`, error: new Error(reason) }, clockAt(now));
-  await noticeOnce(env, { kind: BATCH_FAILED_NOTICE, title: `バッチ処理を諦めた (${p.kind})`, body: `${p.week} の分を送ったが、${reason}。この週の分は送り直さないので、要れば記録を見て手で確かめる` }, now);
+  await noticeOnce(env, { kind: BATCH_FAILED_NOTICE, title: `バッチ処理を諦めた (${p.kind})`, body: `${p.week} の分は、${reason}。この分は送り直さないので、要れば記録を見て手で確かめる` }, now);
 }
 
 /**

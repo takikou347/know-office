@@ -144,6 +144,21 @@ describe("週のバッチ処理の切れ目", () => {
     const left = await rows(world.d1.DB, "SELECT status FROM batches");
     expect(left).toEqual(outcome === "retry" ? [] : [{ status: outcome }]);
     expect(await openNotices("sdk_auth_failed")).toHaveLength(notices);
+    // 決まって断られて諦めた分は知らせる
+    expect(await openNotices("batch_failed")).toHaveLength(outcome === "failed" ? 1 : 0);
+  });
+
+  it("鍵が無い間に始めた送りは印を戻し、鍵を入れた後に送る", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    Object.assign(world.gate.env, { ANTHROPIC_API_KEY: "" });
+    try {
+      await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3));
+      expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+    } finally {
+      Object.assign(world.gate.env, { ANTHROPIC_API_KEY: ANTHROPIC_KEY });
+    }
+    await startBatch(world.gate.env, "distill", depsOf(), dec(7, 4));
+    expect(world.gate.claude.batches).toHaveLength(1);
   });
 
   it("同時に 2 つの見回りが同じ 404 を見ても 1 回と数え、諦めた通知は 1 件", async () => {

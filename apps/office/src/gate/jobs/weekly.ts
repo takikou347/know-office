@@ -7,7 +7,7 @@ import type { IssueTracker } from "../findings/tracker.ts";
 import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
 import { claudeBlocked, noticeAuthFailed } from "../work/run.ts";
-import { BATCH_DEADLINE_MS, countNotFound, failBatch, recordAnswerFailures } from "./batch-giveup.ts";
+import { BATCH_DEADLINE_MS, countNotFound, failBatch, noticeGiveUp, recordAnswerFailures } from "./batch-giveup.ts";
 import { IDEAS_JOB } from "./ideas.ts";
 import { batchEnded, type BatchRequest, type BatchResult, batchResults, submitBatch, UNKNOWN_SUBMIT } from "./claude-batch.ts";
 
@@ -190,6 +190,7 @@ async function submitOnce(
     await (outcome === "failed" ? env.DB.prepare(sql).bind(now, id) : env.DB.prepare(sql).bind(id)).run();
     if (code === "unauthenticated") await noticeAuthFailed(env, now);
     await recordError(env, { source: "job", level: "error", code: `${kind}_submit_${outcome === "unknown" ? "unknown" : "failed"}`, error }, clockOf(now));
+    if (outcome === "failed") await noticeGiveUp(env, { kind, week: key }, now, "送りを断られた");
     return null;
   }
 }
@@ -200,9 +201,10 @@ async function submitOnce(
  * @returns retry は印を戻す、unknown は送ったか分からないので残す、failed は決まって断られたので残す
  */
 function submitOutcome(code: string): "retry" | "unknown" | "failed" {
-  // 鍵の断りは通知を読むまで送らないので、読んだ後に送り直せるよう戻す
-  if (code === "rate_limited" || code === "unauthenticated") return "retry";
+  // 鍵の断りは通知を読むまで送らないので、読んだ後に送り直せるよう戻す。鍵が無いか全体を止めた間 (unavailable) も、入れ直した後に送る
+  if (code === "rate_limited" || code === "unauthenticated" || code === "unavailable") return "retry";
   if (code === UNKNOWN_SUBMIT) return "unknown";
+  // 4xx と ID の形の違い (upstream_failed)、送る要求の形の違いなどの想定外 (internal) は、送り直しても同じなので諦める
   return "failed";
 }
 
