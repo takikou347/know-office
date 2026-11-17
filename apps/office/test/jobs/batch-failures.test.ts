@@ -1,6 +1,7 @@
 // 週のバッチ処理と急ぐ故障の調べの切れ目。鍵の誤り、切れた答え、結果の分からない送り、終わらないバッチを、通知して止める (サービスと拡張の 3.6、3.7)
 import type { Fetcher } from "@know-office/core";
 import { describe, expect, it } from "vitest";
+import { BATCH_APPLY_LIMIT, BATCH_RESULTS_MS } from "../../src/gate/jobs/batch-giveup.ts";
 import { pollBatches, startBatch } from "../../src/gate/jobs/weekly.ts";
 import { noticeOnce } from "../../src/gate/work/notice.ts";
 import { SPEND_LIMIT_NOTICE } from "../../src/gate/work/run.ts";
@@ -49,6 +50,14 @@ async function openNotices(kind: string): Promise<unknown[]> {
 function status(code: number): Fetcher {
   return () => Promise.resolve(Response.json({ type: "error", error: { type: "x" } }, { status: code }));
 }
+
+/**
+ * 終わったバッチの結果を読むと 500 を返し、ほかはテストのゲートウェイに渡す
+ * @param url 呼ぶ URL
+ * @param init 要求の中身
+ * @returns 返事
+ */
+const brokenResults: Fetcher = (url, init) => (url.endsWith("/results") ? status(500)(url, init) : world.gate.fetch(url, init));
 
 describe("落ちても続きから", () => {
   it("鍵が断られる", async () => {
@@ -107,6 +116,23 @@ describe("落ちても続きから", () => {
     expect(await rows(world.d1.DB, "SELECT status, failures FROM batches")).toEqual([{ status: "submitted", failures: 2 }]);
     await pollBatches(world.gate.env, depsOf(), dec(7, 3, 15));
     expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "failed" }]);
+    expect(await openNotices("batch_failed")).toHaveLength(1);
+  });
+  it("結果を入れるのが落ち続けるバッチ", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3));
+    const batch = world.gate.claude.batches.at(-1);
+    if (!batch) throw new Error("送っていない");
+    world.gate.claude.endBatch(batch.id, () => PROPOSAL);
+    // 終わったバッチの結果を読むのが落ち続ける
+    for (let i = 1; i < BATCH_APPLY_LIMIT; i++) await pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3, 5 * i));
+    expect(await rows(world.d1.DB, "SELECT status, apply_failures FROM batches")).toEqual([{ status: "submitted", apply_failures: BATCH_APPLY_LIMIT - 1 }]);
+    expect(await openNotices("batch_failed")).toHaveLength(0);
+    // 続けて上限の回数に届くと諦め、通知を 1 件出す
+    await pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3, 5 * BATCH_APPLY_LIMIT));
+    expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "failed" }]);
+    expect(await openNotices("batch_failed")).toHaveLength(1);
+    await pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3, 5 * (BATCH_APPLY_LIMIT + 1)));
     expect(await openNotices("batch_failed")).toHaveLength(1);
   });
 });
@@ -180,6 +206,43 @@ describe("週のバッチ処理の切れ目", () => {
     }
     await startBatch(world.gate.env, "distill", depsOf(), dec(7, 4));
     expect(world.gate.claude.batches).toHaveLength(1);
+  });
+
+  it("結果を入れるのが同時に 2 つの見回りで落ちても 1 回と数える", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3));
+    const batch = world.gate.claude.batches.at(-1);
+    if (!batch) throw new Error("送っていない");
+    world.gate.claude.endBatch(batch.id, () => PROPOSAL);
+    await Promise.all([pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3, 5)), pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3, 5))]);
+    expect(await rows(world.d1.DB, "SELECT apply_failures FROM batches")).toEqual([{ apply_failures: 1 }]);
+  });
+
+  it("結果を読める期限を過ぎて入れるのが落ちたら、回数を待たずに諦める", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3));
+    const batch = world.gate.claude.batches.at(-1);
+    if (!batch) throw new Error("送っていない");
+    world.gate.claude.endBatch(batch.id, () => PROPOSAL);
+    // 期限ちょうどはまだ数える
+    await pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3) + BATCH_RESULTS_MS);
+    expect(await rows(world.d1.DB, "SELECT status, apply_failures FROM batches")).toEqual([{ status: "submitted", apply_failures: 1 }]);
+    await pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3) + BATCH_RESULTS_MS + 1);
+    expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "failed" }]);
+    expect(await openNotices("batch_failed")).toHaveLength(1);
+  });
+
+  it("結果を入れられたら、落ちた回数があっても入れて終える", async () => {
+    await addStop(world, { at: dec(1, 10), signal: "staff_rule_denied" });
+    await startBatch(world.gate.env, "distill", depsOf(), dec(7, 3));
+    const batch = world.gate.claude.batches.at(-1);
+    if (!batch) throw new Error("送っていない");
+    world.gate.claude.endBatch(batch.id, () => PROPOSAL);
+    for (const m of [5, 10]) await pollBatches(world.gate.env, depsOf(brokenResults), dec(7, 3, m));
+    await pollBatches(world.gate.env, depsOf(), dec(7, 3, 15));
+    expect(await rows(world.d1.DB, "SELECT status FROM batches")).toEqual([{ status: "applied" }]);
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM lessons")).toEqual([{ n: 1 }]);
+    expect(await openNotices("batch_failed")).toHaveLength(0);
   });
 
   it("同時に 2 つの見回りが同じ 404 を見ても 1 回と数え、諦めた通知は 1 件", async () => {

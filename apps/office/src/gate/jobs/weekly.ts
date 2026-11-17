@@ -7,7 +7,7 @@ import type { IssueTracker } from "../findings/tracker.ts";
 import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
 import { claudeBlocked, noticeAuthFailed } from "../work/run.ts";
-import { BATCH_DEADLINE_MS, countNotFound, failBatch, noticeGiveUp, recordAnswerFailures } from "./batch-giveup.ts";
+import { BATCH_DEADLINE_MS, countApplyFailure, countNotFound, failBatch, noticeGiveUp, recordAnswerFailures } from "./batch-giveup.ts";
 import { IDEAS_JOB } from "./ideas.ts";
 import { batchEnded, type BatchRequest, type BatchResult, batchResults, submitBatch, UNKNOWN_SUBMIT } from "./claude-batch.ts";
 
@@ -93,6 +93,7 @@ const Pending = z.object({
   detail: z.string().nullable(),
   created_at: z.number(),
   failures: z.number(),
+  apply_failures: z.number(),
 });
 
 /**
@@ -233,7 +234,7 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
  * @param now 今の時刻
  */
 async function pollSubmitted(env: Bindings, deps: WeeklyDeps, now: number): Promise<void> {
-  const { results } = await env.DB.prepare("SELECT id, kind, week, batch_id, detail, created_at, failures FROM batches WHERE status = 'submitted' ORDER BY id").all();
+  const { results } = await env.DB.prepare("SELECT id, kind, week, batch_id, detail, created_at, failures, apply_failures FROM batches WHERE status = 'submitted' ORDER BY id").all();
   for (const raw of results) {
     const parsed = Pending.safeParse(raw);
     if (!parsed.success) continue;
@@ -257,7 +258,7 @@ async function pollSubmitted(env: Bindings, deps: WeeklyDeps, now: number): Prom
       if (late) await failBatch(env, p, now, "期限を過ぎても終わらない");
       continue;
     }
-    // 終わったバッチの結果は 29 日読めるので、入れるのが落ちても期限で諦めず、次の 5 分で読み直す
+    // 終わったバッチの結果は 29 日読めるので、入れるのが落ちたら次の 5 分で読み直し、続けて落ちる時だけ諦める
     try {
       const answers = await batchResults(env, deps.fetch, p.batch_id);
       const row: BatchRow = { id: p.id, kind: p.kind, week: p.week, batchId: p.batch_id, createdAt: p.created_at, detail: p.detail === null ? null : (JSON.parse(p.detail) as unknown) };
@@ -265,10 +266,12 @@ async function pollSubmitted(env: Bindings, deps: WeeklyDeps, now: number): Prom
       await recordAnswerFailures(env, p.kind, answers, now);
     } catch (error) {
       await recordError(env, { source: "job", level: "error", code: `${p.kind}_apply_failed`, error }, clockOf(now));
+      // 鍵の断りはバッチの落ちでないので数えず、鍵の通知で止める
       if (error instanceof AppError && error.code === "unauthenticated") {
         await noticeAuthFailed(env, now);
         return;
       }
+      await countApplyFailure(env, p, now);
     }
   }
 }

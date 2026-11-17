@@ -134,6 +134,13 @@
       "when": 1794927958187,
       "tag": "0018_dev_issue_heads",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1794929885073,
+      "tag": "0019_batch_apply_failures",
+      "breakpoints": true
     }
   ]
 }

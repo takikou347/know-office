@@ -11,6 +11,12 @@ export const BATCH_DEADLINE_MS = 25 * 60 * 60_000;
 /** 続けて見つからなかったら諦める回数 */
 export const BATCH_NOT_FOUND_LIMIT = 3;
 
+/** 終わったバッチの結果を入れるのが続けて落ちたら諦める回数。5 分ごとに見るので 1 時間 */
+export const BATCH_APPLY_LIMIT = 12;
+
+/** 送ってから結果を読める間。Anthropic のバッチの結果は作ってから 29 日読める (https://docs.claude.com/en/build-with-claude/batch-processing) */
+export const BATCH_RESULTS_MS = 29 * 24 * 60 * 60_000;
+
 /** 諦めたバッチの通知の種類 */
 export const BATCH_FAILED_NOTICE = "batch_failed";
 
@@ -20,6 +26,10 @@ export type SubmittedBatch = {
   id: string;
   /** 読んだ時の、続けて見つからなかった回数 */
   failures: number;
+  /** 読んだ時の、結果を入れるのが続けて落ちた回数 */
+  apply_failures: number;
+  /** 送った時刻 */
+  created_at: number;
   /** 種類 */
   kind: string;
   /** 週の始めの日。急ぐ故障は日と指紋 */
@@ -38,6 +48,24 @@ export async function countNotFound(env: Bindings, p: SubmittedBatch, now: numbe
     .bind(p.id, p.failures)
     .first<{ failures: number }>();
   if (row && row.failures >= BATCH_NOT_FOUND_LIMIT) await failBatch(env, p, now, `続けて ${String(BATCH_NOT_FOUND_LIMIT)} 回見つからない`);
+}
+
+/**
+ * 結果を入れるのが落ちた回数を足し、続けて上限に届くか結果を読める期限を過ぎたら諦める
+ * @param env バインディング
+ * @param p batches の行
+ * @param now 今の時刻
+ */
+export async function countApplyFailure(env: Bindings, p: SubmittedBatch, now: number): Promise<void> {
+  if (now > p.created_at + BATCH_RESULTS_MS) {
+    await failBatch(env, p, now, "結果を読める期限を過ぎても結果を入れられない");
+    return;
+  }
+  // 同時に走った 2 つの見回りが同じ落ちを 2 度数えないよう、読んだ回数の時だけ足す
+  const row = await env.DB.prepare("UPDATE batches SET apply_failures = apply_failures + 1 WHERE id = ? AND status = 'submitted' AND apply_failures = ? RETURNING apply_failures")
+    .bind(p.id, p.apply_failures)
+    .first<{ apply_failures: number }>();
+  if (row && row.apply_failures >= BATCH_APPLY_LIMIT) await failBatch(env, p, now, `結果を入れるのが続けて ${String(BATCH_APPLY_LIMIT)} 回落ちた`);
 }
 
 /**
