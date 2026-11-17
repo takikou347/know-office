@@ -82,10 +82,10 @@ async function hand(env: Bindings, call: PrCall, task: NodeRow & { repo: string 
       .insert(reviews)
       .values({ id: newId(clockAt(call.now)), nodeId: task.id, repo: task.repo, prNumber: pr.number, branch: pr.branch, baseSha: pr.baseSha, headSha: pr.headSha, docsHeadSha: pr.docs?.headSha ?? null });
   } else {
-    // コードか設計書のどちらかの先が変わった時だけ前の先の承認とチェックを消す。push の通知 (synchronize) と同じ式
+    // コードか設計書のどちらかの先が変わった時だけ前の先の承認を消す。チェックはコードの先の物なので、コードの先が変わった時だけ消す。push の通知 (synchronize) と同じ式
     const same = "head_sha = ?1 AND docs_head_sha IS ?3";
     await env.DB.prepare(
-      `UPDATE reviews SET owner_verdict = CASE WHEN ${same} THEN owner_verdict ELSE NULL END, reviewer_verdict = CASE WHEN ${same} THEN reviewer_verdict ELSE NULL END, checks = CASE WHEN ${same} THEN checks ELSE '[]' END, head_sha = ?1, docs_head_sha = ?3 WHERE node_id = ?2`,
+      `UPDATE reviews SET owner_verdict = CASE WHEN ${same} THEN owner_verdict ELSE NULL END, reviewer_verdict = CASE WHEN ${same} THEN reviewer_verdict ELSE NULL END, checks = CASE WHEN head_sha = ?1 THEN checks ELSE '[]' END, head_sha = ?1, docs_head_sha = ?3 WHERE node_id = ?2`,
     )
       .bind(pr.headSha, task.id, pr.docs?.headSha ?? null)
       .run();

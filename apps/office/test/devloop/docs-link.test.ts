@@ -201,6 +201,20 @@ describe("設計書を同じ時に直す", () => {
     await synchronize(world, DOCS, DOCS_HEAD, docs.number);
     expect(await rows(world.d1.DB, "SELECT reviewer_verdict, docs_head_sha FROM reviews WHERE node_id = ?", task)).toEqual([{ reviewer_verdict: "approve", docs_head_sha: DOCS_HEAD }]);
     await synchronize(world, DOCS, DOCS_NEXT, docs.number);
-    expect(await rows(world.d1.DB, "SELECT reviewer_verdict, docs_head_sha, checks FROM reviews WHERE node_id = ?", task)).toEqual([{ reviewer_verdict: null, docs_head_sha: DOCS_NEXT, checks: "[]" }]);
+    expect(await rows(world.d1.DB, "SELECT reviewer_verdict, docs_head_sha, checks FROM reviews WHERE node_id = ?", task)).toEqual([{ reviewer_verdict: null, docs_head_sha: DOCS_NEXT, checks: '[{"name":"verify","ok":true}]' }]);
+  });
+
+  it("設計書の先だけが変わって出し直しても、コードの先のチェックは消さない", async () => {
+    const { task, repos } = await working(world);
+    const docs = numbered((await openDocs()).content);
+    expect(await openCode(docs.number)).toMatchObject({ isError: false });
+    await advance(world, at(10));
+    await staffOf(world, "reviewer").pull(world.clock.now());
+    await world.d1.DB.prepare("UPDATE reviews SET checks = '[{\"name\":\"verify\",\"ok\":true}]' WHERE node_id = ?").bind(task).run();
+    // 差し戻すと開発担当が取り直す。設計書のブランチの先だけを進めて、出し直す
+    expect(await tool(world, "reviewer", "review_submit", { verdict: "reject", summary: "設計書を直す", headSha: "b".repeat(40) })).toMatchObject({ isError: false });
+    repos.heads.set(`${DOCS}:ko/${task.slice(0, 8)}-spec`, DOCS_NEXT);
+    expect(await openCode(docs.number)).toMatchObject({ isError: false });
+    expect(await rows(world.d1.DB, "SELECT reviewer_verdict, docs_head_sha, checks FROM reviews WHERE node_id = ?", task)).toEqual([{ reviewer_verdict: null, docs_head_sha: DOCS_NEXT, checks: '[{"name":"verify","ok":true}]' }]);
   });
 });
