@@ -2,7 +2,7 @@
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
-import { noticeOnce } from "../work/run.ts";
+import { noticeOnce } from "../work/notice.ts";
 import type { BatchResult } from "./claude-batch.ts";
 
 /** 送ったバッチを諦めるまでの間。Anthropic のバッチは 24 時間で切れるので、1 時間の余りを見る (https://docs.claude.com/en/build-with-claude/batch-processing) */

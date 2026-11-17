@@ -2,7 +2,8 @@
 import type { Fetcher } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { pollBatches, startBatch } from "../../src/gate/jobs/weekly.ts";
-import { noticeOnce, SPEND_LIMIT_NOTICE } from "../../src/gate/work/run.ts";
+import { noticeOnce } from "../../src/gate/work/notice.ts";
+import { SPEND_LIMIT_NOTICE } from "../../src/gate/work/run.ts";
 import { rows } from "../helpers/work.ts";
 import { addStop, answerJson, dec, fakeTracker, runBatch, useWeekly } from "../helpers/weekly.ts";
 import { ANTHROPIC_KEY } from "../helpers/gate.ts";
