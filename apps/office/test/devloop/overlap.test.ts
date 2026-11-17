@@ -48,9 +48,11 @@ describe("1 Issue を 1 回の作業で入れる", () => {
     await openPr("make");
     expect(await states()).toEqual({ 動画を作る: "review", 動画を見る: "todo", 動画を消す: "doing" });
     // 取った子が review に出ても、待っていた重なる子は、重なっていた子が入るまで取らない
+    // 山には重なる子だけが残る。空とは言わず、社長に次のタスクを求めない
+    await world.d1.DB.prepare("UPDATE nodes SET status = 'done' WHERE source LIKE 'ask_boss:%'").run();
     await openPr("remove");
     expect(await states()).toEqual({ 動画を作る: "review", 動画を見る: "todo", 動画を消す: "review" });
-    expect(await rows(world.d1.DB, "SELECT 1 FROM nodes WHERE source LIKE 'ask_boss:%' AND created_at >= ?", at(9, 1))).toEqual([]);
+    expect(await rows(world.d1.DB, "SELECT 1 FROM nodes WHERE source LIKE 'ask_boss:%' AND status != 'done'")).toEqual([]);
     // 重なっていた子が main に入ると、待っていた子を取る
     await advance(world, at(10));
     await staffOf(world, "reviewer").pull(world.clock.now());
