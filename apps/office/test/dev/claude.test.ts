@@ -124,7 +124,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("鍵が作業トークンでない時は、開発のプロキシが付けた社員の印で積んだ返事を選び、作業トークンの社員を印より先に使う", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["dev-fake-anthropic-key"], workTokens: true });
     await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", content: [{ type: "text", text: "レビュー担当へ" }] }) });
     const call = (key: string, staffId: string) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": key, [DEV_STAFF_HEADER]: staffId }, body: BODY });
     // 作業トークンの社員は印より先に使うので、印が reviewer でも builder には渡さない
@@ -136,7 +136,7 @@ describe("開発環境の代わりの物", () => {
   });
 
   it("使用の上限に切り替えた社員は、開発のプロキシが付けた社員の印でも見分ける", async () => {
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["dev-fake-anthropic-key"], workTokens: true });
     await claude.app.request("/__fake/limit", { method: "POST", body: JSON.stringify({ staffId: "reviewer", limit: "monthly" }) });
     const res = await claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": "dev-fake-anthropic-key", [DEV_STAFF_HEADER]: "reviewer" }, body: BODY });
     expect(res.status).toBe(429);
@@ -163,7 +163,7 @@ describe("開発環境の代わりの物", () => {
 
   it("待ちを付けて積んだ返事を待つ間に、同じ社員の呼び直しが来たら呼び直しに渡し、前の呼び出しには返さない", async () => {
     // ゲートウェイのプロキシを通ると、SDK が切った呼び出しが代わりの Claude API に切れたと届かない。呼び直しが来た事で前の呼び出しを捨てる
-    const claude = createFakeClaude();
+    const claude = createFakeClaude({ keys: ["dev-fake-anthropic-key"], workTokens: true });
     await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", delay_ms: 200, content: [{ type: "text", text: "待ってから" }] }) });
     const call = () => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": "dev-fake-anthropic-key", [DEV_STAFF_HEADER]: "reviewer" }, body: BODY });
     const first = call();
