@@ -7,7 +7,7 @@ import type { Bindings, WorkspaceContainer } from "../env.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import type { Caller } from "../work/ticket.ts";
 import { announceNotice, liveOf } from "../live/publish.ts";
-import { EditorLsp } from "../work/editor-lsp.ts";
+import { EditorLsp, type LspPrepared } from "../work/editor-lsp.ts";
 import type { RelaySocket, RelayTimers } from "../work/lsp-relay.ts";
 import { containerFor } from "../work/dev-container.ts";
 import { type ContainerLike, noticeWorkspaceDown, WorkspaceBox } from "../work/workspace-box.ts";
@@ -196,7 +196,7 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
    * @throws unavailable 止まっていて起こさない時、起きない時
    * @throws rate_limited 予算か tarball の回数を使い切った時
    */
-  async lspPrepare(input: unknown): Promise<{ tree: "ready" | "needed"; woke: boolean }> {
+  async lspPrepare(input: unknown): Promise<LspPrepared> {
     const parsed = LspPrepareInput.safeParse(input);
     if (!parsed.success) throw new AppError("validation_failed", "補完の支度の形が違う");
     return this.#editorOf(await this.#staffId()).prepare(parsed.data);
@@ -206,22 +206,24 @@ export class WorkspaceDO extends DurableObject<Bindings> implements WorkspaceCon
    * 取った木をワークスペースに渡す
    * @param nodeId タスク
    * @param sha 先のコミット
+   * @param claim 支度が返した役の印
    * @param body tar.gz
    * @returns 無し
    * @throws upstream_failed ワークスペースが木を断った時
    */
-  async lspPutTree(nodeId: string, sha: string, body: ReadableStream<Uint8Array>): Promise<null> {
-    return this.#editorOf(await this.#staffId()).putTree(nodeId, sha, body);
+  async lspPutTree(nodeId: string, sha: string, claim: string, body: ReadableStream<Uint8Array>): Promise<null> {
+    return this.#editorOf(await this.#staffId()).putTree(nodeId, sha, claim, body);
   }
 
   /**
    * 木を取れなかった。待っている接続に取りに行かせる
    * @param nodeId タスク
    * @param sha 先のコミット
+   * @param claim 支度が返した役の印
    * @returns 無し
    */
-  async lspDropTree(nodeId: string, sha: string): Promise<null> {
-    return this.#editorOf(await this.#staffId()).dropTree(nodeId, sha);
+  async lspDropTree(nodeId: string, sha: string, claim: string): Promise<null> {
+    return this.#editorOf(await this.#staffId()).dropTree(nodeId, sha, claim);
   }
 
   /**

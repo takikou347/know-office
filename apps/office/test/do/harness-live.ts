@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import { AppError } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../../src/gate/env.ts";
+import type { LspPrepared } from "../../src/gate/work/editor-lsp.ts";
 
 /** 配信 DO への呼び出し */
 const LiveCall = z.discriminatedUnion("method", [
@@ -36,7 +37,7 @@ export class IdleLsp extends DurableObject<Bindings> {
    * 補完の支度。動いていないので断る
    * @returns 返らない
    */
-  lspPrepare(): Promise<{ tree: "ready" | "needed"; woke: boolean }> {
+  lspPrepare(): Promise<LspPrepared> {
     return Promise.reject(new AppError("unavailable", "ワークスペースが動いていない"));
   }
 

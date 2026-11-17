@@ -9,6 +9,7 @@ import type { IssuedTicket, RenewedTicket, TicketCheck } from "./guard/staff-gua
 import type { ChainCheck } from "./ledger/audit.ts";
 import type { TokenDeps } from "./github/app.ts";
 import type { Forge } from "./work/loop.ts";
+import type { LspPrepared } from "./work/editor-lsp.ts";
 
 /** 記録 DO の RPC。画面の型から DO のコードを読まないよう、ここに形だけを置く */
 export interface Recorder extends Rpc.DurableObjectBranded {
@@ -169,11 +170,11 @@ export interface WorkspaceContainer extends Rpc.DurableObjectBranded {
   /** 起こした時に渡した鍵と同じかを確かめる。開発の代わりのワークスペースのハートビートを、その社員の物と決めるのに使う */
   holdsKey(key: string): Promise<boolean>;
   /** エディタの補完の接続の前の支度。止まっていて wake なら 1 回だけ起こし、木が今の先でなければ取る役を 1 本にだけ渡す (needed) */
-  lspPrepare(input: unknown): Promise<{ tree: "ready" | "needed"; woke: boolean }>;
+  lspPrepare(input: unknown): Promise<LspPrepared>;
   /** 取った木 (tar.gz) をワークスペースに渡す */
-  lspPutTree(nodeId: string, sha: string, body: ReadableStream<Uint8Array>): Promise<null>;
+  lspPutTree(nodeId: string, sha: string, claim: string, body: ReadableStream<Uint8Array>): Promise<null>;
   /** 木を取れなかった。待っている接続に取りに行かせる */
-  lspDropTree(nodeId: string, sha: string): Promise<null>;
+  lspDropTree(nodeId: string, sha: string, claim: string): Promise<null>;
   /** 合うエディタの補完の接続を閉じる */
   closeLsp(filter: unknown): Promise<null>;
   /** 補完で起こした物の期限を確かめ、過ぎていれば止める。社員 DO の 5 分の arm が呼ぶ */

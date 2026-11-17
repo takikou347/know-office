@@ -55,8 +55,8 @@ function wire(w: WorkWorld): void {
       return {
         ...workspaceFake(w.gate.workspaces[id.name]),
         lspPrepare: overRpc((input: { nodeId: string; sha: string; wake: boolean; now: number }) => l.editor.prepare(input)),
-        lspPutTree: overRpc((nodeId: string, sha: string, body: ReadableStream<Uint8Array>) => l.editor.putTree(nodeId, sha, body)),
-        lspDropTree: overRpc((nodeId: string, sha: string) => l.editor.dropTree(nodeId, sha)),
+        lspPutTree: overRpc((nodeId: string, sha: string, claim: string, body: ReadableStream<Uint8Array>) => l.editor.putTree(nodeId, sha, claim, body)),
+        lspDropTree: overRpc((nodeId: string, sha: string, claim: string) => l.editor.dropTree(nodeId, sha, claim)),
         closeLsp: (filter: { sessionId: string } | { ip: string } | { except: string | null }) => {
           l.closes.push(filter);
           l.editor.close(filter);
@@ -276,8 +276,8 @@ describe("ワークスペースを起こす時", () => {
     const b = lsp.builder;
     // 補完で 2 時間を使い切る
     for (let n = 0; n < 2; n += 1) {
-      await b.editor.prepare({ nodeId: task, sha: OLD, wake: true, now: b.timers.now() }).catch(() => null);
-      await b.editor.dropTree(task, OLD);
+      const prepared = await b.editor.prepare({ nodeId: task, sha: OLD, wake: true, now: b.timers.now() }).catch(() => null);
+      await b.editor.dropTree(task, OLD, prepared?.claim ?? "");
       b.timers.advance(3_600_000);
       await b.editor.alarm(b.timers.now());
     }

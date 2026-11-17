@@ -17,6 +17,8 @@ export const EDITOR_LIMITS = {
   pullsPerHour: 20,
   /** tarball を取る 1 日の回数 */
   pullsPerDay: 100,
+  /** 木を取る役を待つ長さ (90 秒)。過ぎたら待っていた接続が自分で取りに行く */
+  claimMs: 90_000,
 } as const;
 
 /** 起きていない時に待たせる秒。勤務の間はハートビートの作り直しを待つ */
@@ -82,20 +84,18 @@ type EditorState = z.infer<typeof EditorState>;
 
 const STATE_KEY = "editor";
 
-/** 合図で終わる約束 */
-type Claim = { promise: Promise<void>; resolve: () => void };
+/** 木を取る役。id は役を渡した接続だけが知り、渡し終えた時に示す */
+type Claim = { id: string; promise: Promise<void>; resolve: () => void; cancel: () => void };
 
-/**
- * 合図で終わる約束を作る
- * @returns 約束と終わらせる関数
- */
-function claim(): Claim {
-  let done: (() => void) | undefined;
-  const promise = new Promise<void>((resolve) => {
-    done = resolve;
-  });
-  return { promise, resolve: () => done?.() };
-}
+/** 支度の答え */
+export type LspPrepared = {
+  /** ready は今の木がある、needed は取って putTree か dropTree を呼ぶ */
+  tree: "ready" | "needed";
+  /** 起こしたか */
+  woke: boolean;
+  /** 木を取る役の印。needed の時だけ。putTree と dropTree に渡す */
+  claim: string | null;
+};
 
 /** ワークスペース 1 つのエディタの補完。WorkspaceDO が 1 つ持つ */
 export class EditorLsp {
@@ -106,6 +106,8 @@ export class EditorLsp {
   readonly #claims = new Map<string, Claim>();
   /** 補完で起こした物を止めている途中の物 */
   #stopping: Promise<void> | null = null;
+  /** 補完のために起こしている途中の物。同じ時に来たほかの接続は起こさずにこれを待つ */
+  #waking: Promise<void> | null = null;
 
   /**
    * 補完の中身を作る
@@ -122,55 +124,59 @@ export class EditorLsp {
    * @param input.sha 先のコミット
    * @param input.wake 止まっている時に起こしてよいか
    * @param input.now 今の時刻
-   * @returns tree は ready (今の木がある) か needed (取って putTree か dropTree を呼ぶ)、woke は起こしたか
-   * @throws unavailable 止まっていて起こさない時、起きなかった時
+   * @returns tree は ready (今の木がある) か needed (取って putTree か dropTree を呼ぶ)、woke は起こしたか、claim は木を取る役の印
+   * @throws unavailable 止まっていて起こさない時、勤務で起こしている途中の時、起きなかった時
    * @throws rate_limited 1 日の予算を使い切った時、tarball の回数が上限の時
    * @throws upstream_failed 木の名前の形が違う時
    */
-  async prepare(input: { nodeId: string; sha: string; wake: boolean; now: number }): Promise<{ tree: "ready" | "needed"; woke: boolean }> {
+  async prepare(input: { nodeId: string; sha: string; wake: boolean; now: number }): Promise<LspPrepared> {
     const params = LspTreeParams.safeParse({ nodeId: input.nodeId, sha: input.sha });
     if (!params.success) throw new AppError("upstream_failed", "木の名前の形が違う");
     const state = await this.#load();
     // 止めている最中に来た接続は、止め終わってから起こすかを決める
     await this.#stopping;
     await this.#deps.box.settled();
+    // ほかの接続が起こしている途中なら、起こさずに待つ。起きなければ同じく 503。待った後の判断の直前に確かめ直す
+    while (this.#waking) await this.#waking;
     let woke = false;
+    // ここから起こすと決めて訳を替えるまで await を挟まない。間に出勤の start が訳を勤務に替えうる
     if (!this.#deps.box.running) {
+      // 出勤の start が訳を書いてから起こすまでの間。補完の訳で上書きすると、勤務中に補完の期限で止まる
+      if (state.by === "shift") throw new AppError("unavailable", "勤務で起こしている途中", { headers: { "Retry-After": String(RETRY_AFTER_S) } });
       if (!input.wake) throw new AppError("unavailable", "ワークスペースが動いていない", { headers: { "Retry-After": String(RETRY_AFTER_S) } });
+      // 前に補完で起こした物が止める判断を通らずに落ちていれば、落ちるまでの長さを予算に足してから起こす
+      this.#settleUsed(state, input.now);
       const used = this.#usedOn(state, input.now);
       if (used >= EDITOR_LIMITS.dayMs) throw new AppError("rate_limited", "今日の補完で起こせる時間を使い切った", { headers: { "Retry-After": String(HOUR_MS / 1000) } });
       Object.assign(state, { by: "editor", wokeAt: input.now, lastAt: input.now, day: jstDay(input.now), usedMs: used });
-      await this.#save();
-      try {
-        await this.#deps.box.wakeOnce();
-      } catch {
-        // 起きなかった時はやり直さず、通知も出さない。画面がつなぎ直す
-        Object.assign(state, { by: null, wokeAt: null });
-        await this.#save();
-        throw new AppError("unavailable", "ワークスペースが起きない", { headers: { "Retry-After": String(RETRY_AFTER_S) } });
-      }
+      this.#waking = this.#wake(state).finally(() => {
+        this.#waking = null;
+      });
+      await this.#waking;
       woke = true;
     }
     // 止める判断より先に「最後の接続」を書き、10 分の判断で止めさせない
     state.lastAt = input.now;
     await this.#save();
     this.#schedule();
-    return { tree: await this.#tree(params.data, input.now), woke };
+    const tree = await this.#tree(params.data, input.now);
+    return { ...tree, woke };
   }
 
   /**
    * 取った木をワークスペースに渡す。渡し終えたら、待っていた接続を通す
    * @param nodeId タスク
    * @param sha 先のコミット
+   * @param claim 支度が返した役の印
    * @param body tar.gz
    * @returns 無し
    * @throws upstream_failed ワークスペースが木を断った時
    */
-  async putTree(nodeId: string, sha: string, body: ReadableStream<Uint8Array>): Promise<null> {
+  async putTree(nodeId: string, sha: string, claim: string, body: ReadableStream<Uint8Array>): Promise<null> {
     try {
       await this.#deps.box.putLspTree(nodeId, sha, body);
     } finally {
-      this.#release(`${nodeId}:${sha}`);
+      this.#release(`${nodeId}:${sha}`, claim);
     }
     return null;
   }
@@ -179,10 +185,11 @@ export class EditorLsp {
    * 木を取れなかった。待っていた接続に自分で取りに行かせる
    * @param nodeId タスク
    * @param sha 先のコミット
+   * @param claim 支度が返した役の印
    * @returns 無し
    */
-  dropTree(nodeId: string, sha: string): Promise<null> {
-    this.#release(`${nodeId}:${sha}`);
+  dropTree(nodeId: string, sha: string, claim: string): Promise<null> {
+    this.#release(`${nodeId}:${sha}`, claim);
     return Promise.resolve(null);
   }
 
@@ -327,6 +334,23 @@ export class EditorLsp {
   }
 
   /**
+   * 補完のために 1 回だけ起こす。起きなければ、起こそうとした間も予算に足し、やり直さず通知も出さない
+   * @param state 記憶。訳と時刻を替えた物
+   * @throws unavailable 起きなかった時
+   */
+  async #wake(state: EditorState): Promise<void> {
+    await this.#save();
+    try {
+      await this.#deps.box.wakeOnce();
+    } catch {
+      this.#settleUsed(state, this.#deps.timers.now());
+      state.by = null;
+      await this.#save();
+      throw new AppError("unavailable", "ワークスペースが起きない", { headers: { "Retry-After": String(RETRY_AFTER_S) } });
+    }
+  }
+
+  /**
    * 補完で起こしていた長さを、その日の予算に足す
    * @param state 記憶
    * @param now 今の時刻
@@ -351,12 +375,13 @@ export class EditorLsp {
 
   /**
    * 木が今の先かを確かめ、違えば取りに行く役を 1 本にだけ渡す。ほかの接続は渡し終えるのを待って確かめ直す
+   * 役を渡した接続が Worker ごと消えても待ち続けないよう、役には 90 秒の期限を付け、過ぎたら待っていた接続が自分で取りに行く
    * @param params 木の名前
    * @param now 今の時刻
-   * @returns ready か needed
+   * @returns ready か needed と、needed の時の役の印
    * @throws rate_limited tarball の回数が上限の時
    */
-  async #tree(params: LspTreeParams, now: number): Promise<"ready" | "needed"> {
+  async #tree(params: LspTreeParams, now: number): Promise<{ tree: "ready" | "needed"; claim: string | null }> {
     const key = `${params.nodeId}:${params.sha}`;
     for (;;) {
       const pending = this.#claims.get(key);
@@ -364,40 +389,59 @@ export class EditorLsp {
         await pending.promise;
         continue;
       }
-      this.#claims.set(key, claim());
+      const id = this.#claim(key);
       let current: string | null;
       try {
         current = await this.#deps.box.lspTreeSha(params.nodeId);
       } catch (error) {
-        this.#release(key);
+        this.#release(key, id);
         throw error;
       }
       if (current === params.sha) {
-        this.#release(key);
-        return "ready";
+        this.#release(key, id);
+        return { tree: "ready", claim: null };
       }
       const state = await this.#load();
       // 取る前に数える。直近 1 時間と 1 日の回数
       state.pulls = state.pulls.filter((at) => now - at < DAY_MS);
       const hour = state.pulls.filter((at) => now - at < HOUR_MS).length;
       if (hour >= EDITOR_LIMITS.pullsPerHour || state.pulls.length >= EDITOR_LIMITS.pullsPerDay) {
-        this.#release(key);
+        this.#release(key, id);
         throw new AppError("rate_limited", "木を取る回数が多すぎる", { headers: { "Retry-After": String(HOUR_MS / 1000) } });
       }
       state.pulls.push(now);
       await this.#save();
-      return "needed";
+      return { tree: "needed", claim: id };
     }
   }
 
   /**
-   * 木を渡す役を終え、待っていた接続を通す
+   * 木を取る役を置く。期限が来たら役を解き、待っていた接続を通す
    * @param key 「nodeId:sha」
+   * @returns 役の印
    */
-  #release(key: string): void {
+  #claim(key: string): string {
+    const id = crypto.randomUUID();
+    let done: (() => void) | undefined;
+    const promise = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    const cancel = this.#deps.timers.after(EDITOR_LIMITS.claimMs, () => this.#release(key, id));
+    this.#claims.set(key, { id, promise, resolve: () => done?.(), cancel });
+    return id;
+  }
+
+  /**
+   * 木を渡す役を終え、待っていた接続を通す。期限で解かれた後の古い役の印では、新しい役を解かない
+   * @param key 「nodeId:sha」
+   * @param id 役の印
+   */
+  #release(key: string, id: string): void {
     const held = this.#claims.get(key);
+    if (held?.id !== id) return;
     this.#claims.delete(key);
-    held?.resolve();
+    held.cancel();
+    held.resolve();
   }
 
   /**

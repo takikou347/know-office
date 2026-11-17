@@ -42,7 +42,7 @@ const openReviewLspRoute = createRoute({
     "レビューの先のコミットが 40 字の小文字の 16 進であることを確認する。ワークスペースへの道はこの 2 つだけで組む",
     "全体か作った社員が止まっていれば起こさない。勤務の外で `EDITOR_WAKE` が `on` で、ログインセッションが今も生きている時だけ、止まっているワークスペースを 1 回だけ起こしてよいとする",
     "`WorkspaceDO` で、止めている最中なら止め終わりを待ち、止まっていれば起こしてよい時だけ 1 回起こす (やり直しと通知はしない)。勤務の外に起こした時は監査ログに `workspace.wake` を残す",
-    "ワークスペースの木が今の先でなければ、読む鍵で GitHub の tarball を取り、302 は `codeload.github.com` の下だけを `Authorization` を付けずに 1 回追い、ためずに流す。同じ木を同時に開いた時は 1 本だけが取り、ほかは渡し終えるのを待つ",
+    "ワークスペースの木が今の先でなければ、読む鍵で GitHub の tarball を取り、302 は `codeload.github.com` の下だけを `Authorization` を付けずに 1 回追い、ためずに流す。同じ木を同時に開いた時は 1 本だけが取り、ほかは渡し終えるのを 90 秒まで待ち、過ぎたら自分で取る",
     "`WorkspaceDO` がワークスペースの `/v1/lsp` に WebSocket を開き、101 を返して中継する。配信の同時の数に入れる",
   ],
   "x-errors": [
@@ -158,14 +158,15 @@ export const reviewLspRoutes = router.openapi(openReviewLspRoute, async (c) => {
     // 記録に落ちても補完は止めない
     await audit(c, "workspace.wake", staffId, { nodeId, reason: "editor" }).catch((error: unknown) => recordError(c.env, { source: "gate", level: "warn", code: "workspace_wake_audit_failed", error }, c.var.clock));
   }
-  if (prepared.tree === "needed") {
+  if (prepared.tree === "needed" && prepared.claim !== null) {
+    const { claim } = prepared;
     let failed: (() => unknown) | null = null;
     try {
       const archive = watched(await c.var.archive(review.repo, sha));
       failed = archive.failed;
-      await workspace.lspPutTree(nodeId, sha, archive.body);
+      await workspace.lspPutTree(nodeId, sha, claim, archive.body);
     } catch (error) {
-      await workspace.lspDropTree(nodeId, sha).catch(() => null);
+      await workspace.lspDropTree(nodeId, sha, claim).catch(() => null);
       // GitHub の側が流す途中で落ちた時は、ワークスペースに届かなかった事より先にそちらを返す
       const upstream = failed?.() ?? null;
       if (upstream instanceof AppError) throw upstream;
