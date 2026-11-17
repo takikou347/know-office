@@ -141,6 +141,31 @@ describe("設計書を同じ時に直す", () => {
     expect(await docsRows()).toEqual([]);
   });
 
+  it("出す前の確かめで断っても、PR を出した後の行は消さない", async () => {
+    const { task, repos } = await working(world);
+    // PR を出した後に落ちて、行は番号の無いまま PR だけ GitHub に開いている
+    const real = world.forge.openPull.bind(world.forge);
+    world.forge.openPull = async (input) => {
+      await real(input);
+      throw new Error("PR を出した後に落ちた");
+    };
+    await expect(openDocs()).rejects.toThrow("PR を出した後に落ちた");
+    world.forge.openPull = real;
+    world.forge.changedPaths = () => Promise.resolve(["services/other-app/README.md"]);
+    expect((await failure(openDocs())).code).toBe("validation_failed");
+    expect(await docsRows()).toEqual([{ node_id: task, pr_number: null, branch: `ko/${task.slice(0, 8)}-spec` }]);
+    expect(repos.opened).toHaveLength(1);
+  });
+
+  it("main に入った PR を新しいブランチに替えた後に断っても、替えた行は消さない", async () => {
+    const { task, repos } = await working(world);
+    expect(await openDocs()).toMatchObject({ isError: false });
+    repos.landed.add(`${DOCS}:${DOCS_HEAD}`);
+    world.forge.changedPaths = () => Promise.resolve(["services/other-app/README.md"]);
+    expect((await failure(openDocs("second"))).code).toBe("validation_failed");
+    expect(await docsRows()).toEqual([{ node_id: task, pr_number: null, branch: `ko/${task.slice(0, 8)}-second` }]);
+  });
+
   it("別のタスクの設計書の PR は結べない", async () => {
     const { task } = await working(world);
     const docs = numbered((await openDocs()).content);

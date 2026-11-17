@@ -36,21 +36,24 @@ export async function guardDocsBranch(env: Bindings, forge: Forge, call: PrCall,
 }
 
 /**
- * 出す前の確かめを通し、PR を出して行に番号を書く。同じブランチの開いた PR が既にあれば、出さずにそれを使う。出す前に断った時は取った行を消す
+ * 出す前の確かめを通し、PR を出して行に番号を書く。同じブランチの開いた PR が既にあれば、出さずにそれを使う。出す前に断った時は、この呼びで取った行を消す
  * @param env バインディング
  * @param forge GitHub
  * @param call 呼んだ社員と時刻
  * @param task タスク
- * @param row 取った行
+ * @param row 行
+ * @param claimed この呼びで取った行か。出す前に断った時に消すのは、この呼びで取った行だけ
  * @param input docs_pr_open の入力
  * @returns PR の番号
- * @throws 確かめの通り
+ * @throws rule_denied ルールの外の時 (出す前、行は取った時だけ消す)
+ * @throws validation_failed 設計書の形が違う時、そのサービスの置き場の外を変える時
+ * @throws upstream_failed GitHub から読めない時、PR を出せない時 (行は残り、次の呼びが同じ PR を使う)
  */
-async function publish(env: Bindings, forge: Forge, call: PrCall, task: NodeRow, row: DocsRow, input: DocsPrOpenTool): Promise<number> {
+async function publish(env: Bindings, forge: Forge, call: PrCall, task: NodeRow, row: DocsRow, claimed: boolean, input: DocsPrOpenTool): Promise<number> {
   try {
     await guardDocsBranch(env, forge, call, task, row);
   } catch (error) {
-    await dropClaim(env.DB, task.id);
+    if (claimed) await dropClaim(env.DB, task.id);
     throw error;
   }
   // 出した後に落ちても行は残る。次の呼びは、このブランチの開いた PR を先に読んで使う
@@ -82,9 +85,11 @@ export async function openDocsPr(env: Bindings, forge: Forge, call: PrCall, task
   const [service] = await drizzle(env.DB).select({ id: services.id }).from(services).where(and(eq(services.id, task.scope), eq(services.repo, task.repo))).limit(1);
   if (!service) throw new AppError("conflict", "サービスのタスクでない");
   const docs = await loadDocsRepo(env.DB);
-  if (docs === null || docs.repo.toLowerCase() === task.repo.toLowerCase()) throw new AppError("conflict", "設計書のリポジトリを設定で選んでいない");
+  if (docs === null) throw new AppError("conflict", "設計書のリポジトリを設定で選んでいない");
+  if (docs.repo.toLowerCase() === task.repo.toLowerCase()) throw new AppError("conflict", "設計書のリポジトリがタスクのリポジトリと同じ。設計書の直しは pr_open で出す");
   const branch = `ko/${task.id.slice(0, 8)}-${input.name}`;
   let row = await docsOf(env.DB, task.id);
+  let claimed = false;
   if (row !== null && row.prNumber !== null) {
     // 出した PR が main に入っていれば、新しいブランチで出し直す。入っていなければ新しい PR は出さず、確かめ直す
     if (await forge.inMain(row.repo, await forge.branchHead(row.repo, row.branch))) {
@@ -97,8 +102,9 @@ export async function openDocsPr(env: Bindings, forge: Forge, call: PrCall, task
     }
   } else if (row === null) {
     if (!(await claimDocs(env.DB, { nodeId: task.id, serviceId: task.scope, repo: docs.repo, branch, now: call.now }))) throw new AppError("conflict", "同じサービスの設計書を直す別のタスクが終わるまで待つ");
+    claimed = true;
     row = await docsOf(env.DB, task.id);
   }
   if (row === null) throw new AppError("conflict", "設計書の PR の行が無い");
-  return { number: await publish(env, forge, call, task, row, input), branch: row.branch };
+  return { number: await publish(env, forge, call, task, row, claimed, input), branch: row.branch };
 }
