@@ -1,5 +1,4 @@
 // 開発の回し方の通し。オーナーが設定の画面で設計書のリポジトリを選び、案を試作に進めると、社員とタスクの画面に開発担当の「設計書: <名前>」のタスクが出る。設計書が main で変わる通知が届くと、社長の「Issue を合わせる: <名前>」のタスクが出る。ゲートウェイの返事は差し替えず、GitHub は開発の代わりの物を使う (開発の回し方の 3.1、3.2、3.3)
-import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
