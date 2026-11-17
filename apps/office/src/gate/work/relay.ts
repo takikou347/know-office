@@ -383,7 +383,8 @@ function laterOf(c: Context<GateEnv>): (task: Promise<void>) => Promise<void> {
   if (ctx === null) return (task) => task;
   const target = ctx;
   return (task) => {
-    target.waitUntil(task);
+    // 返事の後に落ちても実行環境の未処理の拒否にせず、ログに残す
+    target.waitUntil(task.catch((error: unknown) => log("error", "usage_record_failed", { error: error instanceof Error ? error.message : "unknown" })));
     return Promise.resolve();
   };
 }

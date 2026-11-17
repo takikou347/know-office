@@ -1,6 +1,8 @@
 // Claude のプロキシを、作業トークンから代わりの Claude API、使った量の記録、勤怠の待ちまで確かめる (社員が考えるの 3.4、テスト設計の社員が考える)
 import { describe, expect, it, vi } from "vitest";
+import { type Caller, routeEgress } from "../../src/gate/egress.ts";
 import { claudeBlocked } from "../../src/gate/work/run.ts";
+import { workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { ANTHROPIC_KEY } from "../helpers/gate.ts";
 import { MINUTE, rows, useGuardWorld } from "../helpers/guard.ts";
 import { messages, relayKit, SYSTEM, upstream } from "../helpers/relay.ts";
