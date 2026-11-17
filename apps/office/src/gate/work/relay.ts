@@ -1,5 +1,5 @@
 // Claude のプロキシ。作業トークンを確かめた要求を、鍵を替えて Claude API へ流れのまま送り、使った量と上限の待ちを残す (社員が考えるの 3.4)
-import { allowedFetch, allowedModels, AppError, DEV_STAFF_HEADER, PROBLEMS, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
+import { allowedFetch, allowedModels, AppError, DEV_STAFF_HEADER, PROBLEMS, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -13,7 +13,7 @@ import { noticeClaudeFailures } from "../ledger/notices.ts";
 import { problemResponse } from "../problem.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { clockAt } from "./attendance.ts";
-import { noteRateLimit, noteSpendLimit } from "./claude-limits.ts";
+import { noteRateLimit, noteSpendLimit, readSpendLimit, SPEND_STATUSES } from "./claude-limits.ts";
 import { claudeKey } from "./claude-key.ts";
 import { findNode, recordsOf } from "./nodes.ts";
 import type { TicketClaims } from "./ticket.ts";
@@ -30,12 +30,6 @@ export const RELAY_HEADER = "x-know-relay";
 
 /** ワークスペースに返す返事のヘッダー。ほかは頭が anthropic-ratelimit- の物だけを返し、組織の ID などは出さない */
 const RESPONSE_HEADERS = new Set(["content-type", "request-id", "retry-after", "x-should-retry"]);
-
-/** 使用の上限かを読む返事のステータス。出典: platform.claude.com/docs/en/api/rate-limits の「Reaching your spend cap」「Setting your own spend limit」と /docs/en/api/errors の 402 */
-const SPEND_STATUSES = new Set([400, 402, 429]);
-
-/** 使用の上限かを読む本文の大きさの上限。失敗の本文は小さいので、超えた物は読まずにふつうの返事として扱う */
-const SPEND_BODY_MAX_BYTES = 8 * 1024;
 
 /** 1 回の呼び出しを待つ上限。流れの返事は長く続くので、SDK の初期値と同じ 10 分にする */
 const RELAY_TIMEOUT_MS = 10 * 60_000;
@@ -144,66 +138,6 @@ async function noteClaudeFailure(c: Context<GateEnv>, path: string, status: numb
   await noticeClaudeFailures(c.env, c.var.clock, String(status)).catch((cause: unknown) => {
     log("error", "claude_failure_notice_failed", { traceId: c.var.traceId, error: cause instanceof Error ? cause.message : "unknown" });
   });
-}
-
-/**
- * 失敗の本文を 8KB を超えるまで読み、使用の上限かを見分ける。読んだ分と残りで返事を作り直すので、本文は欠けない
- * @param res Claude API の返事
- * @returns 作り直した返事と、使用の上限なら見分けた物。8KB を超える本文、JSON でない本文、形の違う本文は null
- * @throws upstream_failed 本文の流れが途中で切れた時
- */
-async function readSpendLimit(res: Response): Promise<{ res: Response; limit: ClaudeSpendLimit | null }> {
-  if (!res.body) return { res, limit: null };
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    // 上限を超えるまでだけ読む。大きな本文をゲートウェイの記憶に載せない
-    while (size <= SPEND_BODY_MAX_BYTES) {
-      const { done, value } = await reader.read();
-      if (done) {
-        const text = new TextDecoder().decode(concatBytes(chunks, size));
-        return { res: new Response(text, { status: res.status, headers: res.headers }), limit: claudeSpendLimit(res.status, safeJson(text)) };
-      }
-      chunks.push(value);
-      size += value.byteLength;
-    }
-  } catch (error) {
-    // 流れが途中で切れた時は、SDK が待ち直せる 502 で返す
-    log("warn", "claude_error_body_unreadable", { status: res.status, error: error instanceof Error ? error.message : "unknown" });
-    throw new AppError("upstream_failed", "Claude API の返事を読めなかった");
-  }
-  // 上限を超えた本文は使用の上限と見ず、読んだ分と残りの流れをつないで欠かさずに返す
-  const rest = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(chunk);
-    },
-    async pull(controller) {
-      const { done, value } = await reader.read();
-      if (done) controller.close();
-      else controller.enqueue(value);
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
-  return { res: new Response(rest, { status: res.status, headers: res.headers }), limit: null };
-}
-
-/**
- * バイトの並びを 1 つにつなぐ
- * @param chunks 並び
- * @param size 合計の長さ
- * @returns つないだ並び
- */
-function concatBytes(chunks: Uint8Array[], size: number): Uint8Array {
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
 }
 
 /**
