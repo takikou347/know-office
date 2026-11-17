@@ -7,7 +7,7 @@ KNOW IDEA の社内の管理アプリ。AI 社員が自分でタスクを見つ�
 | `packages/core/` | ゲートウェイ、ワークスペース、画面が共に使う型と判断 |
 | `apps/office/` | 画面(Vite と React)とゲートウェイ(Hono)。1 つの Worker にまとめて配る |
 | `apps/workspace/` | ワークスペース。Node.js で動くコンテナの中身 |
-| `apps/office/openapi/v1.yaml` | API の文書 (OpenAPI 3.1)。ゲートウェイの `createRoute` と `core` の Zod スキーマから作る。[Swagger UI](https://takikou347.github.io/know-office/) で読める |
+| `apps/office/openapi/v1.yaml` | API の文書 (OpenAPI 3.1)。ゲートウェイの `createRoute` と `core` の Zod スキーマから作る。動かしたゲートウェイの `/api/v1/docs` の Swagger UI で読める |
 
 確かめは `pnpm install`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm e2e`。`pnpm e2e` は画面を Chrome の幅 1,280 と 360 で開き、横にはみ出さない事とゲートウェイとつながる事を見る。初めての時は `pnpm --filter @know-office/office exec playwright install chromium` でブラウザを入れる。Safari はデプロイの前に Mac で `E2E_BROWSERS=safari pnpm e2e` を 1 度流す。
 

@@ -67,8 +67,8 @@
       "rules": { "no-console": "off" }
     },
     {
-      // Swagger UI の初期化 (GitHub Pages とゲートウェイの /api/v1/docs)。ブラウザが先に読んだ swagger-ui-bundle.js の大域の関数を呼ぶ
-      "files": ["apps/office/openapi/pages/*.js", "apps/office/public/swagger/*.js"],
+      // Swagger UI の初期化 (ゲートウェイの /api/v1/docs)。ブラウザが先に読んだ swagger-ui-bundle.js の大域の関数を呼ぶ
+      "files": ["apps/office/public/swagger/*.js"],
       "rules": { "typescript/no-unsafe-assignment": "off", "typescript/no-unsafe-call": "off" }
     },
     {
