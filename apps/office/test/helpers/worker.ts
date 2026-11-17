@@ -1,9 +1,10 @@
 // DO のテストの入口と、本物の wrangler.jsonc の Worker を本物の workerd で起こす。DO のテストの入口はファイルで 1 つにし、テストごとに空にする
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unstable_startWorker } from "wrangler";
 import { z } from "zod";
+import { CSP_NONCE_PLACEHOLDER } from "../../src/gate/screen-html.ts";
 import { atFileEnd } from "./file-end.ts";
 
 /** 起こしたテストの入口 */
@@ -157,12 +158,18 @@ export async function startOfficeWorker(): Promise<OfficeWorker> {
   const assets = mkdtempSync(join(tmpdir(), "know-office-assets-"));
   let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
   try {
-    copyFileSync(join(import.meta.dirname, "../../index.html"), join(assets, "index.html"));
+    // vite の html.cspNonce が build で入れる nonce の置き場の meta を足し、JS は 1 つだけ置く
+    const html = readFileSync(join(import.meta.dirname, "../../index.html"), "utf8").replace("<head>", `<head>\n    <meta property="csp-nonce" nonce="${CSP_NONCE_PLACEHOLDER}">`);
+    writeFileSync(join(assets, "index.html"), html);
+    mkdirSync(join(assets, "assets"));
+    writeFileSync(join(assets, "assets", "main.js"), "export {};\n");
     // 画面のファイルのヘッダーは public/_headers が決め、vite build がそのまま写す
     copyFileSync(join(import.meta.dirname, "../../public/_headers"), join(assets, "_headers"));
     worker = await unstable_startWorker({
       config: join(import.meta.dirname, "../../wrangler.jsonc"),
       assets,
+      // 手元の .dev.vars (開発の入口が作る) を読まず、本番と同じ CSP を確かめる
+      bindings: { ENVIRONMENT: { type: "plain_text", value: "production" } },
       // vite の ?raw の代わりに、wrangler の組み立てでも OpenAPI の文書を文字列として読む
       build: { moduleRules: [{ type: "Text", globs: ["**/*.yaml?raw"] }] },
       // コンテナは Docker で作るので、入口と画面の分かれ方を見るこのテストでは起こさない

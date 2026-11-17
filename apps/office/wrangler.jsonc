@@ -70,8 +70,11 @@
     }
   },
   "assets": {
-    // /api の下、GitHub の通知の道、/__dev の下 (開発の代わりのワークスペースの道。development の時だけ受け、ほかでは 404) を入口が受け、ほかは画面のファイルを返す
+    "binding": "ASSETS",
+    // 画面の JS と CSS (/assets/ の下) と Swagger UI のファイルだけを画面のファイルから直に返し、ほかは入口が受ける。
+    // 入口は /api の下、GitHub の通知の道、/__dev の下 (開発の代わりのワークスペースの道。development の時だけ受け、ほかでは 404) をゲートウェイに渡し、
+    // ほかの道は画面の HTML に要求ごとの CSP の nonce を入れて返す
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/hooks/v1/github", "/__dev/*"]
+    "run_worker_first": ["/*", "!/assets/*", "!/swagger/*"]
   }
 }

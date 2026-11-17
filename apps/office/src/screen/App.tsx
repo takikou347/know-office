@@ -1,5 +1,6 @@
 import type { Extension, Health } from "@know-office/core";
 import { AppBar, AppShell } from "knowidea-ui";
+import { pageCspNonce } from "./csp.ts";
 import { withScreens } from "./extensions.ts";
 import { type Navigate, Page, type ToggleExtension } from "./pages.tsx";
 import { useRevealFocus } from "./parts/focus.ts";
@@ -36,6 +37,7 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
           bottomItems={bottomItems}
           bottomCurrent={bottomCurrentOf(pathname, shown)}
           brand={{ name: "know-office" }}
+          cspNonce={pageCspNonce()}
           header={<AppBar title={headingOf(pathname, shown)} position="sticky" />}
           // 通知は開いた後にも届くので、中身の下に出す。出ても中身の上の端と見出しは動かない
           footer={<LiveNoticeBar />}

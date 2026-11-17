@@ -2,9 +2,7 @@
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { attachAccess, localSessionCookie, PRODUCTION_CSP_HEADER, productionCsp, upgradeAccess } from "../../dev/plugin.ts";
+import { attachAccess, localSessionCookie, upgradeAccess } from "../../dev/plugin.ts";
 import { cookieHeader, SESSION_COOKIE } from "../../src/gate/auth/session.ts";
 
 /**
@@ -77,23 +75,5 @@ describe("開発環境の代わりの物", () => {
     upgradeAccess(req, "signed.jwt.token");
     expect(req.headers["cf-access-jwt-assertion"]).toBeUndefined();
     expect(req.headers.cookie).toBe("ko_session=abc");
-  });
-
-  it("頼まれた時だけ、文書の返事に本番の CSP を付ける。React の準備の script のほかは本番と同じに断る", () => {
-    const headers = readFileSync(join(import.meta.dirname, "../../public/_headers"), "utf8");
-    const asked = { [PRODUCTION_CSP_HEADER]: "1" };
-    const page = request("/staff", { ...asked, "sec-fetch-dest": "document" });
-    const res = new ServerResponse(page);
-    productionCsp(page, res, headers);
-    const csp = String(res.getHeader("Content-Security-Policy"));
-    expect(csp).toContain("style-src 'self';");
-    expect(csp).toContain("script-src 'self' 'unsafe-inline';");
-    expect(csp).not.toContain("unsafe-eval");
-    // 頼まない要求と、文書でない要求には付けない
-    for (const req of [request("/staff", { "sec-fetch-dest": "document" }), request("/src/main.tsx", { ...asked, "sec-fetch-dest": "script" })]) {
-      const other = new ServerResponse(req);
-      productionCsp(req, other, headers);
-      expect(other.getHeader("Content-Security-Policy")).toBeUndefined();
-    }
   });
 });

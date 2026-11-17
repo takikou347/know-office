@@ -3,6 +3,7 @@ import { Button, Stack, TextField, editorLanguageOfPath } from "knowidea-ui";
 import type { EditorDiagnostic } from "knowidea-ui/editor";
 import { Suspense, lazy, useContext, useEffect, useMemo, useState } from "react";
 import { ApiContext } from "../../api.ts";
+import { pageCspNonce } from "../../csp.ts";
 import { browserLsp, reviewLsp } from "./review-lsp.ts";
 import { type Failed, failureOf, NETWORK, useLoad } from "./review-load.ts";
 import { FailureAlert } from "./ReviewFiles.tsx";
@@ -69,6 +70,7 @@ export function ReviewEditor({ nodeId, path, head, onCommitted }: ReviewEditorPr
           language={editorLanguageOfPath(path)}
           onSave={() => void commit()}
           diagnostics={diagnostics}
+          cspNonce={pageCspNonce()}
           {...(lsp ? { complete: (place) => lsp.complete(place), hover: (place) => lsp.hover(place) } : {})}
         />
       </Suspense>

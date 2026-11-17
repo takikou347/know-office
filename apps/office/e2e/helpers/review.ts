@@ -73,6 +73,8 @@ export async function stubReview(page: Page, options: { firstLines?: number } = 
         return route.fulfill({ json: { data: path === "src/attendance.ts" ? first : addedDiff(path, 3), meta: META } });
       }
       if (method === "PUT" && rest === "/seen") return route.fulfill({ status: 204 });
+      // 直す欄 (エディタ) が読むファイルの中身
+      if (method === "GET" && rest === "/file") return route.fulfill({ json: { data: { content: "const a = 1;\n" }, meta: META } });
       if (method === "POST" && rest === "/verdict") {
         const sent: unknown = route.request().postDataJSON();
         const verdict = z.object({ verdict: z.string() }).loose().safeParse(sent).data?.verdict ?? "approve";

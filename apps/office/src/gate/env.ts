@@ -189,6 +189,8 @@ export type RecordBinding = (typeof RECORD_BINDINGS)[number];
 
 /** Worker のバインディングと変数。wrangler の設定と同じ名前にする (詳細設計の目次の 3.3) */
 export type Bindings = {
+  /** 画面のファイル。画面の HTML は入口が読み、要求ごとの nonce を入れて返す (src/gate/screen-html.ts) */
+  ASSETS: { fetch(request: Request): Promise<Response> };
   /** 今の状態の D1 */
   DB: D1Database;
   /** 記録 DO */
