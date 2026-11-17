@@ -1,5 +1,6 @@
 // 設計書を同じ時に直す、2 つの PR を順に main に入れる所。条件がそろった時だけ、設計書を先に、コードを後に進める (開発の回し方の 3.6)
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { DOCS, DOCS2, REPO, seedSetting } from "../helpers/docs.ts";
 import { CODE_HEAD, DOCS_HEAD, type Repos, working } from "../helpers/docs-together.ts";
 import { BASE, child, detail, planOf, plan, rewriteDocs, issuesOf } from "../helpers/issues.ts";
@@ -16,7 +17,7 @@ const world = useWork({ github: true });
  */
 async function reviewed() {
   const made = await working(world);
-  const docs = JSON.parse((await tool(world, "builder", "docs_pr_open", { name: "spec", title: "設計書", body: "" })).content) as { number: number };
+  const docs = z.object({ number: z.number() }).parse(JSON.parse((await tool(world, "builder", "docs_pr_open", { name: "spec", title: "設計書", body: "" })).content));
   expect(await tool(world, "builder", "pr_open", { name: "make", title: "動画を作る", body: "", docsPr: docs.number })).toMatchObject({ isError: false });
   await advance(world, at(10));
   await staffOf(world, "reviewer").pull(world.clock.now());
@@ -29,7 +30,7 @@ async function reviewed() {
  */
 async function approve(): Promise<boolean> {
   const answer = await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "設計書とコードを確かめた", headSha: CODE_HEAD });
-  return (JSON.parse(answer.content) as { merged: boolean }).merged;
+  return z.object({ merged: z.boolean() }).parse(JSON.parse(answer.content)).merged;
 }
 
 /**

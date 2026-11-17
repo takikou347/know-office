@@ -1,5 +1,4 @@
 // 設計書を同じ時に直すテストの手伝い。サービスの子 Issue のタスクを開発担当に取らせ、設計書のリポジトリとサービスのリポジトリで別々に動く代わりの GitHub を、world.forge に重ねる (開発の回し方の 3.6)
-import type { CheckState } from "@know-office/core";
 import { expect } from "vitest";
 import { DOCS, GOOD, HEAD, MAIN } from "./docs.ts";
 import { child, pacedForge, planOf, plan, withDocs } from "./issues.ts";
@@ -25,7 +24,7 @@ export type Repos = {
   /** リポジトリごとの main に入れたコミット */
   landed: Set<string>;
   /** リポジトリごとのチェック */
-  checks: Record<string, CheckState>;
+  checks: Record<string, "passed" | "failed" | "pending">;
   /** 次に merge を呼んだ時 behind にするリポジトリ */
   behind: Set<string>;
   /** 次に merge を呼んだ時 GitHub の失敗にするリポジトリ */
