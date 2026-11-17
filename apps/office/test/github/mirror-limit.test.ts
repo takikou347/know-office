@@ -82,7 +82,7 @@ describe("GitHub の上限に当たった写し", () => {
     // 送る者が GitHub を呼ぶ前に、印が切れて別の者が取り直した形にする
     const restore = wrapDb(world, {
       prepare: (real, sql) => {
-        if (sql.startsWith("SELECT repo, pr_number FROM reviews")) void real("UPDATE github_mirrors SET claimed_until = ?, attempts = attempts + 1").bind(other).run();
+        if (sql.startsWith("SELECT repo, pr_number, head_sha, owner_verdict FROM reviews")) void real("UPDATE github_mirrors SET claimed_until = ?, attempts = attempts + 1").bind(other).run();
         return real(sql);
       },
     });
