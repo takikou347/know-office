@@ -87,6 +87,39 @@ describe("Claude の使用の上限", () => {
     expect(await noticesOf("claude_spend_limit")).toEqual([]);
   });
 
+  it("8KB を超える流れの本文は、超えた所で読むのを止め、残りとつないで欠かさずに返す", async () => {
+    const work = await startTask("builder", 10);
+    w.clock.advance(at(10, 45) - w.clock.now());
+    const parts = ["a".repeat(5000), "b".repeat(5000), "c".repeat(5000)];
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const part = parts[pulled];
+        pulled += 1;
+        if (part === undefined) controller.close();
+        else controller.enqueue(new TextEncoder().encode(part));
+      },
+    });
+    const res = await callClaude(work, messages("直す"), "/v1/messages", upstream(body, { status: 400, headers: { "content-type": "application/json" } }));
+    // 返事を読む前は、8KB を超えた 2 つ目までしか読んでいない
+    expect(pulled).toBeLessThanOrEqual(3);
+    expect(await res.text()).toBe(parts.join(""));
+    expect(await noticesOf("claude_spend_limit")).toEqual([]);
+  });
+
+  it("失敗の本文の流れが途中で切れたら、502 で返す", async () => {
+    const work = await startTask("builder", 10);
+    w.clock.advance(at(10, 47) - w.clock.now());
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new Error("切れた"));
+      },
+    });
+    const res = await callClaude(work, messages("直す"), "/v1/messages", upstream(body, { status: 429, headers: { "content-type": "application/json" } }));
+    expect(res.status).toBe(502);
+    expect(await noticesOf("claude_spend_limit")).toEqual([]);
+  });
+
   it("同時に 2 つの使用の上限が届いても、通知は 1 件", async () => {
     const work = await startTask("builder", 10);
     w.clock.advance(at(10, 50) - w.clock.now());

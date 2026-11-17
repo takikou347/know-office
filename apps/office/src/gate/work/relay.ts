@@ -142,15 +142,63 @@ async function noteClaudeFailure(c: Context<GateEnv>, path: string, status: numb
 }
 
 /**
- * 失敗の本文を読み、使用の上限かを見分ける。読んだ本文で返事を作り直すので、本文は欠けない
+ * 失敗の本文を 8KB を超えるまで読み、使用の上限かを見分ける。読んだ分と残りで返事を作り直すので、本文は欠けない
  * @param res Claude API の返事
  * @returns 作り直した返事と、使用の上限なら見分けた物。8KB を超える本文、JSON でない本文、形の違う本文は null
+ * @throws upstream_failed 本文の流れが途中で切れた時
  */
 async function readSpendLimit(res: Response): Promise<{ res: Response; limit: ClaudeSpendLimit | null }> {
-  const text = await res.text();
-  const again = new Response(text, { status: res.status, headers: res.headers });
-  if (new TextEncoder().encode(text).byteLength > SPEND_BODY_MAX_BYTES) return { res: again, limit: null };
-  return { res: again, limit: claudeSpendLimit(res.status, safeJson(text)) };
+  if (!res.body) return { res, limit: null };
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    // 上限を超えるまでだけ読む。大きな本文をゲートウェイの記憶に載せない
+    while (size <= SPEND_BODY_MAX_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) {
+        const text = new TextDecoder().decode(concatBytes(chunks, size));
+        return { res: new Response(text, { status: res.status, headers: res.headers }), limit: claudeSpendLimit(res.status, safeJson(text)) };
+      }
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } catch (error) {
+    // 流れが途中で切れた時は、SDK が待ち直せる 502 で返す
+    log("warn", "claude_error_body_unreadable", { status: res.status, error: error instanceof Error ? error.message : "unknown" });
+    throw new AppError("upstream_failed", "Claude API の返事を読めなかった");
+  }
+  // 上限を超えた本文は使用の上限と見ず、読んだ分と残りの流れをつないで欠かさずに返す
+  const rest = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+    },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+  return { res: new Response(rest, { status: res.status, headers: res.headers }), limit: null };
+}
+
+/**
+ * バイトの並びを 1 つにつなぐ
+ * @param chunks 並び
+ * @param size 合計の長さ
+ * @returns つないだ並び
+ */
+function concatBytes(chunks: Uint8Array[], size: number): Uint8Array {
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
 }
 
 /**
