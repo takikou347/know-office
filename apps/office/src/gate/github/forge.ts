@@ -28,7 +28,8 @@ import {
 import type { output, ZodType } from "zod";
 import type { DevIssues } from "../devloop/dev-issues.ts";
 import type { ChangedFile, Forge } from "../work/loop.ts";
-import { GITHUB_USER_AGENT, githubRateLimited, githubRetryAfter } from "./app.ts";
+import { GITHUB_USER_AGENT, githubRetryAfter } from "./app.ts";
+import { GitHubRateLimited } from "./rate-error.ts";
 
 /** 鍵に付ける権限。GitHub App の権限の名前と、読むか書くか */
 export type Permissions = Partial<Record<"contents" | "pull_requests" | "issues" | "checks" | "statuses" | "administration" | "metadata" | "actions", "read" | "write">>;
@@ -193,7 +194,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
       throw new AppError("upstream_failed", "GitHub に届かない");
     }
     const wait = githubRetryAfter(res);
-    if (wait !== null) throw githubRateLimited(wait);
+    if (wait !== null) throw new GitHubRateLimited(wait);
     return res;
   }
 

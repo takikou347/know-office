@@ -3,7 +3,8 @@ import { AppError, allowedFetch, type Fetcher, LSP_TREE_BYTES, LspTreeParams, Re
 import { endpoints } from "../endpoints.ts";
 import type { Bindings } from "../env.ts";
 import type { GitHubAccess } from "./forge.ts";
-import { GITHUB_USER_AGENT, githubRateLimited, githubRetryAfter, githubToken, type TokenDeps } from "./app.ts";
+import { GITHUB_USER_AGENT, githubRetryAfter, githubToken, type TokenDeps } from "./app.ts";
+import { GitHubRateLimited } from "./rate-error.ts";
 
 /** tarball を取る待ち (30 秒)。木は 50MiB まで */
 const ARCHIVE_TIMEOUT_MS = 30_000;
@@ -101,7 +102,7 @@ export async function openArchive(deps: ArchiveDeps, repo: string, sha: string):
     throw new AppError("upstream_failed", "GitHub に届かない");
   }
   const wait = githubRetryAfter(first);
-  if (wait !== null) return refuse(first, githubRateLimited(wait));
+  if (wait !== null) return refuse(first, new GitHubRateLimited(wait));
   if (first.status === 404) return refuse(first, new AppError("not_found", "コミットが無い"));
   if (first.status !== 302) return refuse(first, new AppError("upstream_failed", `GitHub が ${String(first.status)} を返した`));
   // 302 の本文は使わない

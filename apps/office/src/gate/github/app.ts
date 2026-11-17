@@ -174,15 +174,6 @@ export function githubRetryAfter(res: Response): number | null {
 }
 
 /**
- * GitHub の上限に当たった事を、待つ秒を付けた 429 にする
- * @param seconds 待つ秒
- * @returns 投げるエラー
- */
-export function githubRateLimited(seconds: number): AppError {
-  return new GitHubRateLimited(seconds);
-}
-
-/**
  * GitHub の REST API を呼ぶ。決めた宛先の下だけに出す
  * @param env バインディング
  * @param fetcher 外への fetch
@@ -204,7 +195,7 @@ export async function callGitHub(env: Bindings, fetcher: Fetcher, path: string, 
   }
   if (isRedirect(res)) throw new AppError("upstream_failed", "GitHub がリダイレクトを返した");
   const wait = githubRetryAfter(res);
-  if (wait !== null) throw githubRateLimited(wait);
+  if (wait !== null) throw new GitHubRateLimited(wait);
   return res;
 }
 
