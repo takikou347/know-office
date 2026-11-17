@@ -34,7 +34,8 @@ const updateDocsRepoRoute = createRoute({
   ],
   "x-errors": [
     "409 `conflict`: GitHub と連携していない、バージョンが異なる、または確かめた後に連携かサービスのリポジトリが変わった",
-    "422 `validation_failed`: 触れるリポジトリに無い、公開のリポジトリ、またはサービスのリポジトリ",
+    "422 `validation_failed`: 触れるリポジトリに無い (GitHub のルールの触れるリポジトリを含む)、公開のリポジトリ、またはサービスのリポジトリ",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した",
   ],
   "x-step-up": true,
