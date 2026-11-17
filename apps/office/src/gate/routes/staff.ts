@@ -1,6 +1,6 @@
 // 社員: 一覧と、その日だけの指示 (社員と勤怠の 3.4、API の staff)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, type Clock, CreateOrderInput, jstClock, jstDay, jstDayStart, log, newId, Order, StaffId, StaffOverview } from "@know-office/core";
+import { AppError, CreateOrderInput, jstClock, log, newId, Order, StaffId, StaffOverview } from "@know-office/core";
 import { and, asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
@@ -12,7 +12,8 @@ import { recordError } from "../ledger/errors.ts";
 import { audit } from "../ledger/record.ts";
 import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { created, list, ok } from "../respond.ts";
-import { type DayOrderRow, loadSchedule } from "../work/attendance.ts";
+import { type DayOrderRow } from "../work/attendance.ts";
+import { addOrder } from "../work/orders.ts";
 
 const router = createRouter();
 
@@ -160,36 +161,6 @@ async function replan(c: Context<GateEnv>, staffId: StaffId, row: DayOrderRow): 
   }
 }
 
-/**
- * 指示の終わりの時刻を確かめる。日も時刻も今より後、延長は所定の終わりより後、早退は所定の終わりより前
- * @param db D1 の DB
- * @param input 指示
- * @param clock 時刻
- * @returns 終わりの時刻。休みは null
- * @throws conflict 日か時刻を過ぎている、延長が終わりより前、早退が終わりより後の時
- */
-async function untilOf(db: Bindings["DB"], input: CreateOrderInput, clock: Clock): Promise<number | null> {
-  const now = clock.now();
-  if (input.day < jstDay(now)) throw new AppError("conflict", "過ぎた日の指示は出せない");
-  if (input.until === undefined) return null;
-  const until = jstDayStart(input.day) + toMinutes(input.until) * 60_000;
-  if (until <= now) throw new AppError("conflict", "指定の時刻を過ぎている");
-  const end = jstDayStart(input.day) + toMinutes((await loadSchedule(db)).end) * 60_000;
-  if (input.kind === "extend" && until <= end) throw new AppError("conflict", "延長は終わりの時刻より後にする");
-  if (input.kind === "leave_early" && until >= end) throw new AppError("conflict", "早退は終わりの時刻より前にする");
-  return until;
-}
-
-/**
- * HH:MM を 0 時からの分にする
- * @param hhmm 時刻
- * @returns 分
- */
-function toMinutes(hhmm: string): number {
-  const [h = "0", m = "0"] = hhmm.split(":");
-  return Number(h) * 60 + Number(m);
-}
-
 /** 社員のルート: 一覧と、その日だけの指示 */
 export const staffRoutes = router
   .openapi(listStaffRoute, async (c) => list(c, await loadStaff(c.env, c.var.clock.now()), null))
@@ -203,18 +174,9 @@ export const staffRoutes = router
     // 延長は働く時間を増やすので、パスキーで確かめる。休みと早退は減らす側なので確かめない
     if (input.kind === "extend") requireStepUp(c);
     const { staffId } = c.req.valid("param");
-    const until = await untilOf(c.env.DB, input, c.var.clock);
-    const now = c.var.clock.now();
-    const row: DayOrderRow = { id: newId(c.var.clock), staffId, day: input.day, kind: input.kind, until, source: "button", cancels: null, createdAt: now };
-    // 同じ日の同じ種類の効いている指示が無い時だけ足す。読んでから足すと、同時の 2 つがどちらも無いと読んで重なる
-    const res = await c.env.DB.prepare(
-      "INSERT INTO day_orders (id, staff_id, day, kind, until, source, cancels, created_at) SELECT ?, ?, ?, ?, ?, 'button', NULL, ? WHERE NOT EXISTS (SELECT 1 FROM day_orders o WHERE o.staff_id = ? AND o.day = ? AND o.kind = ? AND o.cancels IS NULL AND NOT EXISTS (SELECT 1 FROM day_orders x WHERE x.cancels = o.id))",
-    )
-      .bind(row.id, staffId, input.day, input.kind, until, now, staffId, input.day, input.kind)
-      .run();
-    if (res.meta.changes !== 1) throw new AppError("conflict", "同じ日に同じ指示がある");
+    const row = await addOrder(c.env, { staffId, order: input, source: "button", messageId: null }, c.var.clock.now());
     await replan(c, staffId, row);
-    await audit(c, "order.create", row.id, { staffId, day: input.day, kind: input.kind });
+    await audit(c, "order.create", row.id, { staffId, day: input.day, kind: input.kind, source: "button" });
     return created(c, toOrder(row, [row]), `/api/v1/staff/${staffId}/orders?day=${input.day}`);
   })
   .openapi(cancelOrderRoute, async (c) => {
@@ -224,7 +186,8 @@ export const staffRoutes = router
     const [original] = await orm.select().from(dayOrders).where(and(eq(dayOrders.id, orderId), eq(dayOrders.staffId, staffId)));
     if (!original || original.cancels !== null) throw new AppError("not_found", "その社員の指示が無い");
     const now = c.var.clock.now();
-    const cancel: DayOrderRow = { ...original, id: newId(c.var.clock), until: null, source: "button", cancels: orderId, createdAt: now };
+    // 取り消しは画面のボタンで行うので、会話の言葉から足した指示でも source は button にし、元の発言 ID を持たない
+    const cancel: DayOrderRow = { ...original, id: newId(c.var.clock), until: null, source: "button", cancels: orderId, createdAt: now, messageId: null };
     // まだ取り消されていない時だけ足す。同時の 2 回は片方だけが書ける
     const res = await c.env.DB.prepare(
       "INSERT INTO day_orders (id, staff_id, day, kind, until, source, cancels, created_at) SELECT ?, ?, ?, ?, NULL, 'button', ?, ? WHERE NOT EXISTS (SELECT 1 FROM day_orders WHERE cancels = ?)",

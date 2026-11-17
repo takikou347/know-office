@@ -72,7 +72,9 @@ export const dayOrders = sqliteTable("day_orders", {
   source: text("source", { enum: ["button", "chat"] }).notNull(),
   cancels: text("cancels"),
   createdAt: time("created_at").notNull(),
-});
+  /** 会話の言葉から足した指示の元の発言 ID。ボタンの指示と取り消しの行は null */
+  messageId: text("message_id"),
+}, (t) => [index("day_orders_message").on(t.messageId)]);
 
 /** 日ごとの集計。attendance から作り直せる */
 export const dailyTotals = sqliteTable(
@@ -169,3 +171,10 @@ export const messageDeliveries = sqliteTable("message_deliveries", {
   via: text("via", { enum: ["run", "next_task", "skipped"] }).notNull(),
   deliveredAt: time("delivered_at").notNull(),
 });
+
+/** 会話の言葉から勤務の指示を抜き出した発言。発言 1 件に 1 行で、日本時間の日ごとに数えて 1 日の回数を決める。追記専用 */
+export const chatOrderReads = sqliteTable("chat_order_reads", {
+  messageId: text("message_id").primaryKey(),
+  day: text("day").notNull(),
+  createdAt: time("created_at").notNull(),
+}, (t) => [index("chat_order_reads_day").on(t.day)]);

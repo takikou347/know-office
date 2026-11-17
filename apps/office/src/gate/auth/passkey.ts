@@ -59,13 +59,22 @@ export function relyingParty(c: Context<GateEnv>): { rpID: string; origin: strin
 }
 
 /**
+ * この要求のログインセッションが、15 分のうちにパスキーで確かめていたかを返す
+ * @param c 要求の文脈
+ * @returns 確かめていて、まだ 15 分を過ぎていなければ true
+ */
+export function hasStepUp(c: Context<GateEnv>): boolean {
+  const until = c.var.session?.stepUpUntil ?? null;
+  return until !== null && until > c.var.clock.now();
+}
+
+/**
  * 15 分のうちにパスキーで確かめたかを見る。大事な操作のルートの頭で呼ぶ
  * @param c 要求の文脈
  * @throws step_up_required 確認が無いか、15 分を過ぎた時
  */
 export function requireStepUp(c: Context<GateEnv>): void {
-  const until = c.var.session?.stepUpUntil ?? null;
-  if (until === null || until <= c.var.clock.now()) throw new AppError("step_up_required", "パスキーの確認が要る");
+  if (!hasStepUp(c)) throw new AppError("step_up_required", "パスキーの確認が要る");
 }
 
 /**

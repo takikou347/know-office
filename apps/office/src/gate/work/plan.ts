@@ -17,6 +17,8 @@ export const DayOrder = z
     source: z.enum(["button", "chat"]),
     cancels: z.string().nullable(),
     createdAt: z.number(),
+    // 会話の言葉から足した指示の元の発言。前に足した行と古い呼び手は持たない
+    messageId: z.string().nullable().optional(),
   })
   .strict();
 
