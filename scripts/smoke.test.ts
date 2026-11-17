@@ -10,10 +10,11 @@ const SECRET = "smoke-secret-0123456789abcdef";
 const KEYS = { SMOKE_URL: BASE, CF_ACCESS_CLIENT_ID: ID, CF_ACCESS_CLIENT_SECRET: SECRET };
 
 /** 届いた要求の記録 */
-type Seen = { url: string; headers: Headers; redirect: RequestInit["redirect"]; signal: boolean };
+type Seen = { url: string; headers: Headers; redirect: RequestInit["redirect"]; signal: boolean; method: string };
 
 /**
- * Access の後ろの know-office の代わりを作る。鍵が合えば画面と稼働確認を返し、合わなければ Access のログインへ送る
+ * Access の後ろの know-office の代わりを作る。鍵が合えば画面と稼働確認を返し、合わなければ Access のログインへ送る。
+ * GitHub の通知の道だけは Access の Bypass を通ってゲートウェイに届き、署名の無い通知を 401 の problem+json で断る
  * @param change 返事を差し替える関数。無ければ正しい返事
  * @returns fetch と、届いた要求の並び
  */
@@ -21,10 +22,13 @@ function deployed(change?: (url: string, authed: boolean) => Response | undefine
   const seen: Seen[] = [];
   const fetch: SmokeFetch = (input, init) => {
     const headers = new Headers(init?.headers);
-    seen.push({ url: input, headers, redirect: init?.redirect, signal: init?.signal instanceof AbortSignal });
+    seen.push({ url: input, headers, redirect: init?.redirect, signal: init?.signal instanceof AbortSignal, method: init?.method ?? "GET" });
     const authed = headers.get("CF-Access-Client-Id") === ID && headers.get("CF-Access-Client-Secret") === SECRET;
     const changed = change?.(input, authed);
     if (changed) return Promise.resolve(changed);
+    if (input === `${BASE}/hooks/v1/github`) {
+      return Promise.resolve(Response.json({ status: 401, code: "unauthenticated" }, { status: 401, headers: { "Content-Type": "application/problem+json" } }));
+    }
     if (!authed) return Promise.resolve(new Response(null, { status: 302, headers: { Location: "https://team.cloudflareaccess.com/cdn-cgi/access/login" } }));
     if (input === `${BASE}/`) {
       return Promise.resolve(new Response('<!doctype html><html lang="ja"><body><div id="root"></div></body></html>', { headers: { "Content-Type": "text/html; charset=utf-8" } }));
@@ -57,16 +61,28 @@ void describe("デプロイした後に画面と API が返る", () => {
     assert.match(text, /ok {3}画面/);
     assert.match(text, /ok {3}API/);
     assert.match(text, /ok {3}鍵の無い要求/);
+    assert.match(text, /ok {3}GitHub の通知の道/);
     assert.deepEqual(
-      seen.map((s) => [s.url, s.headers.has("CF-Access-Client-Secret")]),
+      seen.map((s) => [s.method, s.url, s.headers.has("CF-Access-Client-Secret")]),
       [
-        [`${BASE}/`, true],
-        [`${BASE}/api/v1/health`, true],
-        [`${BASE}/api/v1/health`, false],
+        ["GET", `${BASE}/`, true],
+        ["GET", `${BASE}/api/v1/health`, true],
+        ["GET", `${BASE}/api/v1/health`, false],
+        ["POST", `${BASE}/hooks/v1/github`, false],
       ],
     );
     // 転送を追うと鍵を別の宛先へ送りうるので追わない。どの要求も時間で切る
     assert.ok(seen.every((s) => s.redirect === "manual" && s.signal));
+  });
+
+  void it("GitHub の通知の道が Access に止められていたら落とす", async () => {
+    // Bypass が無いと、Access は鍵の無い要求をログインへ送るか 403 の HTML を返す
+    for (const blocked of [new Response(null, { status: 302, headers: { Location: "https://team.cloudflareaccess.com/" } }), new Response("<html>Forbidden</html>", { status: 403, headers: { "Content-Type": "text/html" } })]) {
+      const { fetch } = deployed((url) => (url === `${BASE}/hooks/v1/github` ? blocked : undefined));
+      const { text, code } = await run(KEYS, fetch);
+      assert.equal(code, 1, text);
+      assert.match(text, /FAIL GitHub の通知の道/);
+    }
   });
 
   void it("宛先の末尾の / と道は無視して入口から聞く", async () => {

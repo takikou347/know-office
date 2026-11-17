@@ -46,11 +46,12 @@ function readTarget(env: Readonly<Record<string, string | undefined>>): Target |
  * @param fetch 要求を送る関数
  * @param url 聞く URL
  * @param headers 付けるヘッダー
+ * @param init メソッドと本文。無ければ GET
  * @returns 返事か、つながらなかった時の文
  */
-async function ask(fetch: SmokeFetch, url: URL, headers: Record<string, string>): Promise<Response | string> {
+async function ask(fetch: SmokeFetch, url: URL, headers: Record<string, string>, init: { method?: string; body?: string } = {}): Promise<Response | string> {
   try {
-    return await fetch(url.toString(), { headers, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    return await fetch(url.toString(), { ...init, headers, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (error) {
     // 失敗の文には鍵が入りうるので、名前だけを出す
     return `つながらない (${error instanceof Error ? error.name : "unknown"})`;
@@ -103,7 +104,7 @@ function isGateHealth(body: string): boolean {
 }
 
 /**
- * 画面、API、鍵の無い要求の 3 つを確かめる
+ * 画面、API、鍵の無い要求、GitHub の通知の道の 4 つを確かめる
  * @param target 確かめる先と鍵
  * @param fetch 要求を送る関数
  * @returns 確かめの結果の並び
@@ -138,6 +139,15 @@ async function runChecks(target: Target, fetch: SmokeFetch): Promise<Check[]> {
   else {
     const reached = bare.status === 200 || isGateHealth(await text(bare));
     checks.push({ name: "鍵の無い要求", ok: !reached, detail: `${bare.status}${reached ? " 稼働確認に届いた" : ""}` });
+  }
+
+  // GitHub の通知の道だけは Access の Bypass でゲートウェイに届き、署名の無い通知を 401 の problem+json で断る。Access に止められると転送か HTML になる
+  const hook = await ask(fetch, new URL("/hooks/v1/github", target.base), { "Content-Type": "application/json", "X-GitHub-Event": "ping" }, { method: "POST", body: "{}" });
+  if (typeof hook === "string") checks.push({ name: "GitHub の通知の道", ok: false, detail: hook });
+  else {
+    await text(hook);
+    const gate = hook.status === 401 && (hook.headers.get("Content-Type") ?? "").startsWith("application/problem+json");
+    checks.push({ name: "GitHub の通知の道", ok: gate, detail: `${hook.status}${gate ? "" : " ゲートウェイに届かない (Access の Bypass を確かめる)"}` });
   }
   return checks;
 }
