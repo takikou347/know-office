@@ -75,9 +75,15 @@ void describe("デプロイした後に画面と API が返る", () => {
     assert.ok(seen.every((s) => s.redirect === "manual" && s.signal));
   });
 
-  void it("GitHub の通知の道が Access に止められていたら落とす", async () => {
+  void it("GitHub の通知の道が Access に止められているか、ゲートウェイの断りでなければ落とす", async () => {
     // Bypass が無いと、Access は鍵の無い要求をログインへ送るか 403 の HTML を返す
-    for (const blocked of [new Response(null, { status: 302, headers: { Location: "https://team.cloudflareaccess.com/" } }), new Response("<html>Forbidden</html>", { status: 403, headers: { "Content-Type": "text/html" } })]) {
+    // 401 でも problem+json でなければ、ゲートウェイの断りでない
+    const blockedAll = [
+      new Response(null, { status: 302, headers: { Location: "https://team.cloudflareaccess.com/" } }),
+      new Response("<html>Forbidden</html>", { status: 403, headers: { "Content-Type": "text/html" } }),
+      new Response("<html>Unauthorized</html>", { status: 401, headers: { "Content-Type": "text/html" } }),
+    ];
+    for (const blocked of blockedAll) {
       const { fetch } = deployed((url) => (url === `${BASE}/hooks/v1/github` ? blocked : undefined));
       const { text, code } = await run(KEYS, fetch);
       assert.equal(code, 1, text);
