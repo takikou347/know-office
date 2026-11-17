@@ -123,16 +123,31 @@ function messageId(n: number): string {
  * ワークスペースの代わりの 1 つのメソッドを包む
  * @param staffId 社員 ID
  * @param key 包むメソッド
- * @param wrap 元のメソッドを受けて、包んだメソッドを返す
+ * @param hook 元のメソッドを受けて、包んだメソッドを返す
  */
-function hookWorkspace(staffId: StaffId, key: "run" | "message", wrap: (original: (input: unknown) => Promise<unknown>) => (input: unknown) => Promise<unknown>): void {
+function hookWorkspace(staffId: StaffId, key: "run" | "message", hook: (original: (input: unknown) => Promise<unknown>) => (input: unknown) => Promise<unknown>): void {
   const space = gate.env.WORKSPACE;
-  gate.env.WORKSPACE = Object.assign(Object.create(space) as typeof space, {
-    get: (id: Parameters<typeof space.get>[0]) => {
-      const stub = space.get(id);
-      if (space.idFromName(staffId).toString() !== id.toString()) return stub;
-      const original = (input: unknown) => stub[key](input);
-      return Object.assign(Object.create(stub) as typeof stub, { [key]: wrap(original) });
+  gate.env.WORKSPACE = wrap(space, "get", (id: Parameters<typeof space.get>[0]) => {
+    const stub = space.get(id);
+    if (space.idFromName(staffId).toString() !== id.toString()) return stub;
+    return wrap(stub, key, hook((input) => stub[key](input)));
+  });
+}
+
+/**
+ * バインディングの 1 つのメソッドだけを差し替えた物を作る。ほかのメソッドは元の物に回す
+ * @param target 元のバインディング
+ * @param key 差し替えるメソッド
+ * @param replaced 差し替えた後のメソッド
+ * @returns 包んだバインディング
+ */
+function wrap<T extends object>(target: T, key: string, replaced: unknown): T {
+  return new Proxy(target, {
+    get: (t, k) => {
+      if (k === key) return replaced;
+      const value: unknown = Reflect.get(t, k, t);
+      const bound: unknown = typeof value === "function" ? value.bind(t) : value;
+      return bound;
     },
   });
 }
@@ -279,15 +294,12 @@ describe("オーナーの発言を二重に渡さない", () => {
     const db = gate.env.DB;
     let first = true;
     // 片方のバッチが書く直前に、もう片方の印を挟む
-    gate.env.DB = Object.assign(Object.create(db) as typeof db, {
-      batch: async (statements: Parameters<typeof db.batch>[0]) => {
-        if (first) {
-          first = false;
-          await markDelivered(gate.env, { staffId: "builder", nodeId: TASK }, [{ id: messageId(1), via: "run" }], clock.now());
-        }
-        return db.batch(statements);
-      },
-      prepare: (sql: string) => db.prepare(sql),
+    gate.env.DB = wrap(db, "batch", async (statements: Parameters<typeof db.batch>[0]) => {
+      if (first) {
+        first = false;
+        await markDelivered(gate.env, { staffId: "builder", nodeId: TASK }, [{ id: messageId(1), via: "run" }], clock.now());
+      }
+      return db.batch(statements);
     });
     const added = await markDelivered(gate.env, { staffId: "builder", nodeId: TASK }, [{ id: messageId(1), via: "next_task" }], clock.now());
     expect(added).toEqual([]);
@@ -302,12 +314,9 @@ describe("オーナーの発言を渡す途中で落ちる", () => {
     await seedTask(TASK, "勤怠の表を作る");
     await clockIn();
     const db = gate.env.DB;
-    gate.env.DB = Object.assign(Object.create(db) as typeof db, {
-      prepare: (sql: string) => {
-        if (sql.startsWith("INSERT INTO message_deliveries")) throw new Error("D1 down");
-        return db.prepare(sql);
-      },
-      batch: (statements: Parameters<typeof db.batch>[0]) => db.batch(statements),
+    gate.env.DB = wrap(db, "prepare", (sql: string) => {
+      if (sql.startsWith("INSERT INTO message_deliveries")) throw new Error("D1 down");
+      return db.prepare(sql);
     });
     const { result, prompt } = await takeAndStart();
     expect(result).toBe("started");
@@ -324,7 +333,8 @@ describe("オーナーの発言を渡す途中で落ちる", () => {
     await clockIn();
     const order: string[] = [];
     hookWorkspace("builder", "run", (original) => async (input) => {
-      // 読み終えた後、ワークスペースに頼む間に届いた発言。ワークスペースはまだ走っていないので 409 で断っている
+      // 読み終えた後、ワークスペースに頼む間に届いた発言。始めた時刻より後で、ワークスペースはまだ走っていないので 409 で断っている
+      clock.advance(1000);
       await seedMessage(messageId(1), clock.now(), "間に届いた");
       return original(input);
     });

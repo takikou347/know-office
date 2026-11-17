@@ -13,7 +13,7 @@ export const DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** 次の呼び出しの頭に足す発言の数の上限。1 件は D1 の頭の 2,000 字なので、10 件で 1 回の入力を 2 万字に収める */
 export const DELIVERY_MAX = 10;
 
-/** 24 時間のうちに読む発言の上限。渡した物を引いた残りから新しい 10 件を取る */
+/** 24 時間のうちに読む発言の上限。渡した物を引いた残りから新しい 10 件を取る。新しい 200 件が全部渡し済みなら、その先の古い発言は印が付かず、24 時間を過ぎて skipped になるまで待ちのまま出る */
 const DELIVERY_SCAN = 200;
 
 /** IN に並べる ID の数の上限。D1 の 1 文のバインドは 100 まで */
@@ -64,8 +64,9 @@ export async function undelivered(env: Bindings, staffId: StaffId, now: number):
   const rows: PendingRow[] = [];
   for (const db of dbs) {
     const found = await db
-      .prepare("SELECT id, at, body, body_key FROM messages WHERE staff_id = ? AND sender = 'owner' AND at >= ? AND at <= ? ORDER BY id DESC LIMIT ?")
-      .bind(staffId, since, now, DELIVERY_SCAN)
+      // 上は切らない。始めた後に読み直す時、始めた時刻より後に届いた発言も拾う
+      .prepare("SELECT id, at, body, body_key FROM messages WHERE staff_id = ? AND sender = 'owner' AND at >= ? ORDER BY id DESC LIMIT ?")
+      .bind(staffId, since, DELIVERY_SCAN)
       .all<PendingRow>();
     rows.push(...found.results);
   }
