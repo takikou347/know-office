@@ -36,6 +36,8 @@ export type Repos = {
   next: { docs: number };
   /** main に fast-forward で進められないリポジトリ */
   stale: Set<string>;
+  /** 設計書の PR の先にある設計書のファイル。道は設計書のリポジトリの頭から */
+  files: Record<string, string>;
 };
 
 /**
@@ -44,9 +46,9 @@ export type Repos = {
  * @returns 記録と操作
  */
 export function splitForge(world: WorkWorld): Repos {
-  const repos: Repos = { merges: [], opened: [], heads: new Map(), landed: new Set(), checks: { [DOCS]: "passed", [REPO]: "passed" }, behind: new Set(), broken: new Set(), pulls: new Map(), next: { docs: 10 }, stale: new Set() };
+  const repos: Repos = { merges: [], opened: [], heads: new Map(), landed: new Set(), checks: { [DOCS]: "passed", [REPO]: "passed" }, behind: new Set(), broken: new Set(), pulls: new Map(), next: { docs: 10 }, stale: new Set(), files: { ...GOOD } };
   const forge = world.forge;
-  const files: Record<string, string> = { ...GOOD };
+  const files = repos.files;
   forge.changedPaths = (repo) => Promise.resolve(repo === DOCS ? [DOC_FILE] : []);
   forge.defaultHead = () => Promise.resolve(HEAD);
   forge.branchHead = (repo, branch) => Promise.resolve(repos.heads.get(`${repo}:${branch}`) ?? (repo === DOCS ? DOCS_HEAD : CODE_HEAD));

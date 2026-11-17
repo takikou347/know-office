@@ -1,0 +1,111 @@
+// 承認されたタスクを done にしてから main を進める (タスクとレビューの 3.1 の 5)。子 Issue のタスクは閉じる順番待ちも同じバッチで積み、設計書の PR を結んだタスクは設計書を先に進める (開発の回し方の 3.6)
+import type { D1PreparedStatement } from "@cloudflare/workers-types";
+import { AppError, newId } from "@know-office/core";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { reviews } from "../db/main.ts";
+import { childOf } from "../devloop/pr-issue.ts";
+import type { Bindings } from "../env.ts";
+import { enqueueMirror, sendMirror } from "../github/mirror.ts";
+import { clockAt } from "./attendance.ts";
+import { type DocsTarget, type Landed, landBoth, type Rehash, rehashFor } from "./docs-merge.ts";
+import type { Forge } from "./loop.ts";
+import { moveNode, type NodeRow } from "./nodes.ts";
+import { wakeWaiting } from "./wake.ts";
+
+/** 設計書だけが入った時の知らせの文。社員の書いた文は入れない */
+const SPLIT_BODY = "設計書の PR は main に入ったが、コードの PR は入らなかった。コードは作った社員が確かめ直して入れる";
+
+/**
+ * 承認されたタスクを done にしてから、main を確かめたコミットまで進める。入れられなければ review に戻し、main が先に進んでいて進められない時は作った社員に todo で戻す
+ * 子 Issue のタスクは、done にする文と同じバッチで、入った後に Issue を閉じる順番待ちと、子の要件のハッシュを入れる設計書に合わせる文も積む。main に入らなければ、積んだ行を消して戻す
+ * 設計書の PR を結んだタスクは、設計書を先に進める。設計書だけが入ってコードが進められなければ、設計書は残し、通知 devloop_split を出して戻す (behind は todo、ほかは review)
+ * @param env バインディング
+ * @param forge GitHub
+ * @param made 確かめたタスク
+ * @param review リポジトリ、ブランチ、確かめたコミット、進める設計書
+ * @param review.repo リポジトリ
+ * @param review.branch ブランチ
+ * @param review.sha mergeGate が確かめたコミット
+ * @param review.docs 結んだ設計書の PR。結んでいなければ無い
+ * @param now 今の時刻
+ * @returns main に入れたら merged、何も進めずに戻したら behind、設計書だけ入れたら split
+ * @throws conflict 確かめたタスクが読んだ後に変わった時
+ * @throws upstream_failed GitHub が main を進める更新を断った時 (main が先に進んだ時と、設計書の後のコードの失敗を除く)
+ */
+export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; sha: string; docs?: DocsTarget | undefined }, now: number): Promise<Landed> {
+  // 先に done にして、同じタスクを 2 度入れない。子 Issue のタスクは、同じバッチで閉じる順番待ちと要件のハッシュも書く
+  const child = await childOf(env.DB, made);
+  const rehash = review.docs === undefined ? null : await rehashFor(env.DB, forge, made, review.docs);
+  let closeId: string | null = null;
+  if (child === null) {
+    if (!(await moveNode(env.DB, made, "done", now))) throw new AppError("conflict", "確かめるタスクが変わった");
+  } else {
+    const [row] = await drizzle(env.DB).select({ id: reviews.id }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
+    const close = enqueueMirror(env, row?.id ?? "", { kind: "issue_close", payload: { issueNumber: child.number, sha: review.sha } }, clockAt(now), {
+      sql: "EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'done')",
+      args: [made.id, made.version + 1],
+    });
+    const statements = [env.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ? AND version = ?").bind(now, made.id, made.version), close.statement];
+    // 要件のハッシュは、done にした側が書く。負けた側は書かない
+    if (rehash !== null) statements.push(rehash.apply);
+    const [done] = await env.DB.batch(statements);
+    if ((done?.meta.changes ?? 0) === 0) throw new AppError("conflict", "確かめるタスクが変わった");
+    closeId = close.id;
+  }
+  let outcome: Landed;
+  try {
+    outcome = review.docs === undefined ? await forge.merge(review.repo, { branch: review.branch, sha: review.sha }) : await landBoth(forge, review, review.docs);
+  } catch (error) {
+    await undoMerge(env, made.id, "review", closeId, now, rehash);
+    throw error;
+  }
+  if (outcome === "behind") {
+    // main が先に進んでいる。何も進めていないので、作った社員に戻して rebase させる。積んだ閉じと要件のハッシュは、タスクを戻す文と同じバッチで戻す
+    await undoMerge(env, made.id, "todo", closeId, now, rehash);
+    return "behind";
+  }
+  if (typeof outcome === "object") {
+    // 設計書は main に入った。要件のハッシュは設計書に合わせたままにする (戻すと合わせ直しが子を作り直す)
+    await splitMerge(env, made, outcome.split, closeId, now);
+    return outcome;
+  }
+  // 入った子と重なって待っていた子を、取らせる
+  if (made.repo !== null) await wakeWaiting(env, made.repo, now);
+  if (closeId !== null) await sendMirror(env, forge, closeId, clockAt(now));
+  return "merged";
+}
+
+/**
+ * main に入れられなかったタスクを done から戻し、積んだ閉じの順番待ちを消し、要件のハッシュを元に戻す。同じバッチで書き、片方だけ残さない
+ * @param env バインディング
+ * @param nodeId タスク ID
+ * @param to 戻す状態。入れられなかっただけなら review、main が進んでいたなら todo
+ * @param closeId 積んだ閉じの順番待ちの ID。無ければ null
+ * @param now 今の時刻
+ * @param rehash 戻す要件のハッシュ。無ければ null
+ */
+async function undoMerge(env: Bindings, nodeId: string, to: "review" | "todo", closeId: string | null, now: number, rehash: Rehash | null): Promise<void> {
+  const statements = [env.DB.prepare("UPDATE nodes SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'done'").bind(to, now, nodeId)];
+  if (closeId !== null) statements.push(env.DB.prepare("DELETE FROM github_mirrors WHERE id = ? AND sent_at IS NULL").bind(closeId));
+  if (rehash !== null) statements.push(rehash.revert);
+  await env.DB.batch(statements);
+}
+
+/**
+ * 設計書だけが入った時に、タスクを done から戻し、通知 devloop_split を出し、積んだ閉じの順番待ちを消す。同じバッチで書き、通知はタスクを戻せた時だけ足す
+ * @param env バインディング
+ * @param made 確かめたタスク
+ * @param to 戻す状態
+ * @param closeId 積んだ閉じの順番待ちの ID。無ければ null
+ * @param now 今の時刻
+ */
+async function splitMerge(env: Bindings, made: NodeRow, to: "todo" | "review", closeId: string | null, now: number): Promise<void> {
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("UPDATE nodes SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'done'").bind(to, now, made.id),
+    // 直前の文が 1 行書いた時だけ足す
+    env.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'devloop_split', '設計書だけが main に入った', ?, ? WHERE changes() > 0").bind(newId(clockAt(now)), now, SPLIT_BODY, made.scope),
+  ];
+  if (closeId !== null) statements.push(env.DB.prepare("DELETE FROM github_mirrors WHERE id = ? AND sent_at IS NULL").bind(closeId));
+  await env.DB.batch(statements);
+}
