@@ -1,4 +1,5 @@
 // ワークスペースからの GitHub への要求を受ける。git は読むか push かを決め、push の命令だけを読んで ref を見てから、絞った 1 時間の鍵を付けて送る。api.github.com は選んだリポジトリへの GET だけを通す (タスクとレビューの 3.3)
+import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, allowedFetch, decideRepo, GitHubRepo, recordedText, RepoName } from "@know-office/core";
 import type { Context } from "hono";
 import { endpoints } from "../endpoints.ts";
@@ -7,7 +8,7 @@ import { ensureRunning } from "../guard/actions.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
-import { mayPushDocs } from "../devloop/docs-link.ts";
+import { docsOf, mayPushDocs } from "../devloop/docs-link.ts";
 import { findNode } from "../work/nodes.ts";
 import type { TicketClaims } from "../work/ticket.ts";
 import { callGitHub, GITHUB_USER_AGENT, githubRetryAfter, githubToken, isRedirect, parseGitHub } from "./app.ts";
@@ -238,7 +239,21 @@ async function noteRelayedLimit(c: Context<GateEnv>, res: Response): Promise<voi
 }
 
 /**
- * ワークスペースの git の要求を、絞った鍵を付けて github.com に送る。push はタスクのリポジトリのブランチだけを通す。本文は命令だけを読み、残りは流して送る
+ * サービスのタスクが設計書のリポジトリへ push できる ref の見分けを作る。設計書の PR の行があればそのブランチだけ、行が無い最初の push は ko/<タスク ID の頭 8 字>- で始まるブランチ (頭 8 字は同じ時に作ったタスクと重なりうるので、行ができたら完全一致にする)
+ * @param db 今の状態の D1
+ * @param task タスク
+ * @param task.id タスク ID
+ * @returns ref を受けるか見る関数
+ */
+async function ownDocsRef(db: D1Database, task: { id: string }): Promise<(ref: string) => boolean> {
+  const row = await docsOf(db, task.id);
+  if (row !== null) return (ref) => ref === `refs/heads/${row.branch}`;
+  const prefix = `refs/heads/ko/${task.id.slice(0, 8)}-`;
+  return (ref) => ref.startsWith(prefix);
+}
+
+/**
+ * ワークスペースの git の要求を、絞った鍵を付けて github.com に送る。push はタスクのリポジトリのブランチだけを通す。サービスのタスクだけは、設計書のリポジトリの自分のブランチにも push できる (設計書の PR の行があればそのブランチと同じ名前、出す前は ko/<タスク ID の頭 8 字>- で始まる名前。main と ref の削除は断る)。本文は命令だけを読み、残りは流して送る
  * @param c 要求の文脈。作業トークンは受け手が確かめている
  * @param ticket 確かめた作業トークン
  * @returns GitHub の返事
@@ -264,13 +279,13 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   // 書くのはタスクのリポジトリだけ。ほかのリポジトリはタスクの外
   // ただしサービスのタスクは、設計書のリポジトリの自分のタスクのブランチ (ko/<タスク ID の頭 8 字>-) にも書ける。同じ時に設計書を直す (開発の回し方の 3.6)
   const task = push ? await findNode(c.env.DB, ticket.nodeId) : null;
-  const docsBranch = task !== null && task.repo !== repo.data && (await mayPushDocs(c.env.DB, task, repo.data)) ? `refs/heads/ko/${task.id.slice(0, 8)}-` : null;
-  if (task !== null && task.repo !== repo.data && docsBranch === null) return deny(c, ticket, `${repo.data} push`, "タスクのリポジトリでない");
+  const docsRef = task !== null && task.repo !== repo.data && (await mayPushDocs(c.env.DB, task, repo.data)) ? await ownDocsRef(c.env.DB, task) : null;
+  if (task !== null && task.repo !== repo.data && docsRef === null) return deny(c, ticket, `${repo.data} push`, "タスクのリポジトリでない");
   const body = c.req.method === "POST" ? decodedBody(c) : null;
   const commands = push && body ? await readCommands(body) : null;
   const token = await githubToken(c.env, c.var.github, repo.data, { contents: push ? "write" : "read" });
   if (commands) {
-    const own = docsBranch !== null && commands.updates.some((u) => !u.ref.startsWith(docsBranch)) ? "設計書のリポジトリは自分のタスクのブランチだけ" : null;
+    const own = docsRef !== null && commands.updates.some((u) => !docsRef(u.ref)) ? "設計書のリポジトリは自分のタスクのブランチだけ" : null;
     const refused = own ?? refusedRef(commands.updates, await defaultBranchOf(c, repo.data, token.reveal()));
     if (refused !== null) {
       void commands.relay.stream.cancel();

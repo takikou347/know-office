@@ -43,4 +43,57 @@ describe("設計書を同じ時に直す", () => {
     const res = await push(world, work, DOCS, [{ ref: `refs/heads/ko/${work.nodeId.slice(0, 8)}-spec` }]);
     expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 403, code: "rule_denied" });
   });
+
+  /**
+   * push を断った答えの状態と種類を読む
+   * @param res 受け手の返事
+   * @returns 状態と種類
+   */
+  async function denied(res: Response) {
+    return { status: res.status, code: Problem.parse(await res.json()).code };
+  }
+
+  it("サービスのタスクでないタスクは、設計書のリポジトリに push できない", async () => {
+    const service = await prototyped(world);
+    // 範囲が office のタスク
+    const office = await startTask(world, REPO);
+    await world.d1.DB.prepare("UPDATE nodes SET scope = 'office' WHERE id = ?").bind(office.nodeId).run();
+    expect(await denied(await push(world, office, DOCS, [{ ref: `refs/heads/ko/${office.nodeId.slice(0, 8)}-spec` }]))).toEqual({ status: 403, code: "rule_denied" });
+    // サービスのタスクでも、リポジトリがそのサービスのでないもの
+    const other = await startTask(world, REPO);
+    await world.d1.DB.prepare("UPDATE nodes SET scope = ?, repo = 'example/other' WHERE id = ?").bind(service, other.nodeId).run();
+    expect(await denied(await push(world, other, DOCS, [{ ref: `refs/heads/ko/${other.nodeId.slice(0, 8)}-spec` }]))).toEqual({ status: 403, code: "rule_denied" });
+  });
+
+  it.each([
+    ["自分のブランチが先", (own: string) => [own, "refs/heads/ko/00000000-spec"]],
+    ["ほかの ref が先", (own: string) => ["refs/heads/feature", own]],
+  ])("自分のブランチとほかの ref が混ざる push は、全部断る (%s)", async (_name, refs) => {
+    const work = await serviceTask();
+    const own = `refs/heads/ko/${work.nodeId.slice(0, 8)}-spec`;
+    expect(await denied(await push(world, work, DOCS, refs(own).map((ref) => ({ ref }))))).toEqual({ status: 403, code: "rule_denied" });
+  });
+
+  it.each([
+    ["main", "refs/heads/main", undefined],
+    ["ref を消す", "-spec", "0".repeat(40)],
+    ["崩れた ref (..)", "-spec..x", undefined],
+    ["崩れた ref (.lock)", "-spec.lock", undefined],
+    ["タグ", "refs/tags/ko-spec", undefined],
+  ])("自分の前置きの下でも、%s は断る", async (_name, suffix, to) => {
+    const work = await serviceTask();
+    const ref = suffix.startsWith("refs/") ? suffix : `refs/heads/ko/${work.nodeId.slice(0, 8)}${suffix}`;
+    expect(await denied(await push(world, work, DOCS, [{ ref, ...(to === undefined ? {} : { to }) }]))).toEqual({ status: 403, code: "rule_denied" });
+  });
+
+  it("設計書の PR の行があれば、その行のブランチだけに push でき、行が無い最初の push だけ前置きで通す", async () => {
+    const work = await serviceTask();
+    const prefix = `refs/heads/ko/${work.nodeId.slice(0, 8)}`;
+    // 行が無い最初の push は、前置きの下ならどれでも通す
+    expect((await push(world, work, DOCS, [{ ref: `${prefix}-first` }])).status).toBe(200);
+    // 行ができたら、行のブランチだけ
+    await world.d1.DB.prepare("INSERT INTO task_docs (node_id, service_id, repo, pr_number, branch, created_at) VALUES (?1, (SELECT scope FROM nodes WHERE id = ?1), ?2, NULL, ?3, 1)").bind(work.nodeId, DOCS, `ko/${work.nodeId.slice(0, 8)}-spec`).run();
+    expect((await push(world, work, DOCS, [{ ref: `${prefix}-spec` }])).status).toBe(200);
+    expect(await denied(await push(world, work, DOCS, [{ ref: `${prefix}-other` }]))).toEqual({ status: 403, code: "rule_denied" });
+  });
 });
