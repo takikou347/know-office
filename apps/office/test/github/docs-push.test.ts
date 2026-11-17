@@ -4,7 +4,7 @@ import { z } from "zod";
 import { DOCS, DOCS2, prototyped, REPO, seedSetting } from "../helpers/docs.ts";
 import { push, startTask } from "../helpers/github.ts";
 import { observe } from "../../src/gate/guard/observe.ts";
-import { useWork } from "../helpers/work.ts";
+import { rows, useWork } from "../helpers/work.ts";
 
 const world = useWork({ github: true });
 const Problem = z.object({ code: z.string() }).loose();
@@ -84,6 +84,21 @@ describe("設計書を同じ時に直す", () => {
     const work = await serviceTask();
     const ref = suffix.startsWith("refs/") ? suffix : `refs/heads/ko/${work.nodeId.slice(0, 8)}${suffix}`;
     expect(await denied(await push(world, work, DOCS, [{ ref, ...(to === undefined ? {} : { to }) }]))).toEqual({ status: 403, code: "rule_denied" });
+  });
+
+  it("頭 8 字が同じ別のタスクの設計書のブランチには、行が無くても push できず、記録が残る", async () => {
+    const work = await serviceTask();
+    const prefix = work.nodeId.slice(0, 8);
+    // 頭 8 字が同じ別のタスクが、設計書の PR の行を持っている
+    const other = `${prefix}-0000-7000-8000-000000000000`;
+    const [row] = await rows(world.d1.DB, "SELECT * FROM nodes WHERE id = ?", work.nodeId);
+    const copy = { ...row, id: other, source: `other:${other}`, issue_number: null, pr_number: null, branch: null };
+    const names = Object.keys(copy);
+    await world.d1.DB.prepare(`INSERT INTO nodes (${names.join(", ")}) VALUES (${names.map(() => "?").join(", ")})`).bind(...Object.values(copy)).run();
+    await world.d1.DB.prepare("INSERT INTO task_docs (node_id, service_id, repo, pr_number, branch, created_at) VALUES (?, ?, ?, 90, ?, 1)").bind(other, String(row?.["scope"]), DOCS, `ko/${prefix}-spec`).run();
+    const count = async () => (await observe(world.gate.env, { type: "rule_denied", staffId: "builder", nodeId: work.nodeId, operation: "office.tool", target: "probe" }, world.clock.now(), world.gate.deps)).measured;
+    expect(await denied(await push(world, work, DOCS, [{ ref: `refs/heads/ko/${prefix}-spec` }]))).toEqual({ status: 403, code: "rule_denied" });
+    expect(await count()).toBe(2);
   });
 
   it("設計書の PR の行があれば、その行のブランチだけに push でき、行が無い最初の push だけ前置きで通す", async () => {

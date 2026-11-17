@@ -239,17 +239,21 @@ async function noteRelayedLimit(c: Context<GateEnv>, res: Response): Promise<voi
 }
 
 /**
- * サービスのタスクが設計書のリポジトリへ push できる ref の見分けを作る。設計書の PR の行があればそのブランチだけ、行が無い最初の push は ko/<タスク ID の頭 8 字>- で始まるブランチ (頭 8 字は同じ時に作ったタスクと重なりうるので、行ができたら完全一致にする)
+ * サービスのタスクが設計書のリポジトリへ push できる ref の見分けを作る。設計書の PR の行があればそのブランチだけ。行が無い最初の push は ko/<タスク ID の頭 8 字>- で始まるブランチだが、頭 8 字は同じ時に作ったタスクと重なりうるので、ほかのタスクの行のブランチと同じ名前は断る
  * @param db 今の状態の D1
  * @param task タスク
  * @param task.id タスク ID
  * @returns ref を受けるか見る関数
  */
-async function ownDocsRef(db: D1Database, task: { id: string }): Promise<(ref: string) => boolean> {
+async function ownDocsRef(db: D1Database, task: { id: string }): Promise<(ref: string) => Promise<boolean>> {
   const row = await docsOf(db, task.id);
-  if (row !== null) return (ref) => ref === `refs/heads/${row.branch}`;
+  if (row !== null) return (ref) => Promise.resolve(ref === `refs/heads/${row.branch}`);
   const prefix = `refs/heads/ko/${task.id.slice(0, 8)}-`;
-  return (ref) => ref.startsWith(prefix);
+  return async (ref) => {
+    if (!ref.startsWith(prefix)) return false;
+    const taken = await db.prepare("SELECT 1 AS taken FROM task_docs WHERE branch = ? AND node_id <> ?").bind(ref.slice("refs/heads/".length), task.id).first();
+    return taken === null;
+  };
 }
 
 /**
@@ -277,7 +281,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   const decision = decideRepo({ action: push ? "push" : "read", repo: repo.data, paths: [] }, scope);
   if (!decision.allow) return deny(c, ticket, `${repo.data} ${push ? "push" : "read"}`, decision.reason);
   // 書くのはタスクのリポジトリだけ。ほかのリポジトリはタスクの外
-  // ただしサービスのタスクは、設計書のリポジトリの自分のタスクのブランチ (ko/<タスク ID の頭 8 字>-) にも書ける。同じ時に設計書を直す (開発の回し方の 3.6)
+  // ただしサービスのタスクは、設計書のリポジトリの自分のタスクのブランチにも書ける。同じ時に設計書を直す (開発の回し方の 3.6)。設計書の PR の行があればそのブランチだけ、無い最初の push は ko/<タスク ID の頭 8 字>- で始まり、ほかのタスクの行のブランチと重ならない名前
   const task = push ? await findNode(c.env.DB, ticket.nodeId) : null;
   const docsRef = task !== null && task.repo !== repo.data && (await mayPushDocs(c.env.DB, task, repo.data)) ? await ownDocsRef(c.env.DB, task) : null;
   if (task !== null && task.repo !== repo.data && docsRef === null) return deny(c, ticket, `${repo.data} push`, "タスクのリポジトリでない");
@@ -285,7 +289,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   const commands = push && body ? await readCommands(body) : null;
   const token = await githubToken(c.env, c.var.github, repo.data, { contents: push ? "write" : "read" });
   if (commands) {
-    const own = docsRef !== null && commands.updates.some((u) => !docsRef(u.ref)) ? "設計書のリポジトリは自分のタスクのブランチだけ" : null;
+    const own = docsRef !== null && !(await Promise.all(commands.updates.map((u) => docsRef(u.ref)))).every(Boolean) ? "設計書のリポジトリは自分のタスクのブランチだけ" : null;
     const refused = own ?? refusedRef(commands.updates, await defaultBranchOf(c, repo.data, token.reveal()));
     if (refused !== null) {
       void commands.relay.stream.cancel();
