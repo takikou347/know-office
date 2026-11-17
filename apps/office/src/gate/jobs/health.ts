@@ -8,6 +8,7 @@ import { SHARED_TOKENS } from "../github/app.ts";
 import { vaultForge } from "../github/vault-forge.ts";
 import { retryMirrors } from "../github/mirror.ts";
 import { recheckReviews } from "../work/review.ts";
+import { settleReleases } from "../devloop/release.ts";
 import { connectRollback, UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { collectMetrics, UNCONNECTED_ANALYTICS } from "../services/deploys.ts";
 import { checkOverruns, checkThresholds } from "../guard/observe.ts";
@@ -81,6 +82,7 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
     ctx.waitUntil(pollBatches(env, weekly, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "batch_poll_failed", error }, clock)));
     const forge = vaultForge(env, { fetcher: weekly.fetch, clock, cache: SHARED_TOKENS });
     ctx.waitUntil(retryMirrors(env, forge, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "mirror_retry_failed", error }, clock)));
+    ctx.waitUntil(settleReleases(env, forge.issues, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "release_settle_failed", error }, clock)));
     // サービスの様子を読み、デプロイの後の失敗で止めた時は rollback.yml で戻す。分析の口は #131 までつながず、何も書かない
     const deps = { ...UNCONNECTED_DEPS, rollback: connectRollback(env, forge, () => clock.now()) };
     ctx.waitUntil(collectMetrics(env, UNCONNECTED_ANALYTICS, clock.now(), deps).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "service_metrics_failed", error }, clock)));
