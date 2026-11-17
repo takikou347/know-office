@@ -57,6 +57,7 @@ async function publish(env: Bindings, forge: Forge, call: PrCall, task: NodeRow,
     throw error;
   }
   // 出した後に落ちても行は残る。次の呼びは、このブランチの開いた PR を先に読んで使う
+  // PR を出すのは内容を作る書き。GitHub の REST API の Secondary rate limits は、内容を作る要求を 1 分に 80 回、1 時間に 500 回までにする。1 つのタスクが出すのは 1 本で、断られた時は github/limits.ts がレート制限の通知にする
   const pull = (await forge.pullOf(row.repo, row.branch)) ?? (await forge.openPull({ repo: row.repo, branch: row.branch, title: input.title, body: input.body }));
   await setDocsPr(env.DB, task.id, pull.number);
   const actor = { by: call.staffId, now: call.now, traceId: call.traceId };

@@ -20,6 +20,15 @@ async function serviceTask() {
   return work;
 }
 
+/**
+ * push を断った答えの状態と種類を読む
+ * @param res 受け手の返事
+ * @returns 状態と種類
+ */
+async function denied(res: Response) {
+  return { status: res.status, code: Problem.parse(await res.json()).code };
+}
+
 describe("設計書を同じ時に直す", () => {
   it("設計書のリポジトリの自分のブランチに push できる", async () => {
     const work = await serviceTask();
@@ -43,15 +52,6 @@ describe("設計書を同じ時に直す", () => {
     const res = await push(world, work, DOCS, [{ ref: `refs/heads/ko/${work.nodeId.slice(0, 8)}-spec` }]);
     expect({ status: res.status, code: Problem.parse(await res.json()).code }).toEqual({ status: 403, code: "rule_denied" });
   });
-
-  /**
-   * push を断った答えの状態と種類を読む
-   * @param res 受け手の返事
-   * @returns 状態と種類
-   */
-  async function denied(res: Response) {
-    return { status: res.status, code: Problem.parse(await res.json()).code };
-  }
 
   it("サービスのタスクでないタスクは、設計書のリポジトリに push できない", async () => {
     const service = await prototyped(world);

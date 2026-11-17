@@ -7,6 +7,8 @@ import { reviews } from "../db/main.ts";
 import { childOf } from "../devloop/pr-issue.ts";
 import type { Bindings } from "../env.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
+import { recordError } from "../ledger/errors.ts";
+import { announceNotice } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 import { type DocsTarget, type Landed, landBoth, type Rehash, rehashFor } from "./docs-merge.ts";
 import type { Forge } from "./loop.ts";
@@ -27,10 +29,11 @@ const SPLIT_BODY = "設計書の PR は main に入ったが、コードの PR �
  * @param review.repo リポジトリ
  * @param review.branch ブランチ
  * @param review.sha mergeGate が確かめたコミット
- * @param review.docs 結んだ設計書の PR。結んでいなければ無い
+ * @param review.docs 結んだ設計書の PR。結んでいなければ無い。確かめた先がもう main に入っていれば landed で、進めるのはコードだけ
  * @param now 今の時刻
- * @returns main に入れたら merged、何も進めずに戻したら behind、設計書だけ入れたら split
+ * @returns main に入れたら merged、何も進めずに戻したら behind (遅れたリポジトリ付き)、設計書だけ入れたら split (失敗の種類付き)
  * @throws conflict 確かめたタスクが読んだ後に変わった時
+ * @throws not_found 子 Issue のタスクのレビューが無い時 (done にする前に断る)
  * @throws upstream_failed GitHub が main を進める更新を断った時 (main が先に進んだ時と、設計書の後のコードの失敗を除く)
  */
 export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; sha: string; docs?: DocsTarget | undefined }, now: number): Promise<Landed> {
@@ -42,12 +45,13 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
     if (!(await moveNode(env.DB, made, "done", now))) throw new AppError("conflict", "確かめるタスクが変わった");
   } else {
     const [row] = await drizzle(env.DB).select({ id: reviews.id }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
-    const close = enqueueMirror(env, row?.id ?? "", { kind: "issue_close", payload: { issueNumber: child.number, sha: review.sha } }, clockAt(now), {
+    if (!row) throw new AppError("not_found", "レビューが無い");
+    const close = enqueueMirror(env, row.id, { kind: "issue_close", payload: { issueNumber: child.number, sha: review.sha } }, clockAt(now), {
       sql: "EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'done')",
       args: [made.id, made.version + 1],
     });
     const statements = [env.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ? AND version = ?").bind(now, made.id, made.version), close.statement];
-    // 要件のハッシュは、done にした側が書く。負けた側は書かない
+    // 要件のハッシュを直す文は、このタスクが done になっている時だけ書く (rehashFor の条件)。負けた側は書かない
     if (rehash !== null) statements.push(rehash.apply);
     const [done] = await env.DB.batch(statements);
     if ((done?.meta.changes ?? 0) === 0) throw new AppError("conflict", "確かめるタスクが変わった");
@@ -55,25 +59,39 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
   }
   let outcome: Landed;
   try {
-    outcome = review.docs === undefined ? await forge.merge(review.repo, { branch: review.branch, sha: review.sha }) : await landBoth(forge, review, review.docs);
+    outcome = review.docs === undefined || review.docs.landed === true ? await mergeCode(forge, review) : await landBoth(forge, review, review.docs);
   } catch (error) {
     await undoMerge(env, made.id, "review", closeId, now, rehash);
     throw error;
   }
-  if (outcome === "behind") {
+  if (typeof outcome === "object" && "behind" in outcome) {
     // main が先に進んでいる。何も進めていないので、作った社員に戻して rebase させる。積んだ閉じと要件のハッシュは、タスクを戻す文と同じバッチで戻す
     await undoMerge(env, made.id, "todo", closeId, now, rehash);
-    return "behind";
+    return outcome;
   }
   if (typeof outcome === "object") {
     // 設計書は main に入った。要件のハッシュは設計書に合わせたままにする (戻すと合わせ直しが子を作り直す)
-    await splitMerge(env, made, outcome.split, closeId, now);
+    await splitMerge(env, made, outcome, closeId, now);
     return outcome;
   }
   // 入った子と重なって待っていた子を、取らせる
   if (made.repo !== null) await wakeWaiting(env, made.repo, now);
   if (closeId !== null) await sendMirror(env, forge, closeId, clockAt(now));
   return "merged";
+}
+
+/**
+ * コードだけを main へ進める
+ * @param forge GitHub
+ * @param code リポジトリ、ブランチ、確かめたコミット
+ * @param code.repo リポジトリ
+ * @param code.branch ブランチ
+ * @param code.sha 確かめたコミット
+ * @returns 進めたら merged、main が先に進んでいたら behind (リポジトリ付き)
+ * @throws upstream_failed GitHub が断った時
+ */
+async function mergeCode(forge: Forge, code: { repo: string; branch: string; sha: string }): Promise<Landed> {
+  return (await forge.merge(code.repo, { branch: code.branch, sha: code.sha })) === "behind" ? { behind: code.repo } : "merged";
 }
 
 /**
@@ -93,19 +111,24 @@ async function undoMerge(env: Bindings, nodeId: string, to: "review" | "todo", c
 }
 
 /**
- * 設計書だけが入った時に、タスクを done から戻し、通知 devloop_split を出し、積んだ閉じの順番待ちを消す。同じバッチで書き、通知はタスクを戻せた時だけ足す
+ * 設計書だけが入った時に、タスクを done から戻し、通知 devloop_split を出し、積んだ閉じの順番待ちを消す。同じバッチで書き、通知はタスクを戻せた時だけ足す。通知は足せたら配り、失敗の種類をエラーログに残す
  * @param env バインディング
  * @param made 確かめたタスク
- * @param to 戻す状態
+ * @param split 戻す先、失敗の種類、投げられた物
+ * @param split.split 戻す先
+ * @param split.error 投げられた物。遅れただけなら無い
  * @param closeId 積んだ閉じの順番待ちの ID。無ければ null
  * @param now 今の時刻
  */
-async function splitMerge(env: Bindings, made: NodeRow, to: "todo" | "review", closeId: string | null, now: number): Promise<void> {
+async function splitMerge(env: Bindings, made: NodeRow, split: { split: "todo" | "review"; error?: unknown }, closeId: string | null, now: number): Promise<void> {
+  const noticeId = newId(clockAt(now));
   const statements: D1PreparedStatement[] = [
-    env.DB.prepare("UPDATE nodes SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'done'").bind(to, now, made.id),
+    env.DB.prepare("UPDATE nodes SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'done'").bind(split.split, now, made.id),
     // 直前の文が 1 行書いた時だけ足す
-    env.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'devloop_split', '設計書だけが main に入った', ?, ? WHERE changes() > 0").bind(newId(clockAt(now)), now, SPLIT_BODY, made.scope),
+    env.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'devloop_split', '設計書だけが main に入った', ?, ? WHERE changes() > 0").bind(noticeId, now, SPLIT_BODY, made.scope),
   ];
   if (closeId !== null) statements.push(env.DB.prepare("DELETE FROM github_mirrors WHERE id = ? AND sent_at IS NULL").bind(closeId));
-  await env.DB.batch(statements);
+  const [, notice] = await env.DB.batch(statements);
+  if ((notice?.meta.changes ?? 0) > 0) await announceNotice(env, noticeId, clockAt(now));
+  if (split.error !== undefined) await recordError(env, { source: "gate", level: "warn", code: "devloop_split", error: split.error }, clockAt(now));
 }

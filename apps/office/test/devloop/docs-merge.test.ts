@@ -1,56 +1,18 @@
 // 設計書を同じ時に直す、2 つの PR を順に main に入れる所。条件がそろった時だけ、設計書を先に、コードを後に進める (開発の回し方の 3.6)
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import { DOCS, DOCS2, REPO, seedSetting } from "../helpers/docs.ts";
-import { CODE_HEAD, DOCS_HEAD, type Repos, working } from "../helpers/docs-together.ts";
+import { CODE_HEAD, DOCS_HEAD } from "../helpers/docs-together.ts";
 import { BASE, child, detail, planOf, plan, rewriteDocs, issuesOf } from "../helpers/issues.ts";
-import { advance, at, rows, staffOf, tool, useWork } from "../helpers/work.ts";
+import { approve as approveFor, retry as retryFor, reviewed as reviewedFor, statusOf as statusFor } from "../helpers/docs-land.ts";
+import { rows, useWork } from "../helpers/work.ts";
 import { eventsOf } from "../helpers/review.ts";
-import { findNode } from "../../src/gate/work/nodes.ts";
-import { mergeIfReady } from "../../src/gate/work/review.ts";
 
 const world = useWork({ github: true });
 
-/**
- * 設計書の PR とコードの PR を出し、レビュー担当がレビューを取る直前まで進める
- * @returns サービス ID、タスク ID、Issue の番号、代わりの GitHub の記録
- */
-async function reviewed() {
-  const made = await working(world);
-  const docs = z.object({ number: z.number() }).parse(JSON.parse((await tool(world, "builder", "docs_pr_open", { name: "spec", title: "設計書", body: "" })).content));
-  expect(await tool(world, "builder", "pr_open", { name: "make", title: "動画を作る", body: "", docsPr: docs.number })).toMatchObject({ isError: false });
-  await advance(world, at(10));
-  await staffOf(world, "reviewer").pull(world.clock.now());
-  return made;
-}
-
-/**
- * レビュー担当が承認する
- * @returns main に入れたか
- */
-async function approve(): Promise<boolean> {
-  const answer = await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "設計書とコードを確かめた", headSha: CODE_HEAD });
-  return z.object({ merged: z.boolean() }).parse(JSON.parse(answer.content)).merged;
-}
-
-/**
- * 承認の後にもう一度入れようとする (オーナーの押し直しの代わり)
- * @param task タスク ID
- * @returns main に入れたか
- */
-async function retry(task: string): Promise<boolean> {
-  const made = await findNode(world.gate.env.DB, task);
-  return mergeIfReady(world.gate.env, world.forge, made, { repo: REPO, branch: `ko/${task.slice(0, 8)}-make`, prNumber: 1, reviewer: null }, { staffId: null, kind: "owner_approved", detail: {} }, { by: "owner", now: world.clock.now() }, world.gate.deps);
-}
-
-/**
- * タスクの状態を読む
- * @param task タスク ID
- * @returns 状態
- */
-async function statusOf(task: string): Promise<unknown> {
-  return (await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task))[0]?.["status"];
-}
+const reviewed = () => reviewedFor(world);
+const approve = () => approveFor(world);
+const retry = (task: string) => retryFor(world, task);
+const statusOf = (task: string) => statusFor(world, task);
 
 /**
  * 通知の種類を読む
@@ -161,11 +123,10 @@ describe("設計書を同じ時に直す", () => {
   });
 
   it("設計書と一緒に入れた子は、合わせ直しで作り直さない", async () => {
-    const { task, service, repos } = await reviewed();
+    const { service, repos } = await reviewed();
     // 設計書の PR が要件の本文を変える。main に入った設計書も同じに置く
     const next = detail({ first: "文章と画像から作る" });
     repos.files[`${BASE}/1-video.md`] = next;
-    await world.d1.DB.prepare("UPDATE reviews SET docs_head_sha = docs_head_sha WHERE node_id = ?").bind(task).run();
     expect(await approve()).toBe(true);
     rewriteDocs(world, "1-video.md", next);
     const again = await plan(world, planOf(service, [child("動画を作る", { kind: "chore" })]));
@@ -173,5 +134,3 @@ describe("設計書を同じ時に直す", () => {
     expect(await rows(world.d1.DB, "SELECT COUNT(*) AS n FROM dev_issues WHERE kind = 'child'")).toEqual([{ n: 1 }]);
   });
 });
-
-export type { Repos };

@@ -18,7 +18,6 @@ import { denyByRule, type PrCall } from "./rule-denied.ts";
 /** レビューのタスクを割り振る社員 */
 const REVIEWER: StaffId = "reviewer";
 
-
 /**
  * 出す前に、ルールと設計書の形と子 Issue のテストの確かめを通す。変えたファイルは子のタスクだけ固定した先で 1 回読み、ルールとテストの確かめの両方に使う
  * @param env バインディング

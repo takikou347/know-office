@@ -170,15 +170,16 @@ export async function mergeIfReady(
     await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch, sha: gate.sha } }, actor);
     return true;
   }
-  if (typeof outcome === "object" && outcome !== null) {
+  if (typeof outcome === "object" && outcome !== null && "split" in outcome) {
     // 設計書だけが入った。設計書は残し、コードは戻した。behind なら作った社員が rebase する (勤務時間外の社員は呼び出さない)
-    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "devloop_split", detail: { branch: review.branch, sha: gate.kind === "ready" ? gate.sha : null, to: outcome.split } }, actor);
+    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "devloop_split", detail: { branch: review.branch, sha: gate.kind === "ready" ? gate.sha : null, to: outcome.split, code: outcome.code } }, actor);
     if (outcome.split === "todo" && made.assignee !== null) await notifyStaff(env, made.assignee, actor.now, false);
     return false;
   }
   if (gate.kind === "ready") {
-    // main が先に進んでいた。例外にせず、作った社員に rebase を求める出来事を残し、勤務中なら次に取らせる (勤務時間外の社員は呼び出さない)
-    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "main_advanced", detail: { branch: review.branch, sha: gate.sha } }, actor);
+    // main が先に進んでいた。例外にせず、遅れたリポジトリと一緒に作った社員に rebase を求める出来事を残し、勤務中なら次に取らせる (勤務時間外の社員は呼び出さない)
+    const repo = typeof outcome === "object" && outcome !== null ? outcome.behind : review.repo;
+    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "main_advanced", detail: { branch: review.branch, sha: gate.sha, repo } }, actor);
     if (made.assignee !== null) await notifyStaff(env, made.assignee, actor.now, false);
     return false;
   }
