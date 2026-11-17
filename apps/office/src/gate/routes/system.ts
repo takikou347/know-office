@@ -6,6 +6,7 @@ import { createRouter } from "../app.ts";
 import { CONTENT_SECURITY_POLICY } from "../headers.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
+import { checkEnv } from "../config.ts";
 
 const getHealth = createRoute({
   method: "get",
@@ -14,7 +15,11 @@ const getHealth = createRoute({
   tags: ["system"],
   summary: "ゲートウェイの稼働確認",
   description: "D1 が止まっても答えるよう、ログインセッションの検証を通らない。デプロイの後の確かめのため、Access の証明はオーナーのほかに、`ACCESS_SMOKE_CLIENT_ID` の作業用の鍵の証明もこのルートだけ通す。",
-  "x-steps": ["`DB` に `SELECT 1` を実行する", "応答した部分 (ゲートウェイ、画面、ワークスペース) を返す"],
+  "x-steps": [
+    "`DB` に `SELECT 1` を実行する",
+    "設定 (環境変数、秘密、バインディング) を 1 つの形で確かめ、足りない項目と形の違う項目の名前だけを `missing` に並べる。値は返さない",
+    "応答した部分 (ゲートウェイ、画面、ワークスペース) を返す。`missing` が空でなければ `ok` は `false`",
+  ],
   "x-errors": ["503 `unavailable`: D1 が応答しない"],
   security: [{ accessJwt: [] }],
   responses: { 200: okResponse(Health), ...problems(401, 403, 429, 500, 503) },
@@ -54,7 +59,8 @@ export const system = createRouter()
     } catch {
       throw new AppError("unavailable", "D1 が応答しない");
     }
-    return ok(c, health("gate"));
+    const missing = checkEnv(c.env);
+    return ok(c, { ...health("gate"), ok: missing.length === 0, missing });
   })
   .openapi(getApiDocs, (c) => {
     // Swagger UI は style 属性を使うので、このルートだけ style-src に unsafe-inline を足す。API の決まりの 4.1

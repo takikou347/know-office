@@ -36,7 +36,15 @@ export type Problem = z.infer<typeof Problem>;
 export const Part = z.enum(["gate", "screen", "workspace"]);
 
 /** 稼働確認の返事 */
-export const Health = z.object({ ok: z.boolean(), part: Part }).strict().meta({ id: "Health" });
+export const Health = z
+  .object({
+    ok: z.boolean(),
+    part: Part,
+    /** ゲートウェイの足りない設定と形の違う設定の名前。値は返さない */
+    missing: z.array(z.string().max(64)).max(32).optional(),
+  })
+  .strict()
+  .meta({ id: "Health" });
 
 /** 稼働確認の返事の型 */
 export type Health = z.infer<typeof Health>;

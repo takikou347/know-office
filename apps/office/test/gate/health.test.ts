@@ -17,7 +17,18 @@ describe("稼働確認", () => {
   it("D1 が応答すれば 200 でゲートウェイが動いている事を返す", async () => {
     const res = await gate.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ data: { ok: true, part: "gate" } });
+    expect(await res.json()).toMatchObject({ data: { ok: true, part: "gate", missing: [] } });
+  });
+
+  it("足りない設定と形の違う設定があれば、名前だけを返して動いていない事を示す", async () => {
+    const env = { ...gate.env, ANTHROPIC_API_KEY: undefined, MASTER_KEY: "c2hvcnQ=", URGENT_SCAN: "not-a-flag" };
+    const res = await gate.app.request("/api/v1/health", { headers: { "Cf-Access-Jwt-Assertion": await gate.access.sign() } }, env);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(JSON.parse(body)).toMatchObject({ data: { ok: false, part: "gate", missing: ["ANTHROPIC_API_KEY", "MASTER_KEY", "URGENT_SCAN"] } });
+    // 値は返さない
+    expect(body).not.toContain("c2hvcnQ=");
+    expect(body).not.toContain("not-a-flag");
   });
 
   it("D1 が応答しなければ 503 unavailable。ログインセッションは D1 に要るので、稼働確認は Access の証明だけで答える", async () => {

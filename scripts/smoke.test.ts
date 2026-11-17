@@ -30,7 +30,7 @@ function deployed(change?: (url: string, authed: boolean) => Response | undefine
       return Promise.resolve(new Response('<!doctype html><html lang="ja"><body><div id="root"></div></body></html>', { headers: { "Content-Type": "text/html; charset=utf-8" } }));
     }
     if (input === `${BASE}/api/v1/health`) {
-      return Promise.resolve(Response.json({ data: { ok: true, part: "gate" }, meta: { traceId: "t" } }));
+      return Promise.resolve(Response.json({ data: { ok: true, part: "gate", missing: [] }, meta: { traceId: "t" } }));
     }
     return Promise.resolve(new Response("not found", { status: 404 }));
   };
@@ -140,6 +140,13 @@ void describe("デプロイした後に画面と API が返る", () => {
     const { fetch } = deployed((url, authed) => (authed && url.endsWith("/api/v1/health") ? Response.json({ data: { ok: false, part: "gate" } }) : undefined));
     const { code } = await run(KEYS, fetch);
     assert.equal(code, 1);
+  });
+
+  void it("稼働確認が足りない設定を返したら、その名前を出して落とす", async () => {
+    const { fetch } = deployed((url, authed) => (authed && url.endsWith("/api/v1/health") ? Response.json({ data: { ok: false, part: "gate", missing: ["ANTHROPIC_API_KEY", "MASTER_KEY"] } }) : undefined));
+    const { text, code } = await run(KEYS, fetch);
+    assert.equal(code, 1);
+    assert.match(text, /FAIL API .*足りない設定: ANTHROPIC_API_KEY、MASTER_KEY/);
   });
 
   void it("鍵の無い要求が稼働確認に届いたら落とす", async () => {

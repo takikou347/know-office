@@ -58,7 +58,7 @@ describe("返事の形", () => {
     expect(res.status).toBe(200);
     const body = await read(res);
     expect(Object.keys(body).toSorted()).toEqual(["data", "meta"]);
-    expect(body.data).toEqual({ ok: true, part: "gate" });
+    expect(body.data).toEqual({ ok: true, part: "gate", missing: [] });
     expect(body.meta).toEqual({ traceId: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown });
   });
 

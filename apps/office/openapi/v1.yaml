@@ -254,6 +254,12 @@ components:
             - gate
             - screen
             - workspace
+        missing:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 32
       required:
         - ok
         - part
@@ -3135,14 +3141,16 @@ paths:
         処理の流れ:
 
         1. `DB` に `SELECT 1` を実行する
-        2. 応答した部分 (ゲートウェイ、画面、ワークスペース) を返す
+        2. 設定 (環境変数、秘密、バインディング) を 1 つの形で確かめ、足りない項目と形の違う項目の名前だけを `missing` に並べる。値は返さない
+        3. 応答した部分 (ゲートウェイ、画面、ワークスペース) を返す。`missing` が空でなければ `ok` は `false`
 
         このルート固有のエラー:
 
         - 503 `unavailable`: D1 が応答しない
       x-steps:
         - "`DB` に `SELECT 1` を実行する"
-        - 応答した部分 (ゲートウェイ、画面、ワークスペース) を返す
+        - 設定 (環境変数、秘密、バインディング) を 1 つの形で確かめ、足りない項目と形の違う項目の名前だけを `missing` に並べる。値は返さない
+        - 応答した部分 (ゲートウェイ、画面、ワークスペース) を返す。`missing` が空でなければ `ok` は `false`
       x-errors:
         - "503 `unavailable`: D1 が応答しない"
       security:

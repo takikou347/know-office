@@ -71,6 +71,22 @@ async function text(res: Response): Promise<string> {
 }
 
 /**
+ * 稼働確認の本文から、ゲートウェイの足りない設定の名前を読む
+ * @param body 本文
+ * @returns 名前の並び。読めなければ空
+ */
+function missingOf(body: string): string[] {
+  try {
+    const value: unknown = JSON.parse(body);
+    const data: unknown = typeof value === "object" && value !== null && "data" in value ? value.data : null;
+    const missing: unknown = typeof data === "object" && data !== null && "missing" in data ? data.missing : null;
+    return Array.isArray(missing) ? missing.filter((name): name is string => typeof name === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 稼働確認の本文が know-office のゲートウェイの物かを見る
  * @param body 本文
  * @returns `{ data: { ok: true, part: "gate" } }` の形なら true
@@ -109,8 +125,11 @@ async function runChecks(target: Target, fetch: SmokeFetch): Promise<Check[]> {
   const api = await ask(fetch, health, keys);
   if (typeof api === "string") checks.push({ name: "API", ok: false, detail: api });
   else {
-    const ok = api.status === 200 && isGateHealth(await text(api));
-    checks.push({ name: "API", ok, detail: `${api.status}${ok || api.status !== 200 ? "" : " 稼働確認の形でない"}` });
+    const body = await text(api);
+    const ok = api.status === 200 && isGateHealth(body);
+    const missing = missingOf(body);
+    const why = missing.length > 0 ? ` 足りない設定: ${missing.join("、")}` : " 稼働確認の形でない";
+    checks.push({ name: "API", ok, detail: `${api.status}${ok || api.status !== 200 ? "" : why}` });
   }
 
   // 鍵の無い要求は Access が止め (ログインへの転送か 403)、ゲートウェイの稼働確認に届かない。手元ではゲートウェイが 401 で断る
