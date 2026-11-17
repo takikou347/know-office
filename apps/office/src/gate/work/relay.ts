@@ -250,7 +250,7 @@ async function callUpstream(c: Context<GateEnv>, path: string, text: string, sta
   // SDK は beta の Messages API を ?beta=true で呼ぶ。ほかのクエリは送らない
   const query = new URL(c.req.url).searchParams.get("beta") === "true" ? "?beta=true" : "";
   const headers = upstreamHeaders(c.req.raw.headers, key);
-  // 開発環境の代わりの Claude API は、替えた鍵では社員を見分けられないので、社員ごとに積んだ返事を選ぶ印を付ける。宛先が本物の時は付けない
+  // 開発環境の代わりの Claude API は、替えた鍵では社員を見分けられないので、社員ごとに積んだ返事を選ぶ印を付ける。development の宛先は endpoints が手元に限るので、本物の Claude には出ない
   if (c.env.ENVIRONMENT === "development") headers.set(DEV_STAFF_HEADER, staffId);
   try {
     return await allowedFetch(c.var.fetch, `${base}${path}${query}`, [`${base}/`], {

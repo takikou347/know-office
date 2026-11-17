@@ -80,9 +80,10 @@ test.describe("落ちても続きから", () => {
 
       // 上限を直して帯の通知を読むと、次の Cron で社員が続きを始めて終える
       await spendLimit(page, null);
-      await scriptFinish(page);
       await bar.getByRole("button", { name: "読んだ" }).click();
       await expect(bar).toBeHidden();
+      // 積んだ返事が落ちた通しの後に残らないよう、続きを始める Cron の直前に積む
+      await scriptFinish(page);
       await fireCron(page);
       await expect.poll(runsOf, { timeout: 30_000 }).toHaveLength(2);
       await expect.poll(statusOf, { timeout: 60_000 }).toBe("done");
