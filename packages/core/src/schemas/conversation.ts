@@ -1,6 +1,6 @@
 // 会話と配信の形。社員とのメッセージ、配信の作業トークン、LiveDO が画面に流す出来事 (社員と自動の 3.7、API の conversation)
 import { jstClock, jstDay } from "../time.ts";
-import { StaffId, StaffState } from "./workday.ts";
+import { OrderKind, StaffId, StaffState } from "./workday.ts";
 import { z } from "./zod.ts";
 
 /** D1 の messages.body に置く字数の上限。超える本文は R2 に置く (データの 2 章) */
@@ -36,6 +36,35 @@ export const MessageDelivery = z.enum(["run", "next_task", "skipped"]);
 /** オーナーの発言を社員に渡した道の型 */
 export type MessageDelivery = z.infer<typeof MessageDelivery>;
 
+/** オーナーの発言から足した勤務の指示。until は日本時間の HH:MM、cancelledAt は取り消した時刻 */
+export const MessageOrder = z
+  .object({
+    id: z.uuid().openapi({ description: "UUID v7。取り消しのルートに渡す" }),
+    kind: OrderKind,
+    day: z.iso.date().openapi({ description: "日本時間の日付 YYYY-MM-DD" }),
+    until: z.string().nullable(),
+    cancelledAt: z.iso.datetime().nullable(),
+  })
+  .strict()
+  .meta({ id: "MessageOrder" });
+
+/** オーナーの発言から足した勤務の指示の型 */
+export type MessageOrder = z.infer<typeof MessageOrder>;
+
+/** オーナーの発言から抜き出したが、パスキーの確認が無いので足さなかった延長。発言を送った返事にだけ付け、保存しない */
+export const SkippedOrder = z
+  .object({
+    kind: z.literal("extend"),
+    day: z.iso.date().openapi({ description: "日本時間の日付 YYYY-MM-DD" }),
+    until: z.string(),
+    skipped: z.literal("step_up_required"),
+  })
+  .strict()
+  .meta({ id: "SkippedOrder" });
+
+/** 足さなかった延長の型 */
+export type SkippedOrder = z.infer<typeof SkippedOrder>;
+
 /** 社員とのメッセージ 1 件 */
 export const Message = z
   .object({
@@ -47,6 +76,7 @@ export const Message = z
     body: z.string(),
     deliveredAt: z.iso.datetime().nullable().openapi({ description: "社員のワークスペースが発言を受けた時刻。まだ渡していないか、社員の発言なら null" }),
     delivery: MessageDelivery.nullable().openapi({ description: "渡した道。まだ渡していないオーナーの発言と社員の発言は null" }),
+    orders: z.array(z.union([MessageOrder, SkippedOrder])).openapi({ description: "オーナーの発言から足した勤務の指示。足さなかった延長は発言を送った返事にだけ出る。社員の発言は空" }),
   })
   .strict()
   .meta({ id: "Message" });

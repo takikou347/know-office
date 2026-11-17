@@ -142,6 +142,17 @@ describe("開発環境の代わりの物", () => {
     expect(res.status).toBe(429);
   });
 
+  it("ゲートウェイ向けに積んだ返事は、作業トークンでない鍵の呼び出しにだけ先に返し、社員には渡さない", async () => {
+    const claude = createFakeClaude();
+    claude.push({ content: [{ type: "text", text: "社員へ" }] });
+    await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ content: [{ type: "text", text: "ゲートウェイへ" }], forGate: true }) });
+    const staff = await claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": ticket("reviewer") }, body: BODY });
+    expect(await staff.json()).toMatchObject({ content: [{ text: "社員へ" }] });
+    // 社員の呼び出しはゲートウェイ向けの物を取らない
+    expect((await claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": ticket("reviewer") }, body: BODY })).status).toBe(500);
+    expect(await (await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY })).json()).toMatchObject({ content: [{ text: "ゲートウェイへ" }] });
+  });
+
   it("待ちを付けて積んだ返事は、積んでからその間が過ぎるまで返さず、待つ間に呼び出しが切れたら次の呼び出しに残す", async () => {
     const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "reviewer", delay_ms: 200, content: [{ type: "text", text: "待ってから" }] }) });

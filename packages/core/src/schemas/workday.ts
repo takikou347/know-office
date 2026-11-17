@@ -69,6 +69,20 @@ export type OffHoursCall = z.infer<typeof OffHoursCall>;
 /** 時間外の呼び出しの初期値。閉じて 1 日 2 回 */
 export const DEFAULT_OFF_HOURS_CALL: OffHoursCall = { enabled: false, perDay: 2 };
 
+/** 会話の言葉から勤務の指示を抜き出すか。設定 `workday.chatOrders` の値。perDay は office 全体の 1 日の回数 */
+export const ChatOrders = z
+  .object({
+    enabled: z.boolean().meta({ description: "オーナーの発言から勤務の指示を Haiku で抜き出すか。開くと Claude の費用が出る" }),
+    perDay: z.number().int().min(1).max(100).meta({ description: "office 全体の 1 日の抜き出しの回数。1 回は入力 2,000 字、出力 300 トークンまで" }),
+  })
+  .strict();
+
+/** 会話の言葉の指示の設定の型 */
+export type ChatOrders = z.infer<typeof ChatOrders>;
+
+/** 会話の言葉の指示の初期値。閉じて 1 日 20 回 */
+export const DEFAULT_CHAT_ORDERS: ChatOrders = { enabled: false, perDay: 20 };
+
 /** ワークスペースが届けるチェックポイント。テストが通る、コミット、プルリクエスト、経過を書き残す */
 export const CheckpointInput = z
   .object({

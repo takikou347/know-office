@@ -2471,6 +2471,13 @@ components:
             - skipped
             - null
           description: 渡した道。まだ渡していないオーナーの発言と社員の発言は null
+        orders:
+          type: array
+          items:
+            anyOf:
+              - $ref: "#/components/schemas/MessageOrder"
+              - $ref: "#/components/schemas/SkippedOrder"
+          description: オーナーの発言から足した勤務の指示。足さなかった延長は発言を送った返事にだけ出る。社員の発言は空
       required:
         - id
         - at
@@ -2480,6 +2487,63 @@ components:
         - body
         - deliveredAt
         - delivery
+        - orders
+      additionalProperties: false
+    MessageOrder:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID v7。取り消しのルートに渡す
+        kind:
+          type: string
+          enum:
+            - extend
+            - leave_early
+            - "off"
+        day:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
+        until:
+          type:
+            - string
+            - "null"
+        cancelledAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - id
+        - kind
+        - day
+        - until
+        - cancelledAt
+      additionalProperties: false
+    SkippedOrder:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - extend
+        day:
+          type: string
+          format: date
+          description: 日本時間の日付 YYYY-MM-DD
+        until:
+          type: string
+        skipped:
+          type: string
+          enum:
+            - step_up_required
+      required:
+        - kind
+        - day
+        - until
+        - skipped
       additionalProperties: false
     CreateMessageInput:
       type: object
@@ -7120,7 +7184,7 @@ paths:
         - settings
       summary: office の設定とサービスの初期値
       description: |-
-        キーは勤務の時刻 (`workday.schedule`)、時間外の呼び出し (`workday.offHoursCall`)、自動停止の基準 (`guard.thresholds`)、サービスの初期値 (`service.actions`、`service.mergeWhen`、`service.deployWhen`、`service.protectedPaths`、`service.paused`) の順。行が無い項目は組み込みの初期値をバージョン 0 で返し、inherited を true にする。
+        キーは勤務の時刻 (`workday.schedule`)、時間外の呼び出し (`workday.offHoursCall`)、会話の言葉の指示 (`workday.chatOrders`)、自動停止の基準 (`guard.thresholds`)、サービスの初期値 (`service.actions`、`service.mergeWhen`、`service.deployWhen`、`service.protectedPaths`、`service.paused`) の順。行が無い項目は組み込みの初期値をバージョン 0 で返し、inherited を true にする。
 
         処理の流れ:
 
@@ -7168,33 +7232,33 @@ paths:
         - settings
       summary: office の設定を変更する
       description: |-
-        守りを弱める変更、勤務を延ばす変更、時間外の呼び出しを開くか回数を増やす変更の場合のみ、15 分以内のパスキーの確認が必要。
+        守りを弱める変更、勤務を延ばす変更、時間外の呼び出しか会話の言葉の指示を開くか回数を増やす変更の場合のみ、15 分以内のパスキーの確認が必要。
 
         処理の流れ:
 
-        1. `key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`、勤務の時刻の `workday.schedule`、時間外の呼び出しの `workday.offHoursCall`) かを確認し、キーごとの Zod スキーマで値を検証する。勤務の時刻は始まりと終わりが違い、曜日が 1 つ以上で重ならない事も確かめる。`guard.thresholds` と `github.rules` は専用のルートで変更する
+        1. `key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`、勤務の時刻の `workday.schedule`、時間外の呼び出しの `workday.offHoursCall`、会話の言葉の指示の `workday.chatOrders`) かを確認し、キーごとの Zod スキーマで値を検証する。勤務の時刻は始まりと終わりが違い、曜日が 1 つ以上で重ならない事も確かめる。`guard.thresholds` と `github.rules` は専用のルートで変更する
         2. `version` が現在と一致することを確認する
-        3. 今の初期値と変えた後の値を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める。勤務の時刻は、今の勤務の時間に無い時間を足す変更 (終わりを遅らせる、始まりを早める、曜日を足す) ならパスキーの確認を求める。時間外の呼び出しは、開く変更と回数を増やす変更ならパスキーの確認を求める
+        3. 今の初期値と変えた後の値を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める。勤務の時刻は、今の勤務の時間に無い時間を足す変更 (終わりを遅らせる、始まりを早める、曜日を足す) ならパスキーの確認を求める。時間外の呼び出しと会話の言葉の指示は、開く変更と回数を増やす変更ならパスキーの確認を求める
         4. `settings` に範囲 `office` で、読んだ版より新しい行が無い時だけ追加し、監査ログに `setting.update` を記録する
         5. `key` が `service.mergeWhen` の時は、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を新しい条件で設定し直す。`workday.schedule` の時は、3 人の `StaffDO` の alarm を新しい時刻で掛け直す。掛け直せなかった社員は変更を残したまま `error_events` に `schedule_rearm_failed` で残す
 
         このルート固有のエラー:
 
         - 404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない
-        - 401 `step_up_required`: 守りを弱める変更、勤務を延ばす変更、時間外の呼び出しを開くか回数を増やす変更で、パスキーの確認がない
+        - 401 `step_up_required`: 守りを弱める変更、勤務を延ばす変更、時間外の呼び出しか会話の言葉の指示を開くか回数を増やす変更で、パスキーの確認がない
         - 409 `conflict`: バージョンが異なる
         - 422 `validation_failed`: 値が項目の形に合わない、または `null` を送った
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した。変えた設定と監査ログは残る
       x-steps:
-        - "`key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`、勤務の時刻の `workday.schedule`、時間外の呼び出しの `workday.offHoursCall`) かを確認し、キーごとの Zod スキーマで値を検証する。勤務の時刻は始まりと終わりが違い、曜日が 1 つ以上で重ならない事も確かめる。`guard.thresholds` と `github.rules` は専用のルートで変更する"
+        - "`key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`、勤務の時刻の `workday.schedule`、時間外の呼び出しの `workday.offHoursCall`、会話の言葉の指示の `workday.chatOrders`) かを確認し、キーごとの Zod スキーマで値を検証する。勤務の時刻は始まりと終わりが違い、曜日が 1 つ以上で重ならない事も確かめる。`guard.thresholds` と `github.rules` は専用のルートで変更する"
         - "`version` が現在と一致することを確認する"
-        - 今の初期値と変えた後の値を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める。勤務の時刻は、今の勤務の時間に無い時間を足す変更 (終わりを遅らせる、始まりを早める、曜日を足す) ならパスキーの確認を求める。時間外の呼び出しは、開く変更と回数を増やす変更ならパスキーの確認を求める
+        - 今の初期値と変えた後の値を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める。勤務の時刻は、今の勤務の時間に無い時間を足す変更 (終わりを遅らせる、始まりを早める、曜日を足す) ならパスキーの確認を求める。時間外の呼び出しと会話の言葉の指示は、開く変更と回数を増やす変更ならパスキーの確認を求める
         - "`settings` に範囲 `office` で、読んだ版より新しい行が無い時だけ追加し、監査ログに `setting.update` を記録する"
         - "`key` が `service.mergeWhen` の時は、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を新しい条件で設定し直す。`workday.schedule` の時は、3 人の `StaffDO` の alarm を新しい時刻で掛け直す。掛け直せなかった社員は変更を残したまま `error_events` に `schedule_rearm_failed` で残す"
       x-errors:
         - "404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない"
-        - "401 `step_up_required`: 守りを弱める変更、勤務を延ばす変更、時間外の呼び出しを開くか回数を増やす変更で、パスキーの確認がない"
+        - "401 `step_up_required`: 守りを弱める変更、勤務を延ばす変更、時間外の呼び出しか会話の言葉の指示を開くか回数を増やす変更で、パスキーの確認がない"
         - "409 `conflict`: バージョンが異なる"
         - "422 `validation_failed`: 値が項目の形に合わない、または `null` を送った"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
@@ -7646,6 +7710,7 @@ paths:
         1. `messages` を新しい順に取得する
         2. 長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す
         3. オーナーの発言は `message_deliveries` を ID で引き、渡した時刻と道を付ける。印が無く 24 時間を過ぎた発言は `skipped` にする
+        4. オーナーの発言は `day_orders` を `message_id` で引き、会話の言葉から足した指示を付ける。取り消した指示は取り消した時刻を付ける
 
         このルート固有のエラー:
 
@@ -7654,6 +7719,7 @@ paths:
         - "`messages` を新しい順に取得する"
         - 長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す
         - オーナーの発言は `message_deliveries` を ID で引き、渡した時刻と道を付ける。印が無く 24 時間を過ぎた発言は `skipped` にする
+        - オーナーの発言は `day_orders` を `message_id` で引き、会話の言葉から足した指示を付ける。取り消した指示は取り消した時刻を付ける
       x-errors:
         - "400 `malformed_request`: カーソルがメッセージ ID の形でない"
       parameters:
@@ -7715,8 +7781,8 @@ paths:
 
         1. `messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く
         2. タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す
-        3. 社員が退勤していて、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す
-        4. 発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する (#209)
+        3. 設定 `workday.chatOrders` が開いていれば、`chat_order_reads` に今日の回数が上限より少ない時だけ発言の印を足し、足せた時だけ Messages API を Haiku で 1 回呼んで勤務の指示を抜き出す。使った量を `usage` に足す。抜き出した指示は指示のボタンと同じ確かめで `day_orders` に `source` `chat` と `message_id` を付けて足し、`StaffDO.order` で予定を作り直し、監査ログに `order.create` を記録する。延長はこの要求のログインセッションが 15 分以内にパスキーで確かめた時だけ足し、確かめていなければ返事に `step_up_required` の印で返す。抜き出せなくても 201 を返し、訳をエラーログに `chat_orders_failed` で残す
+        4. 社員が退勤していて、この発言で今日を休みにしておらず、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す
         5. `LiveDO` に渡して画面に配信する
 
         このルート固有のエラー:
@@ -7725,8 +7791,8 @@ paths:
       x-steps:
         - "`messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く"
         - タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す
-        - 社員が退勤していて、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す
-        - 発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する (#209)
+        - 設定 `workday.chatOrders` が開いていれば、`chat_order_reads` に今日の回数が上限より少ない時だけ発言の印を足し、足せた時だけ Messages API を Haiku で 1 回呼んで勤務の指示を抜き出す。使った量を `usage` に足す。抜き出した指示は指示のボタンと同じ確かめで `day_orders` に `source` `chat` と `message_id` を付けて足し、`StaffDO.order` で予定を作り直し、監査ログに `order.create` を記録する。延長はこの要求のログインセッションが 15 分以内にパスキーで確かめた時だけ足し、確かめていなければ返事に `step_up_required` の印で返す。抜き出せなくても 201 を返し、訳をエラーログに `chat_orders_failed` で残す
+        - 社員が退勤していて、この発言で今日を休みにしておらず、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す
         - "`LiveDO` に渡して画面に配信する"
       x-errors:
         - "409 `stopped`: 社員が停止中"

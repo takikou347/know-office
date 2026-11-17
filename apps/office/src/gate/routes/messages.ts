@@ -1,6 +1,6 @@
 // 会話: 社員とのメッセージを読む、送る (社員と自動の 3.7、API の conversation)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, codePoints, log, CreateMessageInput, headChars, jstYear, Message, MESSAGE_INLINE_CHARS, newId, StaffId } from "@know-office/core";
+import { AppError, codePoints, log, CreateMessageInput, headChars, jstDay, jstYear, Message, MESSAGE_INLINE_CHARS, type MessageOrder, newId, StaffId } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { createRouter } from "../app.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
@@ -8,10 +8,12 @@ import { recordError } from "../ledger/errors.ts";
 import { announce } from "../live/publish.ts";
 import { createdResponse, listQuery, listResponse, problems } from "../openapi.ts";
 import { created, list } from "../respond.ts";
-import { loadOffHoursCall } from "../services/settings.ts";
+import { loadSwitch, OFF_HOURS_CALL } from "../services/switches.ts";
 import { clockAt } from "../work/attendance.ts";
 import { DELIVERY_WINDOW_MS, type DeliveryMark, deliveriesOf, deliverToRun } from "../work/deliver.ts";
+import { readOrders } from "../work/chat-orders.ts";
 import { callForMessage } from "../work/loop.ts";
+import { ordersOfMessages } from "../work/orders.ts";
 import { recordsOf } from "../work/nodes.ts";
 
 const router = createRouter();
@@ -29,6 +31,7 @@ const listMessagesRoute = createRoute({
     "`messages` を新しい順に取得する",
     "長い発言は本文を R2 から取得する。R2 に無ければ、その発言だけ本文を空にしてエラーログに残す",
     "オーナーの発言は `message_deliveries` を ID で引き、渡した時刻と道を付ける。印が無く 24 時間を過ぎた発言は `skipped` にする",
+    "オーナーの発言は `day_orders` を `message_id` で引き、会話の言葉から足した指示を付ける。取り消した指示は取り消した時刻を付ける",
   ],
   "x-errors": ["400 `malformed_request`: カーソルがメッセージ ID の形でない"],
   request: { params: StaffParam, query: listQuery(router) },
@@ -45,8 +48,8 @@ const createMessageRoute = createRoute({
   "x-steps": [
     "`messages` に追加する。2,000 字を超える場合は本文を先に R2 の `messages/<社員 ID>/<メッセージ ID>.txt` に保存し、D1 には頭の 2,000 字を置く",
     "タスク中なら `WorkspaceDO.message` でワークスペースの `POST /v1/messages` に渡し、受けたら `message_deliveries` に `run` の印を足す。止まったワークスペースは起こさない。渡せなければ次の呼び出しの頭で渡す",
-    "社員が退勤していて、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す",
-    "発言に含まれる勤務の指示を軽量モデルで抽出し、`day_orders` に追加する (#209)",
+    "設定 `workday.chatOrders` が開いていれば、`chat_order_reads` に今日の回数が上限より少ない時だけ発言の印を足し、足せた時だけ Messages API を Haiku で 1 回呼んで勤務の指示を抜き出す。使った量を `usage` に足す。抜き出した指示は指示のボタンと同じ確かめで `day_orders` に `source` `chat` と `message_id` を付けて足し、`StaffDO.order` で予定を作り直し、監査ログに `order.create` を記録する。延長はこの要求のログインセッションが 15 分以内にパスキーで確かめた時だけ足し、確かめていなければ返事に `step_up_required` の印で返す。抜き出せなくても 201 を返し、訳をエラーログに `chat_orders_failed` で残す",
+    "社員が退勤していて、この発言で今日を休みにしておらず、設定 `workday.offHoursCall` が開いていれば、次のタスクを取らせて `StaffDO.call` で呼び出す。発言は最初の呼び出しの頭で渡す。取るタスクが無い時と社員ごとの 1 日の回数に届いた時は呼び出さず、タスクを todo に戻す。呼び出せなくても 201 を返し、訳をエラーログに `message_call_failed` で残す",
     "`LiveDO` に渡して画面に配信する",
   ],
   "x-errors": ["409 `stopped`: 社員が停止中"],
@@ -101,11 +104,13 @@ function yearsFrom(env: Bindings, year: number): D1Database[] {
  * 行を返す形にする。長い本文は R2 から読み、鍵が決めた形でないか R2 に無ければ、その発言だけ本文を空にしてエラーログに残す
  * @param env バインディング
  * @param row 行
- * @param marks 発言 ID ごとの渡した印
+ * @param marks 発言 ID ごとの渡した印と、会話の言葉から足した指示
+ * @param marks.delivered 発言 ID ごとの渡した印
+ * @param marks.orders 発言 ID ごとの指示
  * @param clock 時刻
  * @returns メッセージ
  */
-async function toMessage(env: Bindings, row: MessageRow, marks: Map<string, DeliveryMark>, clock: { now(): number }): Promise<Message> {
+async function toMessage(env: Bindings, row: MessageRow, marks: { delivered: Map<string, DeliveryMark>; orders: Map<string, MessageOrder[]> }, clock: { now(): number }): Promise<Message> {
   const staffId = StaffId.parse(row.staff_id);
   let body = row.body;
   if (row.body_key !== null) {
@@ -117,7 +122,7 @@ async function toMessage(env: Bindings, row: MessageRow, marks: Map<string, Deli
     }
   }
   const sender = row.sender === "staff" ? "staff" : "owner";
-  return { id: row.id, at: new Date(row.at).toISOString(), staffId, nodeId: row.node_id, sender, body, ...deliveryOf(sender, row.at, marks.get(row.id), clock.now()) };
+  return { id: row.id, at: new Date(row.at).toISOString(), staffId, nodeId: row.node_id, sender, body, ...deliveryOf(sender, row.at, marks.delivered.get(row.id), clock.now()), orders: marks.orders.get(row.id) ?? [] };
 }
 
 /**
@@ -158,7 +163,8 @@ export async function listMessages(env: Bindings, staffId: StaffId, page: { curs
     rows.push(...found.results);
   }
   const shown = rows.slice(0, page.limit);
-  const marks = await deliveriesOf(env.DB, shown.filter((r) => r.sender === "owner").map((r) => r.id));
+  const owners = shown.filter((r) => r.sender === "owner").map((r) => r.id);
+  const marks = { delivered: await deliveriesOf(env.DB, owners), orders: await ordersOfMessages(env.DB, owners) };
   const items = await Promise.all(shown.map((r) => toMessage(env, r, marks, clock)));
   return { items, next: rows.length > page.limit ? (shown.at(-1)?.id ?? null) : null };
 }
@@ -196,8 +202,8 @@ export async function appendMessage(
     if (key) await env.FILES.delete(key).catch(() => undefined);
     throw error;
   }
-  const message: Message = { id, at: new Date(at).toISOString(), staffId: input.staffId, nodeId: input.nodeId, sender: input.sender, body: input.body, deliveredAt: null, delivery: null };
-  const { deliveredAt: _at, delivery: _via, ...shown } = message;
+  const message: Message = { id, at: new Date(at).toISOString(), staffId: input.staffId, nodeId: input.nodeId, sender: input.sender, body: input.body, deliveredAt: null, delivery: null, orders: [] };
+  const { deliveredAt: _at, delivery: _via, orders: _orders, ...shown } = message;
   await announce(env, { type: "message", message: { ...shown, body: headChars(input.body, MESSAGE_INLINE_CHARS), truncated: long } }, clock);
   return message;
 }
@@ -211,7 +217,7 @@ export async function appendMessage(
  */
 async function callOffHours(env: Bindings, staffId: StaffId, now: number, traceId: string): Promise<void> {
   try {
-    const setting = await loadOffHoursCall(env.DB);
+    const setting = await loadSwitch(env.DB, OFF_HOURS_CALL);
     if (!setting.value.enabled) return;
     const called = await callForMessage(env, staffId, now, setting.value.perDay, traceId);
     log("info", "message_call", { staffId, called });
@@ -235,8 +241,12 @@ export const messageRoutes = router
     const message = await appendMessage(c.env, { staffId, sender: "owner", body: input.body, nodeId: input.nodeId ?? null, traceId: c.var.traceId }, c.var.clock);
     // 発言は足した後に渡す。渡せなくても発言は残り、次の呼び出しの頭で渡す
     const deliveredAt = await deliverToRun(c.env, { staffId, ...status }, { id: message.id, at: Date.parse(message.at), body: input.body }, c.var.clock.now());
-    if (status.state === "off") await callOffHours(c.env, staffId, c.var.clock.now(), c.var.traceId);
-    // TODO(#209): 発言に含まれる勤務の指示を軽いモデルで抜き出す
-    const answer: Message = deliveredAt === null ? message : { ...message, deliveredAt: new Date(deliveredAt).toISOString(), delivery: "run" };
+    // 抜き出しを呼び出しより先にし、今日を休みにした発言では社員を呼び出さない
+    const orders = await readOrders(c, staffId, { id: message.id, body: input.body });
+    const today = jstDay(c.var.clock.now());
+    const offToday = orders.some((o) => !("skipped" in o) && o.kind === "off" && o.day === today);
+    if (status.state === "off" && !offToday) await callOffHours(c.env, staffId, c.var.clock.now(), c.var.traceId);
+    const delivered: Message = deliveredAt === null ? message : { ...message, deliveredAt: new Date(deliveredAt).toISOString(), delivery: "run" };
+    const answer: Message = { ...delivered, orders };
     return created(c, answer, `/api/v1/staff/${staffId}/messages`);
   });

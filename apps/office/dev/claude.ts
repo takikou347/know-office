@@ -16,21 +16,24 @@ export type ScriptedMessage = z.infer<typeof ScriptedMessage>;
 
 /**
  * 外から積む返事。staffId を付けると、その社員の作業トークンの呼び出しにだけ返す。同じ時に動くほかの社員の SDK に取られないようにする
+ * forGate を付けると、作業トークンでない鍵の呼び出し (ゲートウェイが自分で呼ぶ会話の言葉の抜き出し) にだけ返し、社員の呼び出しには渡さない。ゲートウェイの呼び出しは forGate の物を先に取る
  * delay_ms を付けると、積んでからその間が過ぎるまで返さずに待つ。待つ間に呼び出しが切れたら返さず、積んだ物の先頭に戻す。SDK が待ち切れずに呼び直しても、積んだ時から数えるので待ちは延びない (勤務の終わりの時刻を過ぎるまで社員を作業の途中に置く通しに使う)
  */
-const ScriptedInput = ScriptedMessage.extend({ staffId: StaffId.optional(), delay_ms: z.number().int().min(0).max(600_000).optional() });
+const ScriptedInput = ScriptedMessage.extend({ staffId: StaffId.optional(), delay_ms: z.number().int().min(0).max(600_000).optional(), forGate: z.boolean().optional() });
 
 /** 積んだ返事か失敗と、渡す社員と返してよい時刻。staffId が null ならどの呼び出しにも渡す */
-type Queued = { item: ScriptedMessage | ScriptedError; staffId: StaffId | null; notBefore?: number };
+type Queued = { item: ScriptedMessage | ScriptedError; staffId: StaffId | null; notBefore?: number; forGate?: boolean };
 
 /**
- * 渡し先を決めずに積んだ物と、その社員に積んだ物のうち、先に積んだ物を取り出す
+ * 渡し先を決めずに積んだ物と、その社員に積んだ物のうち、先に積んだ物を取り出す。ゲートウェイ向けの物は社員の印の無い呼び出しにだけ渡す
  * @param queue 積んだ物
  * @param staffId 呼び出しの社員
  * @returns 取り出した物。無ければ undefined
  */
 function takeQueued(queue: Queued[], staffId: StaffId | null): Queued | undefined {
-  const at = queue.findIndex((q) => q.staffId === null || q.staffId === staffId);
+  // ゲートウェイの呼び出しはゲートウェイ向けの物を先に取り、社員の呼び出しはゲートウェイ向けの物を取らない
+  const gate = staffId === null ? queue.findIndex((q) => q.forGate === true) : -1;
+  const at = gate === -1 ? queue.findIndex((q) => q.forGate !== true && (q.staffId === null || q.staffId === staffId)) : gate;
   return at === -1 ? undefined : queue.splice(at, 1)[0];
 }
 
@@ -158,8 +161,8 @@ export type FakeClaude = {
   keys: string[];
   /** 通す鍵。Anthropic の画面で作った鍵にあたり、ほかの鍵は本物と同じく 401 で断る */
   accepted: Set<string>;
-  /** 返事を積む */
-  push(message: ScriptedMessage): void;
+  /** 返事を積む。forGate はゲートウェイの呼び出しにだけ返す */
+  push(message: ScriptedMessage, options?: { forGate: boolean }): void;
   /** 失敗を積む。extra で message、details、ヘッダーを足す */
   pushError(status: ErrorStatus, type: string, extra?: ErrorExtra): void;
   /** 受けたバッチ処理 */
@@ -319,8 +322,8 @@ export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
     .post("/__fake/responses", async (c) => {
       const input = ScriptedInput.safeParse(await c.req.json().catch(() => null));
       if (!input.success) return c.json({ type: "error", error: { type: "invalid_request_error", message: "積む返事の形が違う" } }, 400);
-      const { staffId, delay_ms: delayMs, ...message } = input.data;
-      queue.push({ item: message, staffId: staffId ?? null, ...(delayMs === undefined ? {} : { notBefore: Date.now() + delayMs }) });
+      const { staffId, delay_ms: delayMs, forGate, ...message } = input.data;
+      queue.push({ item: message, staffId: staffId ?? null, ...(delayMs === undefined ? {} : { notBefore: Date.now() + delayMs }), ...(forGate === true ? { forGate } : {}) });
       return c.body(null, 204);
     })
     // 通しが社員の呼び出しを使用の上限に切り替え、終わりに戻す
@@ -346,7 +349,7 @@ export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
     requests,
     keys,
     accepted,
-    push: (message) => queue.push({ item: message, staffId: null }),
+    push: (message, options) => queue.push({ item: message, staffId: null, ...(options?.forGate === true ? { forGate: true } : {}) }),
     pushError: (status, type, extra) => queue.push({ item: { error: { status, type, ...extra } }, staffId: null }),
     batches,
     endBatch: (id, answer) => {

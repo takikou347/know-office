@@ -1,5 +1,5 @@
 // その日だけの指示を確かめて足す。画面のボタンと会話の言葉の両方から使う (社員と勤怠の 3.4)
-import { AppError, type CreateOrderInput, jstDay, jstDayStart, newId, type StaffId } from "@know-office/core";
+import { AppError, type CreateOrderInput, jstClock, jstDay, jstDayStart, type MessageOrder, newId, OrderKind, type StaffId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { clockAt, type DayOrderRow, loadSchedule } from "./attendance.ts";
 
@@ -60,4 +60,39 @@ export async function addOrder(
     .run();
   if (res.meta.changes !== 1) throw new AppError("conflict", "同じ日に同じ指示がある");
   return row;
+}
+
+/** D1 の 1 文に渡せる変数の上限 100 より少なく切る。出典: developers.cloudflare.com/d1/platform/limits */
+const IN_CHUNK = 90;
+
+type OrderLine = { id: string; message_id: string; kind: string; day: string; until: number | null; cancelled_at: number | null };
+
+/**
+ * 会話の言葉から足した指示を、元の発言ごとに読む。取り消した物は取り消した時刻を付ける
+ * @param db 今の状態の D1
+ * @param messageIds 発言 ID
+ * @returns 発言 ID ごとの指示
+ */
+export async function ordersOfMessages(db: Bindings["DB"], messageIds: readonly string[]): Promise<Map<string, MessageOrder[]>> {
+  const out = new Map<string, MessageOrder[]>();
+  for (let i = 0; i < messageIds.length; i += IN_CHUNK) {
+    const ids = messageIds.slice(i, i + IN_CHUNK);
+    const rows = await db
+      .prepare(
+        `SELECT o.id, o.message_id, o.kind, o.day, o.until, (SELECT x.created_at FROM day_orders x WHERE x.cancels = o.id) AS cancelled_at FROM day_orders o WHERE o.cancels IS NULL AND o.message_id IN (${ids.map(() => "?").join(", ")}) ORDER BY o.id`,
+      )
+      .bind(...ids)
+      .all<OrderLine>();
+    for (const r of rows.results) {
+      const order: MessageOrder = {
+        id: r.id,
+        kind: OrderKind.parse(r.kind),
+        day: r.day,
+        until: r.until === null ? null : jstClock(r.until),
+        cancelledAt: r.cancelled_at === null ? null : new Date(r.cancelled_at).toISOString(),
+      };
+      out.set(r.message_id, [...(out.get(r.message_id) ?? []), order]);
+    }
+  }
+  return out;
 }

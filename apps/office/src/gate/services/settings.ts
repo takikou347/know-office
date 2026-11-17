@@ -2,13 +2,11 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import {
   AppError,
-  DEFAULT_OFF_HOURS_CALL,
   DEFAULT_SERVICE_RULES,
   INHERITED_KEYS,
   INHERITED_SETTINGS,
   type InheritedKey,
   newId,
-  OffHoursCall,
   OWN_SETTINGS,
   type ServiceRules,
   type Setting,
@@ -337,60 +335,6 @@ export async function updateSchedule(db: D1Database, input: { value: unknown; ve
     .returning({ id: settings.id });
   if (written.length === 0) throw new AppError("conflict", "バージョンが違う");
   return { key: SCHEDULE_KEY, value, inherited: false, version: next };
-}
-
-/** 時間外の呼び出しを置く `settings` のキー */
-export const OFF_HOURS_CALL_KEY = "workday.offHoursCall";
-
-/**
- * 時間外の呼び出しの設定を、最新の版と一緒に読む。行が無いか形が違えば、閉じた初期値とみなす
- * @param db 今の状態の D1
- * @returns 設定の 1 項目。行が無ければ初期値をバージョン 0 で返す
- */
-export async function loadOffHoursCall(db: D1Database): Promise<Setting & { value: OffHoursCall }> {
-  const [row] = await drizzle(db)
-    .select({ value: settings.value, version: settings.version })
-    .from(settings)
-    .where(and(eq(settings.key, OFF_HOURS_CALL_KEY), eq(settings.scope, "office")))
-    .orderBy(desc(settings.version))
-    .limit(1);
-  // 費用の出る口なので、読めない値は開いているとみなさない
-  const parsed = OffHoursCall.safeParse(row?.value);
-  const version = row?.version ?? 0;
-  return { key: OFF_HOURS_CALL_KEY, value: parsed.success ? parsed.data : DEFAULT_OFF_HOURS_CALL, inherited: version === 0, version };
-}
-
-/**
- * 時間外の呼び出しの設定を変える。読んだ版のままの時だけ書く
- * @param db 今の状態の D1
- * @param input 値、読んだ版、理由、今の時刻
- * @param input.value 時間外の呼び出しの設定
- * @param input.version 読んだ版
- * @param input.reason 理由
- * @param input.now 今の時刻
- * @param stepUp 開く変更か回数を増やす変更の時に呼ぶ、パスキーの確認を求める関数
- * @returns 変えた後の設定
- * @throws validation_failed 値が形に合わない時
- * @throws step_up_required 開くか回数を増やす変更で、パスキーの確認が無い時 (stepUp が投げる)
- * @throws conflict 版が違う時
- */
-export async function updateOffHoursCall(db: D1Database, input: { value: unknown; version: number; reason: string; now: number }, stepUp: () => void): Promise<Setting> {
-  const { version, reason, now } = input;
-  const value = checkValue(OffHoursCall, input.value);
-  const current = await loadOffHoursCall(db);
-  // 古い版のまま送った変更は、今の値と比べず先に断る
-  if (current.version !== version) throw new AppError("conflict", "バージョンが違う");
-  // 開く、または回数を増やす変更は費用が増える
-  if ((value.enabled && !current.value.enabled) || value.perDay > current.value.perDay) stepUp();
-  const next = version + 1;
-  const written = await drizzle(db)
-    .insert(settings)
-    .select(
-      sql`SELECT ${newId(clockAt(now))}, ${OFF_HOURS_CALL_KEY}, 'office', ${JSON.stringify(value)}, ${next}, 'owner', ${reason}, ${now} WHERE NOT EXISTS (SELECT 1 FROM ${settings} WHERE ${settings.key} = ${OFF_HOURS_CALL_KEY} AND ${settings.scope} = 'office' AND ${settings.version} >= ${next})`,
-    )
-    .returning({ id: settings.id });
-  if (written.length === 0) throw new AppError("conflict", "バージョンが違う");
-  return { key: OFF_HOURS_CALL_KEY, value, inherited: false, version: next };
 }
 
 /**
