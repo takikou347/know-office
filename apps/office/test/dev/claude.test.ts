@@ -1,7 +1,8 @@
 // 開発環境の代わりの Claude API を確かめる。ログインと記録の 3.9
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createFakeClaude } from "../../dev/claude.ts";
+import { claudeSpendLimit, SPEND_LIMIT_KINDS } from "@know-office/core";
+import { createFakeClaude, spendLimitError } from "../../dev/claude.ts";
 
 const HEADERS = { "x-api-key": "test-key", "anthropic-version": "2023-06-01", "content-type": "application/json" };
 const REQUEST = { model: "claude-opus-5-5", max_tokens: 100, messages: [{ role: "user", content: "こんにちは" }] };
@@ -27,6 +28,36 @@ describe("開発環境の代わりの物", () => {
     expect(await second.json()).toMatchObject({ content: [{ type: "tool_use", name: "read_file" }], stop_reason: "tool_use" });
     expect(claude.requests).toHaveLength(2);
     expect(claude.requests[0]).toMatchObject({ model: "claude-opus-5-5" });
+  });
+
+  it("代わりの Claude API の使用の上限の返事は、本物と同じ形で読める", async () => {
+    const claude = createFakeClaude();
+    for (const kind of SPEND_LIMIT_KINDS) {
+      const { status, type, ...extra } = spendLimitError(kind).error;
+      claude.pushError(status, type, extra);
+      const res = await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
+      expect(res.status).toBe(status);
+      // ゲートウェイが本物の返事を見分けるのと同じ Zod を通す
+      expect(claudeSpendLimit(res.status, await res.json())).toMatchObject({ kind });
+    }
+    // ふつうのレートの上限は使用の上限にしない
+    claude.pushError(429, "rate_limit_error");
+    const rate = await claude.app.request("/v1/messages", { method: "POST", headers: HEADERS, body: BODY });
+    expect(claudeSpendLimit(rate.status, await rate.json())).toBeNull();
+  });
+
+  it("代わりの Claude API は、切り替えた社員の呼び出しにだけ使用の上限を返し続け、戻すと積んだ返事を返す", async () => {
+    const claude = createFakeClaude();
+    const limit = (body: unknown) => claude.app.request("/__fake/limit", { method: "POST", body: JSON.stringify(body) });
+    expect((await limit({ staffId: "reviewer", limit: "monthly" })).status).toBe(204);
+    expect((await limit({ staffId: "nobody", limit: "monthly" })).status).toBe(400);
+    claude.push({ content: [{ type: "text", text: "開発担当へ" }] });
+    claude.push({ content: [{ type: "text", text: "戻った" }] });
+    const call = (staffId: string) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": ticket(staffId) }, body: BODY });
+    for (let i = 0; i < 2; i += 1) expect((await call("reviewer")).status).toBe(429);
+    expect(await (await call("builder")).json()).toMatchObject({ content: [{ text: "開発担当へ" }] });
+    expect((await limit({ staffId: "reviewer", limit: null })).status).toBe(204);
+    expect(await (await call("reviewer")).json()).toMatchObject({ content: [{ text: "戻った" }] });
   });
 
   it("代わりの Claude API は鍵が無ければ 401 を返す", async () => {

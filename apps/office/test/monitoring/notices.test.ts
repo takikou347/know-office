@@ -169,6 +169,50 @@ describe("Claude の失敗の通知", () => {
   });
 });
 
+describe("落ちても続きから", () => {
+  it("レートの上限が続く", async () => {
+    const work = await startTask(at(16));
+    const limited = { "anthropic-ratelimit-requests-remaining": "12", "anthropic-ratelimit-output-tokens-remaining": "0", "retry-after": "30" };
+    for (let i = 0; i < 5; i += 1) {
+      w.gate.claude.pushError(429, "rate_limit_error", { headers: limited });
+      expect((await callClaude(work, at(16, 10 + i / 2))).status).toBe(429);
+    }
+    // 5 回目で通知が入る。同じエラーの続きの通知 (error_burst) とは重ねない
+    expect(await rows(w, "SELECT kind, level, title, body FROM notices")).toEqual([
+      { kind: "claude_rate_limited", level: "warn", title: "Claude の API のレート制限が続いている", body: expect.stringContaining("anthropic-ratelimit-output-tokens-remaining") as unknown },
+    ]);
+    expect(String((await rows(w, "SELECT body FROM notices"))[0]?.["body"])).not.toContain("requests-remaining");
+  });
+});
+
+describe("Claude のレートの上限の通知", () => {
+  it("5 分に 4 回では出さず、窓の端の行は数えない", async () => {
+    const work = await startTask(at(17));
+    for (const m of [10, 11, 12, 13]) {
+      w.gate.claude.pushError(429, "rate_limit_error");
+      await callClaude(work, at(17, m));
+    }
+    expect(await rows(w, "SELECT kind FROM notices")).toEqual([]);
+    // 17:15 の 5 分の窓は 17:10 を入れない。数えるのは 17:11 から 17:15 の 4 回
+    w.gate.claude.pushError(429, "rate_limit_error");
+    await callClaude(work, at(17, 15));
+    expect(await rows(w, "SELECT kind FROM notices")).toEqual([]);
+    w.gate.claude.pushError(429, "rate_limit_error");
+    await callClaude(work, at(17, 15) + 30_000);
+    // 届いた制限のヘッダーが無ければ「不明」と書く
+    expect(await rows(w, "SELECT kind, body FROM notices")).toEqual([{ kind: "claude_rate_limited", body: expect.stringContaining("不明") as unknown }]);
+  });
+
+  it("529 はレートの上限に数えない", async () => {
+    const work = await startTask(at(18));
+    for (let i = 0; i < 5; i += 1) {
+      w.gate.claude.pushError(529, "overloaded_error");
+      await callClaude(work, at(18, 10 + i / 2));
+    }
+    expect(await rows(w, "SELECT kind FROM notices")).toEqual([]);
+  });
+});
+
 /**
  * 通知を直に置く
  * @param id 通知 ID

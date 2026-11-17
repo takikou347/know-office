@@ -1,5 +1,5 @@
-// 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、届いた要求と鍵を残す。バッチ処理は受けた後にテストが終えさせる
-import { StaffId } from "@know-office/core";
+// 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、使用の上限に切り替えられ、届いた要求と鍵を残す。バッチ処理は受けた後にテストが終えさせる
+import { SPEND_LIMIT_KINDS, type SpendLimitKind, StaffId } from "@know-office/core";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -61,8 +61,50 @@ function staffOfKey(key: string | undefined): StaffId | null {
   }
 }
 
-/** 積んだ失敗。鍵の失敗 (401)、上限 (429)、混み合い (529) を Anthropic の形で返す */
-type ScriptedError = { error: { status: 401 | 429 | 529 | 500; type: string } };
+/** 積める失敗のステータス */
+type ErrorStatus = 400 | 401 | 402 | 429 | 500 | 529;
+
+/** 失敗に足す物。message の初期値は決まった文、details は error.details、headers は返事のヘッダー */
+export type ErrorExtra = { message?: string; details?: Record<string, string>; headers?: Record<string, string> };
+
+/** 積んだ失敗。鍵の失敗 (401)、上限 (400、402、429)、混み合い (529) を Anthropic の形で返す */
+export type ScriptedError = { error: { status: ErrorStatus; type: string } & ErrorExtra };
+
+/** 使用の上限の返事の中身。月の使用の上限の 429 は retry-after を持たない。出典: platform.claude.com/docs/en/api/rate-limits の「Reaching your spend cap」と「Setting your own spend limit」、/docs/en/api/errors の 402 */
+const SPEND_LIMIT_ERRORS: Record<SpendLimitKind, ScriptedError["error"]> = {
+  organization: { status: 400, type: "invalid_request_error", message: "You have reached your specified API usage limits. You will regain access on 2026-12-01 at 00:00 UTC." },
+  workspace: { status: 400, type: "invalid_request_error", message: "You have reached your specified workspace API usage limits. You will regain access on 2026-12-01 at 00:00 UTC." },
+  monthly: {
+    status: 429,
+    type: "rate_limit_error",
+    message: "You have reached your API usage limits: your organization has crossed its monthly API usage threshold, set based on your organization's API tier. You will regain access on 2026-12-01 at 00:00 UTC.",
+    details: { error_code: "enforced_spend_limit_reached" },
+  },
+  billing: { status: 402, type: "billing_error", message: "There's an issue with your billing or payment information." },
+};
+
+/**
+ * 使用の上限の返事を、本物と同じ形で作る
+ * @param kind 使用の上限の種類
+ * @returns 積む失敗
+ */
+export function spendLimitError(kind: SpendLimitKind): ScriptedError {
+  return { error: { ...SPEND_LIMIT_ERRORS[kind] } };
+}
+
+/**
+ * 積んだ失敗を Anthropic の形の返事にする
+ * @param scripted 積んだ失敗
+ * @returns 返事
+ */
+function errorResponse(scripted: ScriptedError): Response {
+  const { status, type, message, details, headers } = scripted.error;
+  const error = { type, message: message ?? "代わりの Claude API が積んだ失敗", ...(details === undefined ? {} : { details }) };
+  return new Response(JSON.stringify({ type: "error", error, request_id: "req_fake_error" }), { status, headers: { "content-type": "application/json", ...headers } });
+}
+
+/** 使用の上限に切り替える口の本文。limit が null なら元に戻す */
+const LimitInput = z.object({ staffId: StaffId, limit: z.enum(SPEND_LIMIT_KINDS).nullable() }).strict();
 
 const MessagesRequest = z.looseObject({ model: z.string().optional(), stream: z.boolean().optional() });
 
@@ -89,8 +131,8 @@ export type FakeClaude = {
   keys: string[];
   /** 返事を積む */
   push(message: ScriptedMessage): void;
-  /** 失敗を積む */
-  pushError(status: 401 | 429 | 529 | 500, type: string): void;
+  /** 失敗を積む。extra で message、details、ヘッダーを足す */
+  pushError(status: ErrorStatus, type: string, extra?: ErrorExtra): void;
   /** 受けたバッチ処理 */
   batches: FakeBatch[];
   /** バッチ処理を終えさせる。answer は custom_id ごとの答えを返す */
@@ -126,6 +168,8 @@ export function createFakeClaude(): FakeClaude {
   const requests: z.infer<typeof MessagesRequest>[] = [];
   const keys: string[] = [];
   const batches: FakeBatch[] = [];
+  // 使用の上限に切り替えた社員。戻すまで、その社員の呼び出しに上限の返事を返し続ける
+  const limits = new Map<StaffId, SpendLimitKind>();
   const toBatch = (b: FakeBatch) => {
     const values = b.answers ? [...b.answers.values()] : [];
     return {
@@ -181,8 +225,11 @@ export function createFakeClaude(): FakeClaude {
     .post("/v1/messages", async (c) => {
       const body = MessagesRequest.parse(await c.req.json());
       requests.push(body);
-      // 渡し先を決めずに積んだ物と、この社員に積んだ物のうち、先に積んだ物を返す
       const staffId = staffOfKey(c.req.header("x-api-key"));
+      // 本物の使用の上限は、直すまでどの呼び出しも断る
+      const limit = staffId === null ? undefined : limits.get(staffId);
+      if (limit !== undefined) return errorResponse(spendLimitError(limit));
+      // 渡し先を決めずに積んだ物と、この社員に積んだ物のうち、先に積んだ物を返す
       const at = queue.findIndex((q) => q.staffId === null || q.staffId === staffId);
       const queued = at === -1 ? undefined : queue.splice(at, 1)[0];
       if (queued?.notBefore !== undefined && !(await waitUnlessGone(Math.max(0, queued.notBefore - Date.now()), c.req.raw.signal))) {
@@ -193,12 +240,7 @@ export function createFakeClaude(): FakeClaude {
       if (!next) {
         return c.json({ type: "error", error: { type: "api_error", message: "代わりの Claude API に返事が積まれていない" } }, 500);
       }
-      if ("error" in next) {
-        return new Response(JSON.stringify({ type: "error", error: { type: next.error.type, message: "代わりの Claude API が積んだ失敗" } }), {
-          status: next.error.status,
-          headers: { "content-type": "application/json" },
-        });
-      }
+      if ("error" in next) return errorResponse(next);
       const message = toMessage(next, body.model, requests.length);
       if (body.stream !== true) return c.json(message);
       return streamSSE(c, async (stream) => {
@@ -222,6 +264,14 @@ export function createFakeClaude(): FakeClaude {
       queue.push({ item: message, staffId: staffId ?? null, ...(delayMs === undefined ? {} : { notBefore: Date.now() + delayMs }) });
       return c.body(null, 204);
     })
+    // 通しが社員の呼び出しを使用の上限に切り替え、終わりに戻す
+    .post("/__fake/limit", async (c) => {
+      const input = LimitInput.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) return c.json({ type: "error", error: { type: "invalid_request_error", message: "切り替えの形が違う" } }, 400);
+      if (input.data.limit === null) limits.delete(input.data.staffId);
+      else limits.set(input.data.staffId, input.data.limit);
+      return c.body(null, 204);
+    })
     .get("/__fake/requests", (c) => c.json(requests));
 
   return {
@@ -229,7 +279,7 @@ export function createFakeClaude(): FakeClaude {
     requests,
     keys,
     push: (message) => queue.push({ item: message, staffId: null }),
-    pushError: (status, type) => queue.push({ item: { error: { status, type } }, staffId: null }),
+    pushError: (status, type, extra) => queue.push({ item: { error: { status, type, ...extra } }, staffId: null }),
     batches,
     endBatch: (id, answer) => {
       const batch = batches.find((b) => b.id === id);

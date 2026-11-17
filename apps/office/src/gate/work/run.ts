@@ -1,7 +1,7 @@
 // 社員が取ったタスクの SDK の呼び出しを始める。最初の runs、作り直しと再開の後の続き、失敗の数え方と鍵の失敗の間の止め方を持つ (社員が考えるの 3.3、タスクとレビューの 3.1)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, log, newId, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, type WorkResult } from "@know-office/core";
-import { and, eq, isNull } from "drizzle-orm";
+import { AppError, log, newId, type NoticeLevel, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, type WorkResult } from "@know-office/core";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, notices, staff, staffPrompts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
@@ -17,6 +17,12 @@ export const RUN_FAILURE_LIMIT = 3;
 
 /** Claude の鍵が断られた時の通知の種類。読むまでどの社員も呼び出しを始めない */
 export const AUTH_FAILED_NOTICE = "sdk_auth_failed";
+
+/** Claude の API が使用の上限に届いた時の通知の種類。読むまでどの社員も呼び出しを始めない (サービスと拡張の 3.5) */
+export const SPEND_LIMIT_NOTICE = "claude_spend_limit";
+
+/** 読まれるまで、どの社員も呼び出しを始めない通知の種類。待っても直らず、オーナーが直す物 */
+const BLOCKING_NOTICES = [AUTH_FAILED_NOTICE, SPEND_LIMIT_NOTICE] as const;
 
 /** 続けて失敗したタスクの通知の種類 */
 export const RUN_FAILED_NOTICE = "staff_run_failed";
@@ -35,27 +41,28 @@ const RUNNABLE = new Set(["working", "called", "waiting"]);
  * @param notice.title 題。重ねない鍵も兼ねる
  * @param notice.body 本文
  * @param now 今の時刻
+ * @param level 重さ。初期値は warn
  */
-export async function noticeOnce(env: Bindings, notice: { kind: string; title: string; body: string }, now: number): Promise<void> {
+export async function noticeOnce(env: Bindings, notice: { kind: string; title: string; body: string }, now: number, level: NoticeLevel = "warn"): Promise<void> {
   const id = newId(clockAt(now));
   const res = await env.DB
-    .prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', ?, ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = ? AND title = ? AND read_at IS NULL)")
-    .bind(id, now, notice.kind, notice.title, notice.body, notice.kind, notice.title)
+    .prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, ?, ?, ?, ?, 'office' WHERE NOT EXISTS (SELECT 1 FROM notices WHERE kind = ? AND title = ? AND read_at IS NULL)")
+    .bind(id, now, level, notice.kind, notice.title, notice.body, notice.kind, notice.title)
     .run();
   // 足した時だけ画面に配る。画面は印を受けて通知を読み直す
   if (res.meta.changes === 1) await announceNotice(env, id, clockAt(now));
 }
 
 /**
- * Claude の鍵が断られた通知を、オーナーがまだ読んでいないか
+ * Claude の鍵が断られた通知か、使用の上限に届いた通知を、オーナーがまだ読んでいないか
  * @param db 今の状態の D1
- * @returns 読んでいなければ true
+ * @returns 読んでいない物があれば true
  */
-export async function authBlocked(db: D1Database): Promise<boolean> {
+export async function claudeBlocked(db: D1Database): Promise<boolean> {
   const [open] = await drizzle(db)
     .select({ id: notices.id })
     .from(notices)
-    .where(and(eq(notices.kind, AUTH_FAILED_NOTICE), isNull(notices.readAt)))
+    .where(and(inArray(notices.kind, [...BLOCKING_NOTICES]), isNull(notices.readAt)))
     .limit(1);
   return open !== undefined;
 }
@@ -128,7 +135,7 @@ export async function runFailed(env: Bindings, staffId: StaffId, nodeId: string,
   return failures;
 }
 
-/** 呼び出しを始めた結果。blocked は鍵の失敗の通知が読まれていない、busy はワークスペースがもう走っている */
+/** 呼び出しを始めた結果。blocked は鍵の失敗か使用の上限の通知が読まれていない、busy はワークスペースがもう走っている */
 export type RunStart = "started" | "skipped" | "blocked" | "busy" | "failed";
 
 /**
@@ -143,8 +150,8 @@ export async function startRun(env: Bindings, staffId: StaffId, now: number, tra
   const target = staffOf(env, staffId);
   const { state, nodeId } = await target.status(now);
   if (nodeId === null || !RUNNABLE.has(state)) return "skipped";
-  // 鍵が違う間に呼ぶと、どの社員も同じ失敗を繰り返す。オーナーが読むまで待ち、読んだ後の arm で始める
-  if (await authBlocked(env.DB)) return "blocked";
+  // 鍵が違う間と使用の上限の間に呼ぶと、どの社員も同じ失敗を繰り返す。オーナーが読むまで待ち、読んだ後の arm で始める
+  if (await claudeBlocked(env.DB)) return "blocked";
   const row = await findNode(env.DB, nodeId);
   if (row.status !== "doing" || row.assignee !== staffId) return "skipped";
   const { promptVersion } = await target.runState(nodeId);

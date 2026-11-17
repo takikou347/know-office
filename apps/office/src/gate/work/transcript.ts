@@ -7,7 +7,7 @@ import { transcriptParts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import { clockAt } from "./attendance.ts";
-import { authBlocked, runBase, type RunStart, startRun } from "./run.ts";
+import { claudeBlocked, runBase, type RunStart, startRun } from "./run.ts";
 import { issueTicket, retireOtherTickets } from "./ticket.ts";
 
 /** 会話の記録の置き場。社員 DO だけが持つ */
@@ -186,8 +186,8 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
   if (nodeId === null || state === "stopped" || state === "off") return false;
   const saved = await staffDo.loadTranscript(nodeId);
   if (!saved) return false;
-  // 鍵が違う間は、続きも呼ばない。読んだ後の arm で呼ぶ
-  if (await authBlocked(env.DB)) return false;
+  // 鍵が違う間と使用の上限の間は、続きも呼ばない。読んだ後の arm で呼ぶ
+  if (await claudeBlocked(env.DB)) return false;
   const workspace = env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId));
   await workspace.restore(saved);
   const { promptVersion } = await staffDo.runState(nodeId);

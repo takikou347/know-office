@@ -121,6 +121,19 @@ describe("社員が自分で働き始める", () => {
     expect(await runs(worker)).toHaveLength(1);
   });
 
+  it("使用の上限の通知を読むまで、runs を呼ばず、読んだ後の arm で呼ぶ", async () => {
+    await worker.query("DB", "INSERT INTO notices (id, at, level, kind, title, body, scope) VALUES ('0190f4a8-0000-7000-8000-00000000e002', 0, 'stop', 'claude_spend_limit', 'Claude の API の使用の上限に届いた', 'x', 'office')");
+    await worker.staff("builder", "pull", jst(9, 1));
+    await worker.staff("builder", "arm", jst(9, 2));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await runs(worker)).toEqual([]);
+    expect(await worker.query("REC_2030", "SELECT action FROM audit_log WHERE action = 'ticket.issue'")).toEqual([]);
+    await worker.query("DB", "UPDATE notices SET read_at = 1 WHERE kind = 'claude_spend_limit'");
+    await worker.staff("builder", "arm", jst(9, 3));
+    await until(async () => (await runs(worker)).length > 0);
+    expect(await runs(worker)).toHaveLength(1);
+  });
+
   it("止めたタスクを離れると、ワークスペースの呼び出しを止めさせ、止め終えた後に次のタスクを取って呼ぶ", async () => {
     const next = "0190f4a8-0000-7000-8000-000000000102";
     await worker.query(

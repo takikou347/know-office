@@ -1,4 +1,5 @@
-// Claude のモデルの単価表と、役ごとに使えるモデル。費用は百万分の 1 ドルで出す (社員が考えるの 3.4)
+// Claude のモデルの単価表と、役ごとに使えるモデルと、使用の上限の見分け。費用は百万分の 1 ドルで出す (社員が考えるの 3.4、サービスと拡張の 3.5)
+import { ClaudeErrorBody, type SpendLimitKind } from "./schemas/claude.ts";
 import type { StaffId } from "./schemas/workday.ts";
 
 /** 社長とレビュー担当のモデル */
@@ -92,4 +93,30 @@ function milliMicroUsd(model: ClaudeModel, usage: ClaudeUsage): number {
     (usage.cacheWriteTokens - hour) * price.cacheWrite +
     hour * price.cacheWrite1h
   );
+}
+
+/** 見分けた使用の上限。message は Claude の API の文のまま */
+export type ClaudeSpendLimit = { kind: SpendLimitKind; message: string };
+
+/** Console で決めた組織の上限の 400 の文の頭。出典: platform.claude.com/docs/en/api/rate-limits の「Setting your own spend limit」 */
+const ORGANIZATION_LIMIT = "You have reached your specified API usage limits";
+/** Console で決めた workspace の上限の 400 の文の頭。出典は上と同じ */
+const WORKSPACE_LIMIT = "You have reached your specified workspace API usage limits";
+
+/**
+ * Claude の API の失敗が使用の上限 (待っても直らない上限) かを見分ける
+ * 出典: platform.claude.com/docs/en/api/rate-limits の「Reaching your spend cap」(429 rate_limit_error の error.details.error_code が enforced_spend_limit_reached) と「Setting your own spend limit」(400 invalid_request_error)、/docs/en/api/errors の 402 billing_error
+ * @param status 返事のステータス
+ * @param body 返事の本文を JSON として読んだ物
+ * @returns 使用の上限なら種類と文。ほかと、形が違う時は null
+ */
+export function claudeSpendLimit(status: number, body: unknown): ClaudeSpendLimit | null {
+  const parsed = ClaudeErrorBody.safeParse(body);
+  if (!parsed.success) return null;
+  const { type, message, details } = parsed.data.error;
+  if (status === 429 && type === "rate_limit_error" && details?.error_code === "enforced_spend_limit_reached") return { kind: "monthly", message };
+  if (status === 400 && type === "invalid_request_error" && message.startsWith(WORKSPACE_LIMIT)) return { kind: "workspace", message };
+  if (status === 400 && type === "invalid_request_error" && message.startsWith(ORGANIZATION_LIMIT)) return { kind: "organization", message };
+  if (status === 402 && type === "billing_error") return { kind: "billing", message };
+  return null;
 }

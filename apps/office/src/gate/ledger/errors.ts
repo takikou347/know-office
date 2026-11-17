@@ -24,8 +24,14 @@ export type ErrorRecord = {
 /** Claude の API の失敗をエラーログに残す時の code。続いた時は notices.ts が claude_failing を出す */
 export const CLAUDE_FAILED = "claude_failed";
 
-/** 自分の通知を持つので (sdk_auth_failed は work/run.ts の noticeOnce)、同じエラーの続き (error_burst) の通知を出さない code */
-const OWN_NOTICE_CODES: ReadonlySet<string> = new Set([CLAUDE_FAILED, "sdk_auth_failed"]);
+/** Claude の API が使用の上限に届いた時の code。work/claude-limits.ts がすぐ claude_spend_limit を出す */
+export const CLAUDE_SPEND_LIMIT = "claude_spend_limit";
+
+/** Claude の API のレートの上限の 429 の code。続いた時は work/claude-limits.ts が claude_rate_limited を出す */
+export const CLAUDE_RATE_LIMITED = "claude_rate_limited";
+
+/** 自分の通知を持つので (sdk_auth_failed、claude_spend_limit、claude_rate_limited は work/run.ts の noticeOnce)、同じエラーの続き (error_burst) の通知を出さない code */
+const OWN_NOTICE_CODES: ReadonlySet<string> = new Set([CLAUDE_FAILED, CLAUDE_SPEND_LIMIT, CLAUDE_RATE_LIMITED, "sdk_auth_failed"]);
 
 /** 同じ原因のエラーが続いたとみなす、5 分の回数。これを超えたら知らせ、急ぐ故障として調べる */
 export const BURST_LIMIT = 3;

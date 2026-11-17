@@ -1,5 +1,5 @@
 // Claude のプロキシ。作業トークンを確かめた要求を、鍵を替えて Claude API へ流れのまま送り、使った量と上限の待ちを残す (社員が考えるの 3.4)
-import { allowedFetch, allowedModels, AppError, PROBLEMS, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
+import { allowedFetch, allowedModels, AppError, PROBLEMS, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -13,6 +13,7 @@ import { noticeClaudeFailures } from "../ledger/notices.ts";
 import { problemResponse } from "../problem.ts";
 import { rethrowRpc } from "../rpc.ts";
 import { clockAt } from "./attendance.ts";
+import { noteRateLimit, noteSpendLimit } from "./claude-limits.ts";
 import { claudeKey } from "./claude-key.ts";
 import { findNode, recordsOf } from "./nodes.ts";
 import type { TicketClaims } from "./ticket.ts";
@@ -29,6 +30,12 @@ export const RELAY_HEADER = "x-know-relay";
 
 /** ワークスペースに返す返事のヘッダー。ほかは頭が anthropic-ratelimit- の物だけを返し、組織の ID などは出さない */
 const RESPONSE_HEADERS = new Set(["content-type", "request-id", "retry-after", "x-should-retry"]);
+
+/** 使用の上限かを読む返事のステータス。出典: platform.claude.com/docs/en/api/rate-limits の「Reaching your spend cap」「Setting your own spend limit」と /docs/en/api/errors の 402 */
+const SPEND_STATUSES = new Set([400, 402, 429]);
+
+/** 使用の上限かを読む本文の大きさの上限。失敗の本文は小さいので、超えた物は読まずにふつうの返事として扱う */
+const SPEND_BODY_MAX_BYTES = 8 * 1024;
 
 /** 1 回の呼び出しを待つ上限。流れの返事は長く続くので、SDK の初期値と同じ 10 分にする */
 const RELAY_TIMEOUT_MS = 10 * 60_000;
@@ -63,6 +70,7 @@ type Call = { staffId: StaffId; nodeId: string; model: ClaudeModel; requestId: s
 /**
  * 作業トークンを確かめた Claude への要求を処理する。止まっていれば断り、役のモデルを確かめ、鍵を替えて送り、返事を流れのまま返す
  * 返事の使った量を usage と自動停止に渡し、429 と 529 は勤怠の待ちに入れる。待ち直しは SDK に任せる
+ * 使用の上限 (サービスと拡張の 3.5) は待ちに入れず、待ち直させない印を付けて返し、通知を出す
  * @param c 要求の文脈
  * @param ticket 確かめた作業トークン
  * @returns Claude API の返事
@@ -88,8 +96,20 @@ export async function relayClaude(c: Context<GateEnv>, ticket: TicketClaims): Pr
   }
   const headers = downstreamHeaders(res.headers);
   const staff = staffOf(c.env, ticket.staffId);
+  if (SPEND_STATUSES.has(res.status)) {
+    const read = await readSpendLimit(res);
+    res = read.res;
+    if (read.limit) {
+      await noteSpendLimit(c.env, c.var.clock, read.limit, { route: path, status: res.status, traceId: c.var.traceId });
+      // 待っても直らないので、SDK に待ち直させない。社員を待ちに入れず、待っていれば次の成功で解く
+      headers.set("x-should-retry", "false");
+      return new Response(res.body, { status: res.status, headers });
+    }
+  }
   if (res.status === 429 || res.status === 529) {
     await staff.waitStart("rate_limit", c.var.clock.now()).catch(rethrowRpc);
+    // 529 の混み合いは数えず、レートの上限の 429 だけを数える
+    if (res.status === 429) await noteRateLimit(c.env, c.var.clock, res.headers, { route: path, status: 429, traceId: c.var.traceId });
     return new Response(res.body, { status: res.status, headers });
   }
   // 529 の混み合いは上の待ちで扱い、ほかの 500 台を Claude の API の失敗として数える
@@ -119,6 +139,18 @@ async function noteClaudeFailure(c: Context<GateEnv>, path: string, status: numb
   await noticeClaudeFailures(c.env, c.var.clock, String(status)).catch((cause: unknown) => {
     log("error", "claude_failure_notice_failed", { traceId: c.var.traceId, error: cause instanceof Error ? cause.message : "unknown" });
   });
+}
+
+/**
+ * 失敗の本文を読み、使用の上限かを見分ける。読んだ本文で返事を作り直すので、本文は欠けない
+ * @param res Claude API の返事
+ * @returns 作り直した返事と、使用の上限なら見分けた物。8KB を超える本文、JSON でない本文、形の違う本文は null
+ */
+async function readSpendLimit(res: Response): Promise<{ res: Response; limit: ClaudeSpendLimit | null }> {
+  const text = await res.text();
+  const again = new Response(text, { status: res.status, headers: res.headers });
+  if (new TextEncoder().encode(text).byteLength > SPEND_BODY_MAX_BYTES) return { res: again, limit: null };
+  return { res: again, limit: claudeSpendLimit(res.status, safeJson(text)) };
 }
 
 /**
