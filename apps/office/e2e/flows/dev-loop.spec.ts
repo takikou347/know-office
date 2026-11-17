@@ -120,6 +120,8 @@ test("設計書が main で変わる通知から、社長の Issue を合わせ�
 test("開発担当が子 Issue の PR を出し、オーナーが承認して main に入ると、GitHub の Issue が閉じ、タスクが済みになる", async ({ page }) => {
   test.slow();
   const { serviceId } = await prototypeService(page, "入れる案");
+  // 前の通しが残した読んでいない鍵と上限の通知は、どの社員の呼び出しも止めるので、先に読んだ事にする
+  seedMain(`UPDATE notices SET read_at = ${String(Date.now())} WHERE kind IN ('sdk_auth_failed', 'claude_spend_limit') AND read_at IS NULL`);
   // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
   const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
   expect(stopped.status()).toBe(201);
