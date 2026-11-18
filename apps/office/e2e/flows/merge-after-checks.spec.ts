@@ -1,6 +1,6 @@
 // 承認の後にチェックを待つタスクの通し。チェックの終わりの通知で main に入る、チェックが落ちてオーナーに知らせが出る、GitHub で出たオーナーの可で main に入る、
 // その可の確かめで GitHub を読めなくても定期の拾い直しが入れる
-// ゲートウェイの返事は差し替えず、通知は手元の代わりの GitHub が App の通知の秘密で署名して送る (タスクとレビューの 3.1 の 5、3.5)
+// ゲートウェイの返事は差し替えず、通知は手元の代わりの GitHub が App の通知の秘密で署名して送る (タスクとレビューの 3.1 の 5、GitHub の連携の 3.4)
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";

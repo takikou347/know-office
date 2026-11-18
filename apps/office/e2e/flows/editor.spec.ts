@@ -1,5 +1,5 @@
 // レビューのその場の直しで、エディタの補完と型の誤りを本物のルート (GET /api/v1/reviews/{nodeId}/lsp) と手元の代わりのワークスペースの tsc --lsp で出す。
-// ゲートウェイの返事は差し替えず、GitHub は手元の代わりの GitHub に木 (tarball) とファイルを置き、ワークスペースは開発のコンテナの代わりが起こす (タスクとレビューの 3.6)
+// ゲートウェイの返事は差し替えず、GitHub は手元の代わりの GitHub に木 (tarball) とファイルを置き、ワークスペースは開発のコンテナの代わりが起こす (タスクとレビューの 3.2)
 import type { Page, WebSocket } from "@playwright/test";
 import { z } from "zod";
 import { FAKES } from "../helpers/fakes.ts";

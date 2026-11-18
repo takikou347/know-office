@@ -1,4 +1,4 @@
-// main に入れる条件とデプロイの条件に共通の確かめ。承認とチェックがそろったかを、条件の並びと照らす (タスクとレビューの 3.4、サービスと拡張の 3.1)
+// main に入れる条件とデプロイの条件に共通の確かめ。承認とチェックがそろったかを、条件の並びと照らす (GitHub の連携の 3.3、サービスと拡張の 3.1)
 import { missingConditions, type ReleaseCondition } from "@know-office/core";
 import type { Forge } from "./loop.ts";
 

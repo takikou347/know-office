@@ -1,4 +1,4 @@
-// レビューのその場の直し。今の先のファイルを knowidea-ui のエディタで書き換え、同じブランチにコミットする。書き換えたら補完の口につなぎ、候補と型の誤りと説明を出す (タスクとレビューの 3.6)
+// レビューのその場の直し。今の先のファイルを knowidea-ui のエディタで書き換え、同じブランチにコミットする。書き換えたら補完の口につなぎ、候補と型の誤りと説明を出す (タスクとレビューの 3.2)
 import { Button, Stack, TextField, editorLanguageOfPath } from "knowidea-ui";
 import type { EditorDiagnostic } from "knowidea-ui/editor";
 import { Suspense, lazy, useContext, useEffect, useMemo, useState } from "react";

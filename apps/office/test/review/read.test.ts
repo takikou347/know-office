@@ -1,4 +1,4 @@
-// レビューを読む道。ワークスペースを起こさず、ゲートウェイが GitHub の compare とファイルの API から取り、前に見た所からの差を出す (タスクとレビューの 3.6、要件 review の指摘とワークスペースを起こす時)
+// レビューを読む道。ワークスペースを起こさず、ゲートウェイが GitHub の compare とファイルの API から取り、前に見た所からの差を出す (タスクとレビューの 3.2、要件 review の指摘とワークスペースを起こす時)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { hook } from "../helpers/github.ts";

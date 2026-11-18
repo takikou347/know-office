@@ -1,4 +1,4 @@
-// GitHub のルールの返す形と入力、ゲートウェイが読む GitHub の REST API の返事の形 (タスクとレビューの 3.2 から 3.4)
+// GitHub のルールの返す形と入力、ゲートウェイが読む GitHub の REST API の返事の形 (GitHub の連携の 3.1 から 3.4)
 import { RepoPath } from "./review.ts";
 import { z } from "./zod.ts";
 

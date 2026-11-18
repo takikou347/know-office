@@ -1,4 +1,4 @@
-// GitHub App のインストールで選んだ、触れるリポジトリを読む。連携の画面の一覧とサービスのリポジトリの確かめが同じ読み方を使う (タスクとレビューの 3.2、サービスと拡張の 3.3)
+// GitHub App のインストールで選んだ、触れるリポジトリを読む。連携の画面の一覧とサービスのリポジトリの確かめが同じ読み方を使う (GitHub の連携の 3.1、サービスと拡張の 3.3)
 import { AppError, GitHubInstallationRepos, type Repo } from "@know-office/core";
 import { type SQL, sql } from "drizzle-orm";
 import type { Bindings } from "../env.ts";

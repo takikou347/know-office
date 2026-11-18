@@ -1,4 +1,4 @@
-// 開発用の変数を 1 か所 (.dev.vars) から読む事と、費用の出る変数の初期値を確かめる。ログインと記録の 3.8、3.9、タスクとレビューの 3.6
+// 開発用の変数を 1 か所 (.dev.vars) から読む事と、費用の出る変数の初期値を確かめる。ログインと記録の 3.8、3.9、タスクとレビューの 3.2
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

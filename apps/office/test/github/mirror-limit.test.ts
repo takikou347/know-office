@@ -1,4 +1,4 @@
-// レビューを GitHub に写す時に GitHub の上限に当たったら、回数に数えず、待つ時刻まで写し直さない (タスクとレビューの 3.6)
+// レビューを GitHub に写す時に GitHub の上限に当たったら、回数に数えず、待つ時刻まで写し直さない (タスクとレビューの 3.2)
 import { describe, expect, it } from "vitest";
 import { retryMirrors, sendMirror } from "../../src/gate/github/mirror.ts";
 import { wrapDb } from "../helpers/github.ts";

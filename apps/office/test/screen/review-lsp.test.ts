@@ -1,4 +1,4 @@
-// レビューのエディタの補完の口。書き換えるまではつながず、初めて書き換えた時に作業トークンで開き、tsc の JSON-RPC をエディタの候補と下線と説明に直す (タスクとレビューの 3.6)
+// レビューのエディタの補完の口。書き換えるまではつながず、初めて書き換えた時に作業トークンで開き、tsc の JSON-RPC をエディタの候補と下線と説明に直す (タスクとレビューの 3.2)
 import { describe, expect, it } from "vitest";
 import { type LspDeps, type LspSocket, reviewLsp } from "../../src/screen/pages/staff/review-lsp.ts";
 

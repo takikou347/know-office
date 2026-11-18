@@ -1,4 +1,4 @@
-// レビューの画面の部品が knowidea-ui から来る事を確かめる。変更は DiffView、エディタは knowidea-ui/editor の CodeEditor で、画面が差分やエディタの仕組みを直に持たない (タスクとレビューの 3.6、要件 review のコンポーネントの置き場)
+// レビューの画面の部品が knowidea-ui から来る事を確かめる。変更は DiffView、エディタは knowidea-ui/editor の CodeEditor で、画面が差分やエディタの仕組みを直に持たない (タスクとレビューの 3.2、要件 review のコンポーネントの置き場)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

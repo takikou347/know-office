@@ -1,4 +1,4 @@
-// push はタスクを取った時に決めたブランチ (ko/<タスク ID>) だけを通す。ほかの名前、ブランチの無いタスク、レビューのタスクの push は断り、ルールの外の操作として数える (タスクとレビューの 3.3)
+// push はタスクを取った時に決めたブランチ (ko/<タスク ID>) だけを通す。ほかの名前、ブランチの無いタスク、レビューのタスクの push は断り、ルールの外の操作として数える (GitHub の連携の 3.2)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { observe } from "../../src/gate/guard/observe.ts";

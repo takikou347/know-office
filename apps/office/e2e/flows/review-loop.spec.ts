@@ -1,5 +1,5 @@
 // レビューの繰り返しの通し。オーナーが変更を読んで行に指摘を書き、開発担当が直して push し、同じプルリクエストで出し直すと、レビュー担当がもう一度確かめ、オーナーは前に見た所からの差だけを読んで承認し、main が進む
-// ゲートウェイの返事は差し替えず、GitHub は手元の代わりの GitHub、社員の SDK は手元の代わりの Claude API だけを呼ぶ (タスクとレビューの 3.1、3.4、3.6)
+// ゲートウェイの返事は差し替えず、GitHub は手元の代わりの GitHub、社員の SDK は手元の代わりの Claude API だけを呼ぶ (タスクとレビューの 3.1、GitHub の連携の 3.3、タスクとレビューの 3.2)
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";

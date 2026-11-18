@@ -1,4 +1,4 @@
-// 承認の後にチェックを待つタスクを、チェックの終わりの通知と GitHub で出たオーナーの可で main に入れる (タスクとレビューの 3.1 の 5、3.5)
+// 承認の後にチェックを待つタスクを、チェックの終わりの通知と GitHub で出たオーナーの可で main に入れる (タスクとレビューの 3.1 の 5、GitHub の連携の 3.4)
 import { describe, expect, it } from "vitest";
 import { RESUME_AFTER_MS, resumeMerges } from "../../src/gate/work/merge-resume.ts";
 import { type Connected, hook, wrapDb } from "../helpers/github.ts";

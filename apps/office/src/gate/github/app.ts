@@ -1,4 +1,4 @@
-// GitHub App の鍵。manifest と state を作り、vault の元の鍵から App の JWT と、リポジトリと権限を絞った 1 時間の鍵を作ってためる (タスクとレビューの 3.2、3.3)
+// GitHub App の鍵。manifest と state を作り、vault の元の鍵から App の JWT と、リポジトリと権限を絞った 1 時間の鍵を作ってためる (GitHub の連携の 3.1、3.2)
 import {
   AppError,
   allowedFetch,
@@ -35,9 +35,9 @@ const TOKEN_MARGIN_MS = 10 * 60_000;
 /** App の JWT の長さ。GitHub は 10 分までを受け、時計のずれのため 60 秒前から効かせる */
 const APP_JWT_S = { back: 60, ahead: 540 };
 
-/** App の権限。非公開で、workflows の権限は持たない。actions の書きは戻しの rollback.yml を動かすのに、deployments の読みは deployment_status の通知を受けるのに使う (タスクとレビューの 3.2 の 2、サービスと拡張の 3.2) */
+/** App の権限。非公開で、workflows の権限は持たない。actions の書きは戻しの rollback.yml を動かすのに、deployments の読みは deployment_status の通知を受けるのに使う (GitHub の連携の 3.1 の 2、サービスと拡張の 3.2) */
 export const APP_PERMISSIONS = { contents: "write", pull_requests: "write", issues: "write", checks: "read", statuses: "write", administration: "write", metadata: "read", actions: "write", deployments: "read" } as const;
-/** App が受ける通知の種類 (タスクとレビューの 3.5)。installation は App に必ず届く */
+/** App が受ける通知の種類 (GitHub の連携の 3.4)。installation は App に必ず届く */
 const APP_EVENTS = ["check_run", "check_suite", "pull_request", "pull_request_review", "pull_request_review_comment", "issues", "push", "deployment_status", "workflow_run"];
 
 /** vault から読んだ GitHub App */
@@ -490,7 +490,7 @@ export async function githubToken(env: Bindings, deps: TokenDeps, repo: string |
     body: JSON.stringify(request),
   });
   if (res.status === 404) {
-    // App を外した通知が届かなくても、ここで連携を切る (タスクとレビューの 3.2 の 5)
+    // App を外した通知が届かなくても、ここで連携を切る (GitHub の連携の 3.1 の 5)
     await dropInstallation(env, link.installation, now, "token_404");
     throw new AppError("upstream_failed", "GitHub App が外された");
   }

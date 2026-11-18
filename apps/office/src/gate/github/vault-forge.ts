@@ -1,4 +1,4 @@
-// 最初に使う時に vault を読み、つないでいれば GitHub を呼ぶ口になる Forge (タスクとレビューの 3.3)
+// 最初に使う時に vault を読み、つないでいれば GitHub を呼ぶ口になる Forge (GitHub の連携の 3.2)
 import { endpoints } from "../endpoints.ts";
 import type { Bindings } from "../env.ts";
 import { lazyDevIssues } from "../devloop/dev-issues.ts";

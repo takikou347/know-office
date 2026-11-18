@@ -1,4 +1,4 @@
-// レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
+// レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、GitHub の連携の 3.3、タスクとレビューの 3.2)
 import { AppError, CommitSha, decideRepo, docsMergeNeeds, log, newId, ownerGuardedPath, type ReleaseCondition, type RepoAction, type ServiceRules, StaffId } from "@know-office/core";
 import { and, eq, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -19,7 +19,7 @@ import { landReady } from "./merge-land.ts";
 import type { SeenReview } from "./merge-made.ts";
 import { type Actor, appendNodeEvent, checkPair, findNode, type NodeRow, recordCreated } from "./nodes.ts";
 
-/** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.7) */
+/** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.3) */
 const SELF_SERVICE_ID = "00000000-0000-7000-8000-000000000102";
 
 /** レビューの行 */
@@ -82,7 +82,7 @@ async function selfRepo(db: D1Database, repo: string): Promise<boolean> {
 }
 
 /**
- * 承認の後に main に入れられるかを決める。レビューで確かめたコミット (head_sha) について、できる操作と触れない所をルールと照らし、main に入れる条件 (タスクとレビューの 3.4) がそろったかを見る
+ * 承認の後に main に入れられるかを決める。レビューで確かめたコミット (head_sha) について、できる操作と触れない所をルールと照らし、main に入れる条件 (GitHub の連携の 3.3) がそろったかを見る
  * know-office 自身のリポジトリで守りのファイル (3.7) を変える時は、条件にオーナーの承認を足す。レビュー担当とオーナーの承認が足りない間は、GitHub にチェックを聞かずに待つ
  * @param env バインディング
  * @param forge GitHub

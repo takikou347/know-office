@@ -1,4 +1,4 @@
-// office の設定とサービスの設定の返す形、入力、項目ごとの値の形と初期値 (サービスと拡張の 3.3、タスクとレビューの 3.4)
+// office の設定とサービスの設定の返す形、入力、項目ごとの値の形と初期値 (サービスと拡張の 3.3、GitHub の連携の 3.3)
 import { DEFAULT_RULES } from "../rules/decide.ts";
 import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";
@@ -44,7 +44,7 @@ export const INHERITED_KEYS = ["actions", "mergeWhen", "deployWhen", "protectedP
 /** 受け継いだ値をまとめた、ルールの判断に使うサービスの設定 */
 export type ServiceRules = { [K in InheritedKey]: z.infer<(typeof INHERITED_SETTINGS)[K]> };
 
-/** office の初期値の組み込みの値。`settings` に行が無い間に使う (タスクとレビューの 3.4 の表) */
+/** office の初期値の組み込みの値。`settings` に行が無い間に使う (GitHub の連携の 3.3 の表) */
 export const DEFAULT_SERVICE_RULES: ServiceRules = {
   actions: [...RepoAction.options],
   mergeWhen: ["checks", "reviewer"],

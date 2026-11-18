@@ -1,4 +1,4 @@
-// エディタの補完のテストの手伝い。手で進める時計、接続の代わり、ワークスペースの代わり、手元の記憶 (タスクとレビューの 3.6)
+// エディタの補完のテストの手伝い。手で進める時計、接続の代わり、ワークスペースの代わり、手元の記憶 (タスクとレビューの 3.2)
 import type { LspBox } from "../../src/gate/work/editor-lsp.ts";
 import type { RelaySocket, RelayTimers } from "../../src/gate/work/lsp-relay.ts";
 

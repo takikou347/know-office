@@ -1,4 +1,4 @@
-// レビューの変えたファイル。木に並べ、最初のファイルだけを先に読み、残りは開いた時に読む。行を選んで指摘を書ける (タスクとレビューの 3.6)
+// レビューの変えたファイル。木に並べ、最初のファイルだけを先に読み、残りは開いた時に読む。行を選んで指摘を書ける (タスクとレビューの 3.2)
 import type { ReviewHead } from "@know-office/core";
 import { Accordion, Alert, Badge, Button, type DiffLine, DiffView, Stack, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";

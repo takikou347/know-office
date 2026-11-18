@@ -1,4 +1,4 @@
-// 仕事の山とタスクの詳細。社員のタスクを入口から読んで並べ、開いたタスクは出来事の流れと、レビューがあればレビューを出す (タスクとレビューの 3.6)
+// 仕事の山とタスクの詳細。社員のタスクを入口から読んで並べ、開いたタスクは出来事の流れと、レビューがあればレビューを出す (タスクとレビューの 3.2)
 import { NodeDetail, NodeTree, type StaffOverview } from "@know-office/core";
 import { List, Stack, Status, Timeline } from "knowidea-ui";
 import { z } from "zod";

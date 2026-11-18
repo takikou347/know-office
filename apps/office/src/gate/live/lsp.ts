@@ -1,4 +1,4 @@
-// エディタの補完の接続を閉じさせる口と、配信の同時の数に入れる口。ログアウト、締め出し、全体の停止は配信と同じ時に 3 人分を閉じさせる (タスクとレビューの 3.6、社員が考えるの 3.8)
+// エディタの補完の接続を閉じさせる口と、配信の同時の数に入れる口。ログアウト、締め出し、全体の停止は配信と同じ時に 3 人分を閉じさせる (タスクとレビューの 3.2、社員が考えるの 3.8)
 import { type Clock, StaffId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import type { LspCloseFilter } from "../work/editor-lsp.ts";

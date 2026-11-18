@@ -1,4 +1,4 @@
-// 設定の画面の GitHub。ボタン 1 つで App を作って入れ、連携したリポジトリを読み、ルールセットを掛け直す (タスクとレビューの 3.2 と 3.4)
+// 設定の画面の GitHub。ボタン 1 つで App を作って入れ、連携したリポジトリを読み、ルールセットを掛け直す (GitHub の連携の 3.1 と 3.3)
 import { GitHubLink, GitHubManifest, GitHubRulesApplied, Repo } from "@know-office/core";
 import { Alert, Button, Card, List, Status } from "knowidea-ui";
 import { useContext, useState } from "react";

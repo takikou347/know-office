@@ -1,4 +1,4 @@
-// ワークスペースのエディタの補完。勤務の外に起こすかを決めて起こし、木を 1 度だけ渡させ、中継を 1 本だけ持ち、補完で起こした物を期限と予算で止める (タスクとレビューの 3.6、社員が考えるの 3.2)
+// ワークスペースのエディタの補完。勤務の外に起こすかを決めて起こし、木を 1 度だけ渡させ、中継を 1 本だけ持ち、補完で起こした物を期限と予算で止める (タスクとレビューの 3.2、社員が考えるの 3.2)
 import { AppError, jstDay, LspTreeParams } from "@know-office/core";
 import { z } from "zod";
 import { CLOSE, LspRelay, type RelayMeta, type RelaySocket, type RelayTimers } from "./lsp-relay.ts";

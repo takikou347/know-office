@@ -1,4 +1,4 @@
-// エディタの補完の切り替え。確かめてから作った社員のワークスペースを起こすかを決め、木が今の先でなければ tarball を流し、WorkspaceDO の中継につなぐ (タスクとレビューの 3.6、API の reviews)
+// エディタの補完の切り替え。確かめてから作った社員のワークスペースを起こすかを決め、木が今の先でなければ tarball を流し、WorkspaceDO の中継につなぐ (タスクとレビューの 3.2、API の reviews)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, decideRepo, LspTreeParams, StaffId } from "@know-office/core";
 import { and, eq, or } from "drizzle-orm";

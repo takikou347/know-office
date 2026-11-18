@@ -1,4 +1,4 @@
-// ワークスペースからの api.github.com の中継は、GitHub の上限の待つ時刻を社員に返し、上限に届いた事を通知に出す (タスクとレビューの 3.3、サービスと拡張の 3.5)
+// ワークスペースからの api.github.com の中継は、GitHub の上限の待つ時刻を社員に返し、上限に届いた事を通知に出す (GitHub の連携の 3.2、サービスと拡張の 3.5)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { rows, useWork } from "../helpers/work.ts";

@@ -1,4 +1,4 @@
-// know-office の中のレビューの入力と返す形、GitHub に写す順番待ちの中身 (タスクとレビューの 3.6、API の reviews)
+// know-office の中のレビューの入力と返す形、GitHub に写す順番待ちの中身 (タスクとレビューの 3.2、API の reviews)
 import { z } from "./zod.ts";
 
 const Uuid = z.uuid().openapi({ description: "UUID v7" });

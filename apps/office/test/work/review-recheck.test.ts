@@ -1,4 +1,4 @@
-// 5 分ごとの確かめ直しが、レビューを割り振れない組 (作った社員とレビュー担当が同じモデル) を拾わず、上限の件数を食わない事を確かめる (タスクとレビューの 3.4)
+// 5 分ごとの確かめ直しが、レビューを割り振れない組 (作った社員とレビュー担当が同じモデル) を拾わず、上限の件数を食わない事を確かめる (GitHub の連携の 3.3)
 import { describe, expect, it } from "vitest";
 import { RECHECK_AFTER_MS, recheckReviews } from "../../src/gate/work/review.ts";
 import { REPO, rows, useWork } from "../helpers/work.ts";

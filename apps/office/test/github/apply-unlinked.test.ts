@@ -1,4 +1,4 @@
-// GitHub と連携していない時に、ルールセットを掛け直す操作を断る (タスクとレビューの 3.4)
+// GitHub と連携していない時に、ルールセットを掛け直す操作を断る (GitHub の連携の 3.3)
 import { describe, expect, it } from "vitest";
 import { api, MINUTE, useWork } from "../helpers/work.ts";
 

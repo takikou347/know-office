@@ -1,4 +1,4 @@
-// レビューのエディタの補完の口 (GET /api/v1/reviews/{nodeId}/lsp)。初めて書き換えた時か候補を求めた時に開き、tsc の JSON-RPC をエディタの候補と下線と説明に直す (タスクとレビューの 3.6)
+// レビューのエディタの補完の口 (GET /api/v1/reviews/{nodeId}/lsp)。初めて書き換えた時か候補を求めた時に開き、tsc の JSON-RPC をエディタの候補と下線と説明に直す (タスクとレビューの 3.2)
 import type { EditorCompletion, EditorDiagnostic } from "knowidea-ui/editor";
 import { type Clock, systemClock } from "@know-office/core";
 import { z } from "zod";

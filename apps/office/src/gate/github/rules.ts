@@ -1,4 +1,4 @@
-// GitHub のルール。触れるリポジトリを読み書きし、リポジトリに効く設定を組み立て、公開のリポジトリにルールセットを掛け直す (タスクとレビューの 3.4)
+// GitHub のルール。触れるリポジトリを読み書きし、リポジトリに効く設定を組み立て、公開のリポジトリにルールセットを掛け直す (GitHub の連携の 3.3)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, docsMergeNeeds, type GitHubRules, GitHubRulesValue, INHERITED_SETTINGS, newId, type ServiceRules } from "@know-office/core";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";

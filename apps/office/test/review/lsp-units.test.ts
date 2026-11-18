@@ -1,4 +1,4 @@
-// エディタの補完の木の渡し方と接続の閉じ方を、DO の中身の物で確かめる。起こし方と止め方は lsp-wake.test.ts、ルートは lsp.test.ts、中継は lsp-relay.test.ts (タスクとレビューの 3.6)
+// エディタの補完の木の渡し方と接続の閉じ方を、DO の中身の物で確かめる。起こし方と止め方は lsp-wake.test.ts、ルートは lsp.test.ts、中継は lsp-relay.test.ts (タスクとレビューの 3.2)
 import { describe, expect, it } from "vitest";
 import { EDITOR_LIMITS, type LspPrepared } from "../../src/gate/work/editor-lsp.ts";
 import { fakeBox, fakeSocket } from "../helpers/lsp.ts";

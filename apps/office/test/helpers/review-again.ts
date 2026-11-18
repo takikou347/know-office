@@ -1,4 +1,4 @@
-// レビューの確かめ直しのテスト (review-again) が使う道具。代わりの GitHub への通知、社員のツール、レビューの行とタスクの読み (タスクとレビューの 3.1、3.4、3.6)
+// レビューの確かめ直しのテスト (review-again) が使う道具。代わりの GitHub への通知、社員のツール、レビューの行とタスクの読み (タスクとレビューの 3.1、GitHub の連携の 3.3、タスクとレビューの 3.2)
 import type { StaffId } from "@know-office/core";
 import { expect } from "vitest";
 import { z } from "zod";

@@ -1,4 +1,4 @@
-// プルリクエストを出す前のブランチ (作業中の変更) を、社員と仕事の画面のレビューで読む。GitHub は手元の代わりにつなぎ、ブランチの先と compare を置く (タスクとレビューの 3.6)
+// プルリクエストを出す前のブランチ (作業中の変更) を、社員と仕事の画面のレビューで読む。GitHub は手元の代わりにつなぎ、ブランチの先と compare を置く (タスクとレビューの 3.2)
 import { expect, test } from "../helpers/test.ts";
 import { z } from "zod";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub, forgetGitHubRoute } from "./helpers/github.ts";

@@ -1,4 +1,4 @@
-// チェックの通知 (check_run と check_suite) を受ける。結果をレビューに写し、終わりの通知では承認の後にチェックを待つタスクを main に入れる (タスクとレビューの 3.1 の 5、3.5)
+// チェックの通知 (check_run と check_suite) を受ける。結果をレビューに写し、終わりの通知では承認の後にチェックを待つタスクを main に入れる (タスクとレビューの 3.1 の 5、GitHub の連携の 3.4)
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { CheckRunEvent, CheckSuiteEvent } from "@know-office/core";
 import type { Bindings } from "../env.ts";

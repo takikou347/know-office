@@ -1,4 +1,4 @@
-// GitHub の通知の受け手。署名、時刻、本文の SHA-256 を確かめ、チェック、プルリクエスト、レビュー、Issue、App を外した事を受ける (タスクとレビューの 3.5、3.6)
+// GitHub の通知の受け手。署名、時刻、本文の SHA-256 を確かめ、チェック、プルリクエスト、レビュー、Issue、App を外した事を受ける (GitHub の連携の 3.4、タスクとレビューの 3.2)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import {
   AppError,
@@ -339,7 +339,7 @@ function fromGitHub(hook: Hook): FromGitHub | null {
 }
 
 /**
- * オーナーが GitHub の画面で出した可と不可、行のコメントを know-office のレビューに写す (タスクとレビューの 3.5、3.6)
+ * オーナーが GitHub の画面で出した可と不可、行のコメントを know-office のレビューに写す (GitHub の連携の 3.4、タスクとレビューの 3.2)
  * know-office が写した物の通知は写し返さない。受けた記録を先に 1 文で取り、取れた側だけが写す。写せなければ記録を消し、GitHub の送り直しで受け直す
  * @param env バインディング
  * @param hook 確かめた通知

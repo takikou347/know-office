@@ -1,4 +1,4 @@
-// know-office 自身のリポジトリで、ルールの判断、自動停止、鍵を扱うファイルを変える PR は、レビュー担当の承認に加えてオーナーの承認を待つ (タスクとレビューの 3.7、要件 services の know-office 自身を管理する)
+// know-office 自身のリポジトリで、ルールの判断、自動停止、鍵を扱うファイルを変える PR は、レビュー担当の承認に加えてオーナーの承認を待つ (タスクとレビューの 3.3、要件 services の know-office 自身を管理する)
 import type { StaffId } from "@know-office/core";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";

@@ -1,4 +1,4 @@
-// App を通した操作の記録。社員がプルリクエストを出すと、どの社員がどのタスクで出したかが監査ログに残る (タスクとレビューの 3.3)
+// App を通した操作の記録。社員がプルリクエストを出すと、どの社員がどのタスクで出したかが監査ログに残る (GitHub の連携の 3.2)
 import { describe, expect, it } from "vitest";
 import { vaultForge } from "../../src/gate/github/vault-forge.ts";
 import { createNode } from "../../src/gate/work/nodes.ts";

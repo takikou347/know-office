@@ -1,4 +1,4 @@
-// エディタの補完の切り替え GET /api/v1/reviews/{nodeId}/lsp。Origin、ログインセッション、配信の作業トークン、nodeId、レビュー、ルールの順に確かめ、勤務の外は EDITOR_WAKE で起こすかを決め、木が無い時だけ tarball を流す (タスクとレビューの 3.6)
+// エディタの補完の切り替え GET /api/v1/reviews/{nodeId}/lsp。Origin、ログインセッション、配信の作業トークン、nodeId、レビュー、ルールの順に確かめ、勤務の外は EDITOR_WAKE で起こすかを決め、木が無い時だけ tarball を流す (タスクとレビューの 3.2)
 import { gzipSync } from "node:zlib";
 import { LSP_TREE_BYTES, newId, Problem, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";

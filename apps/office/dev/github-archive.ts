@@ -1,4 +1,4 @@
-// 代わりの GitHub の tarball。本物と同じく API は 302 で codeload の形の道を返し、codeload の道は出した印を 1 回だけ受ける (タスクとレビューの 3.6)
+// 代わりの GitHub の tarball。本物と同じく API は 302 で codeload の形の道を返し、codeload の道は出した印を 1 回だけ受ける (タスクとレビューの 3.2)
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 

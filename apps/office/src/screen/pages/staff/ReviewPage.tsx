@@ -1,4 +1,4 @@
-// 入口にあるレビュー。レビュー担当の要点とチェックの結果を変更の前に出し、変えたファイルを木に並べ、承認か差し戻し、指摘、その場の直しを入口に送る。読むだけの間はワークスペースを起こさない (タスクとレビューの 3.6)
+// 入口にあるレビュー。レビュー担当の要点とチェックの結果を変更の前に出し、変えたファイルを木に並べ、承認か差し戻し、指摘、その場の直しを入口に送る。読むだけの間はワークスペースを起こさない (タスクとレビューの 3.2)
 import type { ReviewHead } from "@know-office/core";
 import { Alert, Button, Link, List, SegmentedControl, Select, Stack, Status, TextField } from "knowidea-ui";
 import { useContext, useEffect, useState } from "react";

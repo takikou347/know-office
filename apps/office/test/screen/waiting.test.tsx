@@ -1,4 +1,4 @@
-// ダッシュボードの承認を待つ物と、決める画面の 409 の見分け。件数、1 件ずつの道、一覧への道を出す (タスクとレビューの 3.8)
+// ダッシュボードの承認を待つ物と、決める画面の 409 の見分け。件数、1 件ずつの道、一覧への道を出す (タスクとレビューの 3.4)
 import type { Approval } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";

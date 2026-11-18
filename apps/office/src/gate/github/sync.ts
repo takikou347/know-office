@@ -1,4 +1,4 @@
-// プルリクエストの先が進んだ通知 (synchronize) を写す。先を進めて承認を消し、レビュー担当にもう一度確かめさせる (タスクとレビューの 3.4、3.5)
+// プルリクエストの先が進んだ通知 (synchronize) を写す。先を進めて承認を消し、レビュー担当にもう一度確かめさせる (GitHub の連携の 3.3、3.4)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import { sql } from "drizzle-orm";
 import type { Bindings } from "../env.ts";

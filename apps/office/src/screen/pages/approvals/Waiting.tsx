@@ -1,4 +1,4 @@
-// ダッシュボードの、オーナーの承認を待つ物。件数と先頭の数件を出し、1 件ずつと一覧の承認を決める画面へ移る (タスクとレビューの 3.8)
+// ダッシュボードの、オーナーの承認を待つ物。件数と先頭の数件を出し、1 件ずつと一覧の承認を決める画面へ移る (タスクとレビューの 3.4)
 import type { Approval } from "@know-office/core";
 import { Link, List, Stat } from "knowidea-ui";
 import { jstDateTime } from "../../format.ts";

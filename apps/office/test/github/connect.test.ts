@@ -1,4 +1,4 @@
-// GitHub App の連携。ボタン 1 つで App を作って入れ、外されたら連携を切る (タスクとレビューの 3.2)
+// GitHub App の連携。ボタン 1 つで App を作って入れ、外されたら連携を切る (GitHub の連携の 3.1)
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MINUTE, rows, useWork } from "../helpers/work.ts";

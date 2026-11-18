@@ -1,4 +1,4 @@
-// オーナーが行に書いた指摘が、作った社員のタスクに戻り、GitHub のプルリクエストの行のコメントに写る (タスクとレビューの 3.6、要件 review の指摘)
+// オーナーが行に書いた指摘が、作った社員のタスクに戻り、GitHub のプルリクエストの行のコメントに写る (タスクとレビューの 3.2、要件 review の指摘)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { api, rows, useWork } from "../helpers/work.ts";

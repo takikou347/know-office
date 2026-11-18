@@ -1,4 +1,4 @@
-// GitHub のルールとブランチの保護。できる操作、触れない所、main に入れる条件をゲートウェイが守り、公開のリポジトリにはルールセットを掛け直す (タスクとレビューの 3.4)
+// GitHub のルールとブランチの保護。できる操作、触れない所、main に入れる条件をゲートウェイが守り、公開のリポジトリにはルールセットを掛け直す (GitHub の連携の 3.3)
 import { newId, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vitest";

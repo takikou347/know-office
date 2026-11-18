@@ -1,4 +1,4 @@
-// GitHub 連携のルート。App を作って入れ、連携したリポジトリを読み、ルールを読み書きし、通知を受ける (API の github、タスクとレビューの 3.2 から 3.5)
+// GitHub 連携のルート。App を作って入れ、連携したリポジトリを読み、ルールを読み書きし、通知を受ける (API の github、GitHub の連携の 3.1 から 3.4)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, GitHubCallbackQuery, GitHubInstalledQuery, GitHubLink, GitHubManifest, GitHubRules, GitHubRulesApplied, newId, Repo, Secret, UpdateGitHubRulesInput } from "@know-office/core";
 import { createRouter } from "../app.ts";

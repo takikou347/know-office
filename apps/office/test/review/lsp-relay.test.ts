@@ -1,4 +1,4 @@
-// エディタの補完の 1 本の中継の上限と、ワークスペースの起こし方と止め方を確かめる (タスクとレビューの 3.6、社員が考えるの 3.2)
+// エディタの補完の 1 本の中継の上限と、ワークスペースの起こし方と止め方を確かめる (タスクとレビューの 3.2、社員が考えるの 3.2)
 import { health } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { LSP_RELAY_LIMITS, LspRelay } from "../../src/gate/work/lsp-relay.ts";

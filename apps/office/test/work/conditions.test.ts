@@ -1,4 +1,4 @@
-// main に入れる条件とデプロイの条件に共通の確かめ (タスクとレビューの 3.4)
+// main に入れる条件とデプロイの条件に共通の確かめ (GitHub の連携の 3.3)
 import { describe, expect, it } from "vitest";
 import { checkConditions } from "../../src/gate/work/conditions.ts";
 import type { Forge } from "../../src/gate/work/loop.ts";

@@ -1,4 +1,4 @@
-// know-office の中のレビューを GitHub のプルリクエストに写す。書く時に順番待ちに入れ、すぐに送り、送れなければエラーログに残して 5 分ごとに送り直す (タスクとレビューの 3.6)
+// know-office の中のレビューを GitHub のプルリクエストに写す。書く時に順番待ちに入れ、すぐに送り、送れなければエラーログに残して 5 分ごとに送り直す (タスクとレビューの 3.2)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import { AppError, type Clock, MirrorCommentPayload, MirrorIssueClosePayload, MirrorReviewPayload, MirrorStatusPayload, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";

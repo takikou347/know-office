@@ -1,4 +1,4 @@
-// GitHub の操作をオーナーのルールと照らす判断と、main に入れる条件、公開のリポジトリに掛けるルールセットの中身 (タスクとレビューの 3.4)
+// GitHub の操作をオーナーのルールと照らす判断と、main に入れる条件、公開のリポジトリに掛けるルールセットの中身 (GitHub の連携の 3.3)
 // rules/ は schemas/ を読まずに型のチェックに掛かるので、設定の形はここに同じ形で書く
 import { protectedPath } from "./path.ts";
 
@@ -62,7 +62,7 @@ export function decideRepo(req: RepoRequest, scope: RepoScope): RepoDecision {
 }
 
 /**
- * know-office 自身のリポジトリで、変える PR にオーナーの承認も要るファイル (タスクとレビューの 3.7)。ルールの判断、シグナルの数え方、自動停止、vault、鍵を作る所、止める数とロックアウトを数える所
+ * know-office 自身のリポジトリで、変える PR にオーナーの承認も要るファイル (タスクとレビューの 3.3)。ルールの判断、シグナルの数え方、自動停止、vault、鍵を作る所、止める数とロックアウトを数える所
  * この一覧も rules/ にあるので、一覧を弱める変更にもオーナーの承認が要る
  */
 export const OWNER_GUARDED_PATHS = [

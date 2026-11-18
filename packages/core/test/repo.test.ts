@@ -1,4 +1,4 @@
-// GitHub の操作の判断、main に入れる条件、ルールセットの中身、リポジトリの名前の形 (タスクとレビューの 3.4)
+// GitHub の操作の判断、main に入れる条件、ルールセットの中身、リポジトリの名前の形 (GitHub の連携の 3.3)
 import { describe, expect, it } from "vitest";
 import { decideRepo, DEFAULT_SERVICE_RULES, mainRuleset, missingConditions, ownerGuardedPath, RepoName, type ServiceRules } from "../src/index.ts";
 

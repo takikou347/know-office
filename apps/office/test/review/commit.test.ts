@@ -1,4 +1,4 @@
-// オーナーがレビューで書き換えた 1 ファイルを、ゲートウェイが Git の API で同じブランチにコミットする (タスクとレビューの 3.6、要件 review のその場で直す)
+// オーナーがレビューで書き換えた 1 ファイルを、ゲートウェイが Git の API で同じブランチにコミットする (タスクとレビューの 3.2、要件 review のその場で直す)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { api, REPO, rows, useWork } from "../helpers/work.ts";

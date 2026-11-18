@@ -1,4 +1,4 @@
-// GitHub と連携した今を読む。設定の画面のカードは、これで未連携、インストール前、連携済みを分ける (タスクとレビューの 3.2)
+// GitHub と連携した今を読む。設定の画面のカードは、これで未連携、インストール前、連携済みを分ける (GitHub の連携の 3.1)
 import { describe, expect, it } from "vitest";
 import { api, useWork } from "../helpers/work.ts";
 import { connect, createGitHubApp, returnFromGitHub, stepUp } from "../helpers/github.ts";

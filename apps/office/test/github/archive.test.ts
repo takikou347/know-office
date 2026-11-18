@@ -1,4 +1,4 @@
-// エディタの補完の木を GitHub の tarball から取る。読む鍵で取り、302 は 1 回だけ手で追い、codeload の先には鍵を付けない (タスクとレビューの 3.6)
+// エディタの補完の木を GitHub の tarball から取る。読む鍵で取り、302 は 1 回だけ手で追い、codeload の先には鍵を付けない (タスクとレビューの 3.2)
 import { gzipSync } from "node:zlib";
 import { AppError, type Fetcher, LSP_TREE_BYTES } from "@know-office/core";
 import { describe, expect, it } from "vitest";

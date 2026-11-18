@@ -1,4 +1,4 @@
-// レビューのテストの手伝い。代わりの GitHub に連携し、開発担当にプルリクエストを出させ、GitHub の形の通知を作る (タスクとレビューの 3.5、3.6)
+// レビューのテストの手伝い。代わりの GitHub に連携し、開発担当にプルリクエストを出させ、GitHub の形の通知を作る (GitHub の連携の 3.4、タスクとレビューの 3.2)
 import { expect } from "vitest";
 import { z } from "zod";
 import { vaultForge } from "../../src/gate/github/vault-forge.ts";

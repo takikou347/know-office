@@ -1,4 +1,4 @@
--- 最初の 3 人の社員と、役目の説明文の 1 版を置く (データの 2 章、タスクとレビューの 3.1 と 3.7)
+-- 最初の 3 人の社員と、役目の説明文の 1 版を置く (データの 2 章、タスクとレビューの 3.1 と 3.3)
 INSERT INTO staff (id, role, boss_id, model, effort, prompt_version, created_at) VALUES
   ('president', '社長', NULL, 'claude-opus-5-5', 'high', 1, 0),
   ('builder', '開発担当', 'president', 'claude-sonnet-5-5', 'high', 1, 0),

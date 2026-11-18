@@ -1,4 +1,4 @@
-// エディタの補完の中身のテストの手伝い。補完の中身を作る、1 本つなぐ、開いたままにする、書く所で止める記憶 (タスクとレビューの 3.6)
+// エディタの補完の中身のテストの手伝い。補完の中身を作る、1 本つなぐ、開いたままにする、書く所で止める記憶 (タスクとレビューの 3.2)
 import { EditorLsp, type EditorStorage } from "../../src/gate/work/editor-lsp.ts";
 import type { LspRelay } from "../../src/gate/work/lsp-relay.ts";
 import { type FakeBox, type FakeSocket, fakeSocket, ManualTimers, memory } from "./lsp.ts";

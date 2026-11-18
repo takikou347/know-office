@@ -1,4 +1,4 @@
-// GitHub の通知。署名と時刻と配信 ID を確かめ、チェック、プルリクエスト、Issue、App を外した事を受ける (タスクとレビューの 3.5)
+// GitHub の通知。署名と時刻と配信 ID を確かめ、チェック、プルリクエスト、Issue、App を外した事を受ける (GitHub の連携の 3.4)
 import { deliveryId } from "../../dev/github-hooks.ts";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

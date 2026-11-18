@@ -1,4 +1,4 @@
-// know-office のレビューと GitHub のプルリクエストのレビューを互いに写す。自分が写した物の通知は写し返さず、写せない時は記録に残して 5 分ごとに写し直す (タスクとレビューの 3.5、3.6)
+// know-office のレビューと GitHub のプルリクエストのレビューを互いに写す。自分が写した物の通知は写し返さず、写せない時は記録に残して 5 分ごとに写し直す (GitHub の連携の 3.4、タスクとレビューの 3.2)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { retryMirrors } from "../../src/gate/github/mirror.ts";

@@ -1,4 +1,4 @@
-// 補完で起こしたワークスペースの起こし方と止め方を、DO の中身の物で確かめる (タスクとレビューの 3.6、社員が考えるの 3.2)
+// 補完で起こしたワークスペースの起こし方と止め方を、DO の中身の物で確かめる (タスクとレビューの 3.2、社員が考えるの 3.2)
 import { describe, expect, it } from "vitest";
 import { EDITOR_LIMITS } from "../../src/gate/work/editor-lsp.ts";
 import { deferred, fakeBox } from "../helpers/lsp.ts";

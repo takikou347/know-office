@@ -1,4 +1,4 @@
-// プルリクエストを出す前のブランチ (作業中の変更) をレビューの画面で読む。ブランチはタスクを取った時に決まり、ゲートウェイが GitHub の ref と compare から読む (タスクとレビューの 3.6)
+// プルリクエストを出す前のブランチ (作業中の変更) をレビューの画面で読む。ブランチはタスクを取った時に決まり、ゲートウェイが GitHub の ref と compare から読む (タスクとレビューの 3.2)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { connect, stepUp } from "../helpers/github.ts";

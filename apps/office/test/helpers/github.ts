@@ -1,4 +1,4 @@
-// GitHub の連携のテストの手伝い。代わりの GitHub の画面で App を作って入れ、通知を送り、ワークスペースから git を呼ぶ (タスクとレビューの 3.2 から 3.5)
+// GitHub の連携のテストの手伝い。代わりの GitHub の画面で App を作って入れ、通知を送り、ワークスペースから git を呼ぶ (GitHub の連携の 3.1 から 3.4)
 import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
 import type { StaffId } from "@know-office/core";
 import { expect } from "vitest";

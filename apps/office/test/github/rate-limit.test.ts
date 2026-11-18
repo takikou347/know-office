@@ -1,4 +1,4 @@
-// GitHub の上限の返事から、送り直してよいまでの秒を決める (タスクとレビューの 3.3)
+// GitHub の上限の返事から、送り直してよいまでの秒を決める (GitHub の連携の 3.2)
 import { describe, expect, it } from "vitest";
 import { githubRetryAfter } from "../../src/gate/github/app.ts";
 

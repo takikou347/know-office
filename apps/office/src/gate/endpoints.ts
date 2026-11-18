@@ -23,7 +23,7 @@ export type Endpoints = {
   githubWeb: string;
   /** GitHub の git の受け口 */
   githubGit: string;
-  /** GitHub の tarball の 302 の先。この下の道だけを鍵を付けずに追う (タスクとレビューの 3.6) */
+  /** GitHub の tarball の 302 の先。この下の道だけを鍵を付けずに追う (タスクとレビューの 3.2) */
   codeload: string;
 };
 

@@ -2,7 +2,7 @@ import type { Request } from "@playwright/test";
 import { expect, test } from "./helpers/test.ts";
 import { distinct, REVIEW_ID, stubReview, REVIEW_PATH } from "./helpers/review.ts";
 
-// エディタとワークスペース。読むだけの間はエディタのコードも補完の口 (lsp) も読まない。入口の返事は境目のモックで返す (タスクとレビューの 3.6)
+// エディタとワークスペース。読むだけの間はエディタのコードも補完の口 (lsp) も読まない。入口の返事は境目のモックで返す (タスクとレビューの 3.2)
 
 const editorCode = /codemirror|knowidea-ui_editor|editor-/i;
 

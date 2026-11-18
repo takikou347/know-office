@@ -1,4 +1,4 @@
-// GitHub の REST API を呼ぶ口。リポジトリ 1 つと要る権限に絞った鍵を呼ぶたびに付け、返事を Zod で確かめる (タスクとレビューの 3.3、3.4)
+// GitHub の REST API を呼ぶ口。リポジトリ 1 つと要る権限に絞った鍵を呼ぶたびに付け、返事を Zod で確かめる (GitHub の連携の 3.2、3.3)
 import {
   AppError,
   allowedFetch,
@@ -190,7 +190,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
     const token = await access.token(name.data, permissions);
     const init: RequestInit = {
       method: route.method,
-      // GitHub への呼び出しはリダイレクトを追わず、3xx は失敗として断る (タスクとレビューの 3.3)
+      // GitHub への呼び出しはリダイレクトを追わず、3xx は失敗として断る (GitHub の連携の 3.2)
       redirect: "manual",
       headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": GITHUB_USER_AGENT, ...(body === undefined ? {} : { "content-type": "application/json" }) },
     };

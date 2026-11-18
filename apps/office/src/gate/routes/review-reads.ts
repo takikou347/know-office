@@ -1,4 +1,4 @@
-// レビューを読む道。ワークスペースを起こさず、ゲートウェイが GitHub の compare とファイルの API から取り、前に見た所からの差と読んだ所の印を持つ。PR を出す前の作業中のブランチも同じ道で読む (API の reviews、タスクとレビューの 3.6)
+// レビューを読む道。ワークスペースを起こさず、ゲートウェイが GitHub の compare とファイルの API から取り、前に見た所からの差と読んだ所の印を持つ。PR を出す前の作業中のブランチも同じ道で読む (API の reviews、タスクとレビューの 3.2)
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, decideRepo, FileContent, FileDiff, languageOfPath, ReviewDiffQuery, ReviewFileQuery, ReviewHead, SeenInput } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";

@@ -1,4 +1,4 @@
-// レビュー: オーナーの承認と差し戻し、行の指摘、その場の直しを受け、GitHub のプルリクエストに写す (API の reviews、タスクとレビューの 3.6)
+// レビュー: オーナーの承認と差し戻し、行の指摘、その場の直しを受け、GitHub のプルリクエストに写す (API の reviews、タスクとレビューの 3.2)
 import { createRoute, z } from "@hono/zod-openapi";
 import { sql } from "drizzle-orm";
 import { AppError, Commit, CreateCommitInput, CreateNoteInput, newId, ReviewNote, ReviewVerdict, ReviewVerdictInput } from "@know-office/core";

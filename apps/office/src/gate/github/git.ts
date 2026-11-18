@@ -1,4 +1,4 @@
-// ワークスペースからの GitHub への要求を受ける。git は読むか push かを決め、push の命令だけを読んで ref を見てから、絞った 1 時間の鍵を付けて送る。api.github.com は選んだリポジトリへの GET だけを通す (タスクとレビューの 3.3)
+// ワークスペースからの GitHub への要求を受ける。git は読むか push かを決め、push の命令だけを読んで ref を見てから、絞った 1 時間の鍵を付けて送る。api.github.com は選んだリポジトリへの GET だけを通す (GitHub の連携の 3.2)
 import type { D1Database } from "@cloudflare/workers-types";
 import { AppError, allowedFetch, decideRepo, GitHubRepo, recordedText, RepoName } from "@know-office/core";
 import type { Context } from "hono";
@@ -90,7 +90,7 @@ function refusedRef(updates: RefUpdate[], defaultBranch: string): string | null 
     if (!BRANCH_REF.test(u.ref)) return `ブランチでない ref: ${u.ref}`;
     if (u.ref.includes("//") || u.ref.includes("..") || u.ref.endsWith("/") || u.ref.endsWith(".lock")) return `崩れた ref: ${u.ref}`;
     const branch = u.ref.slice("refs/heads/".length).toLowerCase();
-    // main と既定のブランチを進めるのはゲートウェイだけ (タスクとレビューの 3.4)。大文字の違いで別のブランチと見せさせない
+    // main と既定のブランチを進めるのはゲートウェイだけ (GitHub の連携の 3.3)。大文字の違いで別のブランチと見せさせない
     if (branch === "main" || branch === defaultBranch.toLowerCase()) return `${branch} への push`;
   }
   return null;
@@ -343,7 +343,7 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   }
   if (relay?.over()) throw new AppError("payload_too_large", "push が 100MB を超える");
   const status = res?.status ?? 502;
-  // 読む操作も push も、失敗も含めて App を通した操作として残す (タスクとレビューの 3.3)
+  // 読む操作も push も、失敗も含めて App を通した操作として残す (GitHub の連携の 3.2)
   const entry = commands
     ? { action: "github.push", detail: { nodeId: ticket.nodeId, refs: commands.updates.map((u) => recordedText(u.ref)), status } }
     : { action: "github.read", detail: { nodeId: ticket.nodeId, via: "git", path: match[3] ?? "", status } };

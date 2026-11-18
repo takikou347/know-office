@@ -1,4 +1,4 @@
-// レビューの画面が入口から読む物。概要、1 ファイルの差分、ファイルの中身を読み、knowidea-ui の DiffView の形に直す (タスクとレビューの 3.6)
+// レビューの画面が入口から読む物。概要、1 ファイルの差分、ファイルの中身を読み、knowidea-ui の DiffView の形に直す (タスクとレビューの 3.2)
 import type { FileDiff, ReviewHead } from "@know-office/core";
 import type { DiffFile, DiffLine } from "knowidea-ui";
 import { useContext, useEffect, useState } from "react";

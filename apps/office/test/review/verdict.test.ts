@@ -1,4 +1,4 @@
-// オーナーがレビューで出した承認と差し戻しが、GitHub のプルリクエストのレビューに写る (タスクとレビューの 3.6、要件 review の know-office の中で確認する)
+// オーナーがレビューで出した承認と差し戻しが、GitHub のプルリクエストのレビューに写る (タスクとレビューの 3.2、要件 review の know-office の中で確認する)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { wrapDb } from "../helpers/github.ts";

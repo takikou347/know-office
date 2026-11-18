@@ -1,4 +1,4 @@
-// App の鍵。GitHub を呼ぶたびに、リポジトリ 1 つと要る権限だけに絞った 1 時間の鍵をゲートウェイが作って付ける (タスクとレビューの 3.3)
+// App の鍵。GitHub を呼ぶたびに、リポジトリ 1 つと要る権限だけに絞った 1 時間の鍵をゲートウェイが作って付ける (GitHub の連携の 3.2)
 import { gzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";

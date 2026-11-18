@@ -1,4 +1,4 @@
-// ルールセットを掛け直すだけの操作。今の設定のまま公開のリポジトリにルールセットを掛け、同じ名前のルールセットを 2 つ作らない (タスクとレビューの 3.4)
+// ルールセットを掛け直すだけの操作。今の設定のまま公開のリポジトリにルールセットを掛け、同じ名前のルールセットを 2 つ作らない (GitHub の連携の 3.3)
 import { newId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vitest";

@@ -14,7 +14,7 @@ export type ChangedFile = { path: string; previousPath?: string; status: ReviewF
 /** コミットのチェックの今。通った、待っている (走っている、まだ無い、読み切れない)、落ちた */
 export type CheckState = "passed" | "pending" | "failed";
 
-/** GitHub を呼ぶ口。鍵は github/app.ts が vault の App の鍵から作る (タスクとレビューの 3.3、3.4) */
+/** GitHub を呼ぶ口。鍵は github/app.ts が vault の App の鍵から作る (GitHub の連携の 3.2、3.3) */
 export type Forge = {
   /** ブランチから main へのプルリクエストを出す */
   openPull(input: { repo: string; branch: string; title: string; body: string }): Promise<{ number: number; baseSha: string; headSha: string }>;

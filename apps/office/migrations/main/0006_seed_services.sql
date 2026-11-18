@@ -1,4 +1,4 @@
--- 最初のサービスの knowidea-ui と、2 番目の know-office 自身を登録する (サービスと拡張の 3.1 と 3.3、タスクとレビューの 3.4 の表)。何度流しても同じ ID の行を重ねない
+-- 最初のサービスの knowidea-ui と、2 番目の know-office 自身を登録する (サービスと拡張の 3.1 と 3.3、GitHub の連携の 3.3 の表)。何度流しても同じ ID の行を重ねない
 INSERT INTO services (id, name, kind, stage, idea_id, repo, staff_id, aim, users, cost_estimate, revenue_estimate, study_key, dropped_reason, created_at) VALUES
   ('00000000-0000-7000-8000-000000000101', 'knowidea-ui', 'library', 'operation', NULL, 'takikou347/knowidea-ui', 'builder', 'KNOW IDEA のアプリが共通で使う画面のコンポーネントの集まり', 'KNOW IDEA のアプリ', NULL, NULL, NULL, NULL, 0),
   ('00000000-0000-7000-8000-000000000102', 'know-office', 'web_app', 'prototype', NULL, 'takikou347/know-office', 'builder', 'オーナーが AI の社員とその成果を管理する管理室のアプリ', 'オーナー', NULL, NULL, NULL, NULL, 1)

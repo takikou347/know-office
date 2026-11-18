@@ -1,7 +1,7 @@
 import { expect, test } from "./helpers/test.ts";
 import { distinct, REVIEW_ID, REVIEW_PATH, stubReview } from "./helpers/review.ts";
 
-// 入口にあるレビューを開く。要点とチェックを変更の前に出し、幅 1,024 以上は前と後を左右に、狭い時は 1 列に並べる。入口の返事は境目のモックで返す (タスクとレビューの 3.6)
+// 入口にあるレビューを開く。要点とチェックを変更の前に出し、幅 1,024 以上は前と後を左右に、狭い時は 1 列に並べる。入口の返事は境目のモックで返す (タスクとレビューの 3.2)
 
 const width = (page: { viewportSize: () => { width: number } | null }) => page.viewportSize()?.width ?? 0;
 

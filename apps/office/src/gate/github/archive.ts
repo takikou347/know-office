@@ -1,4 +1,4 @@
-// エディタの補完の木を GitHub の tarball から取る。読む鍵で取り、302 は 1 回だけ手で追い、codeload の先へは鍵を付けずに流す (タスクとレビューの 3.6)
+// エディタの補完の木を GitHub の tarball から取る。読む鍵で取り、302 は 1 回だけ手で追い、codeload の先へは鍵を付けずに流す (タスクとレビューの 3.2)
 import { AppError, allowedFetch, type Fetcher, LSP_TREE_BYTES, LspTreeParams, RepoName } from "@know-office/core";
 import { endpoints } from "../endpoints.ts";
 import type { Bindings } from "../env.ts";
