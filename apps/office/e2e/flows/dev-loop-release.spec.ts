@@ -4,7 +4,8 @@ import { expect, test } from "../helpers/test.ts";
 import { FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
 import { readNoticesTitled } from "./helpers/notice-bar.ts";
-import { clockInStaff, Held, openTree, scriptReply } from "./helpers/staff-work.ts";
+import { Held, openTree } from "./helpers/staff-work.ts";
+import { clockIn, scriptReply } from "./helpers/staff.ts";
 import { restoreSeedServices, seedMain } from "./helpers/seed.ts";
 import { move } from "./helpers/services.ts";
 
@@ -63,13 +64,13 @@ test("子 Issue が入って閉じると、親も閉じ、サービスに進め�
     );
 
     try {
-      restoreSchedule = await clockInStaff(page, "builder");
+      restoreSchedule = await clockIn(page, "builder");
       await put("main", base);
       await put(branch, head);
       // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチ名は ko/<タスク ID の頭 8 字>-<name>
       const name = branch.slice("ko/019a7b00-".length);
-      await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use", undefined, "builder");
-      await scriptReply(page, [{ type: "text", text: "PR を出した" }], "end_turn", undefined, "builder");
+      await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use");
+      await scriptReply(page, "builder", [{ type: "text", text: "PR を出した" }], "end_turn");
       // 開発担当に頼むと、開発担当がタスクを取って始める
       expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: new URL(page.url()).origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
 
