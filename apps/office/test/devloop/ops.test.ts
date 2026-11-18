@@ -1,4 +1,4 @@
-// 見つけて直す仕組みの Issue を、運用の段階のサービスでは運用の親の子にして、設計書の子と同じ形で回す (開発の回し方の 3.7)
+// 見つけて直す仕組みの Issue を、段階が service か operation のサービスでは運用の親の子にして、設計書の子と同じ形で回す (開発の回し方の 3.7)
 import { describe, expect, it } from "vitest";
 import { AppError } from "@know-office/core";
 import { syncIssues } from "../../src/gate/findings/scan.ts";
@@ -13,7 +13,7 @@ const world = useWork({ github: true });
 const NOW = Date.UTC(2026, 0, 10);
 
 /**
- * 運用の段階のサービスを用意する
+ * 段階が service か operation のサービスを用意する
  * @param stage サービスの段階
  * @returns サービス ID
  */
@@ -50,7 +50,7 @@ function opsRows() {
 }
 
 describe("リリースと運用につなぐ", () => {
-  it("運用の段階のサービスの原因は、運用の親の子の Issue になり、開発担当のタスクが付く", async () => {
+  it("段階が service か operation のサービスの原因は、運用の親の子の Issue になり、開発担当のタスクが付く", async () => {
     await serviceAt();
     await finding("a".repeat(64));
     await sync();
@@ -77,7 +77,7 @@ describe("リリースと運用につなぐ", () => {
     expect((await opsRows()).map((r) => r["issue_kind"])).toEqual([null, "chore"]);
   });
 
-  it("運用の段階でないサービスの原因は、運用の親を作らず今まで通りの Issue にする", async () => {
+  it("段階が service でも operation でもないサービスの原因は、運用の親を作らず今まで通りの Issue にする", async () => {
     await serviceAt("prototype");
     await finding("a".repeat(64));
     const tracker = fakeTracker();

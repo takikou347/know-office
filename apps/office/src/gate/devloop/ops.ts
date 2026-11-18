@@ -1,4 +1,4 @@
-// 運用の段階のサービスの、見つけて直す仕組みの Issue を、運用の親の子にして、設計書の子と同じ形で回す (開発の回し方の 3.7)
+// 段階が service か operation のサービスの、見つけて直す仕組みの Issue を、運用の親の子にして、設計書の子と同じ形で回す (開発の回し方の 3.7)
 import { AppError, devIssueKey, devIssueText, SERVICE_NAME } from "@know-office/core";
 import { and, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -31,7 +31,7 @@ const PARENT_TEXT = devIssueText({ feature: OPERATIONS, featureName: "運用", r
  * @param repo 原因が起きたサービスのリポジトリ。大文字小文字は問わない
  * @param finding 原因
  * @param now 今の時刻
- * @returns 子の Issue の番号。運用の段階のサービスでなければ null
+ * @returns 子の Issue の番号。段階が service か operation のサービスでなければ null
  * @throws conflict 別の呼び出しが親か子を作っている時。呼んだ側は印を外して次の回に回す
  * @throws upstream_failed GitHub を読めない時、書けない時
  */
