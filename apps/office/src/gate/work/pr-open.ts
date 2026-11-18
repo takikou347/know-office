@@ -116,7 +116,7 @@ export async function openPr(env: Bindings, forge: Forge, call: PrCall, task: No
 type PullToUse = { number: number; baseSha: string; headSha: string; opened: boolean };
 
 /**
- * 出し直しなら GitHub で今のプルリクエストを読み、開いていれば使い直し、閉じていれば新しく出す。初めてなら新しく出す
+ * 出し直しなら GitHub で今のプルリクエストを読み、開いていれば使い直し、閉じていれば新しく出す。初めてなら新しく出す。新しく出す前にブランチの開いたプルリクエストがあれば、それを使う
  * @param forge GitHub
  * @param repo リポジトリ
  * @param branch ブランチ
@@ -135,7 +135,8 @@ async function pullFor(forge: Forge, repo: string, branch: string, input: { titl
     // ルールとテストを確かめた先をレビューの行に書く。確かめた後に進んだ先は synchronize の通知が写す
     if (state.state === "open") return { number: again.row.prNumber, baseSha: again.row.baseSha, headSha: again.head, opened: false };
   }
-  const pr = await forge.openPull({ repo, branch, title: input.title, body: input.body });
+  // 前の呼びが GitHub に出した後で書き込みに落ちていれば、同じブランチの開いた PR が残り、もう一度出すと GitHub が 422 で断る。先に読んで、あればそれを使う
+  const pr = (await forge.pullOf(repo, branch)) ?? (await forge.openPull({ repo, branch, title: input.title, body: input.body }));
   return { ...pr, opened: true };
 }
 

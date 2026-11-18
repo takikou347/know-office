@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { Forge } from "../../src/gate/work/loop.ts";
 import { wrapDb } from "../helpers/github.ts";
-import { appForge, HEAD, openReview, sameBatch, spyBatches } from "../helpers/review.ts";
+import { appForge, buildTaken, HEAD, openReview, sameBatch, spyBatches } from "../helpers/review.ts";
 import { AGAIN, branchOf, checksRunning, headOf, NEWER, NEXT, oneOpen, openReviewTasks, prOpened, pullsOpened, rejected, reviewerSays, setPullState, sqlOf, synchronize, tool } from "../helpers/review-again.ts";
 import { RECHECK_AFTER_MS, recheckReviews } from "../../src/gate/work/review.ts";
 import { api, REPO, rows, staffOf, useWork } from "../helpers/work.ts";
@@ -84,6 +84,38 @@ describe("別のモデルによる確認", () => {
     expect(await rows(world.d1.DB, "SELECT * FROM reviews WHERE node_id = ?", task)).toEqual(before);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
     expect(await openReviewTasks(world)).toEqual([]);
+  });
+
+  it("プルリクエストを出した後に書き込みが落ちても、次の pr_open は同じプルリクエストで進む (初めてと、閉じた後の出し直し)", async () => {
+    const { task } = await buildTaken(world);
+    const failing = () => wrapDb(world, { batch: (real, statements) => real([...statements, world.d1.DB.prepare("INSERT INTO no_such_table VALUES (1)")]) });
+    let restore = failing();
+    try {
+      await expect(tool(world, "builder", "pr_open", AGAIN)).rejects.toThrow(/no such table/);
+    } finally {
+      restore();
+    }
+    // GitHub には 1 番が開いたまま残る。もう一度出すと同じブランチの開いた PR として 422 で断られるので、開いた PR を読んで使う
+    expect(await tool(world, "builder", "pr_open", AGAIN)).toMatchObject({ isError: false, content: JSON.stringify({ number: 1, branch: await branchOf(world, task) }) });
+    expect(pullsOpened(world)).toBe(1);
+    expect(await rows(world.d1.DB, "SELECT pr_number FROM reviews WHERE node_id = ?", task)).toEqual([{ pr_number: 1 }]);
+    expect(await openReviewTasks(world)).toEqual(oneOpen(1));
+
+    // 閉じた後の出し直しで、2 番を出した後に書き込みが落ちても、次は 2 番で進む
+    await staffOf(world, "reviewer").pull(world.clock.now());
+    await rejected(world, task);
+    setPullState(world, 1, "closed");
+    world.gate.github.set(`POST /repos/${REPO}/pulls`, { number: 2, base: { sha: "a".repeat(40) }, head: { sha: NEXT } });
+    restore = failing();
+    try {
+      await expect(tool(world, "builder", "pr_open", AGAIN)).rejects.toThrow(/no such table/);
+    } finally {
+      restore();
+    }
+    expect(await tool(world, "builder", "pr_open", AGAIN)).toMatchObject({ isError: false, content: JSON.stringify({ number: 2, branch: await branchOf(world, task) }) });
+    expect(pullsOpened(world)).toBe(2);
+    expect(await rows(world.d1.DB, "SELECT pr_number, checks, reviewer_verdict FROM reviews WHERE node_id = ?", task)).toEqual([{ pr_number: 2, checks: "[]", reviewer_verdict: null }]);
+    expect(await rows(world.d1.DB, "SELECT status, pr_number FROM nodes WHERE id = ?", task)).toEqual([{ status: "review", pr_number: 2 }]);
   });
 
   it("出し直しが GitHub を読む間に先が進んでも、新しい先を古い先で上書きしない", async () => {

@@ -43,11 +43,11 @@ export function appForge(w: WorkWorld): Forge {
 }
 
 /**
- * 連携し、3 人を出勤させ、開発担当に App の名前でプルリクエストを出させる。レビュー担当にレビューのタスクが付く
+ * 連携し、3 人を出勤させ、開発担当にタスクを取らせる。代わりの GitHub はプルリクエストを 1 番で出す
  * @param w テストの物
- * @returns 連携、タスク、プルリクエストの番号、GitHub を呼ぶ口
+ * @returns 連携と、開発担当のタスク
  */
-export async function openReview(w: WorkWorld): Promise<Opened> {
+export async function buildTaken(w: WorkWorld): Promise<{ c: Connected; task: string }> {
   const c = await connect(w);
   const { goal } = await purposeAndGoal(w);
   await clockIn(w, "president", "builder", "reviewer");
@@ -55,6 +55,16 @@ export async function openReview(w: WorkWorld): Promise<Opened> {
   const task = idOf(await api(w, "POST", "/api/v1/nodes", { kind: "task", parentId: project, scope: "office", title: "勤怠の表をつなぐ", taskKind: "build", assignee: "builder", repo: REPO }, 201));
   await staffOf(w, "builder").pull(w.clock.now());
   w.gate.github.set(`POST /repos/${REPO}/pulls`, { number: 1, base: { sha: BASE }, head: { sha: HEAD } });
+  return { c, task };
+}
+
+/**
+ * 連携し、3 人を出勤させ、開発担当に App の名前でプルリクエストを出させる。レビュー担当にレビューのタスクが付く
+ * @param w テストの物
+ * @returns 連携、タスク、プルリクエストの番号、GitHub を呼ぶ口
+ */
+export async function openReview(w: WorkWorld): Promise<Opened> {
+  const { c, task } = await buildTaken(w);
   const forge = appForge(w);
   const opened = await runTool(w.gate.env, forge, { staffId: "builder", tool: "pr_open", input: { title: "勤怠の表をつなぐ", body: "" }, now: w.clock.now(), guard: w.gate.deps });
   if (opened.isError) throw new Error(opened.content);
