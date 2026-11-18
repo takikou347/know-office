@@ -147,6 +147,7 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
  * @param approved.detail 出来事の中身
  * @param actor 誰がいつ
  * @param guard 自動停止が外へ頼む口。要るチェックが落ちたまま求めた事と、入れた事を自動停止に渡す
+ * @param counted マージの求めを作った社員のタスクとして自動停止に数えるか。定期の入れ直し (resumeMerges) は社員の求めでないので false
  * @returns main に入れたか
  * @throws conflict 確かめたタスクが読んだ後に変わった時
  * @throws upstream_failed GitHub から読めないか、main を進められない時
@@ -159,11 +160,12 @@ export async function mergeIfReady(
   approved: { staffId: string | null; kind: string; detail: Record<string, unknown> },
   actor: Actor,
   guard: GuardDeps,
+  counted = true,
 ): Promise<boolean> {
   const gate = await mergeGate(env, forge, made, review);
   // マージの求めは、作った社員のタスクとして数える。落ちたチェックのままの求めは 1 回でタスクを止める (自動停止の 1 章)
   const maker = StaffId.safeParse(made.assignee);
-  if (maker.success && (gate.kind === "ready" || gate.kind === "failed")) {
+  if (counted && maker.success && (gate.kind === "ready" || gate.kind === "failed")) {
     await observe(env, { type: "merge_requested", staffId: maker.data, nodeId: made.id, checksPassed: gate.kind === "ready" }, actor.now, guard, actor.traceId);
   }
   const outcome = gate.kind === "ready" ? await mergeMade(env, forge, made, { repo: review.repo, branch: review.branch, sha: gate.sha, docs: gate.docs }, actor.now) : null;

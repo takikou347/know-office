@@ -1,4 +1,4 @@
-// 5 分ごとの定期ジョブ。部分ごとの稼働を残し、社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直し、レビューのタスクの取りこぼしを立て直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
+// 5 分ごとの定期ジョブ。部分ごとの稼働を残し、社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直し、レビューのタスクの取りこぼしを立て直し、done のまま残った main への入れ漏れを拾う (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
 import { type Clock, newId, StaffId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -7,6 +7,7 @@ import type { Bindings } from "../env.ts";
 import { SHARED_TOKENS } from "../github/app.ts";
 import { vaultForge } from "../github/vault-forge.ts";
 import { retryMirrors } from "../github/mirror.ts";
+import { resumeMerges } from "../work/merge-resume.ts";
 import { recheckReviews } from "../work/review.ts";
 import { settleReleases } from "../devloop/release.ts";
 import { connectRollback, UNCONNECTED_DEPS } from "../guard/deps.ts";
@@ -83,6 +84,8 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
     ctx.waitUntil(pollBatches(env, weekly, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "batch_poll_failed", error }, clock)));
     ctx.waitUntil(retryMirrors(env, forge, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "mirror_retry_failed", error }, clock)));
     ctx.waitUntil(settleReleases(env, forge.issues, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "release_settle_failed", error }, clock)));
+    // done のまま main に入らずに残ったタスクを、入れ直すか review に戻す。1 回に 20 件まで
+    ctx.waitUntil(resumeMerges(env, forge, UNCONNECTED_DEPS, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "merge_resume_failed", error }, clock)));
     // サービスの様子を読み、デプロイの後の失敗で止めた時は rollback.yml で戻す。分析の口は #131 までつながず、何も書かない
     const deps = { ...UNCONNECTED_DEPS, rollback: connectRollback(env, forge, () => clock.now()) };
     ctx.waitUntil(collectMetrics(env, UNCONNECTED_ANALYTICS, clock.now(), deps).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "service_metrics_failed", error }, clock)));

@@ -74,6 +74,8 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
     await splitMerge(env, made, outcome, closeId, now);
     return outcome;
   }
+  // 入れた印。書く前に止まっても、定期の確かめが main に入っている事を読んで書く (resumeMerges)
+  await env.DB.prepare("UPDATE reviews SET merged_at = ? WHERE node_id = ? AND merged_at IS NULL").bind(now, made.id).run();
   // 入った子と重なって待っていた子を、取らせる
   if (made.repo !== null) await wakeWaiting(env, made.repo, now);
   if (closeId !== null) await sendMirror(env, forge, closeId, clockAt(now));

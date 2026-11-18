@@ -65,6 +65,7 @@ export const reviews = sqliteTable(
     reviewerSummary: text("reviewer_summary"),
     reviewerVerdict: text("reviewer_verdict"),
     ownerVerdict: text("owner_verdict"),
+    mergedAt: time("merged_at"),
   },
   (t) => [uniqueIndex("reviews_node").on(t.nodeId)],
 );
