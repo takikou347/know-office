@@ -22,8 +22,22 @@ async function withSampleNotes(page: Page): Promise<void> {
   await page.route("**/api/v1/ext/sample-notes/note", (route) => route.fulfill({ json: { data: { body: "金曜は早く上がる" }, meta: META } }));
 }
 
+/**
+ * サービスの Issue の木の返事を、境目のモックで返す
+ * @param page 開くページ
+ */
+async function withIssueTree(page: Page): Promise<void> {
+  const task = { id: "0190f4a8-0000-7000-8000-000000000001", status: "done", prNumber: 7 };
+  const tree = {
+    ready: false,
+    docsPrs: [{ repo: "example/docs", number: 41, kind: "design", task: { id: task.id, status: "review" } }],
+    parents: [{ number: 1, feature: "1-video", state: "open", operations: false, children: [{ number: 2, requirement: "動画を作る", kind: "feature", state: "closed", task }] }],
+  };
+  await page.route("**/api/v1/services/*/issues", (route) => route.fulfill({ json: { data: tree, meta: META } }));
+}
+
 /** axe に掛ける所。8 画面に、その他と、社員とサービスを選んだ所と、入れた拡張の画面を足す */
-const pages: readonly { name: string; path: string; heading: string; ready?: string; mock?: (page: Page) => Promise<void> }[] = [
+const pages: readonly { name: string; path: string; heading: string; ready?: string; mock?: (page: Page) => Promise<void>; open?: (page: Page) => Promise<void> }[] = [
   // オフィスは 3D の部屋と名札を読み終えてから掛ける
   ...screens.map((s) => ({ name: s.label, path: s.path, heading: s.label, ...(s.id === "office" ? { ready: "社員を押すと、その社員の会話が開きます" } : {}) })),
   // WebGL を出せないブラウザでは、オフィスは 2D の一覧に代わる
@@ -39,6 +53,17 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   { name: "入口のレビュー", path: REVIEW_PATH, heading: "社員と仕事", ready: "const empty = 0;", mock: async (page) => void (await stubReview(page)) },
   // サービスの様子は、入口から読み終えてから掛ける
   { name: "サービスの様子", path: "/services/00000000-0000-7000-8000-000000000101", heading: "アイデアとサービス", ready: "公開した版" },
+  // サービスの Issue のタブは、境目のモックの木 (親、子、設計書の PR、進められる知らせ) を読み終えてから掛ける
+  {
+    name: "サービスの Issue のタブ",
+    path: "/services/00000000-0000-7000-8000-000000000101",
+    heading: "アイデアとサービス",
+    ready: "example/docs#41",
+    mock: withIssueTree,
+    open: async (page) => {
+      await page.getByRole("tab", { name: "Issue" }).click();
+    },
+  },
   // 木と組織図は records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
   // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
   { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },
@@ -257,6 +282,7 @@ test.describe("使いやすさ", () => {
         await p.mock?.(page);
         await page.goto(p.path);
         await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
+        await p.open?.(page);
         if (p.ready) await expect(page.getByText(p.ready)).toBeVisible();
         const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
         const bad = violations

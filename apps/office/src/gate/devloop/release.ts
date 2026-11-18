@@ -73,8 +73,8 @@ async function closeParent(env: Bindings, issues: DevIssues, parent: ParentRow, 
   const [closed, notice] = await env.DB.batch([
     env.DB.prepare(`UPDATE dev_issues SET state = 'closed', closed_at = ?1, close_reason = ?2 WHERE id = ?5 AND state = 'open' AND ${noChildOpen}`).bind(now, reason, parent.service_id, parent.number, parent.id),
     env.DB.prepare(
-      `INSERT INTO notices (id, at, level, kind, title, body, scope)
-       SELECT ?1, ?2, 'info', 'service_ready', s.name || ' をサービスに進められる', '機能の親 Issue がすべて閉じた。段階を移すのはオーナー', s.id FROM services s
+      `INSERT INTO notices (id, at, level, kind, title, body, scope, link)
+       SELECT ?1, ?2, 'info', 'service_ready', s.name || ' をサービスに進められる', '機能の親 Issue がすべて閉じた。段階を移すのはオーナー', s.id, '/services/' || s.id FROM services s
        WHERE s.id = ?3 AND s.stage = 'prototype' AND changes() > 0 AND (SELECT feature FROM dev_issues WHERE id = ?4) <> '${OPERATIONS}' AND ${readySql("?3")}
          AND NOT EXISTS (SELECT 1 FROM notices WHERE kind = 'service_ready' AND scope = ?3 AND read_at IS NULL)`,
     ).bind(noticeId, now, parent.service_id, parent.id),

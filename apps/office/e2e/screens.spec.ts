@@ -175,6 +175,9 @@ test("サービスを選ぶと、その様子と記録と設定が出る", async
   // 登録した時から本番にデプロイする条件を変えてある
   await expect(page.getByRole("heading", { level: 3, name: "本番にデプロイする条件" })).toBeVisible();
   await expect(page.getByText("初期値から変えている")).toBeVisible();
+  // 設計書から作った Issue がまだ無いサービスの Issue のタブ
+  await page.getByRole("tab", { name: "Issue" }).click();
+  await expect(page.getByText("Issue はまだ無い")).toBeVisible();
 });
 
 test("画面を移ると、題が変わり、中身に移る", async ({ page }) => {
