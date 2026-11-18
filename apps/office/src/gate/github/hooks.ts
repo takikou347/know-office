@@ -2,8 +2,6 @@
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import {
   AppError,
-  CheckRunEvent,
-  CheckSuiteEvent,
   DeliveryId,
   GitHubEventName,
   GitHubWebhookHead,
@@ -24,9 +22,12 @@ import { guardOf } from "../auth/middleware.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { clockAt } from "../work/attendance.ts";
 import { intakeTask } from "../work/loop.ts";
-import { type Actor, appendNodeEvent } from "../work/nodes.ts";
-import { backToTodo, callMaker } from "../work/review.ts";
+import { type Actor, appendNodeEvent, findNode } from "../work/nodes.ts";
+import { backToTodo, callMaker, mergeIfReady } from "../work/review.ts";
+import { recordError } from "../ledger/errors.ts";
+import { markRetry, RETRY_AFTER_MS } from "../work/merge-land.ts";
 import { synchronize } from "./sync.ts";
+import { afterChecks, checkChanges } from "./hooks-checks.ts";
 import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
@@ -41,8 +42,6 @@ import type { Forge } from "../work/loop.ts";
 export const HOOK_BODY_BYTES = 5 * 1024 * 1024;
 /** 受ける通知の時刻の幅 (5 分)。これより古い通知と先の通知は捨てる */
 export const HOOK_WINDOW_MS = 5 * 60_000;
-/** チェックが通ったとみる結果 */
-const PASSED = new Set(["success", "neutral", "skipped"]);
 /** UUID 版 1 の時刻の起点 (1582-10-15) から 1970-01-01 までの 100 ナノ秒の数。RFC 9562 の 5.1 */
 const GREGORIAN_OFFSET = 0x01b21dd213814000n;
 
@@ -144,7 +143,7 @@ export async function receiveHook(c: Context<GateEnv>): Promise<void> {
     await intakeServiceHook(c.env, hook, { forge: c.var.forge, guard: c.var.guard });
     return;
   }
-  await handle(c.env, hook);
+  await handle(c.env, hook, { forge: c.var.forge, guard: c.var.guard });
 }
 
 /** 確かめた通知 */
@@ -200,8 +199,11 @@ const FRESH = "NOT EXISTS (SELECT 1 FROM github_deliveries WHERE body_sha256 = ?
  * 種類ごとに直す文と受けた記録を 1 回の batch で書く。Issue だけは記録を先に取ってからタスクを足す
  * @param env バインディング
  * @param hook 確かめた通知
+ * @param ctx GitHub を呼ぶ口と、自動停止が外へ頼む口。承認の後にチェックを待つタスクを入れるのに使う
+ * @param ctx.forge GitHub を呼ぶ口
+ * @param ctx.guard 自動停止が外へ頼む口
  */
-async function handle(env: Bindings, hook: Hook): Promise<void> {
+async function handle(env: Bindings, hook: Hook, ctx: { forge: Forge; guard: GuardDeps }): Promise<void> {
   const db = env.DB;
   const record = db.prepare("INSERT OR IGNORE INTO github_deliveries (delivery_id, body_sha256, event, received_at) VALUES (?, ?, ?, ?)").bind(hook.delivery, hook.digest, hook.event, hook.now);
   if (hook.event === "issues") {
@@ -209,7 +211,7 @@ async function handle(env: Bindings, hook: Hook): Promise<void> {
     return;
   }
   if (hook.event === "pull_request_review" || hook.event === "pull_request_review_comment") {
-    await intakeReview(env, hook, record);
+    await intakeReview(env, hook, record, ctx);
     return;
   }
   if (hook.event === "pull_request" && hook.repo !== null && hook.action === "synchronize") {
@@ -224,6 +226,8 @@ async function handle(env: Bindings, hook: Hook): Promise<void> {
   if (hook.event === "installation" && effects.length > 0 && (results[0]?.meta.changes ?? 0) > 0) {
     await auditFrom(env, { at: hook.now, actor: "system", action: "github.uninstalled", target: String(hook.link.installation?.id ?? ""), scope: "office", detail: { why: "webhook" } });
   }
+  // 同じ本文の 2 度目は入れに行かない。別の通知が同時に来ても、done にする文の版の条件で 1 つだけが入れる
+  if ((results.at(-1)?.meta.changes ?? 0) > 0) await afterChecks(env, ctx, hook, hook.now);
 }
 
 /**
@@ -234,25 +238,8 @@ async function handle(env: Bindings, hook: Hook): Promise<void> {
  */
 function changes(env: Bindings, hook: Hook): D1PreparedStatement[] {
   const db = env.DB;
-  if (hook.event === "check_run" && hook.repo !== null) {
-    const run = CheckRunEvent.safeParse(hook.payload);
-    if (!run.success) return [];
-    const { name, status, conclusion, head_sha: sha } = run.data.check_run;
-    const ok = status === "completed" && conclusion !== null && PASSED.has(conclusion);
-    // 同じ名前の結果を置き換え、名前の順に並べる。読んで書き直さず 1 文で直し、同時に届いた 2 つの片方を消さない
-    return [
-      db
-        .prepare(
-          `UPDATE reviews SET checks = (SELECT json_group_array(json(v)) FROM (SELECT v FROM (SELECT value AS v FROM json_each(COALESCE(reviews.checks, '[]')) WHERE json_extract(value, '$.name') <> ? UNION ALL SELECT json_object('name', ?, 'ok', json(?)) AS v) ORDER BY json_extract(v, '$.name'))) WHERE repo = ? AND head_sha = ? AND ${FRESH}`,
-        )
-        .bind(name, name, ok ? "true" : "false", hook.repo, sha, hook.digest),
-    ];
-  }
-  if (hook.event === "check_suite" && hook.repo !== null && (hook.action === "requested" || hook.action === "rerequested")) {
-    const suite = CheckSuiteEvent.safeParse(hook.payload);
-    if (!suite.success) return [];
-    return [db.prepare(`UPDATE reviews SET checks = '[]' WHERE repo = ? AND head_sha = ? AND ${FRESH}`).bind(hook.repo, suite.data.check_suite.head_sha, hook.digest)];
-  }
+  const checks = checkChanges(db, hook, FRESH);
+  if (checks !== null) return checks;
   const installation = hook.link.installation;
   if (hook.event === "installation" && installation && (hook.action === "deleted" || hook.action === "suspend")) {
     // 外された App の元の鍵も 1 文で取り消し、片方だけ残さない。もう一度つなぐ時は新しい App を作る
@@ -357,12 +344,15 @@ function fromGitHub(hook: Hook): FromGitHub | null {
  * @param env バインディング
  * @param hook 確かめた通知
  * @param record 受けた記録を書く文
+ * @param ctx GitHub を呼ぶ口と、自動停止が外へ頼む口。オーナーの可で main に入れるのに使う
+ * @param ctx.forge GitHub を呼ぶ口
+ * @param ctx.guard 自動停止が外へ頼む口
  */
-async function intakeReview(env: Bindings, hook: Hook, record: D1PreparedStatement): Promise<void> {
+async function intakeReview(env: Bindings, hook: Hook, record: D1PreparedStatement, ctx: { forge: Forge; guard: GuardDeps }): Promise<void> {
   const found = fromGitHub(hook);
   const review =
     found && hook.repo !== null
-      ? await env.DB.prepare("SELECT id, node_id FROM reviews WHERE repo = ? AND pr_number = ?").bind(hook.repo, found.pr).first<{ id: string; node_id: string }>()
+      ? await env.DB.prepare("SELECT id, node_id, repo, branch, pr_number FROM reviews WHERE repo = ? AND pr_number = ?").bind(hook.repo, found.pr).first<ReviewOf>()
       : null;
   if (!found || !review) {
     await record.run();
@@ -371,10 +361,39 @@ async function intakeReview(env: Bindings, hook: Hook, record: D1PreparedStateme
   const taken = await record.run();
   if (taken.meta.changes === 0) return;
   try {
-    await applyFromGitHub(env, found, review, hook.now);
+    await applyFromGitHub(env, found, review, hook.now, ctx);
   } catch (error) {
     await env.DB.prepare("DELETE FROM github_deliveries WHERE body_sha256 = ?").bind(hook.digest).run();
     throw error;
+  }
+}
+
+/** 写す先のレビューの行 */
+type ReviewOf = { id: string; node_id: string; repo: string; branch: string; pr_number: number };
+
+/**
+ * GitHub で出たオーナーの可を出来事に残し、タスクがレビューを待っていて main に入れる条件がそろえば入れる。画面の可 (routes/reviews.ts) と同じ入口を通る
+ * 確かめの途中か main を進める所で落ちても投げない。可は写せているので、拾い直しの印を残して定期の拾い直しに任せる
+ * @param env バインディング
+ * @param ctx GitHub を呼ぶ口と、自動停止が外へ頼む口
+ * @param ctx.forge GitHub を呼ぶ口
+ * @param ctx.guard 自動停止が外へ頼む口
+ * @param review 写したレビューの行
+ * @param detail 出来事の中身
+ * @param actor 誰がいつ
+ */
+async function ownerApproved(env: Bindings, ctx: { forge: Forge; guard: GuardDeps }, review: ReviewOf, detail: Record<string, unknown>, actor: Actor): Promise<void> {
+  // 可の出来事は入れる前に 1 度だけ残す。入れる所の確かめで GitHub を読めなくても、可は残る
+  await appendNodeEvent(env, { nodeId: review.node_id, staffId: null, kind: "owner_approved", detail }, actor);
+  const made = await findNode(env.DB, review.node_id);
+  if (made.status !== "review") return;
+  try {
+    await mergeIfReady(env, ctx.forge, made, { repo: review.repo, branch: review.branch, prNumber: review.pr_number, reviewer: null }, null, actor, ctx.guard);
+  } catch (error) {
+    // GitHub は通知を送り直さないので、確かめの途中で落ちた物も定期の拾い直しに任せる
+    const head = await env.DB.prepare("SELECT head_sha AS sha FROM reviews WHERE node_id = ?").bind(review.node_id).first<{ sha: string }>();
+    if (head !== null) await markRetry(env, review.node_id, head.sha, actor.now + RETRY_AFTER_MS);
+    await recordError(env, { source: "gate", level: "warn", code: "owner_merge_failed", error }, clockAt(actor.now));
   }
 }
 
@@ -386,9 +405,15 @@ async function intakeReview(env: Bindings, hook: Hook, record: D1PreparedStateme
  * @param review レビューの ID と、作った社員のタスク ID
  * @param review.id レビュー ID
  * @param review.node_id 作った社員のタスク ID
+ * @param review.repo リポジトリ
+ * @param review.branch ブランチ
+ * @param review.pr_number プルリクエストの番号
  * @param now 今の時刻
+ * @param ctx GitHub を呼ぶ口と、自動停止が外へ頼む口
+ * @param ctx.forge GitHub を呼ぶ口
+ * @param ctx.guard 自動停止が外へ頼む口
  */
-async function applyFromGitHub(env: Bindings, found: FromGitHub, review: { id: string; node_id: string }, now: number): Promise<void> {
+async function applyFromGitHub(env: Bindings, found: FromGitHub, review: ReviewOf, now: number, ctx: { forge: Forge; guard: GuardDeps }): Promise<void> {
   const db = env.DB;
   const actor: Actor = { by: "github", now };
   if (found.kind === "review") {
@@ -402,10 +427,13 @@ async function applyFromGitHub(env: Bindings, found: FromGitHub, review: { id: s
     }
     // TODO(#199): 同じレビューを配信 ID を替えて受け直した時に、出来事を 2 度足さないよう GitHub のレビュー ID から鍵を決める
     // 出来事の node_events は年ごとの記録の D1 にあり、D1 のバッチは 1 つの D1 の中だけなので、同じバッチに入れられない
-    const kind = found.verdict === "approve" ? "owner_approved" : "review_rejected";
-    await appendNodeEvent(env, { nodeId: review.node_id, staffId: null, kind, detail: { by: "owner", summary: found.body, githubReviewId: found.githubId } }, actor);
-    // TODO(#55): GitHub で出た可の後に、main に入れる条件がそろっていれば main に入れる
-    if (found.verdict === "request_changes") await callMaker(env, review.node_id, now);
+    const detail = { by: "owner", summary: found.body, githubReviewId: found.githubId };
+    if (found.verdict === "request_changes") {
+      await appendNodeEvent(env, { nodeId: review.node_id, staffId: null, kind: "review_rejected", detail }, actor);
+      await callMaker(env, review.node_id, now);
+      return;
+    }
+    await ownerApproved(env, ctx, review, detail, actor);
     return;
   }
   const id = newId(clockAt(now));

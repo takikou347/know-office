@@ -406,11 +406,10 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
     checkState: async (repo, sha) => {
       // 確かめたコミットのチェックを読む。プルリクエストの今の先は、確かめた後に進んでいるかもしれない
       const runs = await call(repo, { checks: "read" }, { method: "GET", path: `/commits/${commitSha(sha)}/check-runs` }, GitHubCheckRuns);
-      // 読めた中に 1 つでも終えて通らなかった物があれば落ちた
-      if (runs.check_runs.some((r) => r.status === "completed" && (r.conclusion === null || !PASSED.has(r.conclusion)))) return "failed";
-      // チェックが 1 つも無い時と、一覧に入り切らない時は、通ったとも落ちたとも言えない
-      if (runs.check_runs.length === 0 || runs.total_count > runs.check_runs.length) return "pending";
-      return runs.check_runs.every((r) => r.status === "completed") ? "passed" : "pending";
+      // チェックが 1 つも無い時、一覧に入り切らない時、走っている物が残る時は、通ったとも落ちたとも言えない。1 本目が落ちても、全部終わってから決める
+      if (runs.check_runs.length === 0 || runs.total_count > runs.check_runs.length || runs.check_runs.some((r) => r.status !== "completed")) return "pending";
+      // 全部終えた中に 1 つでも通らなかった物があれば落ちた
+      return runs.check_runs.some((r) => r.conclusion === null || !PASSED.has(r.conclusion)) ? "failed" : "passed";
     },
     merge: async (repo, head) => {
       // ブランチの先を読み直さず、変えたファイルとチェックを確かめたコミットまで進める

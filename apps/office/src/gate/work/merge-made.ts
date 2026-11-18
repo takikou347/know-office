@@ -15,6 +15,9 @@ import type { Forge } from "./loop.ts";
 import type { NodeRow } from "./nodes.ts";
 import { wakeWaiting } from "./wake.ts";
 
+/** mergeGate が読んだ時のレビューの行。done にする文は、行がこのままの時だけ書く */
+export type SeenReview = { docsHeadSha: string | null; reviewerVerdict: string | null; ownerVerdict: string | null };
+
 /** 設計書だけが入った時の知らせの文。社員の書いた文は入れない */
 const SPLIT_BODY = "設計書の PR は main に入ったが、コードの PR は入らなかった。コードは作った社員が確かめ直して入れる";
 
@@ -30,22 +33,36 @@ const SPLIT_BODY = "設計書の PR は main に入ったが、コードの PR �
  * @param review.branch ブランチ
  * @param review.sha mergeGate が確かめたコミット
  * @param review.docs 結んだ設計書の PR。結んでいなければ無い。確かめた先がもう main に入っていれば landed で、進めるのはコードだけ
+ * @param review.seen mergeGate が読んだ時の承認と設計書の先。渡せば、読んだ後に変わった行では done にしない
  * @param now 今の時刻
  * @returns main に入れたら merged、何も進めずに戻したら behind (遅れたリポジトリ付き)、設計書だけ入れたら split (失敗の種類付き)
- * @throws conflict 確かめたタスクが読んだ後に変わった時
+ * @throws conflict 確かめたタスクか、レビューの行 (先、設計書の先、承認) が読んだ後に変わった時
  * @throws not_found 子 Issue のタスクのレビューが無い時 (done にする前に断る)
  * @throws upstream_failed GitHub が main を進める更新を断った時 (main が先に進んだ時と、設計書の後のコードの失敗を除く)
  */
-export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; sha: string; docs?: DocsTarget | undefined }, now: number): Promise<Landed> {
+export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, review: { repo: string; branch: string; sha: string; docs?: DocsTarget | undefined; seen?: SeenReview | undefined }, now: number): Promise<Landed> {
   // 先に done にして、同じタスクを 2 度入れない。子 Issue のタスクは、同じバッチで閉じる順番待ちと要件のハッシュも書く
   const child = await childOf(env.DB, made);
   const rehash = review.docs === undefined ? null : await rehashFor(env.DB, forge, made, review.docs);
   let closeId: string | null = null;
   // done にする文と同じバッチで、入れ始めた印と入れる先のコミットを reviews に書く。止まった入れ直しだけを定期の確かめ (resumeMerges) が拾えるようにする
-  const statements = [env.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ? AND version = ?").bind(now, made.id, made.version)];
+  // synchronize は nodes の版を進めずにレビューの行の先と承認を替えるので、行が読んだ時のままかも同じ文で見る。古い先を入れない
+  const seen = review.seen;
+  const unchanged =
+    seen === undefined ? "head_sha = ?4" : "head_sha = ?4 AND docs_head_sha IS ?5 AND reviewer_verdict IS ?6 AND owner_verdict IS ?7";
+  const statements = [
+    env.DB.prepare(`UPDATE nodes SET status = 'done', version = version + 1, updated_at = ?1 WHERE id = ?2 AND version = ?3 AND EXISTS (SELECT 1 FROM reviews WHERE node_id = ?2 AND ${unchanged})`).bind(
+      now,
+      made.id,
+      made.version,
+      review.sha,
+      ...(seen === undefined ? [] : [seen.docsHeadSha, seen.reviewerVerdict, seen.ownerVerdict]),
+    ),
+  ];
+  // 失敗の回数は持ち越す。0 に戻すのは入れた時と、拾い直しで投げずに返った時だけ。ここで戻すと拾い直しが諦めない
   statements.push(
     env.DB.prepare(
-      "UPDATE reviews SET merge_started_at = ?, merge_started_sha = ?, merge_tries = 0, merge_retry_at = NULL WHERE node_id = ? AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'done')",
+      "UPDATE reviews SET merge_started_at = ?, merge_started_sha = ?, merge_retry_at = NULL WHERE node_id = ? AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'done')",
     ).bind(now, review.sha, made.id, made.id, made.version + 1),
   );
   if (child !== null) {
@@ -80,7 +97,7 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
     return outcome;
   }
   // 入れた印。書く前に止まっても、定期の確かめが main に入っている事を読んで書く (resumeMerges)
-  await env.DB.prepare("UPDATE reviews SET merged_at = ? WHERE node_id = ? AND merged_at IS NULL")
+  await env.DB.prepare("UPDATE reviews SET merged_at = ?, merge_tries = 0 WHERE node_id = ? AND merged_at IS NULL")
     .bind(now, made.id)
     .run()
     .catch((error: unknown) => recordError(env, { source: "gate", level: "warn", code: "merged_mark_failed", error }, clockAt(now)));

@@ -15,7 +15,8 @@ import { clockAt } from "./attendance.ts";
 import { checkConditions } from "./conditions.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
 import { type DocsTarget, linkedGate } from "./docs-merge.ts";
-import { mergeMade } from "./merge-made.ts";
+import { landReady } from "./merge-land.ts";
+import type { SeenReview } from "./merge-made.ts";
 import { type Actor, appendNodeEvent, checkPair, findNode, type NodeRow, recordCreated } from "./nodes.ts";
 
 /** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.7) */
@@ -67,7 +68,7 @@ async function checkRepo(
 }
 
 /** main に入れられるかの答え。入れられる時は、確かめたコミットまで入れる。failed は要るチェックが落ちた事 */
-export type MergeGate = { kind: "ready"; sha: string; docs?: DocsTarget } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string } | { kind: "failed"; reason: string };
+export type MergeGate = { kind: "ready"; sha: string; docs?: DocsTarget; seen: SeenReview } | { kind: "refused"; reason: string } | { kind: "waiting"; reason: string } | { kind: "failed"; reason: string };
 
 /**
  * リポジトリが know-office 自身のサービスのリポジトリかを読む
@@ -124,8 +125,9 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
   if (met.kind === "waiting") return { kind: "waiting", reason: met.missing.join(",") };
   // 設計書の PR を結んだタスクは、設計書の側の条件もそろった時だけ入れる
   const linked = await linkedGate(env, forge, made, row.docsHeadSha, approvals, (repo, docsSha) => checkRepo(env, forge, { action: "merge", repo, branch: docsSha }));
-  if (linked.kind === "none") return { kind: "ready", sha: sha.data };
-  return linked.kind === "ready" ? { kind: "ready", sha: sha.data, docs: linked.docs } : linked;
+  const seen = { docsHeadSha: row.docsHeadSha, reviewerVerdict: row.reviewerVerdict, ownerVerdict: row.ownerVerdict };
+  if (linked.kind === "none") return { kind: "ready", sha: sha.data, seen };
+  return linked.kind === "ready" ? { kind: "ready", sha: sha.data, docs: linked.docs, seen } : linked;
 }
 
 /**
@@ -138,7 +140,7 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
  * @param review.branch ブランチ
  * @param review.prNumber プルリクエストの番号
  * @param review.reviewer レビュー担当が承認しているか。null なら reviews の行から読む
- * @param approved 承認の出来事。main に入れた後、入れた出来事の前に残す
+ * @param approved 承認の出来事。入れる前に残す。null なら残さない
  * @param approved.staffId 承認した社員。オーナーは null
  * @param approved.kind 出来事の種類
  * @param approved.detail 出来事の中身
@@ -147,15 +149,14 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
  * @param options 名前付きの指定
  * @param options.counted マージの求めを作った社員のタスクとして自動停止に数えるか。定期の入れ直し (resumeMerges) は社員の求めでないので false。初期値は true
  * @returns main に入れたか
- * @throws conflict 確かめたタスクが読んだ後に変わった時
- * @throws upstream_failed GitHub から読めないか、main を進められない時
+ * @throws upstream_failed GitHub から読めないか、main を進められない時。入れ損ねた時は定期の拾い直しの印を残してから投げる
  */
 export async function mergeIfReady(
   env: Bindings,
   forge: Forge,
   made: NodeRow,
   review: { repo: string; branch: string; prNumber: number; reviewer: boolean | null },
-  approved: { staffId: string | null; kind: string; detail: Record<string, unknown> },
+  approved: { staffId: string | null; kind: string; detail: Record<string, unknown> } | null,
   actor: Actor,
   guard: GuardDeps,
   options: { counted?: boolean } = {},
@@ -166,25 +167,9 @@ export async function mergeIfReady(
   if (options.counted !== false && maker.success && (gate.kind === "ready" || gate.kind === "failed")) {
     await observe(env, { type: "merge_requested", staffId: maker.data, nodeId: made.id, checksPassed: gate.kind === "ready" }, actor.now, guard, actor.traceId);
   }
-  const outcome = gate.kind === "ready" ? await mergeMade(env, forge, made, { repo: review.repo, branch: review.branch, sha: gate.sha, docs: gate.docs }, actor.now) : null;
-  await appendNodeEvent(env, { nodeId: made.id, ...approved }, actor);
-  if (gate.kind === "ready" && outcome === "merged") {
-    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "merged", detail: { branch: review.branch, sha: gate.sha } }, actor);
-    return true;
-  }
-  if (typeof outcome === "object" && outcome !== null && "split" in outcome) {
-    // 設計書だけが入った。設計書は残し、コードは戻した。behind なら作った社員が rebase する (勤務時間外の社員は呼び出さない)
-    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "devloop_split", detail: { branch: review.branch, sha: gate.kind === "ready" ? gate.sha : null, to: outcome.split, code: outcome.code } }, actor);
-    if (outcome.split === "todo" && made.assignee !== null) await notifyStaff(env, made.assignee, actor.now, false);
-    return false;
-  }
-  if (gate.kind === "ready") {
-    // main が先に進んでいた。例外にせず、遅れたリポジトリと一緒に作った社員に rebase を求める出来事を残し、勤務中なら次に取らせる (勤務時間外の社員は呼び出さない)
-    const repo = typeof outcome === "object" && outcome !== null ? outcome.behind : review.repo;
-    await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: "main_advanced", detail: { branch: review.branch, sha: gate.sha, repo } }, actor);
-    if (made.assignee !== null) await notifyStaff(env, made.assignee, actor.now, false);
-    return false;
-  }
+  // 承認の出来事は入れる前に残す。入れる所で投げても、承認した事は残る
+  if (approved !== null) await appendNodeEvent(env, { nodeId: made.id, ...approved }, actor);
+  if (gate.kind === "ready") return (await landReady(env, forge, made, review, gate, actor)) === "merged";
   await appendNodeEvent(env, { nodeId: made.id, staffId: null, kind: gate.kind === "waiting" ? "merge_waiting" : "merge_refused", detail: { reason: gate.reason } }, actor);
   return false;
 }

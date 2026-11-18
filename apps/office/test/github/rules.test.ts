@@ -364,7 +364,9 @@ describe("GitHub のルールの決まり", () => {
     ["1 つも無い", { total_count: 0, check_runs: [] }, "pending"],
     ["走っている物がある", { total_count: 2, check_runs: [run("completed", "success"), run("in_progress", null)] }, "pending"],
     ["読み切れず、読めた中に落ちた物が無い", { total_count: 3, check_runs: [run("completed", "success")] }, "pending"],
-    ["読み切れず、読めた中に落ちた物がある", { total_count: 3, check_runs: [run("completed", "failure")] }, "failed"],
+    ["読み切れず、読めた中に落ちた物がある", { total_count: 3, check_runs: [run("completed", "failure")] }, "pending"],
+    ["落ちた物があり、走っている物も残る", { total_count: 2, check_runs: [run("completed", "failure"), run("in_progress", null)] }, "pending"],
+    ["落ちた物があり、終えていない物は queued だけ", { total_count: 2, check_runs: [run("completed", "failure"), run("queued", null)] }, "pending"],
   ] as const) {
     it(`チェックの今を読む: ${name}`, async () => {
       await service(world, UI);

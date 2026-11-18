@@ -46,8 +46,8 @@ describe("設計書を同じ時に直す", () => {
     changeRequirement(repos);
     const before = await reqHash(world);
     await approved(task);
-    // 読んだ後にタスクの版が進んだ (done にする文が負ける)
-    await expect(retry(world, task, true)).rejects.toMatchObject({ code: "conflict" });
+    // 読んだ後にタスクの版が進んだ (done にする文が負ける)。負けた側は先を越されたとして何もせず、投げない
+    expect(await retry(world, task, true)).toBe(false);
     expect(await reqHash(world)).toBe(before);
     expect(repos.merges).toEqual([]);
   });
