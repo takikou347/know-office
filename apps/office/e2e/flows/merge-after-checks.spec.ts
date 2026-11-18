@@ -1,11 +1,12 @@
-// 承認の後にチェックを待つタスクの通し。チェックの終わりの通知で main に入る、チェックが落ちてオーナーに知らせが出る、GitHub で出たオーナーの可で main に入る
+// 承認の後にチェックを待つタスクの通し。チェックの終わりの通知で main に入る、チェックが落ちてオーナーに知らせが出る、GitHub で出たオーナーの可で main に入る、
+// その可の確かめで GitHub を読めなくても定期の拾い直しが入れる
 // ゲートウェイの返事は差し替えず、通知は手元の代わりの GitHub が App の通知の秘密で署名して送る (タスクとレビューの 3.1 の 5、3.5)
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub, forgetGitHubRoute } from "./helpers/github.ts";
 import { noticeBar, readNoticesTitled } from "./helpers/notice-bar.ts";
-import { seedMain } from "./helpers/seed.ts";
+import { readMain, seedMain } from "./helpers/seed.ts";
 import { ownerPasskey } from "./helpers/staff.ts";
 
 const REPO = "example/know-office";
@@ -14,6 +15,7 @@ const NodeStatus = z.object({ data: z.object({ status: z.string() }).loose() });
 const Pushed = z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/) });
 const Opened = z.object({ number: z.number().int().positive(), base: z.object({ sha: z.string() }).loose() });
 const Requests = z.array(z.object({ route: z.string(), body: z.unknown() }));
+const RetryMark = z.array(z.object({ owner: z.string().nullable(), retry: z.number().nullable(), sha: z.string().nullable() }));
 
 /**
  * 通しごとに新しい ID を作る。タスクの出来事は年ごとの記録に残り消さないので、前の通しの出来事と混ぜない
@@ -78,6 +80,21 @@ async function forget(page: Page, w: Waiting | null): Promise<void> {
 async function sendHook(page: Page, event: string, payload: Record<string, unknown>): Promise<void> {
   const res = await page.request.post(`${FAKE_GITHUB}/__fake/hooks`, { data: { event, payload: { ...payload, repository: { full_name: REPO } } } });
   expect(res.status()).toBe(204);
+}
+
+/**
+ * GitHub の画面でオーナーが可を出した通知を、代わりの GitHub に送らせる
+ * @param page 画面を開いたページ
+ * @param w 置いたタスク
+ */
+async function ownerApproves(page: Page, w: Waiting): Promise<void> {
+  const user = { login: "example", type: "User" };
+  await sendHook(page, "pull_request_review", {
+    action: "submitted",
+    review: { id: Date.now() % 1_000_000_000, state: "approved", body: "よい", user, author_association: "OWNER", commit_id: w.sha },
+    pull_request: { number: w.pr },
+    sender: user,
+  });
 }
 
 /**
@@ -159,17 +176,38 @@ test.describe("通知を受ける", () => {
     try {
       // チェックの終わりの通知は届かなかったが、チェックは通っている
       w = await approvedWhileRunning(page, { status: "completed", conclusion: "success" });
-      const user = { login: "example", type: "User" };
-      await sendHook(page, "pull_request_review", {
-        action: "submitted",
-        review: { id: Date.now() % 1_000_000_000, state: "approved", body: "よい", user, author_association: "OWNER", commit_id: w.sha },
-        pull_request: { number: w.pr },
-        sender: user,
-      });
+      await ownerApproves(page, w);
       await expect.poll(() => statusOf(page, w?.node ?? "")).toBe("done");
       expect(await mainMoves(page, w.sha)).toBe(1);
       await seeDone(page, w.title);
     } finally {
+      await forget(page, w);
+    }
+  });
+
+  test("GitHub で出たオーナーの可の途中で GitHub のチェックを読めなくても、可は残り、定期が入れ直す", async ({ page }) => {
+    let w: Waiting | null = null;
+    try {
+      w = await approvedWhileRunning(page, { status: "completed", conclusion: "success" });
+      // 可の後の確かめでチェックを読む所だけ、GitHub が 1 度落ちる
+      const checkRuns = `GET ${new URL(FAKE_GITHUB).pathname}/repos/${REPO}/commits/${w.sha}/check-runs`;
+      expect((await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: checkRuns, status: 500, times: 1 } })).status()).toBe(204);
+      await ownerApproves(page, w);
+      expect(await statusOf(page, w.node)).toBe("review");
+      expect(await mainMoves(page, w.sha)).toBe(0);
+      // 可と拾い直しの印が残る。定期が拾うのは試す時刻を過ぎた物なので、10 分待つ代わりに時刻を前へ寄せる
+      expect(RetryMark.parse(readMain(`SELECT owner_verdict AS owner, merge_retry_at AS retry, merge_started_sha AS sha FROM reviews WHERE node_id = '${w.node}'`))).toEqual([
+        { owner: "approve", retry: expect.any(Number), sha: w.sha },
+      ]);
+      seedMain(`UPDATE reviews SET merge_retry_at = 0 WHERE node_id = '${w.node}'`);
+      // 入口は 5 分ごとの Cron。開発の入口は scheduled を /cdn-cgi/local/scheduled で呼べる
+      expect((await page.request.get(`/cdn-cgi/local/scheduled?cron=${encodeURIComponent("*/5 * * * *")}`)).status()).toBe(200);
+      await expect.poll(() => statusOf(page, w?.node ?? "")).toBe("done");
+      expect(await mainMoves(page, w.sha)).toBe(1);
+      await seeDone(page, w.title);
+    } finally {
+      // 落ちる前に止まった時も、置いた失敗を後の通しに残さない
+      expect((await page.request.delete(`${FAKE_GITHUB}/__fake/failures`)).status()).toBe(204);
       await forget(page, w);
     }
   });
