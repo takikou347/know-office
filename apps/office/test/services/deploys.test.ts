@@ -64,14 +64,17 @@ function deployed(w: WorkWorld, link: Connected, input: { id: number; commit: nu
 function fakeAnalytics(...answers: { requests: number; errors: number }[]): Analytics & { calls: number } {
   const fake = {
     calls: 0,
-    read: () => {
+    read: (watched: { id: string }[]) => {
       const answer = answers[fake.calls] ?? answers.at(-1) ?? null;
       fake.calls += 1;
-      return Promise.resolve(answer === null ? null : { ...answer, users: 3, reads: 0 });
+      return Promise.resolve(answer === null ? null : { metrics: new Map(watched.map((w) => [w.id, { ...answer, users: 3, reads: 0 }])), skipped: [] });
     },
   };
   return fake;
 }
+
+/** 集まる遅れの分 (1 つ前の区切りを読む) を置いて、最初の区切りが読めるまで進める。デプロイは 8 時ちょうど */
+const FIRST_STEP = 10 * MINUTE;
 
 async function serviceStops(w: WorkWorld): Promise<Record<string, unknown>[]> {
   return rows(w.d1.DB, "SELECT scope, target, signal FROM stops WHERE kind = 'stop' AND scope = 'service'");
@@ -129,7 +132,7 @@ describe("5 分ごとの様子", () => {
     await deployed(world, link, { id: 7, commit: 1 });
     // 12 件で 2 件の失敗は、20 件に届かないので延ばす。2 度数えると 24 件で止まる
     const analytics = fakeAnalytics({ requests: 12, errors: 2 }, { requests: 12, errors: 2 }, { requests: 10, errors: 1 });
-    world.clock.advance(5 * MINUTE);
+    world.clock.advance(FIRST_STEP);
     await collectMetrics(world.gate.env, analytics, world.clock.now(), world.gate.deps);
     await collectMetrics(world.gate.env, analytics, world.clock.now(), world.gate.deps);
     expect(await rows(world.d1.REC_2026, "SELECT requests, errors FROM service_metrics WHERE service_id = ?", OFFICE_ID)).toEqual([{ requests: 12, errors: 2 }]);
@@ -147,7 +150,7 @@ describe("5 分ごとの様子", () => {
     const analytics = fakeAnalytics({ requests: 5, errors: 0 }, { requests: 5, errors: 0 }, { requests: 30, errors: 30 });
     const stopsAt: number[] = [];
     for (let step = 0; step < 3; step += 1) {
-      world.clock.advance(5 * MINUTE);
+      world.clock.advance(step === 0 ? FIRST_STEP : 5 * MINUTE);
       await collectMetrics(world.gate.env, analytics, world.clock.now(), world.gate.deps);
       stopsAt.push((await serviceStops(world)).length);
     }
@@ -160,7 +163,7 @@ describe("5 分ごとの様子", () => {
   it("戻しのデプロイの後の返事では止めない", async () => {
     const link = await linked(world);
     await deployed(world, link, { id: 8, commit: 2, task: "rollback" });
-    world.clock.advance(5 * MINUTE);
+    world.clock.advance(FIRST_STEP);
     await collectMetrics(world.gate.env, fakeAnalytics({ requests: 30, errors: 30 }), world.clock.now(), world.gate.deps);
     expect(await serviceStops(world)).toEqual([]);
   });

@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createFakeCloudflare, DEV_CLOUDFLARE, type FakeCloudflare } from "../../dev/cloudflare.ts";
-import { cloudflareAnalytics } from "../../src/gate/services/analytics.ts";
+import { cloudflareAnalytics, MAX_SCRIPTS_PER_QUERY } from "../../src/gate/services/analytics.ts";
 import { collectMetrics } from "../../src/gate/services/deploys.ts";
 import { resetLedger } from "../helpers/d1.ts";
 import { MINUTE, rows, useWork, type WorkWorld } from "../helpers/work.ts";
@@ -12,6 +12,7 @@ const world = useWork();
 // 記録の D1 は useWork が戻さないので、前のテストの行を数えないよう戻す
 beforeEach(async () => {
   await resetLedger(world.d1.REC_2026);
+  await resetLedger(world.d1.REC_2027);
 });
 
 const OFFICE_ID = "00000000-0000-7000-8000-000000000102";
@@ -105,7 +106,7 @@ describe("サービスの種類", () => {
   it("鍵が片方だけの時も外へ何も送らない", async () => {
     const fakes = connected();
     const half = { ...fakes.env, CLOUDFLARE_ACCOUNT_ID: "" };
-    expect(await cloudflareAnalytics(half, fakes.fetch).read(SERVICE, 0, 5 * MINUTE)).toBeNull();
+    expect(await cloudflareAnalytics(half, fakes.fetch).read([SERVICE], 0, 5 * MINUTE)).toBeNull();
     expect(fakes.sent).toEqual([]);
   });
 
@@ -117,38 +118,70 @@ describe("サービスの種類", () => {
       return fakes.fetch(url, init);
     };
     const from = Date.UTC(2026, 11, 1, 0, 0);
-    await cloudflareAnalytics(fakes.env, spy).read(SERVICE, from, from + 5 * MINUTE);
+    await cloudflareAnalytics(fakes.env, spy).read([SERVICE], from, from + 5 * MINUTE);
     expect(inits).toHaveLength(1);
     expect(inits[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(fakes.cloudflare.requests).toEqual([
-      { authorization: `Bearer ${DEV_CLOUDFLARE.token}`, variables: { accountTag: DEV_CLOUDFLARE.accountId, scriptName: "know-office", datetimeStart: "2026-12-01T00:00:00.000Z", datetimeEnd: "2026-12-01T00:05:00.000Z" } },
+      { authorization: `Bearer ${DEV_CLOUDFLARE.token}`, variables: { accountTag: DEV_CLOUDFLARE.accountId, scriptNames: ["know-office"], datetimeStart: "2026-12-01T00:00:00.000Z", datetimeEnd: "2026-12-01T00:05:00.000Z" } },
     ]);
   });
 
-  it("リポジトリの名前がスクリプト名の形でなければ送らずに断る", async () => {
+  it("リポジトリの名前がスクリプト名の形でなければ読まず、外へ送らずにエラーログに残す", async () => {
     const fakes = connected();
-    await expect(cloudflareAnalytics(fakes.env, fakes.fetch).read({ ...SERVICE, repo: "example/a b\"c" }, 0, 5 * MINUTE)).rejects.toThrow("スクリプト名");
+    const read = await cloudflareAnalytics(fakes.env, fakes.fetch).read([{ ...SERVICE, repo: "example/a b\"c" }, { ...SERVICE, repo: "example/-edge" }], 0, 5 * MINUTE);
+    expect(read?.skipped).toHaveLength(2);
     expect(fakes.sent).toEqual([]);
+    await watched("web_app");
+    await world.d1.DB.prepare("UPDATE services SET repo = 'example/bad name' WHERE id = ?").bind(UI_ID).run();
+    await collect(fakes);
+    expect(await failures()).toEqual([{ code: "cloudflare_analytics_skipped", level: "warn", source: "job" }]);
+    expect(await metrics()).toEqual([{ service_id: OFFICE_ID, requests: 100, errors: 2, users: null, reads: null }]);
+  });
+
+  it("全部のサービスを 1 回の問い合わせで読む", async () => {
+    await watched("web_app");
+    const fakes = connected();
+    await collect(fakes);
+    expect(fakes.cloudflare.requests.map((r) => r.variables["scriptNames"])).toEqual([["knowidea-ui", "know-office"]]);
+  });
+
+  it("1 回に読むスクリプトの上限を超えた分は読まず、同じスクリプトは数えない", async () => {
+    const fakes = connected();
+    const many = Array.from({ length: MAX_SCRIPTS_PER_QUERY + 1 }, (_, n) => ({ id: `s${String(n)}`, repo: `example/app-${String(n)}`, kind: "web_app" }));
+    const read = await cloudflareAnalytics(fakes.env, fakes.fetch).read([...many, { id: "same", repo: "example/app-0", kind: "web_app" }], 0, 5 * MINUTE);
+    expect(fakes.cloudflare.requests.map((r) => z.array(z.string()).parse(r.variables["scriptNames"]).length)).toEqual([MAX_SCRIPTS_PER_QUERY]);
+    expect(read?.skipped.map((k) => k.serviceId)).toEqual([`s${String(MAX_SCRIPTS_PER_QUERY)}`]);
+    expect(read?.metrics.size).toBe(MAX_SCRIPTS_PER_QUERY + 1);
+  });
+
+  it("集まる遅れの分、1 つ前の区切りを読んで、行はその区切りの終わりに置く", async () => {
+    await watched("web_app");
+    const fakes = connected();
+    await collect(fakes);
+    const now = world.clock.now();
+    const end = Math.floor((now - 5 * MINUTE) / (5 * MINUTE)) * 5 * MINUTE;
+    expect(fakes.cloudflare.requests[0]?.variables).toMatchObject({ datetimeStart: new Date(end - 5 * MINUTE).toISOString(), datetimeEnd: new Date(end).toISOString() });
+    expect(await rows(world.d1.REC_2026, "SELECT DISTINCT at FROM service_metrics")).toEqual([{ at: end }]);
   });
 
   it("返事が行の上限ちょうどなら、切れたかもしれないので読まない", async () => {
     const fakes = connected();
     fakes.cloudflare.invocations.set("know-office", Array.from({ length: 100 }, () => ({ requests: 1, errors: 0 })));
-    await expect(cloudflareAnalytics(fakes.env, fakes.fetch).read(SERVICE, 0, 5 * MINUTE)).rejects.toThrow("上限");
+    await expect(cloudflareAnalytics(fakes.env, fakes.fetch).read([SERVICE], 0, 5 * MINUTE)).rejects.toThrow("上限");
     fakes.cloudflare.invocations.set("know-office", Array.from({ length: 99 }, () => ({ requests: 1, errors: 0 })));
-    expect(await cloudflareAnalytics(fakes.env, fakes.fetch).read(SERVICE, 0, 5 * MINUTE)).toMatchObject({ requests: 99 });
+    expect((await cloudflareAnalytics(fakes.env, fakes.fetch).read([SERVICE], 0, 5 * MINUTE))?.metrics.get(OFFICE_ID)).toMatchObject({ requests: 99 });
   });
 
   it("形の違う返事と失敗の返事は読まない", async () => {
     const fakes = connected();
-    const answer = (body: unknown, status = 200) => cloudflareAnalytics(fakes.env, () => Promise.resolve(Response.json(body, { status }))).read(SERVICE, 0, 5 * MINUTE);
-    await expect(answer({ data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ sum: { requests: "1", errors: 0 } }] }] } } })).rejects.toThrow("形が違う");
+    const answer = (body: unknown, status = 200) => cloudflareAnalytics(fakes.env, () => Promise.resolve(Response.json(body, { status }))).read([SERVICE], 0, 5 * MINUTE);
+    await expect(answer({ data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ sum: { requests: "1", errors: 0 }, dimensions: { scriptName: "know-office" } }] }] } } })).rejects.toThrow("形が違う");
     await expect(answer({ data: { viewer: { accounts: [] } } })).rejects.toThrow("アカウント");
     await expect(answer({ data: null, errors: [{ message: "time range exceeds the limit" }] })).rejects.toThrow("time range");
     await expect(answer({ data: { viewer: { accounts: [{ workersInvocationsAdaptive: [] }] } }, errors: [{ message: "x" }] })).rejects.toThrow("エラー");
     await expect(answer({}, 429)).rejects.toThrow("429");
     await expect(answer({ data: { viewer: { accounts: [] } } }, 500)).rejects.toThrow("500");
-    await expect(cloudflareAnalytics(fakes.env, () => Promise.resolve(new Response("<html>", { status: 200 }))).read(SERVICE, 0, 5 * MINUTE)).rejects.toThrow("形が違う");
+    await expect(cloudflareAnalytics(fakes.env, () => Promise.resolve(new Response("<html>", { status: 200 }))).read([SERVICE], 0, 5 * MINUTE)).rejects.toThrow("形が違う");
   });
 
   it("鍵が断られたら行を書かず、エラーログに残し、秘密を出さない", async () => {
@@ -156,10 +189,7 @@ describe("サービスの種類", () => {
     const fakes = connected("wrong-token");
     await collect(fakes);
     expect(await metrics()).toEqual([]);
-    expect(await failures()).toEqual([
-      { code: "cloudflare_analytics_failed", level: "warn", source: "job" },
-      { code: "cloudflare_analytics_failed", level: "warn", source: "job" },
-    ]);
+    expect(await failures()).toEqual([{ code: "cloudflare_analytics_failed", level: "warn", source: "job" }]);
     expect(JSON.stringify(await rows(world.d1.REC_2026, "SELECT message FROM error_events"))).not.toContain("wrong-token");
   });
 
@@ -169,14 +199,13 @@ describe("サービスの種類", () => {
     fakes.cloudflare.failWith = 500;
     await collect(fakes);
     await collect(fakes);
-    // 2 つのサービスが落ちても 1 回と数える
     expect(await notices()).toEqual([]);
     await collect(fakes);
     expect(await notices()).toEqual([{ kind: "analytics_failing" }]);
     await collect(fakes);
     await collect(fakes);
     expect(await notices()).toEqual([{ kind: "analytics_failing" }]);
-    expect((await failures()).length).toBe(10);
+    expect((await failures()).length).toBe(5);
   });
 
   it("間に読めた区切りがあれば、落ちた回数を数え直す", async () => {
@@ -193,15 +222,29 @@ describe("サービスの種類", () => {
     expect(await notices()).toEqual([]);
   });
 
+  it("年をまたいでも、前の年の失敗を数えて 3 回目で通知を出す", async () => {
+    await watched("web_app");
+    const fakes = connected();
+    fakes.cloudflare.failWith = 500;
+    // 日本時間の 2026-12-31 23:50 から 3 回の区切り。3 回目は 2027 年に入る
+    world.clock.advance(Date.UTC(2026, 11, 31, 14, 50) - world.clock.now() - 5 * MINUTE);
+    await collect(fakes);
+    await collect(fakes);
+    expect(await notices()).toEqual([]);
+    await collect(fakes);
+    expect(await rows(world.d1.REC_2027, "SELECT code FROM error_events")).toEqual([{ code: "cloudflare_analytics_failed" }]);
+    expect(await notices()).toEqual([{ kind: "analytics_failing" }]);
+  });
+
   it("代わりの Cloudflare は本物と同じく、違う鍵と長すぎる期間と大きすぎる上限を断る", async () => {
     const fakes = connected();
     const send = (authorization: string, query: string, span: number) =>
       fakes.cloudflare.app.request("/client/v4/graphql", {
         method: "POST",
         headers: { authorization, "content-type": "application/json" },
-        body: JSON.stringify({ query, variables: { accountTag: DEV_CLOUDFLARE.accountId, scriptName: "x", datetimeStart: "2026-12-01T00:00:00.000Z", datetimeEnd: new Date(Date.UTC(2026, 11, 1) + span).toISOString() } }),
+        body: JSON.stringify({ query, variables: { accountTag: DEV_CLOUDFLARE.accountId, scriptNames: ["x"], datetimeStart: "2026-12-01T00:00:00.000Z", datetimeEnd: new Date(Date.UTC(2026, 11, 1) + span).toISOString() } }),
       });
-    const query = "query Q { viewer { accounts { workersInvocationsAdaptive(limit: 100) { sum { requests errors } } } } }";
+    const query = "query Q { viewer { accounts { workersInvocationsAdaptive(limit: 100, filter: { scriptName_in: $scriptNames }) { sum { requests errors } } } } }";
     expect((await send("Bearer bad", query, MINUTE)).status).toBe(403);
     expect(await errorsOf(await send(`Bearer ${DEV_CLOUDFLARE.token}`, query, 8 * 24 * 60 * MINUTE))).toHaveLength(1);
     expect(await errorsOf(await send(`Bearer ${DEV_CLOUDFLARE.token}`, query.replace("100", "10001"), MINUTE))).toHaveLength(1);

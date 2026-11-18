@@ -60,7 +60,7 @@ async function deployIds(w: WorkWorld): Promise<unknown[]> {
  * いつも失敗だけを返す、5 分ごとの様子の代わり
  * @returns 様子を読む口
  */
-const failing = (): Analytics => ({ read: () => Promise.resolve({ requests: 30, errors: 30, users: 1, reads: 0 }) });
+const failing = (): Analytics => ({ read: (watched) => Promise.resolve({ metrics: new Map(watched.map((w) => [w.id, { requests: 30, errors: 30, users: 1, reads: 0 }])), skipped: [] }) });
 
 describe("戻した直後のデプロイを数えない", () => {
   it("戻してから 10 分ちょうどまでに届いたデプロイは、task が rollback でなくても deploy にしない", async () => {
@@ -83,7 +83,8 @@ describe("戻した直後のデプロイを数えない", () => {
     await world.d1.DB.prepare("INSERT INTO service_events (id, at, service_id, kind, by, detail) VALUES (?, ?, ?, 'deploy', 'system', ?)")
       .bind("0192f5c0-0000-7000-8000-0000000000dd", at, OFFICE_ID, JSON.stringify({ deploymentId: 30, version: "abc1234", commit: sha(30) }))
       .run();
-    world.clock.advance(10 * MINUTE);
+    // 1 つ前の区切りを読むので、デプロイの後の区切りが読めるまで進める (区切りの始まりがデプロイの後で、終わりが 10 分の窓の中)
+    world.clock.advance(15 * MINUTE);
     await collectMetrics(world.gate.env, failing(), world.clock.now(), world.gate.deps);
     expect(await rows(world.d1.DB, "SELECT id FROM stops WHERE kind = 'stop' AND scope = 'service'")).toEqual([]);
   });

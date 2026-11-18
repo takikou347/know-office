@@ -36,6 +36,9 @@ export const GITHUB_RATE_LIMITED = "github_rate_limited";
 /** Cloudflare の Analytics を読めなかった時の code。続いた時は services/analytics.ts が analytics_failing を出す */
 export const ANALYTICS_FAILED_CODE = "cloudflare_analytics_failed";
 
+/** Cloudflare の Analytics で読まなかったサービスの code (スクリプト名の形が違う、1 回に読む上限を超えた)。通知は出さない */
+export const ANALYTICS_SKIPPED_CODE = "cloudflare_analytics_skipped";
+
 /** 自分の通知を持つので (cloudflare_analytics_failed は services/analytics.ts、sdk_auth_failed、claude_spend_limit、claude_rate_limited、github_rate_limited は work/notice.ts の noticeOnce)、同じエラーの続き (error_burst) の通知を出さない code */
 const OWN_NOTICE_CODES: ReadonlySet<string> = new Set([CLAUDE_FAILED, CLAUDE_SPEND_LIMIT, CLAUDE_RATE_LIMITED, GITHUB_RATE_LIMITED, ANALYTICS_FAILED_CODE, "sdk_auth_failed"]);
 

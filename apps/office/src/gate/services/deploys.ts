@@ -8,7 +8,7 @@ import { insertedWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
-import { ANALYTICS_FAILED_CODE, recordError } from "../ledger/errors.ts";
+import { ANALYTICS_FAILED_CODE, ANALYTICS_SKIPPED_CODE, recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
 import { recordsOf } from "../work/nodes.ts";
 import { AnalyticsReadError, noticeIfFailing } from "./analytics.ts";
@@ -33,14 +33,28 @@ export const PUBLISH_WORKFLOW = ".github/workflows/publish.yml";
 /** サービスの 5 分の様子 */
 export type Metrics = { requests: number; errors: number; users: number | null; reads: number | null };
 
-/** サービスの様子を外から読む口。本物は services/analytics.ts の cloudflareAnalytics */
-export type Analytics = {
-  /** from から to (含まない) の様子を読む。読めなければ null */
-  read(service: { id: string; repo: string | null; kind: string }, from: number, to: number): Promise<Metrics | null>;
+/** 外から読んだ様子。読んだサービスごとの様子と、読まなかったサービスと訳 */
+export type AnalyticsRead = {
+  /** サービス ID ごとの様子。呼び出しの無かったサービスも 0 の様子で入る */
+  metrics: Map<string, Metrics>;
+  /** 読まなかったサービスと訳 (スクリプト名の形が違う、1 回に読む上限を超えた) */
+  skipped: { serviceId: string; reason: string }[];
 };
 
-/** まだつないでいない口。何も読まず、何も書かせない */
+/** サービスの様子を外から読む口。本物は services/analytics.ts の cloudflareAnalytics */
+export type Analytics = {
+  /** from から to (含まない) の様子を、全部のサービスまとめて 1 回で読む。つないでいなければ null */
+  read(services: { id: string; repo: string | null; kind: string }[], from: number, to: number): Promise<AnalyticsRead | null>;
+};
+
+/** まだつないでいない口 (鍵が無い間)。何も読まず、外へ何も送らず、何も書かせない */
 export const UNCONNECTED_ANALYTICS: Analytics = { read: () => Promise.resolve(null) };
+
+/**
+ * 集まる遅れの分だけ戻して読む長さ。Workers の指標は、直近の数分が集計の遅れで少なく見える (https://developers.cloudflare.com/workers/observability/metrics-and-analytics/ の「slight delay in aggregation and metrics delivery」)。
+ * 遅れの長さは文書に数が無いので、1 つ前の区切りを読む
+ */
+export const METRICS_LAG_MS = METRICS_STEP_MS;
 
 /**
  * そのサービスを、at までの 10 分の間に戻したか。戻しの workflow が task を付け忘れても、戻した版のデプロイを数えない
@@ -134,25 +148,36 @@ async function recentDeploy(env: Bindings, serviceId: string, at: number): Promi
 }
 
 /**
- * 5 分ごとに、リポジトリのある Web アプリとコンテンツの直前の 5 分の様子を読んで service_metrics に残す。同じ区切りは 1 行だけで、
- * 書けた 1 つだけが、デプロイから 10 分の間の返事と失敗を自動停止に渡す。数え済みの区切りは service_metrics の行そのもので決める
+ * 5 分ごとに、リポジトリのある Web アプリとコンテンツの 1 つ前の 5 分の様子を、全部まとめて 1 回で読んで service_metrics に残す。
+ * 直前の 5 分は集計が遅れて少なく見えるので 1 つ前の区切りを読み、行の at は読んだ区切りの終わり。同じ区切りは 1 行だけで、
+ * 書けた 1 つだけが、デプロイから 10 分の間の返事と失敗を自動停止に渡す (窓は読んだ区切りの at で数えるので、遅れの分だけ止めるのが遅れる)。数え済みの区切りは service_metrics の行そのもので決める
  * @param env バインディング
  * @param analytics 様子を読む口
  * @param now 今の時刻
  * @param deps 自動停止が外へ頼む口
  */
 export async function collectMetrics(env: Bindings, analytics: Analytics, now: number, deps: GuardDeps): Promise<void> {
-  const at = Math.floor(now / METRICS_STEP_MS) * METRICS_STEP_MS;
+  const at = Math.floor((now - METRICS_LAG_MS) / METRICS_STEP_MS) * METRICS_STEP_MS;
   const watched = await drizzle(env.DB)
     .select({ id: services.id, repo: services.repo, kind: services.kind })
     .from(services)
     .where(and(inArray(services.kind, ["web_app", "content"]), isNotNull(services.repo), inArray(services.stage, ["prototype", "service", "operation"])))
     .orderBy(asc(services.id));
-  let unread = false;
+  let read: AnalyticsRead | null;
+  try {
+    read = await analytics.read(watched, at - METRICS_STEP_MS, at);
+  } catch (error) {
+    // 全部のサービスを 1 回で読むので、落ちたら全部が読めない。同じ区切りの失敗は 1 回と数える
+    await recordError(env, { source: "job", level: "warn", code: error instanceof AnalyticsReadError ? ANALYTICS_FAILED_CODE : "service_metrics_failed", error }, clockAt(now));
+    if (error instanceof AnalyticsReadError) await noticeIfFailing(env, now, METRICS_STEP_MS);
+    return;
+  }
+  if (read === null) return;
+  for (const skip of read.skipped) await recordError(env, { source: "job", level: "warn", code: ANALYTICS_SKIPPED_CODE, error: new AnalyticsReadError(`${skip.reason} (${skip.serviceId})`) }, clockAt(now));
   for (const service of watched) {
+    const metrics = read.metrics.get(service.id);
+    if (metrics === undefined) continue;
     try {
-      const metrics = await analytics.read(service, at - METRICS_STEP_MS, at);
-      if (metrics === null) continue;
       const rec = recordsOf(env, at);
       const row = { id: newId(clockAt(now)), serviceId: service.id, at, requests: metrics.requests, errors: metrics.errors, users: metrics.users, reads: metrics.reads, traceId: null };
       const written = await insertedWhen(rec, serviceMetrics, row, sql`NOT EXISTS (SELECT 1 FROM ${serviceMetrics} WHERE ${serviceMetrics.serviceId} = ${service.id} AND ${serviceMetrics.at} = ${at})`);
@@ -162,11 +187,8 @@ export async function collectMetrics(env: Bindings, analytics: Analytics, now: n
       if (!deploy || at - METRICS_STEP_MS < deploy.deployedAt) continue;
       await observe(env, { type: "deploy_result", serviceId: service.id, kind: "web", deployedAt: deploy.deployedAt, baselineRate: deploy.baselineRate, responses: metrics.requests, failures: metrics.errors }, at, deps);
     } catch (error) {
-      // 1 つのサービスが読めなくても、ほかのサービスは読む
-      unread ||= error instanceof AnalyticsReadError;
-      await recordError(env, { source: "job", level: "warn", code: error instanceof AnalyticsReadError ? ANALYTICS_FAILED_CODE : "service_metrics_failed", error }, clockAt(now));
+      // 1 つのサービスが書けなくても、ほかのサービスは書く
+      await recordError(env, { source: "job", level: "warn", code: "service_metrics_failed", error }, clockAt(now));
     }
   }
-  // 続けて読めない時の通知は、落ちた数でなく区切りの数で決める
-  if (unread) await noticeIfFailing(env, now, METRICS_STEP_MS);
 }
