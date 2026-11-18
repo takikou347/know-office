@@ -10,6 +10,8 @@ export type FakeArchives = {
   answer(route: string): Response | null;
   /** codeload の形の道 GET /{o}/{r}/legacy.tar.gz/{ref}?token= */
   codeload: Hono;
+  /** 通しが木を置く道 PUT /{o}/{r}/{sha} (本文は tar.gz) と、外す道 DELETE /{o}/{r}/{sha} */
+  place: Hono;
 };
 
 const TARBALL = /^GET \/repos\/([^/]+\/[^/]+)\/tarball\/([^/?]+)$/;
@@ -45,5 +47,17 @@ export function createFakeArchives(codeloadBase: string): FakeArchives {
     if (body === undefined) return c.body(null, 404);
     return new Response(new Uint8Array(body), { headers: { "content-type": "application/x-gzip" } });
   });
-  return { archives, answer, codeload };
+  // レビューの補完の通しが、先のコミットの tarball として読ませる木を置く
+  const place = new Hono()
+    .put("/:owner/:name/:sha", async (c) => {
+      const sha = c.req.param("sha");
+      if (!/^[0-9a-f]{40}$/.test(sha)) return c.body(null, 400);
+      archives.set(`${c.req.param("owner")}/${c.req.param("name")}:${sha}`, new Uint8Array(await c.req.arrayBuffer()));
+      return c.body(null, 204);
+    })
+    .delete("/:owner/:name/:sha", (c) => {
+      archives.delete(`${c.req.param("owner")}/${c.req.param("name")}:${c.req.param("sha")}`);
+      return c.body(null, 204);
+    });
+  return { archives, answer, codeload, place };
 }

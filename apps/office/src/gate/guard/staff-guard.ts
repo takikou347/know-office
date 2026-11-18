@@ -106,13 +106,16 @@ export class StaffGuard {
   }
 
   /**
-   * 社員を止め、作業トークンをすべて失効させる
+   * 社員を止め、作業トークンをすべて失効させる。ワークスペースを止めるか作り直すのに落ちても、作業トークンは必ず失効させる
    * @param now 今の時刻
    * @returns 無し
    */
   async halt(now: number): Promise<null> {
-    await this.book.halt(now);
-    await this.#revoke(() => true);
+    try {
+      await this.book.halt(now);
+    } finally {
+      await this.#revoke(() => true);
+    }
     return null;
   }
 

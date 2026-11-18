@@ -136,6 +136,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     // 置いた返事をまとめて外す。利用場面の通しが 1 本ごとに呼び、置いた返事を後の通しに残さない
     .delete("/__fake/routes", (c) => { routes.clear(); return c.body(null, 204); })
     .get("/__fake/requests", (c) => c.json(requests))
+    .route("/__fake/archives", archives.place)
     .route("/", flowRoutes(apps, failures, { installations, pulls, hookUrl: options.hookUrl }))
     // 画面: オーナーが「作成」を押すと App ができ、manifest の redirect_url に code と state を付けて戻す
     .post("/web/settings/apps/new", async (c) => {
@@ -303,7 +304,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         const repo = /^\/repos\/([^/]+\/[^/]+)/.exec(c.req.path)?.[1];
         if (repo !== undefined && !reaches(t, repo)) return c.json({ message: "Not Found" }, 404);
       }
-      const archived = archives.answer(route);
+      // /github の下に立てた時も、頭 (/github) を除いた道で探す
+      const archived = archives.answer(`${c.req.method} ${c.req.path.slice(mountedAt(c.req.routePath).length)}`);
       if (archived) return archived;
       // 入れたリポジトリの情報は、置いた返事が無ければ公開か非公開と既定のブランチを返す
       // /github の下に立てた時も、頭 (/github) を除いた道で見分ける

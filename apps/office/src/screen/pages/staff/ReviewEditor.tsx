@@ -1,12 +1,17 @@
-// レビューのその場の直し。今の先のファイルを knowidea-ui のエディタで書き換え、同じブランチにコミットする (タスクとレビューの 3.6)
+// レビューのその場の直し。今の先のファイルを knowidea-ui のエディタで書き換え、同じブランチにコミットする。書き換えたら補完の口につなぎ、候補と型の誤りと説明を出す (タスクとレビューの 3.6)
 import { Button, Stack, TextField, editorLanguageOfPath } from "knowidea-ui";
-import { Suspense, lazy, useContext, useState } from "react";
+import type { EditorDiagnostic } from "knowidea-ui/editor";
+import { Suspense, lazy, useContext, useEffect, useMemo, useState } from "react";
 import { ApiContext } from "../../api.ts";
+import { browserLsp, reviewLsp } from "./review-lsp.ts";
 import { type Failed, failureOf, NETWORK, useLoad } from "./review-load.ts";
 import { FailureAlert } from "./ReviewFiles.tsx";
 
 // エディタは「直す」を押した時だけ読み込む
 const CodeEditor = lazy(() => import("knowidea-ui/editor").then((m) => ({ default: m.CodeEditor })));
+
+/** 書き換えてから診断を求めるまでの間。打つたびに求めず、上りの 1 分 600 回に届かせない */
+const DIAGNOSE_WAIT_MS = 400;
 
 export interface ReviewEditorProps {
   /** 作った社員のタスク ID */
@@ -30,6 +35,19 @@ export function ReviewEditor({ nodeId, path, head, onCommitted }: ReviewEditorPr
   const [message, setMessage] = useState(`${path} を直す`);
   const [failed, setFailed] = useState<Failed | null>(null);
   const [busy, setBusy] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<EditorDiagnostic[]>([]);
+  // 補完の口は作るだけで、書き換えるか候補を求めるまで開かない。外す時に閉じ、開発の StrictMode で付け直した後は次の求めで開き直す
+  const lsp = useMemo(() => (api ? reviewLsp(browserLsp(api, nodeId), path) : null), [api, nodeId, path]);
+  useEffect(() => () => lsp?.close(), [lsp]);
+  useEffect(() => {
+    if (!lsp || text === null) return undefined;
+    const timer = setTimeout(() => {
+      void lsp.diagnose(text).then((found) => {
+        if (found) setDiagnostics(found);
+      });
+    }, DIAGNOSE_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [lsp, text]);
   if (loaded.state === "loading") return <p role="status">{path} を読んでいます</p>;
   if (loaded.state === "failed") return <FailureAlert title={`${path} を読めませんでした`} failed={loaded} />;
   const value = text ?? loaded.data;
@@ -44,7 +62,15 @@ export function ReviewEditor({ nodeId, path, head, onCommitted }: ReviewEditorPr
   return (
     <Stack gap={3}>
       <Suspense fallback={<p role="status">エディタを読み込んでいます</p>}>
-        <CodeEditor label={path} value={value} onChange={setText} language={editorLanguageOfPath(path)} onSave={() => void commit()} />
+        <CodeEditor
+          label={path}
+          value={value}
+          onChange={setText}
+          language={editorLanguageOfPath(path)}
+          onSave={() => void commit()}
+          diagnostics={diagnostics}
+          {...(lsp ? { complete: (place) => lsp.complete(place), hover: (place) => lsp.hover(place) } : {})}
+        />
       </Suspense>
       <TextField label="コミットの文" value={message} onChange={(e) => setMessage(e.target.value)} />
       <Stack direction="row" gap={2}>

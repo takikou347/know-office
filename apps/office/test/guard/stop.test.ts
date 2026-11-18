@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { applyStop, type StopInput } from "../../src/gate/guard/actions.ts";
 import { checkOverruns, observe, verifyWorkToken } from "../../src/gate/guard/observe.ts";
+import { StaffGuard } from "../../src/gate/guard/staff-guard.ts";
+import { StaffBook, type StaffStorage } from "../../src/gate/work/staff-book.ts";
 import { addNode, addService, denied, jst, MINUTE, NODE, NODE2, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
 import { ORIGIN } from "../helpers/gate.ts";
 
@@ -185,6 +187,33 @@ describe("止めた記録", () => {
       { level: "stop", kind: "guard_stop_failed" },
     ]);
     expect(w.gate.audits.map((a) => a.action)).toEqual(["guard.stop", "guard.stop_failed"]);
+  });
+
+  it("勤務の外の社員を止めると、補完で起こしたワークスペースも止め、作り直さない", async () => {
+    expect((await w.gate.staff.builder.book.status(jst(10))).state).toBe("off");
+    expect(await applyStop(w.gate.env, manual, jst(10), w.gate.deps)).not.toBeNull();
+    expect(w.gate.staff.builder.workspace).toEqual(["stop"]);
+    expect((await w.gate.staff.builder.book.status(jst(10))).state).toBe("off");
+  });
+
+  it("勤務の外の社員を止めてワークスペースを止められなくても、作業トークンは失効する", async () => {
+    // stop だけを落とすワークスペースの代わりで、開発担当の本と作業トークンの本を作る
+    const kept = new Map<string, unknown>();
+    const storage: StaffStorage = {
+      get: (key) => Promise.resolve(structuredClone(kept.get(key))),
+      put: (key, value) => Promise.resolve(void kept.set(key, structuredClone(value))),
+      setAlarm: () => Promise.resolve(),
+      deleteAlarm: () => Promise.resolve(),
+    };
+    const calls: string[] = [];
+    const ok = (name: string) => () => Promise.resolve(void calls.push(name));
+    const stop = () => Promise.reject(new AppError("unavailable", String(calls.push("stop"))));
+    const book = new StaffBook("builder", storage, w.d1.DB, { start: ok("start"), stop, wrapUp: ok("wrapUp"), abort: ok("abort"), restart: ok("restart") });
+    const guard = new StaffGuard("builder", storage, w.d1.DB, book);
+    const ticket = await guard.issueToken(NODE, "ws-builder", jst(9));
+    await expect(guard.halt(jst(10))).rejects.toMatchObject({ code: "unavailable" });
+    expect(calls).toEqual(["stop"]);
+    expect(await guard.checkToken(ticket.jti, "ws-builder", jst(10))).toBe("revoked");
   });
 
   it("同じ相手への止めが同時に 2 つ来ても、記録は 1 行", async () => {

@@ -1,6 +1,6 @@
 // 社員 1 人の勤務の時刻と勤怠の判断。StaffDO が持ち、テストは同じ物を手元の入れ物で使う (社員と勤怠の 3 章)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, CheckpointInput, jstDay, type StaffId, type StaffStatus, StaffTask, WorkResult } from "@know-office/core";
+import { AppError, CheckpointInput, jstDay, type StaffId, type StaffState, type StaffStatus, StaffTask, WorkResult } from "@know-office/core";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -257,9 +257,9 @@ export class StaffBook {
   /**
    * 自動停止で止める。止めていた間は働いた時間に入れない
    * @param now 今の時刻
-   * @returns 無し
+   * @returns 止めた後の状態
    */
-  async stop(now: number): Promise<void> {
+  async stop(now: number): Promise<StaffState> {
     const s = await this.#load();
     await this.#process(s, now);
     if (ACTIVE.includes(s.m.state)) s.pause(now, "stopped", "guard_stop");
@@ -268,7 +268,7 @@ export class StaffBook {
       s.switch(now, "stopped", "guard_stop");
       s.m.state = "stopped";
     }
-    await this.#save(s, now);
+    return this.#save(s, now).then(() => s.m.state);
   }
 
   /**
@@ -285,13 +285,14 @@ export class StaffBook {
   }
 
   /**
-   * 自動停止で社員を止め、ワークスペースを止めて作り直す。持っているタスクは止めた間も持ったまま
+   * 自動停止で社員を止め、ワークスペースを止めて作り直す。持っているタスクは止めた間も持ったまま。勤務の外なら、補完で起こしたワークスペースを止める
    * @param now 今の時刻
    * @returns 無し
    */
   async halt(now: number): Promise<void> {
-    await this.stop(now);
-    if ((await this.#load()).m.state === "stopped") await this.workspace.restart(now);
+    const state = await this.stop(now);
+    // 勤務の外に補完で起こしたワークスペースは、止めた社員のために動かし続けない。止まっていれば何もしない
+    if (state === "stopped" || state === "off") await (state === "stopped" ? this.workspace.restart(now) : this.workspace.stop());
   }
 
   /**

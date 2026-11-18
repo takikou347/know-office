@@ -243,6 +243,24 @@ describe("開発環境の代わりの物", () => {
     expect({ placed, cleared, after }).toEqual({ placed: [200, 200], cleared: 204, after: [404, 404] });
   });
 
+  it("代わりの GitHub は /github の下に立てても、通しが置いた木を tarball の 302 で返し、外した木は 404 に戻す", async () => {
+    const github = createFakeGitHub({ codeloadBase: "http://localhost:1/codeload" });
+    const outer = new Hono().route("/github", github.app);
+    const headers = { authorization: "Bearer e2e", "user-agent": "know-office-test" };
+    const sha = "c".repeat(40);
+    const tarball = new Uint8Array([31, 139, 8, 0]);
+    const placed = await outer.request(`/github/__fake/archives/example/know-office/${sha}`, { method: "PUT", headers, body: tarball });
+    expect(placed.status).toBe(204);
+    const got = await outer.request(`/github/repos/example/know-office/tarball/${sha}`, { headers });
+    expect(got.status).toBe(302);
+    expect(got.headers.get("location")).toMatch(new RegExp(`^http://localhost:1/codeload/example/know-office/legacy\\.tar\\.gz/${sha}\\?token=`));
+    expect(github.archives.get(`example/know-office:${sha}`)).toEqual(tarball);
+    // 道の形が違う物は置かない
+    expect((await outer.request("/github/__fake/archives/example/know-office/main", { method: "PUT", headers, body: tarball })).status).toBe(400);
+    expect((await outer.request(`/github/__fake/archives/example/know-office/${sha}`, { method: "DELETE", headers })).status).toBe(204);
+    expect((await outer.request(`/github/repos/example/know-office/tarball/${sha}`, { headers })).status).toBe(404);
+  });
+
   it("代わりの GitHub は鍵が無ければ 401 を返す", async () => {
     const res = await ask(createFakeGitHub().app, "/repos/o/r/pulls");
     expect(res.status).toBe(401);

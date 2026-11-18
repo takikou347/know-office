@@ -14,7 +14,11 @@ const devVars = join(import.meta.dirname, ".dev.vars");
 if (!existsSync(devVars)) copyFileSync(join(import.meta.dirname, ".dev.vars.example"), devVars);
 // 中身が同じ時は書かない。書くと開発サーバーが .dev.vars の変化を見て起こし直し、代わりの物を二重に待ち受けて落ちる
 const vars = readFileSync(devVars, "utf8");
-const wanted = vars.replace(/^DEV_FAKES_URL=.*$/m, `DEV_FAKES_URL=http://localhost:${port + 1}`);
+// 前に写した .dev.vars に、後から見本に足した変数 (EDITOR_WAKE など) が無ければ見本の値を足す
+const missing = readFileSync(join(import.meta.dirname, ".dev.vars.example"), "utf8")
+  .split("\n")
+  .filter((line) => /^[A-Z_]+=/.test(line) && !new RegExp(`^${line.split("=")[0] ?? ""}=`, "m").test(vars));
+const wanted = `${vars}${missing.length > 0 && !vars.endsWith("\n") ? "\n" : ""}${missing.map((line) => `${line}\n`).join("")}`.replace(/^DEV_FAKES_URL=.*$/m, `DEV_FAKES_URL=http://localhost:${port + 1}`);
 if (wanted !== vars) writeFileSync(devVars, wanted);
 
 const widths = [

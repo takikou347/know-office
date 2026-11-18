@@ -252,7 +252,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 無し
    */
   stop(now: number): Promise<null> {
-    return this.#run((book) => book.stop(now), now);
+    return this.#run(async (book) => void (await book.stop(now)), now);
   }
 
   /**

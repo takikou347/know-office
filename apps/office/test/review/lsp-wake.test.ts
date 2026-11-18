@@ -231,6 +231,24 @@ describe("ワークスペースを起こす時", () => {
     expect(await storage.read()).toEqual({ by: null, wokeAt: null, usedMs: (40 + 10 + 5) * 60_000 });
   });
 
+  it("補完で起こしたワークスペースを社員の停止で止めると、起こしてから止めるまでだけを 1 日の予算から減らす", async () => {
+    const box = fakeBox();
+    box.trees.set(NODE, SHA);
+    const storage = gatedStorage();
+    const { editor, timers } = editorWith(box, storage);
+    const screen = await connect(editor, T0);
+    timers.advance(3 * 60_000);
+    // WorkspaceDO.stop と同じく、止める前に補完の記憶を締める
+    await editor.stopped();
+    box.isRunning = false;
+    expect(screen.closed).toEqual({ code: 1001, reason: "workspace stopped" });
+    expect(await storage.read()).toEqual({ by: null, wokeAt: null, usedMs: 3 * 60_000 });
+    // 同じ日に後で開き直しても、止めていた間は数えない
+    timers.advance(30 * 60_000);
+    expect((await editor.prepare({ nodeId: NODE, sha: SHA, wake: true, now: timers.now() })).woke).toBe(true);
+    expect(await storage.read()).toEqual({ by: "editor", wokeAt: timers.now(), usedMs: 3 * 60_000 });
+  });
+
   it("同じ時に来た 2 本の補完の接続は、ワークスペースを 1 回だけ起こす", async () => {
     const box = fakeBox();
     box.trees.set(NODE, SHA);
