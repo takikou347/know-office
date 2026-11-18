@@ -78,7 +78,7 @@ describe("サービスの Issue の木", () => {
     const [task] = (await world.d1.DB.prepare("SELECT id FROM nodes WHERE source LIKE 'issue:%' LIMIT 1").all<{ id: string }>()).results;
     await world.d1.DB.prepare("INSERT INTO task_docs (node_id, service_id, repo, pr_number, branch, created_at) VALUES (?, ?, 'example/docs', 42, 'b', 0)").bind(task?.id, id).run();
     const got = await tree(id);
-    expect(got.docsPrs.map((p) => [p.number, p.kind]).toSorted()).toEqual([[41, "design"], [42, "together"]]);
+    expect(got.docsPrs.map((p) => `${String(p.number)}:${p.kind}`).toSorted((a, b) => a.localeCompare(b))).toEqual(["41:design", "42:together"]);
   });
 
   it("子が上限より多くても、上限までを返す", async () => {

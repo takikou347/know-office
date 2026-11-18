@@ -108,10 +108,9 @@ describe("運用の Issue", () => {
     expect(got.filter((r) => r["kind"] === "parent")).toHaveLength(1);
     expect(got.filter((r) => r["kind"] === "child")).toHaveLength(2);
     expect(issuesOf(world)).toHaveLength(3);
-    expect(await rows(world.d1.DB, "SELECT issue_number, claimed_at FROM findings")).toEqual([
-      { issue_number: expect.any(Number), claimed_at: null },
-      { issue_number: expect.any(Number), claimed_at: null },
-    ]);
+    const found = await rows(world.d1.DB, "SELECT issue_number, claimed_at FROM findings");
+    expect(found.map((r) => typeof r["issue_number"])).toEqual(["number", "number"]);
+    expect(found.map((r) => r["claimed_at"])).toEqual([null, null]);
   });
 
   it("子を作った後、つなぐ前に落ちても、次の回に印で見つけ、Issue は 1 件のまま", async () => {
