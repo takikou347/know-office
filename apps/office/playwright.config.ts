@@ -78,7 +78,8 @@ const flowProjects = flowUse
   ? [
       { name: "flows-passkey", testMatch: /flows\/passkey\.setup\.ts/, dependencies: ["attack"], teardown: "flows-cleanup", use: flowUse },
       { name: "flows", testMatch: /flows\/.*\.spec\.ts/, dependencies: ["flows-passkey"], fullyParallel: false, workers: 1, use: flowUse },
-      { name: "flows-cleanup", testMatch: /flows\/cleanup\.teardown\.ts/, use: flowUse },
+      // 後始末の 2 本 (通知の既読と seedMain の wrangler) も手元の D1 を書くので、並べると塞がって 500 になる。1 本ずつ流す
+      { name: "flows-cleanup", testMatch: /flows\/cleanup\.teardown\.ts/, fullyParallel: false, workers: 1, use: flowUse },
     ]
   : [];
 
