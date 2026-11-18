@@ -23,6 +23,8 @@ export type Endpoints = {
   githubWeb: string;
   /** GitHub の git の受け口 */
   githubGit: string;
+  /** Cloudflare の GraphQL Analytics API */
+  cloudflareGraphql: string;
   /** GitHub の tarball の 302 の先。この下の道だけを鍵を付けずに追う (タスクとレビューの 3.2) */
   codeload: string;
 };
@@ -46,6 +48,7 @@ export function endpoints(env: EndpointEnv): Endpoints {
       githubWeb: "https://github.com",
       githubGit: "https://github.com",
       codeload: "https://codeload.github.com",
+      cloudflareGraphql: "https://api.cloudflare.com/client/v4/graphql",
     };
   }
   const base = env.DEV_FAKES_URL ?? "";
@@ -58,6 +61,7 @@ export function endpoints(env: EndpointEnv): Endpoints {
     githubWeb: `${base}/github/web`,
     githubGit: `${base}/github/git`,
     codeload: `${base}/codeload`,
+    cloudflareGraphql: `${base}/cloudflare/client/v4/graphql`,
   };
 }
 

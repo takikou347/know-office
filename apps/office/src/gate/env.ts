@@ -219,6 +219,10 @@ export type Bindings = {
   FILES: R2Bucket;
   /** Claude API の鍵。シークレットで入れ、Claude のプロキシと週のバッチ処理だけが Secret に包んで使う */
   ANTHROPIC_API_KEY?: string;
+  /** Cloudflare の GraphQL Analytics API を読む API トークン。権限は Account Analytics の読み取りだけ。シークレットで入れ、無い間は様子を読まない */
+  CLOUDFLARE_ANALYTICS_TOKEN?: string;
+  /** Analytics を読む Cloudflare のアカウント ID */
+  CLOUDFLARE_ACCOUNT_ID?: string;
   /** know-office 自身のリポジトリ (owner/name)。見つけて直す仕組みが Issue を置く。無い間は数えるだけ */
   OFFICE_REPO?: string;
   /** 急ぐ故障を見つけた時の調べ。費用が出るので、オーナーの はい の後に on にする。初期値は off */

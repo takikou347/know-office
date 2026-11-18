@@ -8,9 +8,10 @@ import { insertedWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
-import { recordError } from "../ledger/errors.ts";
+import { ANALYTICS_FAILED_CODE, recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
 import { recordsOf } from "../work/nodes.ts";
+import { AnalyticsReadError, noticeIfFailing } from "./analytics.ts";
 import { ROLLBACK_COOLDOWN_MS } from "./rollback.ts";
 import { latestRelease } from "./status.ts";
 
@@ -32,7 +33,7 @@ export const PUBLISH_WORKFLOW = ".github/workflows/publish.yml";
 /** サービスの 5 分の様子 */
 export type Metrics = { requests: number; errors: number; users: number | null; reads: number | null };
 
-/** サービスの様子を外から読む口。本物の分析の API は #131 でつなぐ */
+/** サービスの様子を外から読む口。本物は services/analytics.ts の cloudflareAnalytics */
 export type Analytics = {
   /** from から to (含まない) の様子を読む。読めなければ null */
   read(service: { id: string; repo: string | null; kind: string }, from: number, to: number): Promise<Metrics | null>;
@@ -147,6 +148,7 @@ export async function collectMetrics(env: Bindings, analytics: Analytics, now: n
     .from(services)
     .where(and(inArray(services.kind, ["web_app", "content"]), isNotNull(services.repo), inArray(services.stage, ["prototype", "service", "operation"])))
     .orderBy(asc(services.id));
+  let unread = false;
   for (const service of watched) {
     try {
       const metrics = await analytics.read(service, at - METRICS_STEP_MS, at);
@@ -161,7 +163,10 @@ export async function collectMetrics(env: Bindings, analytics: Analytics, now: n
       await observe(env, { type: "deploy_result", serviceId: service.id, kind: "web", deployedAt: deploy.deployedAt, baselineRate: deploy.baselineRate, responses: metrics.requests, failures: metrics.errors }, at, deps);
     } catch (error) {
       // 1 つのサービスが読めなくても、ほかのサービスは読む
-      await recordError(env, { source: "job", level: "warn", code: "service_metrics_failed", error }, clockAt(now));
+      unread ||= error instanceof AnalyticsReadError;
+      await recordError(env, { source: "job", level: "warn", code: error instanceof AnalyticsReadError ? ANALYTICS_FAILED_CODE : "service_metrics_failed", error }, clockAt(now));
     }
   }
+  // 続けて読めない時の通知は、落ちた数でなく区切りの数で決める
+  if (unread) await noticeIfFailing(env, now, METRICS_STEP_MS);
 }

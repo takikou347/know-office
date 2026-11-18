@@ -11,7 +11,8 @@ import { resumeMerges } from "../work/merge-resume.ts";
 import { recheckReviews } from "../work/review.ts";
 import { settleReleases } from "../devloop/release.ts";
 import { connectRollback, UNCONNECTED_DEPS } from "../guard/deps.ts";
-import { collectMetrics, UNCONNECTED_ANALYTICS } from "../services/deploys.ts";
+import { cloudflareAnalytics } from "../services/analytics.ts";
+import { collectMetrics } from "../services/deploys.ts";
 import { checkOverruns, checkThresholds } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import { announceNotice } from "../live/publish.ts";
@@ -86,9 +87,9 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
     ctx.waitUntil(settleReleases(env, forge.issues, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "release_settle_failed", error }, clock)));
     // done のまま main に入らずに残ったタスクを、入れ直すか review に戻す。1 回に 20 件まで
     ctx.waitUntil(resumeMerges(env, forge, UNCONNECTED_DEPS, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "merge_resume_failed", error }, clock)));
-    // サービスの様子を読み、デプロイの後の失敗で止めた時は rollback.yml で戻す。分析の口は #131 までつながず、何も書かない
+    // サービスの様子を読み、デプロイの後の失敗で止めた時は rollback.yml で戻す。Cloudflare の Analytics の鍵が無い間は何も読まず、何も書かない
     const deps = { ...UNCONNECTED_DEPS, rollback: connectRollback(env, forge, () => clock.now()) };
-    ctx.waitUntil(collectMetrics(env, UNCONNECTED_ANALYTICS, clock.now(), deps).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "service_metrics_failed", error }, clock)));
+    ctx.waitUntil(collectMetrics(env, cloudflareAnalytics(env, weekly.fetch), clock.now(), deps).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "service_metrics_failed", error }, clock)));
   }
   // 部分ごとに通るかを残し、月の稼働率のもとにする。書けない時は checkHealth がエラーログに残す
   ctx.waitUntil(checkHealth(env, clock));

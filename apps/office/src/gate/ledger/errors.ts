@@ -33,8 +33,11 @@ export const CLAUDE_RATE_LIMITED = "claude_rate_limited";
 /** GitHub の API のレート制限の code。github/limits.ts がすぐ github_rate_limited を出す */
 export const GITHUB_RATE_LIMITED = "github_rate_limited";
 
-/** 自分の通知を持つので (sdk_auth_failed、claude_spend_limit、claude_rate_limited、github_rate_limited は work/notice.ts の noticeOnce)、同じエラーの続き (error_burst) の通知を出さない code */
-const OWN_NOTICE_CODES: ReadonlySet<string> = new Set([CLAUDE_FAILED, CLAUDE_SPEND_LIMIT, CLAUDE_RATE_LIMITED, GITHUB_RATE_LIMITED, "sdk_auth_failed"]);
+/** Cloudflare の Analytics を読めなかった時の code。続いた時は services/analytics.ts が analytics_failing を出す */
+export const ANALYTICS_FAILED_CODE = "cloudflare_analytics_failed";
+
+/** 自分の通知を持つので (cloudflare_analytics_failed は services/analytics.ts、sdk_auth_failed、claude_spend_limit、claude_rate_limited、github_rate_limited は work/notice.ts の noticeOnce)、同じエラーの続き (error_burst) の通知を出さない code */
+const OWN_NOTICE_CODES: ReadonlySet<string> = new Set([CLAUDE_FAILED, CLAUDE_SPEND_LIMIT, CLAUDE_RATE_LIMITED, GITHUB_RATE_LIMITED, ANALYTICS_FAILED_CODE, "sdk_auth_failed"]);
 
 /** 同じ原因のエラーが続いたとみなす、5 分の回数。これを超えたら知らせ、急ぐ故障として調べる */
 export const BURST_LIMIT = 3;

@@ -8,3 +8,6 @@ MASTER_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
 ANTHROPIC_API_KEY=dev-fake-anthropic-key
 # 勤務の外でもエディタの補完で代わりのワークスペースを起こす。手元の通しが勤務の時刻によらずに補完を確かめるため (タスクとレビューの 3.2)
 EDITOR_WAKE=on
+# 代わりの Cloudflare の GraphQL Analytics API が通す値 (dev/cloudflare.ts の DEV_CLOUDFLARE)
+CLOUDFLARE_ANALYTICS_TOKEN=dev-fake-cloudflare-token
+CLOUDFLARE_ACCOUNT_ID=dev-account
