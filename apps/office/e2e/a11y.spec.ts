@@ -268,7 +268,8 @@ test.describe("使いやすさ", () => {
         await page.goto(p.path);
         await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
         await p.open?.(page);
-        if (p.ready) await expect(page.getByText(p.ready)).toBeVisible();
+        // 部屋は 3D のモデルを読み終えてから案内を出し、CI で 2 つの worker が同時に部屋を開くと 5 秒を超える事がある。読み終わりの待ちだけを延ばす
+        if (p.ready) await expect(page.getByText(p.ready)).toBeVisible({ timeout: 15_000 });
         const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
         const bad = violations
           .filter((v) => v.impact === "critical" || v.impact === "serious")
