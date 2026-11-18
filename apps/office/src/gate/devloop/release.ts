@@ -22,7 +22,7 @@ export const SETTLE_LIMIT = 20;
  */
 export function readySql(service: string): string {
   const feature = `p.service_id = ${service} AND p.kind = 'parent' AND p.feature <> '${OPERATIONS}'`;
-  const hasChild = "EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = p.service_id AND c.kind = 'child' AND c.parent_number = p.number)";
+  const hasChild = "EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = p.service_id AND c.kind = 'child' AND c.feature = p.feature)";
   return `(NOT EXISTS (SELECT 1 FROM dev_issues p WHERE ${feature} AND p.state <> 'closed' AND ${hasChild}) AND EXISTS (SELECT 1 FROM dev_issues p WHERE ${feature} AND p.state = 'closed' AND p.close_reason IS NOT 'not_planned'))`;
 }
 
@@ -48,8 +48,8 @@ type ParentRow = { id: string; service_id: string; repo: string; number: number 
  */
 async function childrenOf(db: D1Database, parent: ParentRow): Promise<{ total: number; notClosed: number; completed: number }> {
   const row = await db
-    .prepare("SELECT COUNT(*) AS total, COALESCE(SUM(state <> 'closed'), 0) AS notClosed, COALESCE(SUM(state = 'closed' AND close_reason IS NOT 'not_planned'), 0) AS completed FROM dev_issues WHERE service_id = ? AND kind = 'child' AND parent_number = ?")
-    .bind(parent.service_id, parent.number)
+    .prepare("SELECT COUNT(*) AS total, COALESCE(SUM(state <> 'closed'), 0) AS notClosed, COALESCE(SUM(state = 'closed' AND close_reason IS NOT 'not_planned'), 0) AS completed FROM dev_issues WHERE service_id = ? AND kind = 'child' AND feature = (SELECT feature FROM dev_issues WHERE id = ?)")
+    .bind(parent.service_id, parent.id)
     .first<{ total: number; notClosed: number; completed: number }>();
   return row ?? { total: 0, notClosed: 0, completed: 0 };
 }
@@ -69,7 +69,7 @@ async function closeParent(env: Bindings, issues: DevIssues, parent: ParentRow, 
   const reason = kids.completed > 0 ? "completed" : "not_planned";
   await issues.close(parent.repo, parent.number, reason);
   const noticeId = newId(clockAt(now));
-  const noChildOpen = "NOT EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = ?3 AND c.kind = 'child' AND c.parent_number = ?4 AND c.state <> 'closed')";
+  const noChildOpen = "NOT EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = ?3 AND c.kind = 'child' AND c.feature = (SELECT feature FROM dev_issues WHERE id = ?5) AND c.state <> 'closed')";
   const [closed, notice] = await env.DB.batch([
     env.DB.prepare(`UPDATE dev_issues SET state = 'closed', closed_at = ?1, close_reason = ?2 WHERE id = ?5 AND state = 'open' AND ${noChildOpen}`).bind(now, reason, parent.service_id, parent.number, parent.id),
     env.DB.prepare(
@@ -117,8 +117,8 @@ export async function settleReleases(env: Bindings, issues: DevIssues, now: numb
   const { results } = await env.DB.prepare(
     `SELECT p.id, p.service_id, p.repo, p.number FROM dev_issues p
      WHERE p.kind = 'parent' AND p.state = 'open' AND p.number IS NOT NULL
-       AND EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = p.service_id AND c.kind = 'child' AND c.parent_number = p.number)
-       AND NOT EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = p.service_id AND c.kind = 'child' AND c.parent_number = p.number AND c.state <> 'closed')
+       AND EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = p.service_id AND c.kind = 'child' AND c.feature = p.feature)
+       AND NOT EXISTS (SELECT 1 FROM dev_issues c WHERE c.service_id = p.service_id AND c.kind = 'child' AND c.feature = p.feature AND c.state <> 'closed')
      ORDER BY p.id LIMIT ?`,
   )
     .bind(SETTLE_LIMIT)

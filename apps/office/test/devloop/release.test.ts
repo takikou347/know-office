@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AppError } from "@know-office/core";
 import { REPO } from "../helpers/docs.ts";
 import { child, issuesOf, pacedForge, plan, planOf, withDocs } from "../helpers/issues.ts";
-import { advance, clockIn, rows, tool, useWork } from "../helpers/work.ts";
+import { advance, clockIn, rows, useWork } from "../helpers/work.ts";
 import { fakeTracker } from "../helpers/weekly.ts";
 import { runScheduled } from "../../src/gate/jobs/health.ts";
 import { isReady, settleParent } from "../../src/gate/devloop/release.ts";
@@ -83,8 +83,8 @@ describe("リリースと運用につなぐ", () => {
     expect((await parentNow(parent)).row).toEqual(["open", null]);
     // 作っている途中 (pending) の子がいる間も閉じない
     await closeKids(kids);
-    await world.d1.DB.prepare("INSERT INTO dev_issues (id, service_id, repo, number, parent_number, kind, feature, requirement, req_hash, issue_kind, paths, mark_key, state, created_at) SELECT ?, service_id, repo, NULL, ?, 'child', feature, '作りかけ', 'x', 'feature', '[]', ?, 'pending', 0 FROM dev_issues WHERE kind = 'parent'")
-      .bind(crypto.randomUUID(), parent, "a".repeat(64))
+    await world.d1.DB.prepare("INSERT INTO dev_issues (id, service_id, repo, number, parent_number, kind, feature, requirement, req_hash, issue_kind, paths, mark_key, state, created_at) SELECT ?, service_id, repo, NULL, NULL, 'child', feature, '作りかけ', 'x', 'feature', '[]', ?, 'pending', 0 FROM dev_issues WHERE kind = 'parent'")
+      .bind(crypto.randomUUID(), "a".repeat(64))
       .run();
     await settle(kids[0] ?? 0);
     expect((await parentNow(parent)).row).toEqual(["open", null]);
@@ -178,8 +178,8 @@ describe("リリースと運用につなぐ", () => {
       ...real,
       close: async (repo, number, reason) => {
         await real.close(repo, number, reason);
-        await world.d1.DB.prepare("INSERT INTO dev_issues (id, service_id, repo, number, parent_number, kind, feature, requirement, req_hash, issue_kind, paths, mark_key, state, created_at) SELECT ?, service_id, repo, NULL, ?, 'child', feature, '新しい', 'y', 'feature', '[]', ?, 'pending', 0 FROM dev_issues WHERE kind = 'parent'")
-          .bind(crypto.randomUUID(), parent, "b".repeat(64))
+        await world.d1.DB.prepare("INSERT INTO dev_issues (id, service_id, repo, number, parent_number, kind, feature, requirement, req_hash, issue_kind, paths, mark_key, state, created_at) SELECT ?, service_id, repo, NULL, NULL, 'child', feature, '新しい', 'y', 'feature', '[]', ?, 'pending', 0 FROM dev_issues WHERE kind = 'parent'")
+          .bind(crypto.randomUUID(), "b".repeat(64))
           .run();
       },
     });
@@ -223,6 +223,5 @@ describe("リリースと運用につなぐ", () => {
     expect(reopened).toBe(1);
     expect((await parentNow(parent)).row).toEqual(["open", null]);
     expect(both.some((r) => r.status === "fulfilled")).toBe(true);
-    void tool;
   });
 });
