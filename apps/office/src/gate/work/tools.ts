@@ -38,13 +38,14 @@ import { type GuardDeps, UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { closableService, createIdea, submitStudy } from "../services/flow.ts";
+import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "./attendance.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
 import { issuePlan } from "../devloop/plan.ts";
 import { openDocsPr } from "./docs-pr-open.ts";
 import { openPr } from "./pr-open.ts";
 import { announceNotice } from "../live/publish.ts";
-import { askBoss, finishTask, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
+import { askBoss, type Forge, leaveTask, notifyStaff, staffDo } from "./loop.ts";
 import { readOwnerData } from "./owner-data.ts";
 import { addStaffMessage, reachCheckpoint } from "./progress.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, type NodeRow, updateNode } from "./nodes.ts";
@@ -336,6 +337,8 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
       .prepare("UPDATE reviews SET reviewer_verdict = ?, reviewer_summary = ? WHERE id = ? AND head_sha = ? AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND status = 'review')")
       .bind(input.verdict, input.summary, row.id, input.headSha, made.id),
     mirror.statement,
+    // レビューのタスクも同じバッチで閉じる。判断が書けた時には開いたレビューのタスクが無く、その後に先が進めば立て直せる
+    db.prepare(`UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ? AND status = 'doing' AND ${when.sql}`).bind(call.now, review.id, ...when.args),
   ];
   if (input.verdict === "reject") statements.push(backToTodo(db, made.id, call.now, when));
   const [updated] = await db.batch(statements);
@@ -343,15 +346,22 @@ async function reviewSubmit(env: Bindings, forge: Forge, call: ToolCall, input: 
   // 出来事の node_events は年ごとの記録の D1 にあり、同じバッチに入れられないので、書けた後に足す
   const actor = actorOf(call);
   let merged = false;
-  if (input.verdict === "reject") {
-    await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_rejected", detail: { summary: input.summary } }, actor);
-  } else {
-    const approved = { staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } };
-    // 承認は書いた行から読む。書いた後に先が進んでいれば、その通知が承認を消している
-    merged = await mergeIfReady(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: null }, approved, actor, call.guard ?? UNCONNECTED_DEPS);
+  try {
+    if (input.verdict === "reject") {
+      await appendNodeEvent(env, { nodeId: made.id, staffId: call.staffId, kind: "review_rejected", detail: { summary: input.summary } }, actor);
+    } else {
+      const approved = { staffId: call.staffId, kind: "review_approved", detail: { summary: input.summary } };
+      // 承認は書いた行から読む。書いた後に先が進んでいれば、その通知が承認を消している
+      merged = await mergeIfReady(env, forge, made, { repo: review.repo, branch: review.branch, prNumber: review.prNumber, reviewer: null }, approved, actor, call.guard ?? UNCONNECTED_DEPS);
+    }
+    await auditFrom(env, { at: call.now, actor: call.staffId, action: "review.submit", target: made.id, scope: made.scope, detail: { verdict: input.verdict, merged }, traceId: call.traceId });
+  } finally {
+    // レビューのタスクは判断のバッチで閉じたので、main に入れる所で落ちても離れる。離れないと、閉じたタスクを持ったまま次を取らない
+    // ここで落ちても元のエラーを隠さないよう、投げずにエラーログに残して続ける
+    const kept = (error: unknown) => recordError(env, { source: "gate", level: "error", code: "review_leave_failed", error, traceId: call.traceId }, clock);
+    await appendNodeEvent(env, { nodeId: review.id, staffId: call.staffId, kind: "finished", detail: {} }, actor).catch(kept);
+    await leaveTask(env, call.staffId, "done", call.now).catch(kept);
   }
-  await auditFrom(env, { at: call.now, actor: call.staffId, action: "review.submit", target: made.id, scope: made.scope, detail: { verdict: input.verdict, merged }, traceId: call.traceId });
-  await finishTask(env, call.staffId, review.id, call.now);
   if (input.verdict === "reject" && made.assignee !== null) await notifyStaff(env, made.assignee, call.now, false);
   // 写せなければ記録に残し、5 分ごとの定期ジョブが写し直す
   await sendMirror(env, forge, mirror.id, clock);

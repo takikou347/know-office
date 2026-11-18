@@ -31,7 +31,7 @@ export async function startFakes(options: FakeAccessOptions & { port: number; ga
   // ゲートウェイの鍵だけを通す。ワークスペースの Claude の呼び出しもゲートウェイのプロキシが鍵を付け替えて届く
   const claude = createFakeClaude({ keys: [options.claudeKey] });
   // tarball の 302 の先は、ここに立てた codeload の形の道にする。ゲートウェイは DEV_FAKES_URL (localhost) の下だけを追う
-  const github = createFakeGitHub({ codeloadBase: `http://localhost:${String(options.port)}/codeload` });
+  const github = createFakeGitHub({ codeloadBase: `http://localhost:${String(options.port)}/codeload`, hookUrl: () => `${options.gateBase()}/hooks/v1/github` });
   // 代わりのワークスペースは、出来事も SDK の Claude の呼び出しも手元のゲートウェイの開発の道に送る。Claude の呼び出しはゲートウェイのプロキシからここの代わりの Claude API に届く
   const workspaces = createDevWorkspaces(options.gateBase);
   const app = new Hono().route("/access", access.app).route("/anthropic", claude.app).route("/github", github.app).route("/codeload", github.codeload).route("/workspace", workspaces.app);

@@ -268,6 +268,16 @@ export class Shift {
   }
 
   /**
+   * タスクを離れた時に退勤するかを返す。終わりの時刻の後の待ちと呼び出しはそのタスクのためだけなので、止められているか待っている間も、戻る先がそれなら退勤する
+   * @returns 退勤するか
+   */
+  leavesWithTask(): boolean {
+    const m = this.m;
+    const state = m.state === "stopped" || m.state === "waiting" ? m.back?.state : m.state;
+    return state === "wrapping" || state === "called";
+  }
+
+  /**
    * stopped と waiting の上限を返す。呼び出しなら呼び出しの期限、ほかは終わりの時刻から 30 分。延長中に止められた時は、ずらした後の期限の方が遅ければそちら
    * @returns 時刻。stopped と waiting でなければ null
    */

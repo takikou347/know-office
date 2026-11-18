@@ -2,8 +2,9 @@
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, giveBackBuilderTasks, prototypeService, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
-import { clockInStaff, openTree, scriptReply } from "./helpers/staff-work.ts";
+import { findTaskId, giveBackBuilderTasks, prototypeService, releaseReviewTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
+import { clockIn, scriptReply } from "./helpers/staff.ts";
+import { openTree } from "./helpers/staff-work.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { freeRepoNames, restoreSeedServices, seedMain } from "./helpers/seed.ts";
 import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
@@ -110,13 +111,13 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
     );
 
     try {
-      restoreSchedule = await clockInStaff(page, "builder");
+      restoreSchedule = await clockIn(page, "builder");
       await put("main", base);
       await put(branch, head);
       // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチ名は ko/<タスク ID の頭 8 字>-<name>
       const name = branch.slice("ko/019a7b00-".length);
-      await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use", undefined, "builder");
-      await scriptReply(page, [{ type: "text", text: "PR を出した" }], "end_turn", undefined, "builder");
+      await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use");
+      await scriptReply(page, "builder", [{ type: "text", text: "PR を出した" }], "end_turn");
       // 開発担当に頼むと、開発担当がタスクを取って始める
       expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: new URL(page.url()).origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
 
@@ -150,10 +151,7 @@ test("開発担当が子 Issue の PR を出し、オーナーが承認して ma
         // レビュー担当が持つ「レビュー: …」のタスクは、消さずに取り消して離させる。消すと、持ったまま続きを呼んで落ち、後の通しの社員を塞ぐ
         const list: unknown = await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json();
         const reviewId = findTaskId(list, `レビュー: #${String(issue)} 動画を作る`);
-        if (reviewId !== null) {
-          const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
-          await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } });
-        }
+        if (reviewId !== null) await releaseReviewTask(page, reviewId);
         // 済みの子のタスクは、開発担当が離れているので消してよい。ミラーとレビューも消す
         seedMain(`DELETE FROM github_mirrors WHERE review_id IN (SELECT id FROM reviews WHERE node_id = '${ids.task}'); DELETE FROM reviews WHERE node_id = '${ids.task}'; DELETE FROM dev_issues WHERE id = '${ids.dev}'; DELETE FROM nodes WHERE id = '${ids.task}'`);
       } finally {

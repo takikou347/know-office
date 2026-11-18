@@ -56,4 +56,21 @@ describe("オーナーの指示に合わせる", () => {
     await s.book.forgetDay(jst(21, 20));
     expect(await s.book.call(CALL_TASK, jst(21, 30), { perDay: 1 })).toBe(true);
   });
+  it("止めている間に呼び出しのタスクを離れると、再開を待たずに退勤する", async () => {
+    // 再開で呼び出しに戻ると、タスクの無いまま呼び出しの期限まで残り、次の呼び出しも勤務の中の割り振りも受けない
+    const dropped = hire();
+    expect(await dropped.book.call(CALL_TASK, jst(21))).toBe(true);
+    dropped.at = jst(21);
+    await dropped.book.stop(jst(21, 1));
+    await dropped.book.drop(CALL_TASK.nodeId, jst(21, 2));
+    await dropped.book.resume(jst(21, 3));
+    expect((await dropped.book.status(jst(21, 3))).state).toBe("off");
+    const handed = hire("reviewer");
+    expect(await handed.book.call(CALL_TASK, jst(21))).toBe(true);
+    handed.at = jst(21);
+    await handed.book.stop(jst(21, 1));
+    await handed.book.finish("handed_back", jst(21, 2));
+    await handed.book.resume(jst(21, 3));
+    expect((await handed.book.status(jst(21, 3))).state).toBe("off");
+  });
 });

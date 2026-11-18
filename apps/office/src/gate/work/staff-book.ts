@@ -128,7 +128,7 @@ export class StaffBook {
     const s = await this.#load();
     if (s.m.task?.nodeId !== parsed.data.nodeId) throw new AppError("conflict", "今のタスクと違うチェックポイント");
     await this.#process(s, now);
-    if (s.m.state === "wrapping" || s.m.state === "called") await this.#clockOut(s, now);
+    if (s.leavesWithTask()) await this.#clockOut(s, now);
     await this.#save(s, now);
   }
 
@@ -177,7 +177,7 @@ export class StaffBook {
     if (!s.m.task) throw new AppError("conflict", "タスクを持っていない");
     await this.#process(s, now);
     s.closeTask(now, parsed.data);
-    if (s.m.state === "wrapping" || s.m.state === "called") await this.#clockOut(s, now);
+    if (s.leavesWithTask()) await this.#clockOut(s, now);
     await this.#save(s, now);
   }
 
@@ -306,7 +306,7 @@ export class StaffBook {
     if (s.m.task?.nodeId !== nodeId) return;
     s.closeTask(now, "stopped");
     // 呼び出しはそのタスクのためだけなので、finish と同じく退勤する。残すと次の割り振りで呼び出せない
-    if (s.m.state === "wrapping" || s.m.state === "called") await this.#clockOut(s, now);
+    if (s.leavesWithTask()) await this.#clockOut(s, now);
     await this.#save(s, now);
     // 止めさせるのは離れた事を書いた後。止め終えるまで待たず、終えた後の結果は作業トークンの失効と今のタスクの確かめで捨てる
     await this.workspace.abort(now);

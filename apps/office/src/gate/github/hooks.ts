@@ -26,6 +26,7 @@ import { clockAt } from "../work/attendance.ts";
 import { intakeTask } from "../work/loop.ts";
 import { type Actor, appendNodeEvent } from "../work/nodes.ts";
 import { backToTodo, callMaker } from "../work/review.ts";
+import { synchronize } from "./sync.ts";
 import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
@@ -33,7 +34,6 @@ import { receiveDeploymentStatus, receiveWorkflowRun } from "../services/deploys
 import { receiveDocsPush } from "../devloop/sync.ts";
 import { isDocsRepo } from "../devloop/docs-setting.ts";
 import { devIssueKeyOf } from "../findings/tracker.ts";
-import { docsSynchronized } from "./hooks-docs.ts";
 import { receivePush } from "../services/releases.ts";
 import type { Forge } from "../work/loop.ts";
 
@@ -212,6 +212,12 @@ async function handle(env: Bindings, hook: Hook): Promise<void> {
     await intakeReview(env, hook, record);
     return;
   }
+  if (hook.event === "pull_request" && hook.repo !== null && hook.action === "synchronize") {
+    const pull = PullRequestEvent.safeParse(hook.payload);
+    if (pull.success) await synchronize(env, { repo: hook.repo, number: pull.data.pull_request.number, headSha: pull.data.pull_request.head.sha, digest: hook.digest, now: hook.now }, record);
+    else await record.run();
+    return;
+  }
   const effects = changes(env, hook);
   const results = await db.batch([...effects, record]);
   // App を外した通知は、取り消せた時だけ記録に残す
@@ -246,16 +252,6 @@ function changes(env: Bindings, hook: Hook): D1PreparedStatement[] {
     const suite = CheckSuiteEvent.safeParse(hook.payload);
     if (!suite.success) return [];
     return [db.prepare(`UPDATE reviews SET checks = '[]' WHERE repo = ? AND head_sha = ? AND ${FRESH}`).bind(hook.repo, suite.data.check_suite.head_sha, hook.digest)];
-  }
-  if (hook.event === "pull_request" && hook.repo !== null && hook.action === "synchronize") {
-    const pull = PullRequestEvent.safeParse(hook.payload);
-    if (!pull.success) return [];
-    const { number, head } = pull.data.pull_request;
-    // 先が進んだら、前の先に出た承認は新しい先を確かめていないので、同じ文で消して待ち直す。同じ先の通知がもう一度届いた時は消さない
-    return [
-      db.prepare(`UPDATE reviews SET owner_verdict = CASE WHEN head_sha = ? THEN owner_verdict ELSE NULL END, reviewer_verdict = CASE WHEN head_sha = ? THEN reviewer_verdict ELSE NULL END, head_sha = ?, checks = '[]' WHERE repo = ? AND pr_number = ? AND ${FRESH}`).bind(head.sha, head.sha, head.sha, hook.repo, number, hook.digest),
-      docsSynchronized(db, { repo: hook.repo, number, sha: head.sha, digest: hook.digest }),
-    ];
   }
   const installation = hook.link.installation;
   if (hook.event === "installation" && installation && (hook.action === "deleted" || hook.action === "suspend")) {

@@ -99,6 +99,9 @@ export const GitHubContent = z.object({ type: z.string(), encoding: z.string(), 
 /** プルリクエストの返事のうち使う所 */
 export const GitHubPull = z.object({ number: z.number().int().positive(), base: z.object({ sha: Sha }).loose(), head: z.object({ ref: z.string().optional(), sha: Sha }).loose() }).loose();
 
+/** GET /repos/{o}/{r}/pulls/{n} の返事のうち使う所。state は open か closed で、入った物は closed のまま merged が true になる (GitHub の REST API の Pulls) */
+export const GitHubPullState = z.object({ state: z.enum(["open", "closed"]), merged: z.boolean(), head: z.object({ sha: Sha }).loose() }).loose();
+
 /** GET /repos/{o}/{r}/git/ref/{ref} の返事のうち使う所 */
 export const GitHubRef = z.object({ object: z.object({ sha: Sha }).loose() }).loose();
 

@@ -31,6 +31,7 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
   };
   return {
     openPull: async (input) => (await load()).openPull(input),
+    pullState: async (repo, pr) => (await load()).pullState(repo, pr),
     checkState: async (repo, sha) => (await load()).checkState(repo, sha),
     merge: async (repo, head) => (await load()).merge(repo, head),
     fastForwardable: async (repo, sha) => (await load()).fastForwardable(repo, sha),

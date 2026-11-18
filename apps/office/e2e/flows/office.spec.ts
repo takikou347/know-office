@@ -3,7 +3,7 @@ import { connectGitHub, fakeGitHubRoute, forgetGitHub } from "./helpers/github.t
 import { boxOf, pictureOf, roomOf } from "../helpers/room.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { seedMain } from "./helpers/seed.ts";
-import { clockInReviewer } from "./helpers/staff-work.ts";
+import { clockIn } from "./helpers/staff.ts";
 
 // オフィスの部屋が、本物のゲートウェイのレビューの判断を、配信で届いた出来事として見せる。GitHub は手元の代わりにつなぎ、プルリクエストの変更だけを置く (画面の全体の 3.2)
 
@@ -65,7 +65,7 @@ test.describe("オフィスの部屋", () => {
     // 画面を開いてログインセッションができてから、入口に直に聞く
     await page.goto("/settings");
     await expect(page.getByRole("heading", { level: 3, name: "勤務の時刻", exact: true })).toBeVisible();
-    const restore = await clockInReviewer(page);
+    const restore = await clockIn(page, "reviewer");
     try {
       await page.emulateMedia({ reducedMotion: "reduce" });
       await page.goto("/office");
@@ -88,7 +88,7 @@ test.describe("オフィスの部屋", () => {
     // 画面を開いてログインセッションができてから、入口に直に聞く
     await page.goto("/settings");
     await expect(page.getByRole("heading", { level: 3, name: "勤務の時刻", exact: true })).toBeVisible();
-    const restore = await clockInReviewer(page);
+    const restore = await clockIn(page, "reviewer");
     try {
       await page.goto("/office");
       const halt = page.getByRole("button", { name: "動きを止める" });

@@ -69,14 +69,36 @@ export function giveBackBuilderTasks(ids: string): void {
 }
 
 /**
- * 開発担当が持つ (持っているかもしれない) タスクを、見送りにして離させる。作業中のタスクは画面から取り消せないので、待ちに戻し、担当を開発担当にしてから取り消す。取り消しが前の担当の社員を離れさせる
+ * 社員が持つ (持っているかもしれない) タスクを、見送りにして離させる。作業中のタスクは画面から取り消せないので、待ちに戻し、担当をその社員にしてから取り消す。取り消しが前の担当の社員を離れさせる
+ * @param page 画面を開いたページ
+ * @param id タスク ID
+ * @param staffId 持っているかもしれない社員の ID
+ */
+export async function releaseTask(page: Page, id: string, staffId: string): Promise<void> {
+  seedMain(`UPDATE nodes SET status = 'todo', assignee = '${staffId}' WHERE id = '${id}'`);
+  const { version } = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${id}`)).json()).data;
+  expect((await page.request.patch(`/api/v1/nodes/${id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+}
+
+/**
+ * 開発担当が持つ (持っているかもしれない) タスクを、見送りにして離させる
  * @param page 画面を開いたページ
  * @param id タスク ID
  */
 export async function releaseBuilderTask(page: Page, id: string): Promise<void> {
-  seedMain(`UPDATE nodes SET status = 'todo', assignee = 'builder' WHERE id = '${id}'`);
-  const { version } = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${id}`)).json()).data;
-  expect((await page.request.patch(`/api/v1/nodes/${id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+  await releaseTask(page, id, "builder");
+}
+
+/**
+ * レビュー担当が持つ (持っているかもしれない) 「レビュー: …」のタスクを見送りにし、レビュー担当が離れるまで待つ。消すと、持ったまま続きを呼んで落ち、後の通しの社員を塞ぐ
+ * @param page 画面を開いたページ
+ * @param id タスク ID
+ */
+export async function releaseReviewTask(page: Page, id: string): Promise<void> {
+  await expect(() => releaseTask(page, id, "reviewer")).toPass({ timeout: 10_000 });
+  await expect
+    .poll(async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((x) => x.id === "reviewer")?.nodeId ?? null, { timeout: 30_000 })
+    .not.toBe(id);
 }
 
 /**

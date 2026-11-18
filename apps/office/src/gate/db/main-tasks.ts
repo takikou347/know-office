@@ -49,21 +49,25 @@ export const approvals = sqliteTable("approvals", {
 });
 
 /** レビュー */
-export const reviews = sqliteTable("reviews", {
-  id: id(),
-  nodeId: text("node_id").notNull(),
-  repo: text("repo").notNull(),
-  prNumber: integer("pr_number").notNull(),
-  branch: text("branch").notNull(),
-  baseSha: text("base_sha").notNull(),
-  headSha: text("head_sha").notNull(),
-  docsHeadSha: text("docs_head_sha"),
-  lastSeenSha: text("last_seen_sha"),
-  checks: json("checks"),
-  reviewerSummary: text("reviewer_summary"),
-  reviewerVerdict: text("reviewer_verdict"),
-  ownerVerdict: text("owner_verdict"),
-});
+export const reviews = sqliteTable(
+  "reviews",
+  {
+    id: id(),
+    nodeId: text("node_id").notNull(),
+    repo: text("repo").notNull(),
+    prNumber: integer("pr_number").notNull(),
+    branch: text("branch").notNull(),
+    baseSha: text("base_sha").notNull(),
+    headSha: text("head_sha").notNull(),
+    docsHeadSha: text("docs_head_sha"),
+    lastSeenSha: text("last_seen_sha"),
+    checks: json("checks"),
+    reviewerSummary: text("reviewer_summary"),
+    reviewerVerdict: text("reviewer_verdict"),
+    ownerVerdict: text("owner_verdict"),
+  },
+  (t) => [uniqueIndex("reviews_node").on(t.nodeId)],
+);
 
 /** レビューの書き込み。追記専用 */
 export const reviewNotes = sqliteTable("review_notes", {

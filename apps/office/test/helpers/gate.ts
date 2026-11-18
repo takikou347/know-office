@@ -183,9 +183,12 @@ function githubPath(github: TestGate["github"], path: string): string {
     const content = github.contents.get(`${ref}:${decodeURIComponent(name)}`);
     github.set(`GET ${route}`, content === undefined ? undefined : { type: "file", encoding: "base64", content: Buffer.from(content).toString("base64") });
   }
-  // ブランチの先は、置いた物があればそれを、無ければ b だけの sha を返す
-  const head = /^\/repos\/[^/]+\/[^/]+\/git\/ref\/heads\/(.+)$/.exec(path);
-  if (head) github.set(`GET ${path}`, { ref: "refs/heads/x", object: { sha: github.branchHeads.get(decodeURIComponent(head[1] ?? "")) ?? "b".repeat(40) } });
+  // ブランチの先は、置いた物か、代わりの GitHub が push で進めた先があればそれを、無ければ b だけの sha を返す
+  const head = /^\/repos\/([^/]+\/[^/]+)\/git\/ref\/heads\/(.+)$/.exec(path);
+  if (head) {
+    const branch = decodeURIComponent(head[2] ?? "");
+    github.set(`GET ${path}`, { ref: "refs/heads/x", object: { sha: github.branchHeads.get(branch) ?? github.heads.get(`${head[1] ?? ""}:${branch}`) ?? "b".repeat(40) } });
+  }
   return path;
 }
 

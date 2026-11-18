@@ -3,7 +3,7 @@ import type { KeyObject } from "node:crypto";
 import type { Hono } from "hono";
 import { z } from "zod";
 import type { FakeIssues } from "./github-issues.ts";
-import type { FakePosted, FakeTreeEntry } from "./github-pulls.ts";
+import type { FakePosted, FakePull, FakeTreeEntry } from "./github-pulls.ts";
 
 /** 代わりの GitHub の App が持てる権限。know-office の manifest と同じ */
 export const Permission = z.enum(["read", "write"]);
@@ -103,6 +103,8 @@ export type FakeGitHub = {
   codeload: Hono;
   /** Issue の置き場と受けた書き。一覧、作成、更新、コメント、sub-issue に GitHub と同じ決まりで答える */
   issues: FakeIssues;
+  /** 出したプルリクエスト。「owner/name#番号」から。テストが閉じたり入れたりする */
+  pullRequests: Map<string, FakePull>;
 };
 
 /** 代わりの GitHub の設定 */
@@ -113,4 +115,6 @@ export type FakeGitHubOptions = {
   appKey?: () => { privateKey: KeyObject; publicKey: KeyObject };
   /** tarball の 302 の先。無ければ https://codeload.github.com */
   codeloadBase?: string;
+  /** 通知を送るゲートウェイの宛先を返す。無ければ /__fake/pushes は通知を送らない */
+  hookUrl?: () => string;
 };

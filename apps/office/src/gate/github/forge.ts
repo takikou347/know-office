@@ -16,6 +16,7 @@ import {
   GitHubPosted,
   GitHubPostedList,
   GitHubPull,
+  GitHubPullState,
   GitHubRef,
   GitHubRepo,
   GitHubRuleset,
@@ -400,6 +401,8 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
       const pull = await call(input.repo, { pull_requests: "write" }, { method: "POST", path: "/pulls" }, GitHubPull, { title: input.title, head: input.branch, base: "main", body: input.body });
       return { number: pull.number, baseSha: pull.base.sha, headSha: pull.head.sha };
     },
+    // GET /repos/{o}/{r}/pulls/{n}。入ったプルリクエストは state が closed のまま merged が true になる
+    pullState: async (repo, pr) => call(repo, { pull_requests: "read" }, { method: "GET", path: `/pulls/${String(pr)}` }, GitHubPullState).then((pull) => ({ state: pull.merged ? "merged" : pull.state, headSha: pull.head.sha })),
     checkState: async (repo, sha) => {
       // 確かめたコミットのチェックを読む。プルリクエストの今の先は、確かめた後に進んでいるかもしれない
       const runs = await call(repo, { checks: "read" }, { method: "GET", path: `/commits/${commitSha(sha)}/check-runs` }, GitHubCheckRuns);

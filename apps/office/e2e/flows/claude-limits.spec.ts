@@ -3,7 +3,8 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/test.ts";
 import { FAKES } from "../helpers/fakes.ts";
 import { noticeBar, readNoticesTitled, SPEND_TITLE } from "./helpers/notice-bar.ts";
-import { addTask, clockInReviewer, NodeDetail, NodeStatus, openTree, PURPOSE, Runs, scriptFinish, type Tree, Trees } from "./helpers/staff-work.ts";
+import { clockIn } from "./helpers/staff.ts";
+import { addTask, NodeDetail, NodeStatus, openTree, PURPOSE, Runs, scriptFinish, type Tree, Trees } from "./helpers/staff-work.ts";
 
 /** 使用の上限で止めるタスクの題の頭。前の通しが落ちて残した物を探す */
 const SPEND_TASK = "上限で止まるタスク";
@@ -51,7 +52,7 @@ test.describe("落ちても続きから", () => {
     test.slow();
     await openTree(page);
     await clearSpendLimit(page);
-    const restore = await clockInReviewer(page);
+    const restore = await clockIn(page, "reviewer");
     try {
       await spendLimit(page, "monthly");
       await page.goto("/goals");

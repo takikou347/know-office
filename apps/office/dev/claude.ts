@@ -334,6 +334,13 @@ export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
       else limits.set(input.data.staffId, input.data.limit);
       return c.body(null, 204);
     })
+    // 社員に積んだまま残った返事を外す。途中で落ちた通しの返事を、後でその社員が取ったほかのタスクに返さない
+    .delete("/__fake/responses/:staffId", (c) => {
+      const staffId = StaffId.safeParse(c.req.param("staffId"));
+      if (!staffId.success) return c.json({ type: "error", error: { type: "invalid_request_error", message: "社員の形でない" } }, 400);
+      for (let at = queue.length - 1; at >= 0; at -= 1) if (queue[at]?.staffId === staffId.data) queue.splice(at, 1);
+      return c.body(null, 204);
+    })
     .get("/__fake/requests", (c) => c.json(requests))
     .get("/__fake/keys", (c) => c.json({ keys: [...accepted] }))
     .put("/__fake/keys", async (c) => {

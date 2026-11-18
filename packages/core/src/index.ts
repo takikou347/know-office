@@ -86,6 +86,7 @@ export {
   GitHubContent,
   GitHubPullFiles,
   GitHubPull,
+  GitHubPullState,
   GitHubRef,
   GitHubRepo,
   GitHubRules,

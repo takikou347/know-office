@@ -1,4 +1,4 @@
-// 5 分ごとの定期ジョブ。部分ごとの稼働を残し、社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
+// 5 分ごとの定期ジョブ。部分ごとの稼働を残し、社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直し、レビューのタスクの取りこぼしを立て直す (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.6)
 import { type Clock, newId, StaffId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -7,6 +7,7 @@ import type { Bindings } from "../env.ts";
 import { SHARED_TOKENS } from "../github/app.ts";
 import { vaultForge } from "../github/vault-forge.ts";
 import { retryMirrors } from "../github/mirror.ts";
+import { recheckReviews } from "../work/review.ts";
 import { connectRollback, UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { collectMetrics, UNCONNECTED_ANALYTICS } from "../services/deploys.ts";
 import { checkOverruns, checkThresholds } from "../guard/observe.ts";
@@ -89,6 +90,8 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
   ctx.waitUntil(
     checkStorage(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "storage_check_failed", error }, clock)),
   );
+  // レビューのタスクの無いままレビューを待つタスクに、レビューのタスクを立て直す。書く順の間を拾わないよう 10 分の猶予を置く
+  ctx.waitUntil(recheckReviews(env, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "review_recheck_failed", error }, clock)));
   // 1 つのタスクの最長時間は 5 分ごとに見る。最長の 4 時間に比べて十分に細かい
   ctx.waitUntil(
     checkOverruns(env, clock.now(), UNCONNECTED_DEPS).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "overrun_check_failed", error }, clock)),

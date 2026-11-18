@@ -1,5 +1,6 @@
 // レビュー: オーナーの承認と差し戻し、行の指摘、その場の直しを受け、GitHub のプルリクエストに写す (API の reviews、タスクとレビューの 3.6)
 import { createRoute, z } from "@hono/zod-openapi";
+import { sql } from "drizzle-orm";
 import { AppError, Commit, CreateCommitInput, CreateNoteInput, newId, ReviewNote, ReviewVerdict, ReviewVerdictInput } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { enqueueMirror, sendMirror } from "../github/mirror.ts";
@@ -7,7 +8,7 @@ import { audit } from "../ledger/record.ts";
 import { createdResponse, okResponse, problems } from "../openapi.ts";
 import { created, ok } from "../respond.ts";
 import { type Actor, appendNodeEvent, findNode } from "../work/nodes.ts";
-import { backToTodo, callMaker, findReview, mergeIfReady, repoRefusal } from "../work/review.ts";
+import { askReview, backToTodo, callMaker, findReview, mergeIfReady, repoRefusal, reviewAsked } from "../work/review.ts";
 
 const router = createRouter();
 
@@ -79,7 +80,7 @@ const createReviewCommitRoute = createRoute({
     "`baseSha` が現在の `head_sha` と一致することを確認する",
     "変更禁止のパスを変えていないかをルールで確認する",
     "App の contents の書きに絞った鍵で、Git Data API でブランチにコミットを追加し、force なしでブランチの先を進める",
-    "`baseSha` のままの時だけ `head_sha` を新しいコミットにし、チェックの結果を空にする",
+    "`baseSha` のままの時だけ、`head_sha` を新しいコミットにしてチェックの結果と承認を空にする事と、レビュー担当のレビューのタスクを立て直す事を 1 回のバッチで書く。開いたレビューのタスクがある時と、新しいコミットに承認がもう出ている時は立てない",
     "監査ログに `review.commit` を記録する",
   ],
   "x-errors": [
@@ -163,8 +164,22 @@ export const reviewRoutes = router
     if (refusal !== null) throw new AppError("rule_denied", refusal.reason);
     // GitHub の側でブランチの先が進んでいれば、force を付けないので conflict で断られる
     const sha = await c.var.forge.commitFile(review.repo, review.branch, { parent: input.baseSha, path: input.path, content: input.content, message: input.message });
-    // 同じ push の synchronize の通知が先に届いていれば、もう新しい先になっている。先が進むので、前の先に出た承認は同じ文で消して待ち直す
-    await c.env.DB.prepare("UPDATE reviews SET head_sha = ?, checks = '[]', owner_verdict = NULL, reviewer_verdict = NULL WHERE id = ? AND head_sha = ?").bind(sha, review.id, input.baseSha).run();
+    // 同じ push の synchronize の通知が先に届いていれば、もう新しい先になっている。先が進むので、前の先に出た承認は同じ文で消して待ち直し、同じバッチでレビュー担当に確かめ直しを求める
+    // 求めるのは新しい先の承認が消えたままの時だけ (synchronize と同じ守り)。通知が先に届き、レビュー担当がその先を承認して閉じた後なら立てない
+    const db = c.env.DB;
+    const actor: Actor = { by: "system", now: c.var.clock.now(), traceId: c.var.traceId };
+    const asked = await askReview(
+      c.env,
+      await findNode(db, nodeId),
+      { repo: review.repo, branch: review.branch, prNumber: review.prNumber },
+      actor,
+      sql`EXISTS (SELECT 1 FROM reviews WHERE id = ${review.id} AND head_sha = ${sha} AND reviewer_verdict IS NULL AND owner_verdict IS NULL)`,
+    );
+    const results = await db.batch([
+      db.prepare("UPDATE reviews SET head_sha = ?, checks = '[]', owner_verdict = NULL, reviewer_verdict = NULL WHERE id = ? AND head_sha = ?").bind(sha, review.id, input.baseSha),
+      ...(asked ? [asked.statement] : []),
+    ]);
+    await reviewAsked(c.env, asked, results[1], actor);
     await audit(c, "review.commit", nodeId, { repo: review.repo, sha, path: input.path });
     return created(c, { sha }, `/api/v1/reviews/${nodeId}/commits/${sha}`);
   });

@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { E2E_STATE, PERSIST_ENV } from "../../helpers/state.ts";
+import { z } from "zod";
 
 const office = join(import.meta.dirname, "../../..");
 
@@ -51,6 +52,16 @@ export function runLocalWrangler(args: string[]): void {
  */
 export function seedMain(sql: string): void {
   runLocalWrangler(["exec", "wrangler", "d1", "execute", "DB", "--local", `--command=${sql}`]);
+}
+
+/**
+ * 手元の主の D1 (DB) から行を読む。通しが書き換える行の元の値を読んでおき、終わる時に戻すため
+ * @param sql 読む SQL。値はテストが決めた物だけを入れ、外から来た文字を入れない
+ * @returns 読んだ行
+ */
+export function readMain(sql: string): unknown[] {
+  const out = execFileSync("pnpm", withE2eState(["exec", "wrangler", "d1", "execute", "DB", "--local", "--json", `--command=${sql}`]), { cwd: office, stdio: "pipe", env: { ...process.env, [PERSIST_ENV]: E2E_STATE } });
+  return z.array(z.object({ results: z.array(z.unknown()) })).parse(JSON.parse(String(out))).flatMap((r) => r.results);
 }
 
 /**

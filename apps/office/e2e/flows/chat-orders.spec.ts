@@ -4,7 +4,8 @@ import { z } from "zod";
 import { FAKES } from "../helpers/fakes.ts";
 import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
-import { ownerPasskey, sayToReviewer } from "./helpers/staff-work.ts";
+import { ownerPasskey } from "./helpers/staff.ts";
+import { sayToReviewer } from "./helpers/staff-work.ts";
 
 /**
  * 設定の画面で会話の言葉の指示を開くか閉じる。開く時はパスキーで確かめる

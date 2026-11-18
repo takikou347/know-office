@@ -1,5 +1,5 @@
 // 条件が合う時だけ 1 行を足す INSERT ... SELECT ... WHERE。読んだ状態のままの時だけ書く batch に入れる
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { getTableColumns, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -33,4 +33,17 @@ const RunResult = z.object({ meta: z.object({ changes: z.number() }).loose() }).
 export async function insertedWhen<T extends SQLiteTable>(db: D1Database, table: T, row: T["$inferSelect"], when: SQL): Promise<boolean> {
   const result: unknown = await insertWhen(db, table, row, when).run();
   return RunResult.parse(result).meta.changes > 0;
+}
+
+/**
+ * 条件が合う時だけ行を足す文を、D1 の batch に直に渡せる文にする。ほかの D1 の文と同じバッチに入れる所で使う
+ * @param db D1
+ * @param table 足すテーブル
+ * @param row 足す行。全部のカラムを持つ
+ * @param when 足す条件
+ * @returns D1 の文
+ */
+export function insertWhenStatement<T extends SQLiteTable>(db: D1Database, table: T, row: T["$inferSelect"], when: SQL): D1PreparedStatement {
+  const query = insertWhen(db, table, row, when).toSQL();
+  return db.prepare(query.sql).bind(...query.params);
 }

@@ -2,9 +2,10 @@
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
+import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, releaseReviewTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
 import { restoreSeedServices, seedMain } from "./helpers/seed.ts";
-import { clockInStaff, Held, openTree, scriptReply } from "./helpers/staff-work.ts";
+import { clockIn, scriptReply } from "./helpers/staff.ts";
+import { Held, openTree } from "./helpers/staff-work.ts";
 
 /** 通しの間だけ開発担当から外したタスクの ID。後始末で戻す */
 const state = { aside: "" };
@@ -85,7 +86,7 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
 
   let restoreSchedule: (() => Promise<void>) | null = null;
   try {
-    restoreSchedule = await clockInStaff(page, "builder");
+    restoreSchedule = await clockIn(page, "builder");
     await put(REPO, "main", codeBase);
     await put(REPO, codeBranch, codeHead);
     await put(docs, "main", docsBase);
@@ -94,9 +95,9 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
     const used = z.array(z.object({ number: z.number() })).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${docs}/issues?state=all&per_page=100`, GITHUB)).json());
     const docsPr = Math.max(0, ...used.map((i) => i.number)) + 1;
     // 代わりの Claude が、開発担当に docs_pr_open、続けて docsPr を結んだ pr_open を呼ばせて終える
-    await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_docs_pr_open", name: "mcp__staff__docs_pr_open", input: { name: docsName, title: "概要を直す", body: "仕様が変わった" } }], "tool_use", undefined, "builder");
-    await scriptReply(page, [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name: codeName, title: "動画を作る", body: "動画を作った", docsPr } }], "tool_use", undefined, "builder");
-    await scriptReply(page, [{ type: "text", text: "PR を出した" }], "end_turn", undefined, "builder");
+    await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_docs_pr_open", name: "mcp__staff__docs_pr_open", input: { name: docsName, title: "概要を直す", body: "仕様が変わった" } }], "tool_use");
+    await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name: codeName, title: "動画を作る", body: "動画を作った", docsPr } }], "tool_use");
+    await scriptReply(page, "builder", [{ type: "text", text: "PR を出した" }], "end_turn");
     expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
 
     const detail = async () => z.object({ data: z.object({ status: z.string(), events: z.array(z.object({ kind: z.string(), detail: z.record(z.string(), z.unknown()) }).loose()) }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${ids.task}`)).json()).data;
@@ -136,10 +137,7 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
     }
     const list: unknown = await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json();
     const reviewId = findTaskId(list, `レビュー: #${String(issue)} 動画を作る`);
-    if (reviewId !== null) {
-      const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
-      await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: origin }, data: { version, status: "dropped" } });
-    }
+    if (reviewId !== null) await releaseReviewTask(page, reviewId);
     // 開発担当が持ったままのタスクを消すと、続きを呼んで落ち、後の通しの社員を塞ぐ。見送りにして離させ、離れてから消す。済みのタスクが溜まると、前処理の 100 件の数えを超える
     try {
       // 待ちに戻した間に開発担当が取ると版が食い違うので、読み直して取り消す

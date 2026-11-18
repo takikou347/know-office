@@ -186,6 +186,18 @@ describe("開発環境の代わりの物", () => {
     expect(await res.json()).toMatchObject({ content: [{ type: "text", text: "待ってから" }] });
   });
 
+  it("社員に積んだまま残った返事を外すと、その社員の呼び出しに返さず、ほかの社員に積んだ物は残す", async () => {
+    const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
+    const script = (staffId: string, text: string) => claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId, content: [{ type: "text", text }] }) });
+    await script("builder", "開発担当へ");
+    await script("reviewer", "レビュー担当へ");
+    const cleared = await claude.app.request("/__fake/responses/builder", { method: "DELETE" });
+    expect(cleared.status).toBe(204);
+    const call = (key: string) => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": key }, body: BODY });
+    expect((await call(ticket("builder"))).status).toBe(500);
+    expect(await (await call(ticket("reviewer"))).json()).toMatchObject({ content: [{ type: "text", text: "レビュー担当へ" }] });
+  });
+
   it("社員の形でない渡し先を付けて積もうとすると 400 で断る", async () => {
     const claude = createFakeClaude({ keys: ["test-key"], workTokens: true });
     const res = await claude.app.request("/__fake/responses", { method: "POST", body: JSON.stringify({ staffId: "nobody", content: [{ type: "text", text: "x" }] }) });

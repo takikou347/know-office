@@ -7,7 +7,7 @@ import { decodeJwt } from "jose";
 import { z } from "zod";
 import { createFakeArchives } from "./github-archive.ts";
 import { createFakeIssues } from "./github-issues.ts";
-import { createFakePulls, type FakeActor, type FakePosted, type FakeTreeEntry } from "./github-pulls.ts";
+import { createFakePulls, type FakeActor, type FakePosted, type FakePull, type FakeTreeEntry } from "./github-pulls.ts";
 import { type FakeApp, type FakeGitHub, type FakeGitHubOptions, type FakeToken, type GitHubRequest, Manifest, Permission } from "./github-types.ts";
 
 export type { FakeApp, FakeGitHub, FakeGitHubOptions, FakeToken, GitHubRequest } from "./github-types.ts";
@@ -43,6 +43,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   const heads = new Map<string, string>();
   const trees = new Map<string, FakeTreeEntry[]>();
   const posted: FakePosted = { reviews: [], comments: [] };
+  const pullRequests = new Map<string, FakePull>();
   const pick: FakeGitHub["pick"] = [
     { fullName: "example/knowidea-ui", private: false }, { fullName: "example/know-office", private: false },
     { fullName: "example/knowidea-docs", private: true }, { fullName: "example/other-docs", private: true },
@@ -122,7 +123,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
 
   const archives = createFakeArchives(options.codeloadBase ?? "https://codeload.github.com");
   const issues = createFakeIssues({ allows, next, now });
-  const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, claimNumber: (repo, title) => issues.seed(repo, { title, pull: true }).number, sent, heads, trees, posted });
+  const pulls = createFakePulls({ actorOf, allows, installationOf: (token) => tokens.get(token ?? "")?.installationId ?? 0, next, claimNumber: (repo, title) => issues.seed(repo, { title, pull: true }).number, sent, heads, trees, posted, pullRequests });
 
   const app = new Hono().use("*", requireUserAgent)
     .post("/__fake/routes", async (c) => {
@@ -131,7 +132,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       return c.body(null, 204);
     })
     .get("/__fake/requests", (c) => c.json(requests))
-    .route("/", flowRoutes(apps, installations, failures))
+    .route("/", flowRoutes(apps, failures, { installations, pulls, hookUrl: options.hookUrl }))
     // 画面: オーナーが「作成」を押すと App ができ、manifest の redirect_url に code と state を付けて戻す
     .post("/web/settings/apps/new", async (c) => {
       const form = await c.req.parseBody();
@@ -308,16 +309,15 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       if (/^POST \/app\/installations\/\d+\/access_tokens$/.test(route)) {
         return c.json({ token: `ghs_test${String(next())}`, expires_at: "2099-01-01T00:00:00Z" }, 201);
       }
-      const failed = takeFailure(route);
+      // 置いた失敗と、同じブランチの開いたプルリクエストがある時の 422 を先に返す
+      const failed = takeFailure(route) ?? pulls.refuse(route, text);
       if (failed) return failed;
       // Issue とプルリクエストと Git の答えは、/github の下に立てた時の頭 (/github) を除いた道で探す
       const bare = `${c.req.method} ${c.req.path.slice(mountedAt(c.req.routePath).length)}`;
       if (!routes.has(route)) return issues.answer(bare, text, token, new URL(c.req.url).searchParams) ?? pulls.answer(bare, text, token, new URL(c.req.url).searchParams) ?? c.json({ message: "Not Found" }, 404);
       const body = routes.get(route);
-      // 出したプルリクエストは、出した者を覚える。自分で可を付ける事を断るのに使う
-      const opened = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
-      const number = z.object({ number: z.number() }).loose().safeParse(body);
-      if (opened !== undefined && number.success) pulls.opened(opened, number.data.number, token);
+      // 出したプルリクエストは、出した者と、ブランチと先を覚える。自分で可を付ける事を断るのと、状態を返すのに使う
+      pulls.placed(route, body, text, token);
       return c.json(body);
     });
 
@@ -358,5 +358,6 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     archives: archives.archives,
     codeload: archives.codeload,
     issues,
+    pullRequests,
   };
 }

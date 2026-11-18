@@ -70,19 +70,28 @@ interface FileDiffPanelProps {
   onNote: (text: string) => void;
 }
 
+/**
+ * 行を見分ける印を作る。差分の行は描くたびに作り直されるので、物の同じさでなく種類と行の番号で比べる
+ * @param line 差分の行
+ * @returns 印
+ */
+function lineKey(line: DiffLine): string {
+  return `${line.type}:${String(line.oldNumber ?? "")}:${String(line.newNumber ?? "")}`;
+}
+
 /** 1 ファイルの差分。開いた時に入口から読む */
 function FileDiffPanel({ nodeId, file, since, head, onNote }: FileDiffPanelProps) {
   const loaded = useFileDiff(nodeId, file.path, since, head);
-  const [target, setTarget] = useState<DiffLine | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
   if (loaded.state === "loading") return <p role="status">{file.path} の変更を読んでいます</p>;
   if (loaded.state === "failed") return <FailureAlert title={`${file.path} の変更を読めませんでした`} failed={loaded} />;
   if (loaded.data.hunks.length === 0) return <p>行の差はありません。大きすぎるファイルと文字でないファイルは、GitHub が行の差を返しません</p>;
   return (
     <DiffView
       files={[toDiffFile(loaded.data, file.status)]}
-      onLineComment={(_f, line) => setTarget(line)}
+      onLineComment={(_f, line) => setTarget(lineKey(line))}
       renderAfterLine={(_f, line) =>
-        line === target ? (
+        lineKey(line) === target ? (
           <NoteForm
             nodeId={nodeId}
             path={file.path}

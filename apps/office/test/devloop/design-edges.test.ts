@@ -1,7 +1,7 @@
 // 設計書を書くタスクと設計書の PR の、同時、設定の変わり、置き場の重なり、道と名前の境目 (開発の回し方の 3.2)
 import { describe, expect, it } from "vitest";
 import { wrapDb, stepUp } from "../helpers/github.ts";
-import { api, rows, useWork } from "../helpers/work.ts";
+import { api, rows, staffOf, useWork } from "../helpers/work.ts";
 import { DOCS, DOCS2, REPO, BIG_NAME, HIDDEN, HEAD, NEXT, MAIN, README, GOOD, failure, link, putDocs, studied, toPrototype, prototyped, designTasks, docsAt, pullOnGitHub, tool, takeDesign, openedDocsPull, reviewerApproves, events, mainMoves, pullsOpened, synchronize } from "../helpers/docs.ts";
 
 /**
@@ -220,5 +220,19 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     expect(await toPrototype(world, id, DOCS.toUpperCase(), 409)).toMatchObject({ code: "conflict" });
     await world.d1.DB.prepare("UPDATE services SET repo = ? WHERE id = ?").bind(DOCS2.toUpperCase(), id).run();
     expect(await putDocs(world, DOCS2, 1, 422)).toMatchObject({ code: "validation_failed" });
+  });
+
+  it("差し戻しの後に同じプルリクエストで出し直す設計書の PR も、変えた道が外れていれば断る", async () => {
+    const task = await openedDocsPull(world);
+    // レビュー担当が差し戻し、開発担当が同じタスクを取り直す
+    await tool(world, "reviewer", "review_submit", { verdict: "reject", summary: "置き場を直す", headSha: HEAD });
+    await staffOf(world, "builder").pull(world.clock.now());
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
+    // 直した先が services/<名前>/ の外を変えていれば、出し直しも GitHub に書かずに断る
+    world.gate.github.files = [{ filename: "WRITING.md" }];
+    expect((await failure(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }))).code).toBe("validation_failed");
+    expect(pullsOpened(world)).toBe(1);
+    expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
+    expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM nodes WHERE task_kind = 'review' AND status = 'todo'")).toEqual([{ n: 0 }]);
   });
 });

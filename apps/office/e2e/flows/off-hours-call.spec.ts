@@ -2,7 +2,8 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders, seedMain } from "./helpers/seed.ts";
-import { CARRY_TITLE, claudeReceived, dropLeftovers, finishedBy, NodeStatus, openTree, ownerPasskey, PROJECT, reviewerState, sayToReviewer, scriptFinish } from "./helpers/staff-work.ts";
+import { ownerPasskey, staffState } from "./helpers/staff.ts";
+import { CARRY_TITLE, claudeReceived, dropLeftovers, finishedBy, NodeStatus, openTree, PROJECT, sayToReviewer, scriptFinish } from "./helpers/staff-work.ts";
 
 /**
  * 設定の画面で時間外の呼び出しを開くか閉じる。開く時はパスキーで確かめる
@@ -32,7 +33,7 @@ async function restReviewer(page: Page): Promise<void> {
   await expect(page.getByText("レビュー担当を今日は休みにしました")).toBeVisible();
   // 同じ日に流し直しても時間外の呼び出しの回数が上限に届かないよう、開発の道で数え直す。休みの日なので出勤はしない
   expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);
-  await expect.poll(() => reviewerState(page), { timeout: 30_000 }).toBe("off");
+  await expect.poll(() => staffState(page, "reviewer"), { timeout: 30_000 }).toBe("off");
 }
 
 /**
@@ -69,7 +70,7 @@ test.describe("オーナーの指示に合わせる", () => {
       await page.goto("/staff/reviewer?tab=talk");
       await expect(bubble.getByText("次のタスクの頭で渡しました")).toBeVisible();
       // 頼まれたタスクを終えたら退勤する
-      await expect.poll(() => reviewerState(page), { timeout: 30_000 }).toBe("off");
+      await expect.poll(() => staffState(page, "reviewer"), { timeout: 30_000 }).toBe("off");
     } finally {
       try {
         await setOffHoursCall(page, false);
@@ -91,7 +92,7 @@ test.describe("オーナーの指示に合わせる", () => {
       const bubble = await sayToReviewer(page, `閉じた時間外の話しかけ ${String(Date.now())}`);
       await expect(bubble.getByText("次のタスクで渡します")).toBeVisible();
       // 発言を返した後も、社員は退勤したままでタスクは待ちのまま
-      expect(await reviewerState(page)).toBe("off");
+      expect(await staffState(page, "reviewer")).toBe("off");
       expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status).toBe("todo");
     } finally {
       cancelLeftOrders("reviewer");

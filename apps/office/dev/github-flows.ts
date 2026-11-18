@@ -3,6 +3,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { sendWebhook } from "./github-hooks.ts";
 import { renewAppKey } from "./github-keys.ts";
+import type { FakePulls } from "./github-pulls.ts";
 import type { FakeApp } from "./github-types.ts";
 
 /** 代わりの GitHub に通知を送らせる要求。種類と本文。installation は代わりの GitHub が付ける */
@@ -15,6 +16,19 @@ const FakeFailure = z.object({
   times: z.number().int().min(1).max(10).default(1),
   headers: z.record(z.string(), z.string()).optional(),
 });
+
+/** ブランチの先を進める要求。画面の通しが、開発担当の push の代わりに送る */
+const FakePush = z.object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), branch: z.string().min(1) }).strict();
+
+/** 先を進めて通知を送るのに使う、代わりの GitHub の中身 */
+export type PushDeps = {
+  /** インストール。ID から、App ID と選んだリポジトリ */
+  installations: Map<number, { appId: number; repos: string[] }>;
+  /** プルリクエストの代わり */
+  pulls: FakePulls;
+  /** 通知を送るゲートウェイの宛先を返す。無ければ通知を送らない */
+  hookUrl: (() => string) | undefined;
+};
 
 /** 道ごとの、置いた失敗と残りの回数 */
 export type FakeFailures = Map<string, { status: number; left: number; headers?: Record<string, string> }>;
@@ -37,11 +51,11 @@ export function failureTaker(failures: FakeFailures): (route: string) => Respons
 /**
  * 画面の通しから呼ぶ口を作る
  * @param apps 作った App
- * @param installations インストール。ID から、App ID と選んだリポジトリ
  * @param failures 道ごとの、置いた失敗と残りの回数
+ * @param push 先を進めて通知を送るのに使う中身
  * @returns 口
  */
-export function flowRoutes(apps: Map<number, FakeApp>, installations: Map<number, { appId: number }>, failures: FakeFailures): Hono {
+export function flowRoutes(apps: Map<number, FakeApp>, failures: FakeFailures, push: PushDeps): Hono {
   return (
     new Hono()
       // 置いた回数だけ、その道に失敗を返す
@@ -49,6 +63,15 @@ export function flowRoutes(apps: Map<number, FakeApp>, installations: Map<number
         const { route, status, times, headers } = FakeFailure.parse(await c.req.json());
         failures.set(route, { status, left: times, ...(headers ? { headers } : {}) });
         return c.body(null, 204);
+      })
+      // 開発担当が push したのと同じく、ブランチの先を進め、そのブランチの開いたプルリクエストの synchronize の通知をゲートウェイに送る
+      .post("/__fake/pushes", async (c) => {
+        const { repo, branch } = FakePush.parse(await c.req.json());
+        // 前の通しがつないだ App の入れ先も残るので、そのリポジトリに入れた最後の入れ先 (今つないでいる物) の鍵で送る
+        const [installationId = 0, inst] = [...push.installations.entries()].findLast(([, i]) => i.repos.includes(repo)) ?? [];
+        const secret = inst ? apps.get(inst.appId)?.webhookSecret : undefined;
+        const url = push.hookUrl?.();
+        return c.json(await push.pulls.pushed(repo, branch, url === undefined || secret === undefined ? null : { url, secret, installationId }));
       })
       // 置いた失敗を全部外す。画面の通しの片付けに使う
       .delete("/__fake/failures", (c) => {
@@ -59,7 +82,7 @@ export function flowRoutes(apps: Map<number, FakeApp>, installations: Map<number
       .post("/__fake/hooks", async (c) => {
         const input = FakeHook.parse(await c.req.json());
         const made = [...apps.values()].at(-1);
-        const installed = [...installations.entries()].find(([, v]) => v.appId === made?.id)?.[0];
+        const installed = [...push.installations.entries()].find(([, v]) => v.appId === made?.id)?.[0];
         if (!made || installed === undefined) return c.json({ message: "App がインストールされていない" }, 409);
         const res = await sendWebhook({ url: made.manifest.hook_attributes.url, event: input.event, payload: { ...input.payload, installation: { id: installed } }, secret: made.webhookSecret });
         return c.body(null, res.status === 204 ? 204 : 502);

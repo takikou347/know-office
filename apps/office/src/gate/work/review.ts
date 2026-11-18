@@ -1,19 +1,21 @@
 // レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
-import { AppError, CommitSha, decideRepo, docsMergeNeeds, StaffId, missingConditions, ownerGuardedPath, type ReleaseCondition, type RepoAction, type ServiceRules } from "@know-office/core";
-import { and, eq, ne } from "drizzle-orm";
+import { AppError, CommitSha, decideRepo, docsMergeNeeds, log, missingConditions, newId, ownerGuardedPath, type ReleaseCondition, type RepoAction, type ServiceRules, StaffId } from "@know-office/core";
+import { and, eq, ne, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
 import { nodes, reviews, services } from "../db/main.ts";
+import { insertWhenStatement } from "../db/when.ts";
 import { expectedDocsName, isFirstDocs, verifyDocsPr } from "../devloop/docs-pr.ts";
 import { childOf, missingTests, readPrFiles } from "../devloop/pr-issue.ts";
 import type { Bindings } from "../env.ts";
 import { repoScope } from "../github/rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
+import { clockAt } from "./attendance.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
 import { type DocsTarget, linkedGate } from "./docs-merge.ts";
 import { mergeMade } from "./merge-made.ts";
-import { type Actor, appendNodeEvent, findNode, type NodeRow } from "./nodes.ts";
+import { type Actor, appendNodeEvent, checkPair, findNode, type NodeRow, recordCreated } from "./nodes.ts";
 
 /** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.7) */
 const SELF_SERVICE_ID = "00000000-0000-7000-8000-000000000102";
@@ -239,4 +241,109 @@ export function backToTodo(db: D1Database, nodeId: string, now: number, when: { 
 export async function callMaker(env: Bindings, nodeId: string, now: number): Promise<void> {
   const made = await findNode(env.DB, nodeId);
   if (made.status === "todo" && made.assignee !== null) await notifyStaff(env, made.assignee, now, true);
+}
+
+/** レビューのタスクを割り振る社員 */
+export const REVIEWER: StaffId = "reviewer";
+
+/** 定期の確かめが拾う、レビューのタスクの無いままレビューを待つタスクの古さ (10 分)。書く順の間にあるタスクを拾わない */
+export const RECHECK_AFTER_MS = 10 * 60_000;
+
+/** 定期の確かめが 1 回に立て直す数の上限 */
+const RECHECK_LIMIT = 50;
+
+/** レビュー担当に確かめを求める文と、足す行 */
+export type AskReview = { row: NodeRow; statement: D1PreparedStatement };
+
+/**
+ * レビュー担当のレビューのタスクを足す、条件付きの 1 文を作る。書くのは呼ぶ側で、一緒に書く物と同じバッチに入れる
+ * 確かめるタスクがレビューを待ち、同じプルリクエストに開いた (todo か doing の) レビューのタスクが無い時だけ足すので、同時に何度求めてもタスクは 1 つになる
+ * @param env バインディング
+ * @param made 確かめるタスク
+ * @param pull 確かめるプルリクエスト
+ * @param pull.repo リポジトリ
+ * @param pull.branch ブランチ
+ * @param pull.prNumber プルリクエストの番号
+ * @param actor 誰がいつ
+ * @param also ほかに足す条件。一緒に書く物と同じ条件を渡す
+ * @returns 文と足す行。作った社員が分からないか、レビュー担当と同じモデルの時は、割り振れないので null
+ */
+export async function askReview(env: Bindings, made: NodeRow, pull: { repo: string; branch: string; prNumber: number; body?: string | null }, actor: Actor, also: SQL = sql`1`): Promise<AskReview | null> {
+  try {
+    if (made.assignee === null) throw new AppError("conflict", "作った社員が分からない");
+    await checkPair(env.DB, made.assignee, REVIEWER);
+  } catch (error) {
+    if (!(error instanceof AppError)) throw error;
+    log("warn", "review_not_asked", { nodeId: made.id, reason: error.message });
+    return null;
+  }
+  const row: NodeRow = {
+    id: newId(clockAt(actor.now)),
+    kind: "task",
+    parentId: made.parentId,
+    scope: made.scope,
+    title: `レビュー: ${made.title}`,
+    body: pull.body ?? null,
+    taskKind: "review",
+    assignee: REVIEWER,
+    status: "todo",
+    priority: made.priority,
+    repo: pull.repo,
+    branch: pull.branch,
+    prNumber: pull.prNumber,
+    issueNumber: null,
+    source: "review",
+    progress: null,
+    version: 1,
+    createdBy: actor.by,
+    createdAt: actor.now,
+    updatedAt: actor.now,
+  };
+  const when = sql`EXISTS (SELECT 1 FROM nodes WHERE id = ${made.id} AND status = 'review') AND NOT EXISTS (SELECT 1 FROM nodes WHERE repo = ${pull.repo} AND pr_number = ${pull.prNumber} AND task_kind = 'review' AND status IN ('todo', 'doing')) AND ${also}`;
+  return { row, statement: insertWhenStatement(env.DB, nodes, row, when) };
+}
+
+/**
+ * 求めた文で足せた時だけ、足したタスクの出来事と監査ログを残し、レビュー担当を呼ぶ。出来事は年ごとの記録の D1 にあり、同じバッチに入れられないので後で足す
+ * @param env バインディング
+ * @param asked askReview の文と行。null なら何もしない
+ * @param result バッチの中のその文の結果
+ * @param actor 誰がいつ
+ * @returns 足せたか
+ */
+export async function reviewAsked(env: Bindings, asked: AskReview | null, result: D1Result | undefined, actor: Actor): Promise<boolean> {
+  if (asked === null || (result?.meta.changes ?? 0) === 0) return false;
+  await recordCreated(env, asked.row, actor);
+  await notifyStaff(env, REVIEWER, actor.now, false);
+  return true;
+}
+
+/**
+ * 定期の確かめ。レビューを待ち、レビュー担当の判断が無く、開いたレビューのタスクも無いまま 10 分を過ぎたタスクに、レビューのタスクを立て直す
+ * 求める文と同じバッチに入らない出来事と知らせの前に落ちた時の取りこぼしを拾う。10 分の猶予で、書く順の間にあるタスクを拾わない
+ * @param env バインディング
+ * @param now 今の時刻
+ * @returns 立て直した数
+ */
+export async function recheckReviews(env: Bindings, now: number): Promise<number> {
+  const { results } = await env.DB.prepare(
+    "SELECT n.id AS id, r.repo AS repo, r.branch AS branch, r.pr_number AS pr FROM nodes n JOIN reviews r ON r.node_id = n.id " +
+      "WHERE n.status = 'review' AND n.task_kind <> 'review' AND n.updated_at < ? AND r.reviewer_verdict IS NULL " +
+      "AND NOT EXISTS (SELECT 1 FROM nodes x WHERE x.repo = r.repo AND x.pr_number = r.pr_number AND x.task_kind = 'review' AND x.status IN ('todo', 'doing')) " +
+      // レビューを割り振れない組 (作った社員とレビュー担当が同じモデル) は拾わない。拾っても askReview が断るだけで、上限の件数を食う
+      "AND EXISTS (SELECT 1 FROM staff m JOIN staff v ON v.id = ? WHERE m.id = n.assignee AND m.model <> v.model) LIMIT ?",
+  )
+    .bind(now - RECHECK_AFTER_MS, REVIEWER, RECHECK_LIMIT)
+    .all<{ id: string; repo: string; branch: string; pr: number }>();
+  const actor: Actor = { by: "system", now };
+  let added = 0;
+  for (const found of results) {
+    const made = await findNode(env.DB, found.id);
+    // 読んだ後に動いたタスクは、今の版のままの時だけ足す
+    const asked = await askReview(env, made, { repo: found.repo, branch: found.branch, prNumber: found.pr }, actor, sql`EXISTS (SELECT 1 FROM nodes WHERE id = ${made.id} AND version = ${made.version}) AND EXISTS (SELECT 1 FROM reviews WHERE node_id = ${made.id} AND reviewer_verdict IS NULL)`);
+    if (asked === null) continue;
+    const [result] = await env.DB.batch([asked.statement]);
+    if (await reviewAsked(env, asked, result, actor)) added += 1;
+  }
+  return added;
 }

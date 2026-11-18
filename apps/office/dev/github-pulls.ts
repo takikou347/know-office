@@ -1,5 +1,6 @@
 // 開発環境の代わりの GitHub のうち、プルリクエストのレビューと行のコメント、Git の API (blobs、trees、commits、ブランチの先)、workflow を動かす要求に答える所。GitHub の決まりのうち know-office が当たる所だけを持つ
 import { z } from "zod";
+import { sendWebhook } from "./github-hooks.ts";
 
 /** プルリクエストのレビューを出す要求。GitHub の POST /repos/{o}/{r}/pulls/{n}/reviews */
 const ReviewRequest = z.object({ event: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]), body: z.string().optional(), commit_id: z.string().optional() }).loose();
@@ -7,6 +8,8 @@ const ReviewRequest = z.object({ event: z.enum(["APPROVE", "REQUEST_CHANGES", "C
 const CommentRequest = z.object({ body: z.string().min(1), commit_id: z.string(), path: z.string().min(1), line: z.number().int().positive(), side: z.enum(["LEFT", "RIGHT"]) }).loose();
 /** プルリクエストを出す要求。GitHub の POST /repos/{o}/{r}/pulls */
 const PullRequest = z.object({ title: z.string().min(1), head: z.string().min(1), base: z.string().min(1), body: z.string().optional() }).loose();
+/** 置いた返事のうち、プルリクエストを出した物の番号と先 */
+const PlacedPull = z.object({ number: z.number(), base: z.object({ sha: z.string() }).loose(), head: z.object({ sha: z.string() }).loose() }).loose();
 /** Git の API の要求のうち使う所 */
 const BlobRequest = z.object({ content: z.string(), encoding: z.enum(["utf-8", "base64"]) }).loose();
 const TreeRequest = z.object({ base_tree: z.string(), tree: z.array(z.object({ path: z.string(), mode: z.string(), type: z.string(), sha: z.string() }).loose()) }).loose();
@@ -40,7 +43,12 @@ export type PullsDeps = {
   trees: Map<string, FakeTreeEntry[]>;
   /** 受けたレビューと行のコメント */
   posted: FakePosted;
+  /** 出したプルリクエスト。「owner/name#番号」から */
+  pullRequests: Map<string, FakePull>;
 };
+
+/** 出したプルリクエスト 1 つ。headSha は出した時の先で、ブランチの先 (heads) があればそちらを今の先とする */
+export type FakePull = { repo: string; number: number; branch: string; baseSha: string; headSha: string; state: "open" | "closed" | "merged"; title?: string; body?: string };
 
 /** Git の木の 1 項目 */
 export type FakeTreeEntry = { path: string; mode: string; type: string; sha: string };
@@ -53,26 +61,23 @@ export type FakePost = { repo: string; pr: number; id: number; body: string; pay
 
 /** レビューと Git の API の代わり */
 export type FakePulls = {
-  /** プルリクエストを出した者を覚える */
-  opened(repo: string, number: number, token: string | null): void;
+  /** 置いた返事でプルリクエストを出した時に、出した者と、ブランチと先を覚える */
+  placed(route: string, body: unknown, text: string, token: string | null): void;
+  /** 同じブランチの開いたプルリクエストがある時に、新しいプルリクエストを断る返事。断らなければ null */
+  refuse(route: string, text: string): Response | null;
+  /** ブランチにコミットを 1 つ足して先を進め、hook があればそのブランチの開いたプルリクエストの synchronize の通知を送り、sha を返す */
+  pushed(repo: string, branch: string, hook: { url: string; secret: string; installationId: number } | null): Promise<{ sha: string }>;
   /** 要求に答える。当たらなければ null */
   answer(route: string, text: string, token: string | null, query?: URLSearchParams): Response | null;
 };
 
-const PullState = z.object({ state: z.string() }).loose();
 /**
- * 覚えた PR の state。読めなければ undefined
- * @param pr 覚えた PR
- * @returns open か closed
+ * 道を GitHub の API と同じ形にする。開発のサーバーは代わりの GitHub を /github の下に立てる
+ * @param route 「メソッド 道」
+ * @returns 頭の /github を除いた「メソッド 道」
  */
-const stateOf = (pr: unknown): string | undefined => PullState.safeParse(pr).data?.state;
-const HeadRef = z.object({ head: z.object({ ref: z.string() }).loose() }).loose();
-/**
- * 覚えた PR の head のブランチ名
- * @param pr 覚えた PR
- * @returns ブランチ名。読めなければ undefined
- */
-const headRef = (pr: unknown): string | undefined => HeadRef.safeParse(pr).data?.head.ref;
+const apiRoute = (route: string): string => route.replace(/^(\S+) \/github\//, "$1 /");
+
 const invalid = () => Response.json({ message: "Invalid request" }, { status: 422 });
 const notFound = () => Response.json({ message: "Not Found" }, { status: 404 });
 const forbidden = () => Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
@@ -129,29 +134,6 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     deps.sent.push({ event: "pull_request_review_comment", payload: { action: "created", comment, ...head } });
     deps.posted.comments.push({ repo, pr: num, id, body: comment.body, payload: comment });
     return Response.json(comment, { status: 201 });
-  };
-
-  const made = new Map<string, unknown>();
-  /**
-   * POST /repos/{o}/{r}/pulls に答える。ブランチの先が無いか、同じ head の開いた PR があれば 422
-   * @param repo owner/name
-   * @param body 本文
-   * @param token 鍵
-   * @returns 返事
-   */
-  const open = (repo: string, body: unknown, token: string | null): Response => {
-    if (!deps.allows(token, repo, "pull_requests", "write")) return forbidden();
-    const input = PullRequest.safeParse(body);
-    const head = input.success ? deps.heads.get(`${repo}:${input.data.head}`) : undefined;
-    if (!input.success || head === undefined) return invalid();
-    // 同じリポジトリで同じ head の開いた PR があれば、本物と同じく 422 (A pull request already exists)
-    const exists = [...made.entries()].some(([key, pr]) => key.startsWith(`${repo}#`) && headRef(pr) === input.data.head && stateOf(pr) === "open");
-    if (exists) return Response.json({ message: "Validation Failed", errors: [{ resource: "PullRequest", code: "custom", message: `A pull request already exists for ${repo.split("/")[0] ?? ""}:${input.data.head}.` }] }, { status: 422 });
-    const number = deps.claimNumber(repo, input.data.title);
-    const opened1 = { number, title: input.data.title, body: input.data.body ?? "", base: { ref: input.data.base, sha: deps.heads.get(`${repo}:${input.data.base}`) ?? "0".repeat(40) }, head: { ref: input.data.head, sha: head }, state: "open" };
-    made.set(`${repo}#${String(number)}`, opened1);
-    authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key);
-    return Response.json(opened1, { status: 201 });
   };
 
   /**
@@ -235,26 +217,104 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     return Response.json({ status, files: [{ filename: "src/feature.test.ts", status: "added", patch: "@@ -0,0 +1 @@\n+test" }] });
   };
 
+  /**
+   * プルリクエストを GitHub の GET /repos/{o}/{r}/pulls/{n} の形にする
+   * @param pr 出したプルリクエスト
+   * @returns 返す本文
+   */
+  const pullJson = (pr: FakePull) => ({
+    number: pr.number,
+    title: pr.title ?? "",
+    body: pr.body ?? "",
+    state: pr.state === "open" ? "open" : "closed",
+    merged: pr.state === "merged",
+    head: { ref: pr.branch, sha: pr.state === "open" ? (deps.heads.get(`${pr.repo}:${pr.branch}`) ?? pr.headSha) : pr.headSha },
+    base: { ref: "main", sha: pr.baseSha },
+  });
+
+  /**
+   * 置いた返事の無いプルリクエストを出す。番号は Issue と同じ続き番号、先はブランチの先で、ブランチの先が無ければ 422
+   * @param repo owner/name
+   * @param body 本文
+   * @param token 付いていた鍵
+   * @returns 返事
+   */
+  const openPull = (repo: string, body: unknown, token: string | null): Response => {
+    if (!deps.allows(token, repo, "pull_requests", "write")) return forbidden();
+    const input = PullRequest.safeParse(body);
+    const head = input.success ? deps.heads.get(`${repo}:${input.data.head}`) : undefined;
+    if (!input.success || head === undefined) return invalid();
+    const number = deps.claimNumber(repo, input.data.title);
+    const created: FakePull = {
+      repo,
+      number,
+      branch: input.data.head,
+      baseSha: deps.heads.get(`${repo}:${input.data.base}`) ?? "0".repeat(40),
+      headSha: head,
+      state: "open",
+      title: input.data.title,
+      body: input.data.body ?? "",
+    };
+    deps.pullRequests.set(`${repo}#${String(number)}`, created);
+    authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key);
+    return Response.json(pullJson(created), { status: 201 });
+  };
+
   return {
-    opened: (repo, number, token) => void authors.set(`${repo}#${String(number)}`, deps.actorOf(token).key),
-    answer: (route, text, token, query) => {
+    placed: (placedRoute, body, text, token) => {
+      const route = apiRoute(placedRoute);
+      const repo = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
+      const placedPull = PlacedPull.safeParse(body);
+      if (repo === undefined || !placedPull.success) return;
+      const key = `${repo}#${String(placedPull.data.number)}`;
+      authors.set(key, deps.actorOf(token).key);
+      const input = PullRequest.safeParse(text ? JSON.parse(text) : null);
+      if (input.success) deps.pullRequests.set(key, { repo, number: placedPull.data.number, branch: input.data.head, baseSha: placedPull.data.base.sha, headSha: placedPull.data.head.sha, state: "open" });
+    },
+    refuse: (refusedRoute, text) => {
+      const route = apiRoute(refusedRoute);
+      const repo = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
+      const input = PullRequest.safeParse(text ? JSON.parse(text) : null);
+      if (repo === undefined || !input.success) return null;
+      const open = [...deps.pullRequests.values()].some((p) => p.repo === repo && p.branch === input.data.head && p.state === "open");
+      // GitHub は同じブランチから開いたプルリクエストがもう 1 つあれば 422 で断る
+      if (!open) return null;
+      const owner = repo.split("/")[0] ?? "";
+      return Response.json({ message: "Validation Failed", errors: [{ resource: "PullRequest", code: "custom", message: `A pull request already exists for ${owner}:${input.data.head}.` }] }, { status: 422 });
+    },
+    pushed: async (repo, branch, hook) => {
+      const sha = newSha();
+      deps.heads.set(`${repo}:${branch}`, sha);
+      if (hook === null) return { sha };
+      const open = [...deps.pullRequests.values()].filter((p) => p.repo === repo && p.branch === branch && p.state === "open");
+      for (const pr of open) {
+        const payload = { action: "synchronize", number: pr.number, pull_request: { number: pr.number, head: { ref: branch, sha } }, repository: { full_name: repo }, installation: { id: hook.installationId }, sender: { login: "example", type: "User" } };
+        const res = await sendWebhook({ url: hook.url, event: "pull_request", payload, secret: hook.secret });
+        if (!res.ok) throw new Error(`通知を受けられない: ${String(res.status)}`);
+      }
+      return { sha };
+    },
+    answer: (answeredRoute, text, token, query) => {
+      const route = apiRoute(answeredRoute);
       const body: unknown = text ? JSON.parse(text) : null;
       // GET /repos/{o}/{r}/pulls?head=<owner>:<ブランチ>&state=open は、そのブランチで開いている PR を返す (GitHub の REST API の List pull requests)
       const listed = /^GET \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route);
       if (listed) {
-        if (!deps.allows(token, listed[1] ?? "", "pull_requests", "read")) return forbidden();
+        const [, repo = ""] = listed;
+        if (!deps.allows(token, repo, "pull_requests", "read")) return forbidden();
         const branch = (query?.get("head") ?? "").split(":").slice(1).join(":");
         const per = Number(query?.get("per_page") ?? "30");
-        return Response.json([...made.entries()].filter(([key, pr]) => key.startsWith(`${listed[1] ?? ""}#`) && headRef(pr) === branch && stateOf(pr) === (query?.get("state") ?? "open")).map(([, pr]) => pr).slice(0, per));
+        const state = query?.get("state") ?? "open";
+        return Response.json([...deps.pullRequests.values()].filter((p) => p.repo === repo && p.branch === branch && (state === "open" ? p.state === "open" : p.state !== "open")).map(pullJson).slice(0, per));
       }
-      // 出した PR は、先をブランチの先と main の先に決めて覚え、GET で本文を読める。置いた返事 (fakeGitHubRoute) がある道は、呼ぶ側がこれより先に答える
-      const created = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route);
-      if (created) return open(created[1] ?? "", body, token);
-      const read = /^GET \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(route);
-      if (read) {
-        if (!deps.allows(token, read[1] ?? "", "pull_requests", "read")) return forbidden();
-        const found = made.get(`${read[1] ?? ""}#${read[2] ?? ""}`);
-        return found === undefined ? notFound() : Response.json(found);
+      const created = /^POST \/repos\/([^/]+\/[^/]+)\/pulls$/.exec(route)?.[1];
+      if (created !== undefined) return openPull(created, body, token);
+      const one = /^GET \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(route);
+      if (one) {
+        const [, repo = "", num = ""] = one;
+        if (!deps.allows(token, repo, "pull_requests", "read")) return forbidden();
+        const found = deps.pullRequests.get(`${repo}#${num}`);
+        return found ? Response.json(pullJson(found)) : notFound();
       }
       const review = /^POST \/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/(reviews|comments)$/.exec(route);
       if (review) return pull(review[1] ?? "", Number(review[2]), review[3] ?? "", body, token);

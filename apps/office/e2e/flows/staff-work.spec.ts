@@ -4,13 +4,14 @@ import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
 import { part, post } from "./helpers/screen.ts";
 import { FAKES } from "../helpers/fakes.ts";
-import { CARRY_TITLE, claudeReceived, dropLeftovers, NodeStatus, NodeVersion, PROJECT, Runs, addTask, clockInReviewer, finishedBy, openTree, ownerPasskey, reviewerState, sayToReviewer, scriptFinish, scriptReply, scriptWork } from "./helpers/staff-work.ts";
+import { clockIn, ownerPasskey, scriptReply, staffState } from "./helpers/staff.ts";
+import { CARRY_TITLE, claudeReceived, dropLeftovers, NodeStatus, NodeVersion, PROJECT, Runs, addTask, finishedBy, openTree, sayToReviewer, scriptFinish, scriptWork } from "./helpers/staff-work.ts";
 
 test("オーナーが画面で頼んだタスクを社員が取り、発言とチェックポイントを伝えて終え、記録に残る", async ({ page }) => {
   // 勤務の時刻を変え、SDK が 3 度呼ぶのを待つ
   test.slow();
   await openTree(page);
-  const restore = await clockInReviewer(page);
+  const restore = await clockIn(page, "reviewer");
   try {
     const said = `通しのタスクを読んだ ${String(Date.now())}`;
     await scriptWork(page, said);
@@ -42,10 +43,10 @@ test.describe("オーナーの発言を社員に渡す", () => {
   test("タスクの途中に話しかけると「社員に渡しました」", async ({ page }) => {
     test.slow();
     await openTree(page);
-    const restore = await clockInReviewer(page);
+    const restore = await clockIn(page, "reviewer");
     try {
       // 終わりの返事を 30 秒遅らせ、その間に話しかける。止めた呼び出しの返事は積み直され、続きの呼び出しが受けて終える
-      await scriptReply(page, [{ type: "text", text: "通しのタスクを終えた" }], "end_turn", 30_000);
+      await scriptReply(page, "reviewer", [{ type: "text", text: "通しのタスクを終えた" }], "end_turn", 30_000);
       await page.goto("/goals");
       const nodeId = await addTask(page, `話しかけるタスク ${String(Date.now())}`, "レビュー担当");
       await expect.poll(async () => Runs.parse(await (await page.request.get(`${FAKES}/workspace/__fake/runs`)).json()), { timeout: 30_000 }).toContainEqual({ staffId: "reviewer", nodeId });
@@ -65,7 +66,7 @@ test.describe("オーナーの発言を社員に渡す", () => {
   test("タスクの外で話しかけて次のタスクを取ると「次のタスクの頭で渡しました」", async ({ page }) => {
     test.slow();
     await openTree(page);
-    const restore = await clockInReviewer(page);
+    const restore = await clockIn(page, "reviewer");
     try {
       const said = `タスクの外の話しかけ ${String(Date.now())}`;
       const bubble = await sayToReviewer(page, said);
@@ -91,7 +92,7 @@ test.describe("気付く", () => {
     test.slow();
     await ownerPasskey(page);
     await openTree(page);
-    const restore = await clockInReviewer(page);
+    const restore = await clockIn(page, "reviewer");
     try {
       const said = `流れを追う発言 ${String(Date.now())}`;
       await scriptWork(page, said);
@@ -193,13 +194,13 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
   await openTree(page);
   cancelLeftOrders("reviewer");
   await dropLeftovers(page);
-  const restore = await clockInReviewer(page, true);
+  const restore = await clockIn(page, "reviewer", true);
   try {
     // 早退の時刻を過ぎてから、SDK がチェックポイントを伝える。それまで社員はタスクの途中にいる
     const checkpoint = { type: "tool_use", id: "toolu_flow_carry", name: "mcp__staff__checkpoint", input: { kind: "note", note: "続きは明日" } };
-    await scriptReply(page, [checkpoint], "tool_use", until.at - Date.now() + 15_000);
+    await scriptReply(page, "reviewer", [checkpoint], "tool_use", until.at - Date.now() + 15_000);
     // チェックポイントで退勤した後も SDK はその次を求めるので、終わりの文で閉じさせる。社員はもうタスクを離れているので、この終わりはタスクを済にしない
-    await scriptReply(page, [{ type: "text", text: "今日はここまで" }], "end_turn");
+    await scriptReply(page, "reviewer", [{ type: "text", text: "今日はここまで" }], "end_turn");
     await page.goto("/goals");
     const title = `${CARRY_TITLE} ${String(Date.now())}`;
     const nodeId = await addTask(page, title, "レビュー担当");
@@ -213,7 +214,7 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
     await expect(page.getByText(`レビュー担当に今日の早退を ${until.hhmm} までで出しました`)).toBeVisible();
 
     // 早退の時刻を過ぎてチェックポイントに届くと退勤し、タスクは待ちに戻る
-    await expect.poll(() => reviewerState(page), { timeout: until.at - Date.now() + 90_000 }).toBe("off");
+    await expect.poll(() => staffState(page, "reviewer"), { timeout: until.at - Date.now() + 90_000 }).toBe("off");
     await expect.poll(async () => NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status).toBe("todo");
     await page.goto(`/staff/reviewer/tasks/${nodeId}`);
     await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
@@ -231,7 +232,7 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
     await expect.poll(async () => Runs.parse(await (await page.request.get(`${FAKES}/workspace/__fake/runs`)).json()).filter((r) => r.staffId === "reviewer" && r.nodeId === nodeId), { timeout: 30_000 }).toHaveLength(2);
     await expect.poll(async () => NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status, { timeout: 60_000 }).toBe("done");
     // 呼び直しが返事の無い代わりの Claude API に当たって、ワークスペースを待つ事になっていない
-    expect(await reviewerState(page)).not.toBe("waiting");
+    expect(await staffState(page, "reviewer")).not.toBe("waiting");
   } finally {
     // 途中で落ちても、広げた勤務の時刻、早退の指示、続けるタスクを次の通しに残さない。片付けは落ちうるので、勤務の時刻を先に戻す
     try {

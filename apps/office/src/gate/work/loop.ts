@@ -18,6 +18,8 @@ export type CheckState = "passed" | "pending" | "failed";
 export type Forge = {
   /** ブランチから main へのプルリクエストを出す */
   openPull(input: { repo: string; branch: string; title: string; body: string }): Promise<{ number: number; baseSha: string; headSha: string }>;
+  /** プルリクエストの今の状態 (開いている、閉じた、入った) と先のコミット。pull_requests の読みだけに絞った鍵で 1 回だけ読む */
+  pullState(repo: string, pr: number): Promise<{ state: "open" | "closed" | "merged"; headSha: string }>;
   /** コミットのチェックの今。すべて通れば passed、1 つでも落ちていれば failed、ほかは pending。sha は確かめたコミット */
   checkState(repo: string, sha: string): Promise<CheckState>;
   /** main を確かめたコミットへ fast-forward で進める。進めたら merged、main が先に進んでいて進められなければ behind (作った社員が rebase する)。branch は記録と代わりの GitHub のために渡す。ほかの断りは upstream_failed */
@@ -65,6 +67,7 @@ export type Forge = {
 /** まだつないでいない口。GitHub を呼ぶ操作は upstream_failed で断る */
 export const UNCONNECTED_FORGE: Forge = {
   openPull: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  pullState: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   checkState: () => Promise.resolve("pending"),
   merge: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   fastForwardable: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),

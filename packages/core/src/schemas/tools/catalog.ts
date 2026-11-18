@@ -43,7 +43,7 @@ export const STAFF_TOOL_CATALOG: Record<StaffToolName, StaffToolEntry> = {
   issue_plan: { description: "設計書の機能ごとの親と要件ごとの子の組を送り、サービスのリポジトリに Issue を作る。題と本文はゲートウェイが決まった形で作る。Issue を合わせるタスクで呼ぶ", shape: IssuePlanTool.shape },
   service_close_request: { description: "サービスを閉じる案をオーナーに出す。オーナーが承認するまでサービスは閉じない", shape: ServiceCloseRequestTool.shape },
   docs_pr_open: { description: "仕様が変わった時に、設計書のリポジトリへ ko/<タスク ID の頭 8 字>-<name> から PR を出す。タスクは作業中のまま。出した番号を pr_open の docsPr に書いてコードの PR に結ぶ", shape: DocsPrOpenTool.shape },
-  pr_open: { description: "今のタスクのブランチ ko/<タスク ID の頭 8 字>-<name> からプルリクエストを出す。出すとタスクはレビューを待つ。仕様が変わったなら docs_pr_open で出した設計書の PR の番号を docsPr に書く", shape: PrOpenTool.shape },
+  pr_open: { description: "今のタスクのブランチ ko/<タスク ID の頭 8 字>-<name> からプルリクエストを出す。出すとタスクはレビューを待つ。差し戻しの後に直して呼ぶと、同じプルリクエストでもう一度レビューを求める。仕様が変わったなら docs_pr_open で出した設計書の PR の番号を docsPr に書く", shape: PrOpenTool.shape },
   review_submit: { description: "今のレビューのタスクに承認か差し戻しを出す。差し戻しは理由と一緒に作った社員に戻る", shape: ReviewSubmitTool.shape },
   idea_add: { description: "サービスの案を足す。オーナーの案と同じくアイデアの段階に並ぶ", shape: IdeaAddTool.shape },
   ask_boss: { description: "上司に次のタスクを求めるか、困った事を上げる", shape: AskBossTool.shape },

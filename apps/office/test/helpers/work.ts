@@ -82,6 +82,7 @@ function fakeForge(): FakeForge {
       forge.baseOf[input.branch] = forge.main;
       return { number: forge.pulls.length, baseSha: "a".repeat(40), headSha: "b".repeat(40) };
     },
+    pullState: () => Promise.resolve({ state: "open", headSha: "b".repeat(40) }),
     checkState: () => Promise.resolve(forge.checks),
     changedPaths: () => Promise.resolve([]),
     protectMain: () => Promise.resolve("applied"),
