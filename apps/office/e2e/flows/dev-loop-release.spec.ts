@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
+import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, releaseReviewTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
 import { readNoticesTitled } from "./helpers/notice-bar.ts";
 import { Held, openTree } from "./helpers/staff-work.ts";
 import { clockIn, scriptReply } from "./helpers/staff.ts";
@@ -120,10 +120,7 @@ test("子 Issue が入って閉じると、親も閉じ、サービスに進め�
         // レビュー担当が持つ「レビュー: …」のタスクは、消さずに取り消して離させる。消すと、持ったまま続きを呼んで落ち、後の通しの社員を塞ぐ
         const list: unknown = await (await page.request.get(`/api/v1/nodes?scope=${serviceId}&limit=100`)).json();
         const reviewId = findTaskId(list, `レビュー: #${String(issue)} 動画を作る`);
-        if (reviewId !== null) {
-          const version = z.object({ data: z.object({ version: z.number() }).loose() }).parse(await (await page.request.get(`/api/v1/nodes/${reviewId}`)).json()).data.version;
-          await page.request.patch(`/api/v1/nodes/${reviewId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, status: "dropped" } });
-        }
+        if (reviewId !== null) await releaseReviewTask(page, reviewId);
         // 開発担当が持ったままのタスクを消すと、続きを呼んで落ち、後の通しの社員を塞ぐ。見送りにして離させ、離れてから消す
         await expect(() => releaseBuilderTask(page, ids.task)).toPass({ timeout: 10_000 });
         await expect
