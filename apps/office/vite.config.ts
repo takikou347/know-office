@@ -11,5 +11,6 @@ export default defineConfig({
   // 開発の時だけ、代わりの物を cloudflare より前に置き、API への要求に証明を付ける
   plugins: [devFakes(), react(), cloudflare({ persistState: persistDir ? { path: persistDir } : true })],
   // 遅れて読む画面 (コードの差分、オフィスの 3D) を起動の時に先に変換し、最初に開いた時の待ちを除く。CI の冷えたサーバーで e2e が待ちきれずに落ちた
-  server: { warmup: { clientFiles: ["./src/screen/pages/staff/ReviewEditor.tsx", "./src/screen/pages/office/OfficeScene.tsx"] } },
+  // 画面の通しでは Vite のエラーの重ね表示を出さない。重ね表示は開いている全部の画面に配られるので、Worker への中継が一時に落ちると、落ちた要求と関わらない同時の通しの画面にも出て、a11y のチェックが重ね表示の中身を拾う
+  server: { warmup: { clientFiles: ["./src/screen/pages/staff/ReviewEditor.tsx", "./src/screen/pages/office/OfficeScene.tsx"] }, ...(persistDir ? { hmr: { overlay: false } } : {}) },
 });

@@ -270,6 +270,9 @@ test.describe("使いやすさ", () => {
         await p.open?.(page);
         // 部屋は 3D のモデルを読み終えてから案内を出し、CI で 2 つの worker が同時に部屋を開くと 5 秒を超える事がある。読み終わりの待ちだけを延ばす
         if (p.ready) await expect(page.getByText(p.ready)).toBeVisible({ timeout: 15_000 });
+        // 開発サーバーのエラーの重ね表示が出ていれば、a11y の違反でなく、その中身を落ちた訳として出す
+        const overlay = page.locator("vite-error-overlay");
+        if ((await overlay.count()) > 0) throw new Error(`開発サーバーのエラーの重ね表示が出た: ${await overlay.evaluate((el) => el.shadowRoot?.textContent ?? "")}`);
         const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
         const bad = violations
           .filter((v) => v.impact === "critical" || v.impact === "serious")
