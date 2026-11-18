@@ -62,6 +62,11 @@
       }
     },
     {
+      // 利用場面の通しは e2e/helpers/test.ts の test を使う。代わりの GitHub に置いた返事を 1 本ごとに外す fixture が掛かる
+      "files": ["apps/office/e2e/flows/**/*.spec.ts"],
+      "rules": { "no-restricted-imports": ["error", { "paths": [{ "name": "@playwright/test", "importNames": ["test"], "message": "通しは ../helpers/test.ts の test を使う" }] }] }
+    },
+    {
       // ログの出口はここだけ。ほかは log() を通して鍵を伏せる
       "files": ["packages/core/src/log.ts"],
       "rules": { "no-console": "off" }

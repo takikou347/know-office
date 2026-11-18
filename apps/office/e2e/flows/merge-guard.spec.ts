@@ -1,5 +1,5 @@
 // 要るチェックが落ちたままのプルリクエストをオーナーが承認すると、main に入れずにそのタスクを止め、セキュリティの画面の止めている物に出る。GitHub は手元の代わりにつなぎ、チェックの結果だけを置く (タスクとレビューの 3.1、自動停止の 1 章)
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../helpers/test.ts";
 import { z } from "zod";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
