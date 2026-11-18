@@ -77,17 +77,22 @@ export function useReviewHead(nodeId: string, version: number): Loaded<ReviewHea
   });
 }
 
+/** 作業中の変更の元と先。概要が返した物で、差分もこの 2 つの間を読む */
+export type WorkingRange = { baseSha: string; headSha: string };
+
 /**
  * 1 ファイルの差分を読む。開いた時だけ呼ぶ
  * @param nodeId 作った社員のタスク ID
  * @param path ファイルの道
  * @param since 前に見た先。あればそこからの差だけを読む
  * @param head 今の先。変われば読み直す
+ * @param range 作業中の変更の元と先。あれば since を使わずこの間を読む
  * @returns 差分
  */
-export function useFileDiff(nodeId: string, path: string, since: string | null, head: string): Loaded<FileDiff> {
+export function useFileDiff(nodeId: string, path: string, since: string | null, head: string, range: WorkingRange | null = null): Loaded<FileDiff> {
   return useLoad(`${nodeId}/${path}/${since ?? ""}/${head}`, async (api) => {
-    const res = await api.api.v1.reviews[":nodeId"].diff.$get({ param: { nodeId }, query: since === null ? { path } : { path, since } });
+    const query = range === null ? (since === null ? { path } : { path, since }) : { path, ...range };
+    const res = await api.api.v1.reviews[":nodeId"].diff.$get({ param: { nodeId }, query });
     return res.ok ? (await res.json()).data : failureOf(res);
   });
 }

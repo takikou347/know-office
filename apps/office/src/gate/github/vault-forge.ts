@@ -51,6 +51,7 @@ export function vaultForge(env: Bindings, deps: TokenDeps): Forge {
     dispatchWorkflow: async (repo, workflow, inputs) => (await load()).dispatchWorkflow(repo, workflow, inputs),
     defaultHead: async (repo) => (await load()).defaultHead(repo),
     branchHead: async (repo, branch) => (await load()).branchHead(repo, branch),
+    findBranchHead: async (repo, branch) => (await load()).findBranchHead(repo, branch),
     listFiles: async (repo, ref, prefix) => (await load()).listFiles(repo, ref, prefix),
     issues: lazyDevIssues(async () => (await load()).issues),
   };

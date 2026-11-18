@@ -52,8 +52,8 @@ export type TestGate = {
   claude: FakeClaude;
   /** ゲートウェイが外へ出す fetch。代わりの Access、Claude API、GitHub に回す */
   fetch: Fetcher;
-  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル。compares は「元...先」ごとに返すファイルで、あればそちらを返す。contents は「sha:道」ごとのファイルの中身。pullFiles はプルリクエストの番号ごとの変えたファイルで、無ければ files を返す。branchHeads はブランチの名前ごとの先 */
-  github: FakeGitHub & { files: CompareFile[]; compares: Map<string, CompareFile[]>; contents: Map<string, string>; pullFiles: Map<number, CompareFile[]>; branchHeads: Map<string, string> };
+  /** 代わりの GitHub。files は compare がどのブランチにも返す変えたファイル。compares は「元...先」ごとに返すファイルで、あればそちらを返す。contents は「sha:道」ごとのファイルの中身。pullFiles はプルリクエストの番号ごとの変えたファイルで、無ければ files を返す。branchHeads はブランチの名前ごとの先。mergeBases は「元...先」ごとの共通の祖先 */
+  github: FakeGitHub & { files: CompareFile[]; compares: Map<string, CompareFile[]>; contents: Map<string, string>; pullFiles: Map<number, CompareFile[]>; branchHeads: Map<string, string>; mergeBases: Map<string, string> };
   /** vault の App の鍵から作った 1 時間の鍵をためる所。テストごとに別にする */
   githubCache: TokenCache;
   /** GitHub の鍵を出した先と権限 */
@@ -168,7 +168,10 @@ function namespace<T>(stub: T) {
 function githubPath(github: TestGate["github"], path: string): string {
   const compare = /^\/repos\/[^/]+\/[^/]+\/compare\/([^?]+)/.exec(path);
   // GitHub と同じく、compare は比べる全体で 300 ファイルまでを返し、page を付けても続きを返さない
-  if (compare) github.set(`GET ${path.split("?")[0] ?? path}`, { files: (github.compares.get(decodeURIComponent(compare[1] ?? "")) ?? github.files).slice(0, COMPARE_LIMIT) });
+  const range = compare ? decodeURIComponent(compare[1] ?? "") : "";
+  // merge_base_commit は 2 つの先の共通の祖先。置いた物が無ければ、元が sha ならそれを返す
+  const base = github.mergeBases.get(range) ?? /^[0-9a-f]{40}(?=\.\.\.)/.exec(range)?.[0];
+  if (compare) github.set(`GET ${path.split("?")[0] ?? path}`, { files: (github.compares.get(range) ?? github.files).slice(0, COMPARE_LIMIT), ...(base === undefined ? {} : { merge_base_commit: { sha: base } }) });
   // プルリクエストのファイルの一覧は、per_page ごとのページで返す
   const pull = /^(\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files)\?(.*)$/.exec(path);
   if (pull) {
@@ -205,7 +208,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const access = await createFakeAccess({ team: "test", aud: "test-aud", email: OWNER, clock: options.clock, keyPair: accessKeyPair });
   const certs: TestGate["certs"] = { calls: 0, answer: "ok" };
   const claude = createFakeClaude({ keys: [ANTHROPIC_KEY] });
-  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey, codeloadBase: `${FAKES}/codeload` }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map(), branchHeads: new Map() });
+  const github: TestGate["github"] = Object.assign(createFakeGitHub({ now: () => options.clock.now(), appKey: githubAppKey, codeloadBase: `${FAKES}/codeload` }), { files: [], compares: new Map(), contents: new Map(), pullFiles: new Map(), branchHeads: new Map(), mergeBases: new Map() });
   const githubCache = new TokenCache();
   const githubTokens: TestGate["githubTokens"] = [];
   const githubAccess: GitHubAccess = {
@@ -288,12 +291,10 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
       resume: book.resume.bind(book),
       observe: g.observe.bind(g),
       dropTask: g.dropTask.bind(g),
-      halt: g.halt.bind(g),
-      resumeTask: g.resumeTask.bind(g),
+      halt: g.halt.bind(g), resumeTask: g.resumeTask.bind(g),
       taskClock: g.taskClock.bind(g),
       externalSources: g.externalSources.bind(g),
-      issueToken: g.issueToken.bind(g),
-      checkToken: g.checkToken.bind(g),
+      issueToken: g.issueToken.bind(g), checkToken: g.checkToken.bind(g),
       correct: overRpc(book.correct.bind(book)),
       rebuildDay: overRpc(async (day: unknown, now: number) => {
         await book.rebuildDay(day, now);

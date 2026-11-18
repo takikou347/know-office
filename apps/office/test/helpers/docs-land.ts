@@ -15,7 +15,7 @@ import { mergeIfReady } from "../../src/gate/work/review.ts";
 export async function reviewed(world: WorkWorld) {
   const made = await working(world);
   const docs = z.object({ number: z.number() }).parse(JSON.parse((await tool(world, "builder", "docs_pr_open", { name: "spec", title: "設計書", body: "" })).content));
-  expect(await tool(world, "builder", "pr_open", { name: "make", title: "動画を作る", body: "", docsPr: docs.number })).toMatchObject({ isError: false });
+  expect(await tool(world, "builder", "pr_open", { title: "動画を作る", body: "", docsPr: docs.number })).toMatchObject({ isError: false });
   await advance(world, at(10));
   await staffOf(world, "reviewer").pull(world.clock.now());
   return made;

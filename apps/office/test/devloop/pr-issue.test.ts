@@ -20,7 +20,7 @@ function changes(paths: string[], truncated = false): { calls: string[][] } {
   world.forge.compare = (_repo, base, head) => {
     seen.calls.push([base, head]);
     const files: ChangedFile[] = paths.map((p) => ({ path: p.replace(/^removed:/, ""), status: p.startsWith("removed:") ? "removed" : "modified", patch: null }));
-    return Promise.resolve({ files, truncated });
+    return Promise.resolve({ files, truncated, baseSha: null });
   };
   return seen;
 }
@@ -42,12 +42,11 @@ async function working(kind: "bug" | "feature" | "chore"): Promise<number> {
 
 /**
  * pr_open を呼ぶ
- * @param name ブランチの名前
  * @param body 本文
  * @returns ツールの答え
  */
-function open(name = "make", body = "テストを足した"): Promise<ToolResult> {
-  return tool(world, "builder", "pr_open", { name, title: "動画を作る", body });
+function open(body = "テストを足した"): Promise<ToolResult> {
+  return tool(world, "builder", "pr_open", { title: "動画を作る", body });
 }
 
 /**
@@ -101,7 +100,7 @@ describe("1 Issue を 1 回の作業で入れる", () => {
     await staffOf(world, "builder").pull(world.clock.now());
     pullOnGitHub(world, Object.keys(GOOD));
     docsAt(world, HEAD, GOOD);
-    expect(await docsTool(world, "builder", "pr_open", { name: "video-maker-docs", title: "設計書", body: "" })).toMatchObject({ isError: false });
+    expect(await docsTool(world, "builder", "pr_open", { title: "設計書", body: "" })).toMatchObject({ isError: false });
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE title LIKE '設計書:%'")).toEqual([{ status: "review" }]);
   });
 });
@@ -147,13 +146,13 @@ describe("出し直し", () => {
   it("同じタスクの 2 度目の pr_open は新しい PR を出さない", async () => {
     const number = await working("feature");
     changes(["src/a.ts", "src/a.test.ts"]);
-    await open("make");
+    await open();
     await clockIn(world, "reviewer");
     expect(await tool(world, "reviewer", "review_submit", { verdict: "reject", summary: "境目が無い", headSha: "b".repeat(40) })).toMatchObject({ isError: false });
-    // 差し戻しで戻ったタスクを開発担当が取り直し、先を進めて出し直す。別の name でも新しい PR は出さない
+    // 差し戻しで戻ったタスクを開発担当が取り直し、先を進めて出し直す。同じブランチなので新しい PR は出さない
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE source = ?", `issue:${String(number)}`)).toEqual([{ status: "doing" }]);
     world.forge.branchHead = () => Promise.resolve("c".repeat(40));
-    expect(await open("other-name")).toMatchObject({ isError: false });
+    expect(await open()).toMatchObject({ isError: false });
     expect(world.forge.pulls).toHaveLength(1);
     expect(await rows(world.d1.DB, "SELECT status, pr_number, branch FROM nodes WHERE source = ?", `issue:${String(number)}`)).toMatchObject([{ status: "review", pr_number: 1 }]);
     // 先が変わったので承認を消し、レビューのタスクをもう 1 つ足して、レビュー担当に渡す

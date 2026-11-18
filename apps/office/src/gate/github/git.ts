@@ -257,13 +257,40 @@ async function ownDocsRef(db: D1Database, task: { id: string }): Promise<(ref: s
 }
 
 /**
- * ワークスペースの git の要求を、絞った鍵を付けて github.com に送る。push はタスクのリポジトリのブランチだけを通す。サービスのタスクだけは、設計書のリポジトリの自分のブランチにも push できる (設計書の PR の行があればそのブランチと同じ名前、出す前は ko/<タスク ID の頭 8 字>- で始まる名前。main と ref の削除は断る)。本文は命令だけを読み、残りは流して送る
+ * 設計書のリポジトリへの push のうち、自分のタスクのブランチでない ref があれば断る理由を返す
+ * @param updates 変える ref
+ * @param docsRef 設計書のリポジトリで受ける ref の見分け
+ * @returns 断る理由。通すなら null
+ */
+async function refusedDocsRef(updates: RefUpdate[], docsRef: (ref: string) => Promise<boolean>): Promise<string | null> {
+  return (await Promise.all(updates.map((u) => docsRef(u.ref)))).every(Boolean) ? null : "設計書のリポジトリは自分のタスクのブランチだけ";
+}
+
+/**
+ * タスクのリポジトリへの push のうち、タスクを取った時に決めたブランチでない ref があれば断る理由を返す。1 つでも外れれば全部を断る。
+ * 名前は大文字と小文字も区別して比べ、ブランチの無いタスクとレビューのタスクは push しない
+ * @param updates 変える ref
+ * @param task 作業トークンのタスク
+ * @param task.branch タスクのブランチ
+ * @param task.taskKind タスクの種類
+ * @returns 断る理由。通すなら null
+ */
+function refusedTaskRef(updates: RefUpdate[], task: { branch: string | null; taskKind: string | null }): string | null {
+  if (task.taskKind === "review") return "レビューのタスクは push しない";
+  if (task.branch === null) return "タスクにブランチが無い";
+  const own = `refs/heads/${task.branch}`;
+  const other = updates.find((u) => u.ref !== own);
+  return other === undefined ? null : `タスクのブランチでない: ${other.ref}`;
+}
+
+/**
+ * ワークスペースの git の要求を、絞った鍵を付けて github.com に送る。push はタスクのリポジトリの、タスクを取った時に決めたブランチ (ko/<タスク ID>) だけを通す。サービスのタスクだけは、設計書のリポジトリの自分のブランチにも push できる (設計書の PR の行があればそのブランチと同じ名前、出す前は ko/<タスク ID の頭 8 字>- で始まる名前。main と ref の削除は断る)。本文は命令だけを読み、残りは流して送る
  * @param c 要求の文脈。作業トークンは受け手が確かめている
  * @param ticket 確かめた作業トークン
  * @returns GitHub の返事
  * @throws not_found git の道でない時
  * @throws stopped 全体、社員、タスクが止まっている時
- * @throws rule_denied 触れるリポジトリでない、できない操作、タスクのでないリポジトリ、main や既定のブランチ、ref を消す、崩れた ref の push の時
+ * @throws rule_denied 触れるリポジトリでない、できない操作、タスクのでないリポジトリ、タスクのブランチでない、main や既定のブランチ、ref を消す、崩れた ref の push の時
  * @throws malformed_request push の命令の形が違う時
  * @throws payload_too_large 本文が 100MB を超える時
  * @throws upstream_failed つないでいない、GitHub に届かない時
@@ -289,8 +316,10 @@ export async function relayGit(c: Context<GateEnv>, ticket: TicketClaims): Promi
   const commands = push && body ? await readCommands(body) : null;
   const token = await githubToken(c.env, c.var.github, repo.data, { contents: push ? "write" : "read" });
   if (commands) {
-    const own = docsRef !== null && !(await Promise.all(commands.updates.map((u) => docsRef(u.ref)))).every(Boolean) ? "設計書のリポジトリは自分のタスクのブランチだけ" : null;
-    const refused = own ?? refusedRef(commands.updates, await defaultBranchOf(c, repo.data, token.reveal()));
+    // push なら task は読めている。読めていなければ通さない側に倒す
+    let own: string | null = "タスクが無い";
+    if (task !== null) own = docsRef === null ? refusedTaskRef(commands.updates, task) : await refusedDocsRef(commands.updates, docsRef);
+    const refused = refusedRef(commands.updates, await defaultBranchOf(c, repo.data, token.reveal())) ?? own;
     if (refused !== null) {
       void commands.relay.stream.cancel();
       return deny(c, ticket, `${repo.data} push`, refused);

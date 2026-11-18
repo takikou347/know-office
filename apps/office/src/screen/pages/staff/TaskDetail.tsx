@@ -59,8 +59,8 @@ export function TaskDetail({ staffId, nodeId }: TaskDetailProps) {
   const tick = useLiveTick((e) => e.type === "node" && e.node.id === nodeId);
   const loaded = useLoad(NodeDetail, (a) => a.api.v1.nodes[":nodeId"].$get({ param: { nodeId } }), tick);
   const node = loaded.state === "ok" ? loaded.data : null;
-  // レビューはレビュー待ちか、レビューの出来事があるタスクにだけある。読めない時はレビューの側で読み直す
-  const hasReview = node === null || node.status === "review" || node.events.some((e) => e.kind.includes("review"));
+  // レビューはレビュー待ちか、レビューの出来事があるタスクと、ブランチで作業中のタスク (プルリクエストの前) にだけある。読めない時はレビューの側で読み直す
+  const hasReview = node === null || node.status === "review" || (node.status === "doing" && node.branch !== null && node.taskKind !== "review") || node.events.some((e) => e.kind.includes("review"));
   return (
     <Stack gap={4}>
       {node ? (

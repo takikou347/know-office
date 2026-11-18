@@ -43,7 +43,8 @@ test("子 Issue が入って閉じると、親も閉じ、サービスに進め�
     const previous = before.ok() ? z.object({ object: z.object({ sha: z.string() }) }).parse(await before.json()).object.sha : null;
     const base = await commit([]);
     const head = await commit([base]);
-    const branch = `ko/019a7b00-make${crypto.randomUUID().slice(0, 6)}`;
+    // ブランチは開発担当がタスクを取った時に、ゲートウェイが ko/<タスク ID> に決める
+    const branch = `ko/${ids.task}`;
     const put = async (name: string, sha: string) => expect((await page.request.patch(`${ref}/${name}`, { ...github, data: { sha, force: true } })).status()).toBe(200);
     const issue = z.object({ number: z.number() }).parse(await (await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/issues`, { ...github, data: { title: "動画を作る", body: "設計書: 詳細設計 1-video の要件「動画を作る」", labels: ["feature"] } })).json()).number;
     const parentIssue = z.object({ number: z.number() }).parse(await (await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/issues`, { ...github, data: { title: "動画", body: "設計書: 詳細設計 1-video の機能「動画」", labels: [] } })).json()).number;
@@ -67,9 +68,8 @@ test("子 Issue が入って閉じると、親も閉じ、サービスに進め�
       restoreSchedule = await clockIn(page, "builder");
       await put("main", base);
       await put(branch, head);
-      // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチ名は ko/<タスク ID の頭 8 字>-<name>
-      const name = branch.slice("ko/019a7b00-".length);
-      await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name, title: "動画を作る", body: "動画を作った" } }], "tool_use");
+      // 代わりの Claude が、開発担当に pr_open を呼ばせて終える。ブランチはタスクのブランチ
+      await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { title: "動画を作る", body: "動画を作った" } }], "tool_use");
       await scriptReply(page, "builder", [{ type: "text", text: "PR を出した" }], "end_turn");
       // 開発担当に頼むと、開発担当がタスクを取って始める
       expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: new URL(page.url()).origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);

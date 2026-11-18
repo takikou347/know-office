@@ -126,7 +126,7 @@ describe("GitHub のルール", () => {
     // main へのマージを外すのは守りを強める変更なので、パスキーは要らない
     await api(world, "PUT", `/api/v1/services/${ui}/settings/actions`, { version: 0, value: ["read", "branch", "push", "pull_request", "issue"], reason: "このサービスは main に入れさせない" });
     const task = await buildTask(world, UI);
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
 
     const answer = await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: SHA.head });
@@ -141,7 +141,7 @@ describe("GitHub のルール", () => {
     repoOnGitHub(world, UI, { private: false, files: [{ filename: "src/index.ts" }, { filename: ".github/workflows/ci.yml" }] });
     const task = await buildTask(world, UI);
 
-    await expect(tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
+    await expect(tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
     // GitHub にプルリクエストを出さず、ルールの外の操作として数えてタスクを止める
     expect(writes(world)).toEqual([]);
     expect(await rows(world.d1.DB, "SELECT scope, target, signal FROM stops")).toEqual([{ scope: "task", target: task, signal: "rule_denied" }]);
@@ -185,7 +185,7 @@ describe("ブランチの保護をルールから掛ける", () => {
 
     // 非公開のリポジトリは、チェックとレビュー担当の承認がそろっても、オーナーの承認まで main を進めない
     const task = await buildTask(world, OFFICE);
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
     expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: SHA.head })).content)).toEqual({ merged: false });
     expect(writes(world).filter((r) => r.includes("/git/refs/heads/main"))).toEqual([]);
@@ -214,7 +214,7 @@ describe("GitHub のルールの決まり", () => {
     await stepUp(world);
     await api(world, "PUT", "/api/v1/github/rules", { version: 0, repos: [UI], reason: "UI だけ" });
     await buildTask(world, OFFICE);
-    await expect(tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
+    await expect(tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
     expect(writes(world)).toEqual([]);
   });
 
@@ -280,7 +280,7 @@ describe("GitHub のルールの決まり", () => {
     await service(world, UI);
     repoOnGitHub(world, UI, { private: false, files: [{ filename: ".github/workflows-old/ci.yml" }, { filename: "docs/github/workflows.md" }] });
     await buildTask(world, UI);
-    expect(await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+    expect(await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
     expect(writes(world)).toEqual([`POST /repos/${UI}/pulls`]);
   });
 
@@ -288,7 +288,7 @@ describe("GitHub のルールの決まり", () => {
     await service(world, UI);
     repoOnGitHub(world, UI, { private: false, files: [{ filename: "ci.yml", previous_filename: ".github/workflows/ci.yml" }] });
     await buildTask(world, UI);
-    await expect(tool(world, "builder", "pr_open", { name: "attendance-table", title: "動かす", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
+    await expect(tool(world, "builder", "pr_open", { title: "動かす", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
     expect(writes(world)).toEqual([]);
   });
 
@@ -296,14 +296,14 @@ describe("GitHub のルールの決まり", () => {
     await service(world, UI);
     repoOnGitHub(world, UI, { private: false, files: Array.from({ length: 299 }, (_, i) => ({ filename: `src/f${String(i)}.ts` })) });
     await buildTask(world, UI);
-    expect(await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+    expect(await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
   });
 
   it("変えたファイルが 300 件に届いて全部を確かめられない時は断る", async () => {
     await service(world, UI);
     repoOnGitHub(world, UI, { private: false, files: Array.from({ length: 300 }, (_, i) => ({ filename: `src/f${String(i)}.ts` })) });
     await buildTask(world, UI);
-    await expect(tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
+    await expect(tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "rule_denied" });
     expect(writes(world)).toEqual([]);
   });
 
@@ -311,7 +311,7 @@ describe("GitHub のルールの決まり", () => {
     await service(world, UI);
     repoOnGitHub(world, UI, { private: false });
     const task = await buildTask(world, UI);
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
     world.gate.github.files = [{ filename: ".github/workflows/ci.yml" }];
     expect(JSON.parse((await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: SHA.head })).content)).toEqual({ merged: false });
@@ -323,7 +323,7 @@ describe("GitHub のルールの決まり", () => {
     await service(world, UI);
     repoOnGitHub(world, UI, { private: false });
     await buildTask(world, UI);
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
     // 通知で先が c に進んだレビュー。ブランチの今の先 (代わりの GitHub は b を返す) はまだ確かめていない
     const reviewed = "c".repeat(40);
@@ -343,7 +343,7 @@ describe("GitHub のルールの決まり", () => {
       await service(world, UI);
       repoOnGitHub(world, UI, { private: false });
       const task = await buildTask(world, UI);
-      await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+      await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
       await world.d1.DB.prepare("UPDATE reviews SET head_sha = ?, reviewer_verdict = 'approve'").bind(bad).run();
       const made = await findNode(world.d1.DB, task);
       const before = world.gate.github.requests.length;

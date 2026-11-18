@@ -63,7 +63,7 @@ describe("App の鍵", () => {
   it("絞った鍵", async () => {
     await connect(world);
     const work = await startTask(world, UI);
-    const res = await push(world, work, UI, [{ ref: "refs/heads/ko/0190f4a8-attendance" }]);
+    const res = await push(world, work, UI, [{ ref: "refs/heads/ko/x" }]);
     expect({ status: res.status, body: await res.text() }).toEqual({ status: 200, body: "fake-git" });
     // knowidea-ui だけに書ける、1 時間の鍵
     expect(minted()).toEqual([{ installationId: expect.any(Number) as unknown, repos: [UI], permissions: { contents: "write" }, expiresAt: world.clock.now() + 60 * MINUTE }]);
@@ -72,7 +72,7 @@ describe("App の鍵", () => {
     // ワークスペースに GitHub の鍵を返さない
     expect(sent[0]?.token).not.toBe(work.token);
     expect(world.gate.audits.filter((a) => a.action === "github.push")).toEqual([
-      expect.objectContaining({ actor: "builder", target: UI, detail: { nodeId: work.nodeId, refs: ["refs/heads/ko/0190f4a8-attendance"], status: 200 } }),
+      expect.objectContaining({ actor: "builder", target: UI, detail: { nodeId: work.nodeId, refs: ["refs/heads/ko/x"], status: 200 } }),
     ]);
   });
 
@@ -209,14 +209,6 @@ describe("ゲートウェイが断る GitHub の操作", () => {
 });
 
 describe("ワークスペースの git の push", () => {
-  it("複数のブランチをまとめて push する", async () => {
-    await connect(world);
-    const work = await startTask(world, UI);
-    const res = await push(world, work, UI, [{ ref: "refs/heads/ko/a" }, { ref: "refs/heads/ko/b-2.x" }]);
-    expect(res.status).toBe(200);
-    expect(world.gate.audits.filter((a) => a.action === "github.push").map((a) => a.detail)).toEqual([{ nodeId: work.nodeId, refs: ["refs/heads/ko/a", "refs/heads/ko/b-2.x"], status: 200 }]);
-  });
-
   it("shallow の行の後に命令がある push は通す", async () => {
     await connect(world);
     const work = await startTask(world, UI);
@@ -325,7 +317,7 @@ describe("App を通した操作を記録する (ワークスペース)", () => 
 
   it("push は失敗も記録に残し、ref の長さを切る", async () => {
     await connect(world);
-    const work = await startTask(world, UI);
+    const work = await startTask(world, UI, "builder", { branch: `ko/${"a".repeat(600)}` });
     world.gate.github.gitStatus = 500;
     const long = `refs/heads/ko/${"a".repeat(600)}`;
     const res = await push(world, work, UI, [{ ref: long }]);

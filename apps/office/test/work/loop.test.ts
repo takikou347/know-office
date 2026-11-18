@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { finishTask, intakeTask, pullNext, type TaskBook } from "../../src/gate/work/loop.ts";
-import { createNode, recordsOf } from "../../src/gate/work/nodes.ts";
+import { createNode, findNode, recordsOf } from "../../src/gate/work/nodes.ts";
+import { taskPrompt } from "../../src/gate/work/run.ts";
 import { api, at, advance, clockIn, idOf, purposeAndGoal, REPO, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork();
@@ -42,7 +43,7 @@ async function openedPull(w: WorkWorld): Promise<string> {
   await clockIn(w, "president", "builder", "reviewer");
   await presidentPlans(w);
   const { tasks } = await split(w, goal, "勤怠の表をつなぐ");
-  expect(await tool(w, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+  expect(await tool(w, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
   return String(tasks[0]);
 }
 
@@ -156,8 +157,8 @@ describe("タスクの繰り返し", () => {
     expect(await doing(world, "builder")).toBe(first);
 
     await advance(world, at(10));
-    expect(await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "テストを足した" })).toMatchObject({ isError: false });
-    const branch = `ko/${first.slice(0, 8)}-attendance-table`;
+    expect(await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "テストを足した" })).toMatchObject({ isError: false });
+    const branch = `ko/${first}`;
     expect(world.forge.pulls).toEqual([{ repo: REPO, branch, title: "勤怠の表をつなぐ" }]);
     expect(await rows(world.d1.DB, "SELECT status, branch, pr_number FROM nodes WHERE id = ?", first)).toEqual([{ status: "review", branch, pr_number: 1 }]);
     // 開発担当はプルリクエストを出したら次を取る
@@ -173,6 +174,46 @@ describe("タスクの繰り返し", () => {
     ]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE task_kind = 'review'")).toEqual([{ status: "done" }]);
   });
+  it("タスクを取ると、リポジトリのあるタスクにブランチを決め、続けたタスクのブランチは変えない", async () => {
+    const { goal } = await purposeAndGoal(world);
+    await clockIn(world, "president", "builder");
+    await presidentPlans(world);
+    const { tasks } = await split(world, goal, "勤怠の表をつなぐ");
+    const [first = ""] = tasks;
+    expect(await doing(world, "builder")).toBe(first);
+    expect(await rows(world.d1.DB, "SELECT status, branch FROM nodes WHERE id = ?", first)).toEqual([{ status: "doing", branch: `ko/${first}` }]);
+    // 社員への最初の指示は、決めたブランチの名前をそのまま伝える
+    expect(taskPrompt(await findNode(world.d1.DB, first))).toContain(`ブランチは ko/${first} で切り、push できるのはこのブランチだけ`);
+    // リポジトリの無いタスク (社長の plan) にはブランチを決めない
+    expect(await rows(world.d1.DB, "SELECT branch FROM nodes WHERE assignee = 'president' AND status = 'doing'")).toEqual([{ branch: null }]);
+    // もうブランチのあるタスク (差し戻しで戻ったタスク、前の勤務から続けたタスク) は、取り直しても同じブランチのまま
+    await world.d1.DB.prepare("UPDATE nodes SET status = 'todo', branch = 'ko/kept-branch' WHERE id = ?").bind(first).run();
+    await world.gate.staff.builder.book.finish("handed_back", world.clock.now());
+    await staffOf(world, "builder").pull(world.clock.now());
+    expect(await rows(world.d1.DB, "SELECT status, branch FROM nodes WHERE id = ?", first)).toEqual([{ status: "doing", branch: "ko/kept-branch" }]);
+    // doing のまま branch の無いタスクは、取り直しでブランチが決まる。版は doing への移しの 1 つだけ進み、ブランチの書き込みを別に増やさない
+    await world.d1.DB.prepare("UPDATE nodes SET status = 'todo', branch = NULL, version = 10 WHERE id = ?").bind(first).run();
+    await world.gate.staff.builder.book.finish("handed_back", world.clock.now());
+    await staffOf(world, "builder").pull(world.clock.now());
+    expect(await rows(world.d1.DB, "SELECT status, branch, version FROM nodes WHERE id = ?", first)).toEqual([{ status: "doing", branch: `ko/${first}`, version: 11 }]);
+  });
+
+  it("pr_open はタスクのブランチで PR を出す", async () => {
+    const { goal } = await purposeAndGoal(world);
+    await clockIn(world, "president", "builder", "reviewer");
+    await presidentPlans(world);
+    const [first = ""] = (await split(world, goal, "勤怠の表をつなぐ")).tasks;
+    // 入力にブランチの名前は無い。name を付けると形の違いとして断る
+    await expect(tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "validation_failed" });
+    // ブランチの無いタスクは、GitHub に出さずに断る
+    await world.d1.DB.prepare("UPDATE nodes SET branch = NULL WHERE id = ?").bind(first).run();
+    await expect(tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "conflict" });
+    expect(world.forge.pulls).toEqual([]);
+    await world.d1.DB.prepare("UPDATE nodes SET branch = ? WHERE id = ?").bind(`ko/${first}`, first).run();
+    expect(await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+    expect(world.forge.pulls).toEqual([{ repo: REPO, branch: `ko/${first}`, title: "勤怠の表をつなぐ" }]);
+    expect(await rows(world.d1.DB, "SELECT n.branch AS node, r.branch AS review FROM nodes n JOIN reviews r ON r.node_id = n.id WHERE n.id = ?", first)).toEqual([{ node: `ko/${first}`, review: `ko/${first}` }]);
+  });
 });
 
 describe("タスクの繰り返しの決まり", () => {
@@ -182,7 +223,7 @@ describe("タスクの繰り返しの決まり", () => {
     await presidentPlans(world);
     const { tasks } = await split(world, goal, "勤怠の表をつなぐ");
     await staffOf(world, "builder").pull(world.clock.now());
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
     world.forge.checks = "pending";
     await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: "b".repeat(40) });
@@ -198,7 +239,7 @@ describe("タスクの繰り返しの決まり", () => {
     await presidentPlans(world);
     const { tasks } = await split(world, goal, "勤怠の表をつなぐ");
     await staffOf(world, "builder").pull(world.clock.now());
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
     world.forge.checks = "failed";
     await tool(world, "reviewer", "review_submit", { verdict: "approve", summary: "読んだ", headSha: "b".repeat(40) });
@@ -228,7 +269,7 @@ describe("タスクの繰り返しの決まり", () => {
     expect(await api(world, "PATCH", `/api/v1/nodes/${first}`, { version: before.version, priority: 2 }, 409)).toMatchObject({ detail: "バージョンが違う" });
 
     await staffOf(world, "builder").pull(world.clock.now());
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     const [review] = await rows(world.d1.DB, "SELECT id, version FROM nodes WHERE task_kind = 'review'");
     // 開発担当 (Sonnet) が作った物を開発担当に確かめさせない
     expect(await api(world, "PATCH", `/api/v1/nodes/${String(review?.["id"])}`, { version: review?.["version"], assignee: "builder" }, 409)).toMatchObject({
@@ -238,7 +279,7 @@ describe("タスクの繰り返しの決まり", () => {
 
   it("社員の役で使えないツールは not_found で断る", async () => {
     await expect(tool(world, "builder", "node_create", { kind: "project", parentId: "0190f4a8-0000-7000-8000-00000000ffff", title: "勝手に作る" })).rejects.toMatchObject({ code: "not_found" });
-    await expect(tool(world, "reviewer", "pr_open", { name: "x", title: "x", body: "" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(tool(world, "reviewer", "pr_open", { title: "x", body: "" })).rejects.toMatchObject({ code: "not_found" });
     await expect(tool(world, "president", "no_such_tool", {})).rejects.toMatchObject({ code: "not_found" });
   });
 
@@ -296,7 +337,7 @@ describe("タスクの繰り返しの決まり", () => {
     world.forge.during.openPull = async () => {
       expect(await ownerPatch(world, first, { title: "勤怠の表を本物の記録につなぐ" })).toBe(200);
     };
-    expect(await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
+    expect(await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).toMatchObject({ isError: false });
     expect(await rows(world.d1.DB, "SELECT status, pr_number FROM nodes WHERE id = ?", first)).toEqual([{ status: "review", pr_number: 1 }]);
     expect(await rows(world.d1.DB, "SELECT assignee, status FROM nodes WHERE task_kind = 'review'")).toEqual([{ assignee: "reviewer", status: "todo" }]);
   });
@@ -307,7 +348,7 @@ describe("タスクの繰り返しの決まり", () => {
     await presidentPlans(world);
     const { tasks } = await split(world, goal, "勤怠の表をつなぐ");
     await world.d1.DB.prepare("UPDATE staff SET model = (SELECT model FROM staff WHERE id = 'builder') WHERE id = 'reviewer'").run();
-    await expect(tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "conflict" });
+    await expect(tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" })).rejects.toMatchObject({ code: "conflict" });
     expect(world.forge.pulls).toEqual([]);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", tasks[0])).toEqual([{ status: "doing" }]);
     expect(await doing(world, "builder")).toBe(tasks[0]);

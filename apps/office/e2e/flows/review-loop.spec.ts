@@ -162,7 +162,7 @@ test.describe("別のモデルによる確認", () => {
       await expect.poll(async () => (await headOf(page)).lastSeenSha).toBe(first);
 
       // 開発担当の SDK は、指摘を受けて直した後にプルリクエストを出し直す。直して push し、レビュー担当の返事を積むまでの間を置いて返す。積む前にレビュー担当が呼ぶと、返事が無くて走りが落ちる
-      await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name: "review-loop", title: TITLE, body: "空の日を 0 にした" } }], "tool_use", 30_000);
+      await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { title: TITLE, body: "空の日を 0 にした" } }], "tool_use", 30_000);
       await scriptReply(page, "builder", [{ type: "text", text: "出し直した" }], "end_turn");
 
       // オーナーが行に指摘を書くと、開発担当のタスクに戻る

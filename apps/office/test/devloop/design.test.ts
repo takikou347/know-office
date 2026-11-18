@@ -80,7 +80,7 @@ describe("決まった形の設計書", () => {
     pullOnGitHub(world, Object.keys(bad));
     docsAt(world, HEAD, bad);
     // GitHub に出す前に 422 で断り、直す所を返す。PR は出さず、タスクは作業中のまま
-    const refused = await failure(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }));
+    const refused = await failure(tool(world, "builder", "pr_open", { title: "t", body: "" }));
     expect(refused.code).toBe("validation_failed");
     expect(refused.errors?.map((e) => e.pointer)).toContain("#/files/docs/04-detail/1-x.md");
     expect(pullsOpened(world)).toBe(0);
@@ -89,7 +89,7 @@ describe("決まった形の設計書", () => {
     // 直せば出せる
     docsAt(world, HEAD, GOOD);
     pullOnGitHub(world, Object.keys(GOOD));
-    expect(await tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" })).toMatchObject({ isError: false });
+    expect(await tool(world, "builder", "pr_open", { title: "t", body: "" })).toMatchObject({ isError: false });
     expect(pullsOpened(world)).toBe(1);
   });
 

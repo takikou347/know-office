@@ -97,7 +97,7 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     ];
     for (const [changed, code] of cases) {
       pullOnGitHub(world, changed);
-      expect((await failure(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }))).code).toBe(code);
+      expect((await failure(tool(world, "builder", "pr_open", { title: "t", body: "" }))).code).toBe(code);
     }
     expect(pullsOpened(world)).toBe(0);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
@@ -109,15 +109,15 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     pullOnGitHub(world, Object.keys(GOOD));
     // GitHub が木を切った (truncated) 時は、読み切れないので 502
     world.gate.github.set(`GET /repos/${DOCS}/git/trees/${HEAD}`, { sha: HEAD, tree: [], truncated: true });
-    await expect(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" })).rejects.toMatchObject({ code: "upstream_failed" });
+    await expect(tool(world, "builder", "pr_open", { title: "t", body: "" })).rejects.toMatchObject({ code: "upstream_failed" });
     // 60 件ちょうどは読み、61 件は読まずに断る
     docsAt(world, HEAD, many(61));
-    await expect(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" })).rejects.toMatchObject({ code: "validation_failed" });
+    await expect(tool(world, "builder", "pr_open", { title: "t", body: "" })).rejects.toMatchObject({ code: "validation_failed" });
     expect(pullsOpened(world)).toBe(0);
     const contentReads = () => world.gate.github.requests.filter((r) => r.route.includes("/contents/")).length;
     const before = contentReads();
     docsAt(world, HEAD, many(60));
-    expect(await tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" })).toMatchObject({ isError: false });
+    expect(await tool(world, "builder", "pr_open", { title: "t", body: "" })).toMatchObject({ isError: false });
     expect(contentReads() - before).toBe(60);
   });
 
@@ -131,7 +131,7 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     world.gate.github.contents.set(`${MAIN}:services/README.md`, list);
     const open = (next: string) => {
       world.gate.github.contents.set(`${HEAD}:services/README.md`, next);
-      return tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" });
+      return tool(world, "builder", "pr_open", { title: "t", body: "" });
     };
     // ほかの行も変える、行を消す、自分の名前の無い行を足す、2 行足すは、PR を出す前に 422
     for (const next of [`# サービス!\n\n- [a](a/README.md)\n${own}`, `# サービス\n\n${own}`, `${list}- [x](x/README.md)\n`, `${list}${own}${own}`, list]) {
@@ -165,7 +165,7 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     const other = { "services/other/README.md": README.replace("name: video-maker", "name: other"), "services/other/docs/01-overview/index.md": "# 概要\n" };
     pullOnGitHub(world, Object.keys(other));
     docsAt(world, HEAD, other);
-    const refused = await failure(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }));
+    const refused = await failure(tool(world, "builder", "pr_open", { title: "t", body: "" }));
     expect(refused.code).toBe("validation_failed");
     expect(refused.errors?.map((e) => e.pointer)).toEqual(["#/files"]);
     expect(pullsOpened(world)).toBe(0);
@@ -230,7 +230,7 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
     // 直した先が services/<名前>/ の外を変えていれば、出し直しも GitHub に書かずに断る
     world.gate.github.files = [{ filename: "WRITING.md" }];
-    expect((await failure(tool(world, "builder", "pr_open", { name: "video-maker-docs", title: "t", body: "" }))).code).toBe("validation_failed");
+    expect((await failure(tool(world, "builder", "pr_open", { title: "t", body: "" }))).code).toBe("validation_failed");
     expect(pullsOpened(world)).toBe(1);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM nodes WHERE task_kind = 'review' AND status = 'todo'")).toEqual([{ n: 0 }]);

@@ -214,7 +214,9 @@ export function createFakePulls(deps: PullsDeps): FakePulls {
     else if (from === to) status = "identical";
     else if (ancestors(to).has(from)) status = "ahead";
     else if (ancestors(from).has(to)) status = "behind";
-    return Response.json({ status, files: [{ filename: "src/feature.test.ts", status: "added", patch: "@@ -0,0 +1 @@\n+test" }] });
+    // merge_base_commit は 2 つの共通の祖先。元が先の祖先なら元、先が元の祖先なら先、ほかは元とみなす
+    const mergeBase = status === "behind" ? to : from;
+    return Response.json({ status, ...(/^[0-9a-f]{40}$/.test(mergeBase) ? { merge_base_commit: { sha: mergeBase } } : {}), files: [{ filename: "src/feature.test.ts", status: "added", patch: "@@ -0,0 +1 @@\n+test" }] });
   };
 
   /**

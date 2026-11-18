@@ -82,7 +82,7 @@ async function openedPull(w: WorkWorld, repo: string): Promise<string> {
   const project = (await createNode(w.gate.env, { kind: "project", parentId: goal, scope: "office", title: "自動停止" }, { by: "owner", now: w.clock.now() })).id;
   const task = (await createNode(w.gate.env, { kind: "task", parentId: project, scope: "office", title: "自動停止の数え方を直す", taskKind: "fix", assignee: "builder", repo }, { by: "owner", now: w.clock.now() })).id;
   await staffOf(w, "builder").pull(w.clock.now());
-  expect(await tool(w, "builder", "pr_open", { name: "guard-count", title: "自動停止の数え方を直す", body: "" })).toMatchObject({ isError: false });
+  expect(await tool(w, "builder", "pr_open", { title: "自動停止の数え方を直す", body: "" })).toMatchObject({ isError: false });
   await staffOf(w, "reviewer").pull(w.clock.now());
   return task;
 }

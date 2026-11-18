@@ -191,7 +191,7 @@ export async function openedDocsPull(w: WorkWorld, files: Record<string, string>
   const task = await takeDesign(w, id);
   pullOnGitHub(w, changed);
   docsAt(w, HEAD, files);
-  await tool(w, "builder", "pr_open", { name: "video-maker-docs", title: "video-maker の設計書", body: "" });
+  await tool(w, "builder", "pr_open", { title: "video-maker の設計書", body: "" });
   await staffOf(w, "reviewer").pull(w.clock.now());
   return task;
 }

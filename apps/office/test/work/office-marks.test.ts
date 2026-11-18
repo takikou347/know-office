@@ -30,7 +30,7 @@ async function openReview(): Promise<string> {
   const task = z.object({ id: z.string() }).parse(JSON.parse((await tool(world, "president", "node_create", { kind: "task", parentId: project, title: "勤怠の表をつなぐ", taskKind: "build", repo: REPO, assignee: "builder" })).content)).id;
   await staffOf(world, "builder").pull(world.clock.now());
   world.gate.live.published.length = 0;
-  await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+  await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
   await staffOf(world, "reviewer").pull(world.clock.now());
   return task;
 }

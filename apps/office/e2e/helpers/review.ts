@@ -1,4 +1,5 @@
 // レビューの画面の通しの手伝い。入口のレビューの返事を境目のモックで返し、画面が呼んだ道を並べる。入口の中身は test/review/ で確かめる
+import type { ReviewHead } from "@know-office/core";
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 
@@ -50,6 +51,7 @@ export async function stubReview(page: Page, options: { firstLines?: number } = 
     baseSha: BASE,
     headSha: HEAD,
     lastSeenSha: null,
+    working: false,
     checks: [{ name: "verify", ok: true }],
     reviewerSummary: "空の日の勤怠を 0 で出すように直した。気になる所は無い",
     reviewerVerdict: "approve",
@@ -57,7 +59,7 @@ export async function stubReview(page: Page, options: { firstLines?: number } = 
       { path: "src/attendance.ts", status: options.firstLines === undefined ? "modified" : "added", seen: false },
       { path: "src/format.ts", status: "modified", seen: false },
     ],
-  };
+  } satisfies ReviewHead;
   await page.route(
     (url) => url.pathname.startsWith(`/api/v1/reviews/${REVIEW_ID}`),
     async (route) => {

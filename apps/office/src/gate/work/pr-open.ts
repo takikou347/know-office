@@ -67,7 +67,7 @@ async function guardPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow 
  * @param task 呼んだ社員の今のタスク
  * @param input PrOpenTool
  * @returns プルリクエストの番号とブランチ
- * @throws conflict 直すリポジトリが無い時、レビュー担当が作った社員と同じモデルの時、出す間にタスクの担当か状態が変わった時、プルリクエストがもう入った時
+ * @throws conflict 直すリポジトリかブランチが無い時、レビュー担当が作った社員と同じモデルの時、出す間にタスクの担当か状態が変わった時、プルリクエストがもう入った時
  * @throws rule_denied ルールがプルリクエストを出す事を断った時
  * @throws validation_failed 設計書の形が違う時、bug と feature の子がテストのファイルを変えていない時
  * @throws upstream_failed GitHub がプルリクエストを出せないか読めない時、設計書の木を読み切れない時
@@ -77,7 +77,9 @@ export async function openPr(env: Bindings, forge: Forge, call: PrCall, task: No
   // レビューを割り振れないなら、GitHub に出す前に断る
   await checkPair(env.DB, call.staffId, REVIEWER);
   const [before] = await drizzle(env.DB).select().from(reviews).where(eq(reviews.nodeId, task.id)).limit(1);
-  const branch = before?.branch ?? `ko/${task.id.slice(0, 8)}-${input.name}`;
+  // ブランチはタスクを取った時に決めた名前だけを使う。出し直しは前に出したレビューの行のブランチ
+  const branch = before?.branch ?? task.branch;
+  if (branch === null) throw new AppError("conflict", "タスクにブランチが無い。タスクを取り直す");
   // 出し直しは、レビューの行に書く先を読むので、ブランチの先を必ず固定する
   const link = await linkedRow(env.DB, task.id, input.docsPr);
   const { head, child, docsHead } = await guardPr(env, forge, call, { ...task, repo: task.repo }, branch, before !== undefined, link);

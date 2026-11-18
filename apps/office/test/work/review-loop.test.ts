@@ -14,7 +14,7 @@ describe("別のモデルによる確認", () => {
     const project = z.object({ id: z.string() }).parse(JSON.parse((await tool(world, "president", "node_create", { kind: "project", parentId: goal, title: "勤怠" })).content)).id;
     const task = z.object({ id: z.string() }).parse(JSON.parse((await tool(world, "president", "node_create", { kind: "task", parentId: project, title: "勤怠の表をつなぐ", taskKind: "build", repo: REPO, assignee: "builder" })).content)).id;
     await staffOf(world, "builder").pull(world.clock.now());
-    await tool(world, "builder", "pr_open", { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" });
+    await tool(world, "builder", "pr_open", { title: "勤怠の表をつなぐ", body: "" });
     await staffOf(world, "reviewer").pull(world.clock.now());
 
     await advance(world, at(9, 40));

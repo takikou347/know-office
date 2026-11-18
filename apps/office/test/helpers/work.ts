@@ -105,10 +105,11 @@ function fakeForge(): FakeForge {
     commitFile: () => Promise.resolve("c".repeat(40)),
     findMirror: () => Promise.resolve(null),
     pullFiles: () => Promise.resolve([]),
-    compare: () => Promise.resolve({ files: [], truncated: false }),
+    compare: () => Promise.resolve({ files: [], truncated: false, baseSha: null }),
     readFile: () => Promise.resolve(null),
     defaultHead: () => Promise.resolve("b".repeat(40)),
     branchHead: () => Promise.resolve("b".repeat(40)),
+    findBranchHead: () => Promise.resolve("b".repeat(40)),
     listFiles: () => Promise.resolve([]),
     issues: UNCONNECTED_DEV_ISSUES,
     dispatchWorkflow: (repo, workflow, inputs) => {

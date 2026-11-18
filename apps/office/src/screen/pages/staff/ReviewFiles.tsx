@@ -3,7 +3,7 @@ import type { ReviewHead } from "@know-office/core";
 import { Accordion, Alert, Badge, Button, type DiffLine, DiffView, Stack, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";
 import { ApiContext } from "../../api.ts";
-import { type Failed, failureOf, NETWORK, toDiffFile, useFileDiff } from "./review-load.ts";
+import { type Failed, failureOf, NETWORK, toDiffFile, useFileDiff, type WorkingRange } from "./review-load.ts";
 
 type ReviewFile = ReviewHead["files"][number];
 
@@ -67,6 +67,7 @@ interface FileDiffPanelProps {
   file: ReviewFile;
   since: string | null;
   head: string;
+  range: WorkingRange | null;
   onNote: (text: string) => void;
 }
 
@@ -80,12 +81,14 @@ function lineKey(line: DiffLine): string {
 }
 
 /** 1 ファイルの差分。開いた時に入口から読む */
-function FileDiffPanel({ nodeId, file, since, head, onNote }: FileDiffPanelProps) {
-  const loaded = useFileDiff(nodeId, file.path, since, head);
+function FileDiffPanel({ nodeId, file, since, head, range, onNote }: FileDiffPanelProps) {
+  const loaded = useFileDiff(nodeId, file.path, since, head, range);
   const [target, setTarget] = useState<string | null>(null);
   if (loaded.state === "loading") return <p role="status">{file.path} の変更を読んでいます</p>;
   if (loaded.state === "failed") return <FailureAlert title={`${file.path} の変更を読めませんでした`} failed={loaded} />;
   if (loaded.data.hunks.length === 0) return <p>行の差はありません。大きすぎるファイルと文字でないファイルは、GitHub が行の差を返しません</p>;
+  // 作業中の変更はプルリクエストの前なので、行の指摘を書く先が無い
+  if (range !== null) return <DiffView files={[toDiffFile(loaded.data, file.status)]} />;
   return (
     <DiffView
       files={[toDiffFile(loaded.data, file.status)]}
@@ -116,12 +119,14 @@ export interface ReviewFilesProps {
   since: string | null;
   /** 今の先 */
   head: string;
+  /** 作業中の変更の元と先。あれば差分はこの間を読み、行の指摘を出さない */
+  range?: WorkingRange | null;
   /** 指摘を送れた時 */
   onNote: (text: string) => void;
 }
 
 /** 変えたファイルの木。最初のファイルだけを開いて読み、残りは開いた時に読む */
-export function ReviewFiles({ nodeId, files, since, head, onNote }: ReviewFilesProps) {
+export function ReviewFiles({ nodeId, files, since, head, range = null, onNote }: ReviewFilesProps) {
   const [open, setOpen] = useState<string[]>(() => (files[0] ? [files[0].path] : []));
   if (files.length === 0) return <p>変えたファイルはありません</p>;
   return (
@@ -138,7 +143,7 @@ export function ReviewFiles({ nodeId, files, since, head, onNote }: ReviewFilesP
             {f.seen ? null : <Badge tone="info">未読</Badge>}
           </Stack>
         ),
-        content: open.includes(f.path) ? <FileDiffPanel nodeId={nodeId} file={f} since={since} head={head} onNote={onNote} /> : null,
+        content: open.includes(f.path) ? <FileDiffPanel nodeId={nodeId} file={f} since={since} head={head} range={range} onNote={onNote} /> : null,
       }))}
     />
   );

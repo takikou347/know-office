@@ -10,7 +10,11 @@ describe("設計書を同じ時に直す", () => {
   });
 
   it("pr_open の docsPr は正の整数だけを受ける", () => {
-    expect(PrOpenTool.safeParse({ name: "code", title: "コード", body: "", docsPr: 3 }).success).toBe(true);
-    for (const docsPr of [0, -1, 1.5, "3"]) expect(PrOpenTool.safeParse({ name: "code", title: "コード", body: "", docsPr }).success).toBe(false);
+    expect(PrOpenTool.safeParse({ title: "コード", body: "", docsPr: 3 }).success).toBe(true);
+    for (const docsPr of [0, -1, 1.5, "3"]) expect(PrOpenTool.safeParse({ title: "コード", body: "", docsPr }).success).toBe(false);
+  });
+
+  it("pr_open はブランチの名前を受けない。ブランチはタスクを取った時に決まる", () => {
+    expect(PrOpenTool.safeParse({ name: "code", title: "コード", body: "" }).success).toBe(false);
   });
 });

@@ -198,6 +198,37 @@ describe("開発環境の代わりの物", () => {
     expect(compare.status).toBe(200);
   });
 
+  it("代わりの GitHub は /github の下に立てても、入れたリポジトリの既定のブランチを返す", async () => {
+    const github = createFakeGitHub();
+    const token = await mintToken(github, { contents: "read" });
+    const outer = new Hono().route("/github", github.app);
+    const res = await outer.request("/github/repos/example/knowidea-ui", { headers: { authorization: `Bearer ${token}`, "user-agent": "know-office-test" } });
+    expect({ status: res.status, body: z.object({ default_branch: z.string() }).loose().parse(await res.json()).default_branch }).toEqual({ status: 200, body: "main" });
+  });
+
+  it("代わりの GitHub は、置いた compare の返事も GitHub と同じく 300 ファイルで切る", async () => {
+    const github = createFakeGitHub();
+    const outer = new Hono().route("/github", github.app);
+    const headers = { authorization: "Bearer e2e", "user-agent": "know-office-test" };
+    const range = `${"a".repeat(40)}...${"b".repeat(40)}`;
+    github.set(`GET /github/repos/example/know-office/compare/${range}`, { merge_base_commit: { sha: "a".repeat(40) }, files: Array.from({ length: 301 }, (_, i) => ({ filename: `f${String(i)}.ts` })) });
+    const body = z.object({ merge_base_commit: z.object({ sha: z.string() }), files: z.array(z.unknown()) }).parse(await (await outer.request(`/github/repos/example/know-office/compare/${range}`, { headers })).json());
+    expect({ base: body.merge_base_commit.sha, files: body.files.length }).toEqual({ base: "a".repeat(40), files: 300 });
+  });
+
+  it("代わりの GitHub は、本文の無い返事を置くと、前に置いた返事を外す", async () => {
+    const github = createFakeGitHub();
+    const outer = new Hono().route("/github", github.app);
+    const headers = { authorization: "Bearer e2e", "user-agent": "know-office-test" };
+    const route = "GET /github/repos/example/know-office/git/ref/heads/main";
+    const place = (data: object) => outer.request("/github/__fake/routes", { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(data) });
+    await place({ route, body: { ref: "refs/heads/main", object: { sha: "a".repeat(40) } } });
+    const placed = (await outer.request("/github/repos/example/know-office/git/ref/heads/main", { headers })).status;
+    await place({ route });
+    const removed = (await outer.request("/github/repos/example/know-office/git/ref/heads/main", { headers })).status;
+    expect({ placed, removed }).toEqual({ placed: 200, removed: 404 });
+  });
+
   it("代わりの GitHub は鍵が無ければ 401 を返す", async () => {
     const res = await ask(createFakeGitHub().app, "/repos/o/r/pulls");
     expect(res.status).toBe(401);

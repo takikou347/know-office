@@ -30,8 +30,8 @@ async function twoPullRequests(): Promise<[string, string]> {
     ids.push(String(read(await tool(world, "president", "node_create", { kind: "task", parentId: project, title, taskKind: "build", repo: REPO, assignee: "builder" }))["id"]));
   }
   await staffOf(world, "builder").pull(world.clock.now());
-  expect(await tool(world, "builder", "pr_open", { name: "table", title: "表", body: "" })).toMatchObject({ isError: false });
-  expect(await tool(world, "builder", "pr_open", { name: "fix", title: "訂正", body: "" })).toMatchObject({ isError: false });
+  expect(await tool(world, "builder", "pr_open", { title: "表", body: "" })).toMatchObject({ isError: false });
+  expect(await tool(world, "builder", "pr_open", { title: "訂正", body: "" })).toMatchObject({ isError: false });
   return [ids[0] ?? "", ids[1] ?? ""];
 }
 
@@ -91,9 +91,9 @@ describe("古い main の上で確かめた PR は入らない", () => {
     await approve();
     await approve();
     // 作った社員が main の先に rebase して push し直し、先が変わったので出し直す。承認は消えているので、レビューを受け直す
-    world.forge.baseOf["ko/" + second.slice(0, 8) + "-fix"] = world.forge.main;
+    world.forge.baseOf[`ko/${second}`] = world.forge.main;
     world.forge.branchHead = () => Promise.resolve("d".repeat(40));
-    expect(await tool(world, "builder", "pr_open", { name: "fix", title: "訂正", body: "" })).toMatchObject({ isError: false });
+    expect(await tool(world, "builder", "pr_open", { title: "訂正", body: "" })).toMatchObject({ isError: false });
     expect(await rows(world.d1.DB, "SELECT head_sha, reviewer_verdict FROM reviews WHERE node_id = ?", second)).toEqual([{ head_sha: "d".repeat(40), reviewer_verdict: null }]);
     expect(await approve("d".repeat(40))).toEqual({ merged: true });
     expect(world.forge.merged).toHaveLength(2);
@@ -108,7 +108,7 @@ describe("古い main の上で確かめた PR は入らない", () => {
     world.forge.during.merge = gate.arrive;
     const run = async (id: string) => {
       const made = await findNode(world.d1.DB, id);
-      const branch = `ko/${id.slice(0, 8)}-${id === first ? "table" : "fix"}`;
+      const branch = `ko/${id}`;
       return mergeIfReady(world.gate.env, world.forge, made, { repo: made.repo ?? "", branch, prNumber: made.prNumber ?? 0, reviewer: null }, { staffId: null, kind: "owner_approved", detail: {} }, { by: "owner", now: world.clock.now() }, world.gate.deps);
     };
     const results = await Promise.all([run(first), run(second)]);

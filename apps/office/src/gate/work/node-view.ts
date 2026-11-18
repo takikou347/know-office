@@ -25,6 +25,7 @@ export function toNode(row: typeof nodes.$inferSelect, progress: number): Node {
     body: row.body ?? "",
     taskKind: row.taskKind,
     assignee: row.assignee,
+    branch: row.branch,
     status: row.status,
     priority: row.priority,
     progress,

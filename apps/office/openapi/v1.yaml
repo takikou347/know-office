@@ -1337,6 +1337,11 @@ components:
           type:
             - string
             - "null"
+        branch:
+          type:
+            - string
+            - "null"
+          description: 社員が作業するブランチ。リポジトリのあるタスクは、社員が取った時に `ko/<タスク ID>` に決まる
         status:
           type: string
           enum:
@@ -1373,6 +1378,7 @@ components:
         - body
         - taskKind
         - assignee
+        - branch
         - status
         - priority
         - progress
@@ -1644,17 +1650,29 @@ components:
         repo:
           type: string
         prNumber:
-          type: integer
+          type:
+            - integer
+            - "null"
+          description: プルリクエストの番号。作業中 (`working`) は null
         branch:
           type: string
         baseSha:
-          type: string
+          type:
+            - string
+            - "null"
+          description: 変更の元のコミット。作業中は既定のブランチとの共通の祖先で、まだ push が無ければ null
         headSha:
-          type: string
+          type:
+            - string
+            - "null"
+          description: 変更の先のコミット。作業中でまだ push が無ければ null
         lastSeenSha:
           type:
             - string
             - "null"
+        working:
+          type: boolean
+          description: プルリクエストを出す前の作業中の変更か。true の時は承認、指摘、その場の直し、読んだ印を 409 で断る
         checks:
           type: array
           items:
@@ -1703,6 +1721,7 @@ components:
         - baseSha
         - headSha
         - lastSeenSha
+        - working
         - checks
         - reviewerSummary
         - reviewerVerdict
@@ -6012,25 +6031,29 @@ paths:
         - reviews
       summary: レビューの概要
       description: |-
-        レビュー担当の要約、チェック結果、変更ファイルのツリー。
+        レビュー担当の要約、チェック結果、変更ファイルのツリー。プルリクエストを出す前の作業中のブランチは `working: true` で返す。
 
         処理の流れ:
 
-        1. `reviews` を取得する
-        2. プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない
-        3. `last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする
+        1. `reviews` を取得する。無ければ `nodes` を読み、リポジトリとブランチがあり `pr_number` が無いタスクなら作業中の変更として読む。どちらでもなければ 404
+        2. 作業中の変更は、リポジトリを読む操作がルールで許されなければ GitHub を呼ばずに 403。ブランチの先、既定のブランチの先、その間の compare を 1 回ずつ読み、元を 2 つの共通の祖先 (`merge_base_commit`) にする。ブランチがまだ無ければ (404) 空の変更を返す。compare が 300 件ちょうどなら 502
+        3. レビューの行があれば、プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない
+        4. `last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする
 
         このルート固有のエラー:
 
-        - 404 `not_found`: レビューが存在しない
+        - 403 `rule_denied`: 作業中の変更のリポジトリを読む操作がルールで許されない
+        - 404 `not_found`: レビューも作業中のブランチも存在しない
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
-        - "`reviews` を取得する"
-        - プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない
+        - "`reviews` を取得する。無ければ `nodes` を読み、リポジトリとブランチがあり `pr_number` が無いタスクなら作業中の変更として読む。どちらでもなければ 404"
+        - 作業中の変更は、リポジトリを読む操作がルールで許されなければ GitHub を呼ばずに 403。ブランチの先、既定のブランチの先、その間の compare を 1 回ずつ読み、元を 2 つの共通の祖先 (`merge_base_commit`) にする。ブランチがまだ無ければ (404) 空の変更を返す。compare が 300 件ちょうどなら 502
+        - レビューの行があれば、プルリクエストのファイルの一覧 API を 100 件ずつのページで読み、変更ファイルの一覧を取得する。30 ページ目まで満ちていれば 502。ワークスペースは起こさない
         - "`last_seen_sha` が今の `head_sha` と違えば、そこから `head_sha` までの compare に入るファイルを未読にする。compare が 300 件ちょうどで切れているかもしれない時は、全部を未読にする"
       x-errors:
-        - "404 `not_found`: レビューが存在しない"
+        - "403 `rule_denied`: 作業中の変更のリポジトリを読む操作がルールで許されない"
+        - "404 `not_found`: レビューも作業中のブランチも存在しない"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
       parameters:
@@ -6078,20 +6101,28 @@ paths:
         - reviews
       summary: 1 ファイルの差分
       description: |-
-        since を指定すると、前回確認した時点からの差分を返す。
+        since を指定すると、前回確認した時点からの差分を返す。作業中の変更は、概要が返した `baseSha` と `headSha` の間の差分を返す。
 
         処理の流れ:
 
-        1. `since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す。compare が 300 件ちょうどなら 502。ワークスペースは起こさない
+        1. 作業中の変更は、`since` があれば 400、`baseSha` か `headSha` が無ければ 400、ルールで読めなければ 403。`baseSha` から `headSha` までの compare API から 1 ファイル分の差分を取り出す。概要の後に push があっても同じ元と先を読む
+        2. レビューの行があれば、`baseSha` か `headSha` を付けると 400。`since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す
+        3. compare が 300 件ちょうどなら 502。ワークスペースは起こさない
 
         このルート固有のエラー:
 
+        - 400 `malformed_request`: 作業中の変更に `since` を付けた、`baseSha` と `headSha` が無い、またはレビューの行のある変更に付けた
+        - 403 `rule_denied`: 作業中の変更のリポジトリを読む操作がルールで許されない
         - 404 `not_found`: ファイルが存在しない
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
       x-steps:
-        - "`since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す。compare が 300 件ちょうどなら 502。ワークスペースは起こさない"
+        - 作業中の変更は、`since` があれば 400、`baseSha` か `headSha` が無ければ 400、ルールで読めなければ 403。`baseSha` から `headSha` までの compare API から 1 ファイル分の差分を取り出す。概要の後に push があっても同じ元と先を読む
+        - レビューの行があれば、`baseSha` か `headSha` を付けると 400。`since` が無ければプルリクエストのファイルの一覧 API から、あれば `since` から `head_sha` までの compare API から、1 ファイル分の差分を取り出す
+        - compare が 300 件ちょうどなら 502。ワークスペースは起こさない
       x-errors:
+        - "400 `malformed_request`: 作業中の変更に `since` を付けた、`baseSha` と `headSha` が無い、またはレビューの行のある変更に付けた"
+        - "403 `rule_denied`: 作業中の変更のリポジトリを読む操作がルールで許されない"
         - "404 `not_found`: ファイルが存在しない"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
@@ -6116,10 +6147,26 @@ paths:
         - schema:
             type: string
             pattern: ^[0-9a-f]{40}$
-            description: 前に見た `last_seen_sha`。指定するとそこから今の `head_sha` までの差分を返す
+            description: 前に見た `last_seen_sha`。指定するとそこから今の `head_sha` までの差分を返す。作業中の変更では 400
           required: false
-          description: 前に見た `last_seen_sha`。指定するとそこから今の `head_sha` までの差分を返す
+          description: 前に見た `last_seen_sha`。指定するとそこから今の `head_sha` までの差分を返す。作業中の変更では 400
           name: since
+          in: query
+        - schema:
+            type: string
+            pattern: ^[0-9a-f]{40}$
+            description: 作業中の変更だけで要る。概要が返した `baseSha`
+          required: false
+          description: 作業中の変更だけで要る。概要が返した `baseSha`
+          name: baseSha
+          in: query
+        - schema:
+            type: string
+            pattern: ^[0-9a-f]{40}$
+            description: 作業中の変更だけで要る。概要が返した `headSha`
+          required: false
+          description: 作業中の変更だけで要る。概要が返した `headSha`
+          name: headSha
           in: query
       responses:
         "200":
@@ -6161,8 +6208,11 @@ paths:
         - reviews
       summary: 変更前または変更後のファイル内容
       x-steps:
+        - 作業中の変更は、`baseSha` か `headSha` が無ければ 400、ルールで読めなければ 403。`ref` が `base` なら `baseSha`、`head` なら `headSha` のファイルを読む。レビューの行があれば、`baseSha` か `headSha` を付けると 400 で、行の元か先を読む
         - 変更前または変更後のファイル内容を contents API から取得する
       x-errors:
+        - "400 `malformed_request`: 作業中の変更に `baseSha` と `headSha` が無い、またはレビューの行のある変更に付けた"
+        - "403 `rule_denied`: 作業中の変更のリポジトリを読む操作がルールで許されない"
         - "404 `not_found`: ファイルが存在しない"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した"
@@ -6191,6 +6241,22 @@ paths:
               - head
           required: true
           name: ref
+          in: query
+        - schema:
+            type: string
+            pattern: ^[0-9a-f]{40}$
+            description: 作業中の変更だけで要る。概要が返した `baseSha`
+          required: false
+          description: 作業中の変更だけで要る。概要が返した `baseSha`
+          name: baseSha
+          in: query
+        - schema:
+            type: string
+            pattern: ^[0-9a-f]{40}$
+            description: 作業中の変更だけで要る。概要が返した `headSha`
+          required: false
+          description: 作業中の変更だけで要る。概要が返した `headSha`
+          name: headSha
           in: query
       responses:
         "200":
@@ -6227,10 +6293,13 @@ paths:
       description: |-
         処理の流れ:
 
-        1. 変更前または変更後のファイル内容を contents API から取得する
+        1. 作業中の変更は、`baseSha` か `headSha` が無ければ 400、ルールで読めなければ 403。`ref` が `base` なら `baseSha`、`head` なら `headSha` のファイルを読む。レビューの行があれば、`baseSha` か `headSha` を付けると 400 で、行の元か先を読む
+        2. 変更前または変更後のファイル内容を contents API から取得する
 
         このルート固有のエラー:
 
+        - 400 `malformed_request`: 作業中の変更に `baseSha` と `headSha` が無い、またはレビューの行のある変更に付けた
+        - 403 `rule_denied`: 作業中の変更のリポジトリを読む操作がルールで許されない
         - 404 `not_found`: ファイルが存在しない
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した
@@ -6245,7 +6314,7 @@ paths:
         - "`sha` が現在の `head_sha` と一致する時だけ、`reviews.last_seen_sha` を `sha` にする。1 文の条件付きの `UPDATE` で書く"
       x-errors:
         - "404 `not_found`: レビューが存在しない"
-        - "409 `conflict`: 確認した後に変更が追加された"
+        - "409 `conflict`: 確認した後に変更が追加された、またはプルリクエストを出す前の作業中の変更"
       parameters:
         - schema:
             type: string
@@ -6292,7 +6361,7 @@ paths:
         このルート固有のエラー:
 
         - 404 `not_found`: レビューが存在しない
-        - 409 `conflict`: 確認した後に変更が追加された
+        - 409 `conflict`: 確認した後に変更が追加された、またはプルリクエストを出す前の作業中の変更
       security: *a1
   /api/v1/reviews/{nodeId}/lsp:
     get:

@@ -117,3 +117,20 @@ export const requireUserAgent: MiddlewareHandler = async (c, next) => {
 export function mountedAt(routePath: string): string {
   return routePath.endsWith("/*") ? routePath.slice(0, -2) : "";
 }
+
+/** compare が返すファイルの上限。GitHub は比べる全体で 300 件までしか返さない (GitHub の REST API の Compare two commits) */
+const COMPARE_FILES = 300;
+
+const PlacedCompare = z.object({ files: z.array(z.unknown()) }).loose();
+
+/**
+ * 置いた compare の返事を、GitHub と同じく 300 ファイルで切る。compare でない返事はそのまま返す
+ * @param route 「メソッド 道」 (/github の頭を除いた物)
+ * @param body 置いた返事
+ * @returns 返す本文
+ */
+export function capCompare(route: string, body: unknown): unknown {
+  if (!/^GET \/repos\/[^/]+\/[^/]+\/compare\//.test(route)) return body;
+  const placed = PlacedCompare.safeParse(body);
+  return placed.success ? { ...placed.data, files: placed.data.files.slice(0, COMPARE_FILES) } : body;
+}

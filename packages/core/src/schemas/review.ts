@@ -122,16 +122,17 @@ export const ReviewFileStatus = z.enum(["added", "modified", "removed", "renamed
 /** 変えたファイルの種類の型 */
 export type ReviewFileStatus = z.infer<typeof ReviewFileStatus>;
 
-/** レビューの概要。要点とチェックを変更の前に出し、変えたファイルは木に並べる道と種類だけを持つ。差分はファイルごとに getReviewDiff で取る */
+/** レビューの概要。要点とチェックを変更の前に出し、変えたファイルは木に並べる道と種類だけを持つ。差分はファイルごとに getReviewDiff で取る。working はプルリクエストを出す前の作業中のブランチで、prNumber は null */
 export const ReviewHead = z
   .object({
     nodeId: Uuid,
     repo: z.string(),
-    prNumber: z.number().int(),
+    prNumber: z.number().int().nullable().meta({ description: "プルリクエストの番号。作業中 (`working`) は null" }),
     branch: z.string(),
-    baseSha: z.string(),
-    headSha: z.string(),
+    baseSha: z.string().nullable().meta({ description: "変更の元のコミット。作業中は既定のブランチとの共通の祖先で、まだ push が無ければ null" }),
+    headSha: z.string().nullable().meta({ description: "変更の先のコミット。作業中でまだ push が無ければ null" }),
     lastSeenSha: z.string().nullable(),
+    working: z.boolean().meta({ description: "プルリクエストを出す前の作業中の変更か。true の時は承認、指摘、その場の直し、読んだ印を 409 で断る" }),
     checks: z.array(z.object({ name: z.string(), ok: z.boolean() }).strict()),
     reviewerSummary: z.string(),
     reviewerVerdict: z.string().nullable(),
@@ -147,7 +148,9 @@ export type ReviewHead = z.infer<typeof ReviewHead>;
 export const ReviewDiffQuery = z
   .object({
     path: RepoPath.meta({ description: "リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422" }),
-    since: CommitSha.optional().meta({ description: "前に見た `last_seen_sha`。指定するとそこから今の `head_sha` までの差分を返す" }),
+    since: CommitSha.optional().meta({ description: "前に見た `last_seen_sha`。指定するとそこから今の `head_sha` までの差分を返す。作業中の変更では 400" }),
+    baseSha: CommitSha.optional().meta({ description: "作業中の変更だけで要る。概要が返した `baseSha`" }),
+    headSha: CommitSha.optional().meta({ description: "作業中の変更だけで要る。概要が返した `headSha`" }),
   })
   .strict();
 
@@ -164,8 +167,15 @@ export const FileDiff = z
 /** 1 ファイルの差分の型 */
 export type FileDiff = z.infer<typeof FileDiff>;
 
-/** 前か後のファイルの中身の問い。base はレビューの元、head は今の先 */
-export const ReviewFileQuery = z.object({ path: RepoPath.meta({ description: "リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422" }), ref: z.enum(["base", "head"]) }).strict();
+/** 前か後のファイルの中身の問い。base はレビューの元、head は今の先。作業中の変更は、概要が返した元と先を baseSha と headSha に渡す */
+export const ReviewFileQuery = z
+  .object({
+    path: RepoPath.meta({ description: "リポジトリの頭からの道。頭と末尾の `/`、空の区切り、`.` と `..` の区切り、制御文字は 422" }),
+    ref: z.enum(["base", "head"]),
+    baseSha: CommitSha.optional().meta({ description: "作業中の変更だけで要る。概要が返した `baseSha`" }),
+    headSha: CommitSha.optional().meta({ description: "作業中の変更だけで要る。概要が返した `headSha`" }),
+  })
+  .strict();
 
 /** 前か後のファイルの中身。ref は読んだ sha */
 export const FileContent = z.object({ path: z.string(), ref: z.string(), content: z.string() }).strict().meta({ id: "FileContent" });

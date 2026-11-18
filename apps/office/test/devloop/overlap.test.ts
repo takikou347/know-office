@@ -34,10 +34,10 @@ async function states(): Promise<Record<string, string>> {
 
 /**
  * 開発担当が今のタスクで PR を出す
- * @param name ブランチの名前
+ * @param name PR の題
  */
 async function openPr(name: string): Promise<void> {
-  expect(await tool(world, "builder", "pr_open", { name, title: name, body: "" })).toMatchObject({ isError: false });
+  expect(await tool(world, "builder", "pr_open", { title: name, body: "" })).toMatchObject({ isError: false });
 }
 
 describe("1 Issue を 1 回の作業で入れる", () => {

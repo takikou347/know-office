@@ -180,22 +180,26 @@ export type Work = {
   jti: string;
 };
 
+/** startTask のタスクのブランチ。取った時にゲートウェイが決める名前の代わりで、push はこのブランチだけが通る */
+export const WORK_BRANCH = "ko/x";
+
 /**
  * 社員を出勤させ、リポジトリを直すタスクを持たせて作業トークンを出す
  * @param w テストの物
  * @param repo タスクのリポジトリ
  * @param staffId 社員 ID
+ * @param options タスクのブランチ (無ければ WORK_BRANCH、null はブランチの無いタスク) と種類
  * @returns 社員、タスク、作業トークン
  */
-export async function startTask(w: WorkWorld, repo: string, staffId: StaffId = "builder"): Promise<Work> {
+export async function startTask(w: WorkWorld, repo: string, staffId: StaffId = "builder", options: { branch?: string | null; taskKind?: "build" | "review" } = {}): Promise<Work> {
   const nodeId = crypto.randomUUID();
   const { book } = w.gate.staff[staffId];
   const now = w.clock.now();
   await book.wake(now);
   await w.d1.DB.prepare(
-    "INSERT INTO nodes (id, kind, parent_id, scope, title, status, priority, assignee, repo, created_by, created_at, updated_at) VALUES (?, 'task', NULL, 'office', '直す', 'doing', 1, ?, ?, 'president', 0, 0)",
+    "INSERT INTO nodes (id, kind, parent_id, scope, title, task_kind, status, priority, assignee, repo, branch, created_by, created_at, updated_at) VALUES (?, 'task', NULL, 'office', '直す', ?, 'doing', 1, ?, ?, ?, 'president', 0, 0)",
   )
-    .bind(nodeId, staffId, repo)
+    .bind(nodeId, options.taskKind ?? null, staffId, repo, options.branch === undefined ? WORK_BRANCH : options.branch)
     .run();
   await book.take({ nodeId, title: "直す", scope: "office" }, null, now);
   const { token, jti } = await issueTicket(w.gate.env, staffId, nodeId, now);

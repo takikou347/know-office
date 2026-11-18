@@ -48,8 +48,8 @@ export type Forge = {
   commitFile(repo: string, branch: string, change: { parent: string; path: string; content: string; message: string }): Promise<string>;
   /** プルリクエストで変わったファイルを、差分の本文と一緒に全部返す。pull_requests の読みだけに絞った鍵でページを回して読み、上限の 3,000 件に届けば upstream_failed で断る */
   pullFiles(repo: string, pr: number): Promise<ChangedFile[]>;
-  /** base から head までに変わったファイルを、差分の本文と一緒に返す。contents の読みだけに絞った鍵で 1 回だけ読む。GitHub は 300 件で切るので、300 件ちょうどなら truncated */
-  compare(repo: string, base: string, head: string): Promise<{ files: ChangedFile[]; truncated: boolean }>;
+  /** base から head までに変わったファイルを、差分の本文と一緒に返す。contents の読みだけに絞った鍵で 1 回だけ読む。GitHub は 300 件で切るので、300 件ちょうどなら truncated。baseSha は 2 つの共通の祖先で、GitHub が返さなければ null */
+  compare(repo: string, base: string, head: string): Promise<{ files: ChangedFile[]; truncated: boolean; baseSha: string | null }>;
   /** コミット ref のファイルの中身を返す。無いか、ファイルでなければ null */
   readFile(repo: string, ref: string, path: string): Promise<string | null>;
   /** リポジトリの既定のブランチで、.github/workflows/ の workflow を動かし、動かしたブランチを返す。actions の書きだけに絞った鍵で送る */
@@ -58,6 +58,8 @@ export type Forge = {
   defaultHead(repo: string): Promise<string>;
   /** ブランチの先のコミット。設計書の PR を確かめる時に、変えたファイルと中身を同じコミットで読むために固定する */
   branchHead(repo: string, branch: string): Promise<string>;
+  /** ブランチの先のコミット。ブランチがまだ無ければ (404) null。作業中の変更を読む時に、まだ push の無いブランチを空の変更として扱う */
+  findBranchHead(repo: string, branch: string): Promise<string | null>;
   /** コミット ref の木のうち、prefix の下のファイルの道 (リポジトリの頭から) を返す。GitHub が木を切った時と、500 件を超えた時は null */
   listFiles(repo: string, ref: string, prefix: string): Promise<string[] | null>;
   /** 設計書から作る Issue の口。issue_plan だけが使う */
@@ -87,6 +89,7 @@ export const UNCONNECTED_FORGE: Forge = {
   dispatchWorkflow: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   defaultHead: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   branchHead: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
+  findBranchHead: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   listFiles: () => Promise.reject(new AppError("upstream_failed", "GitHub とまだつないでいない")),
   issues: UNCONNECTED_DEV_ISSUES,
 };
@@ -200,13 +203,25 @@ async function hasTodo(env: Bindings, staffId: string): Promise<boolean> {
  * @returns 取った行。取れなければ null
  */
 export async function claimNode(env: Bindings, row: NodeRow, now: number): Promise<NodeRow | null> {
-  if (row.issueNumber === null || row.repo === null) return moveNode(env.DB, row, "doing", now);
+  const branch = branchOf(row);
+  if (row.issueNumber === null || row.repo === null) return moveNode(env.DB, row, "doing", now, { branch });
   const done = await drizzle(env.DB)
     .update(nodes)
-    .set({ status: "doing", version: row.version + 1, updatedAt: now })
+    .set({ status: "doing", branch, version: row.version + 1, updatedAt: now })
     .where(and(eq(nodes.id, row.id), eq(nodes.version, row.version), eq(nodes.status, "todo"), noOverlap({ repo: sql`${row.repo}`, issue: sql`${row.issueNumber}`, id: sql`${row.id}` })))
     .returning({ id: nodes.id });
-  return done.length > 0 ? { ...row, status: "doing", version: row.version + 1, updatedAt: now } : null;
+  return done.length > 0 ? { ...row, status: "doing", branch, version: row.version + 1, updatedAt: now } : null;
+}
+
+/**
+ * タスクを取る時に置くブランチを決める。リポジトリのあるタスクで、まだブランチが無ければ ko/<タスク ID>。もうあれば (差し戻しで戻った、続けた) そのまま。
+ * ID 全体を使うので、同じ時に作ったタスクとも重ならない。名前はここだけで決め、push の守りと pr_open はこの名前だけを使う
+ * @param row 読んだ時のタスクの行
+ * @returns 置くブランチ。リポジトリの無いタスクは今の値 (null)
+ */
+export function branchOf(row: Pick<NodeRow, "id" | "repo" | "branch" | "taskKind">): string | null {
+  if (row.branch !== null || row.repo === null || row.taskKind === "review") return row.branch;
+  return `ko/${row.id}`;
 }
 
 /**

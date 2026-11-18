@@ -119,7 +119,7 @@ describe("鍵はゲートウェイだけが持つ", () => {
 
   it("社員のツールは社員の役で使える物だけを通し、役で使えないツールは断って記録する", async () => {
     const work = await startTask();
-    expect(await decision(work, "mcp__staff__pr_open", { name: "fix", title: "直す", body: "本文" })).toEqual({ allow: true, reason: "役で使える社員のツール" });
+    expect(await decision(work, "mcp__staff__pr_open", { title: "直す", body: "本文" })).toEqual({ allow: true, reason: "役で使える社員のツール" });
     expect(await decision(work, "mcp__staff__node_create", {})).toEqual({ allow: false, reason: "役で使えない社員のツールは断る" });
     expect(await toolCalls(work.nodeId)).toMatchObject([
       { tool: "mcp__staff__pr_open", op_kind: "office.tool", target: "pr_open", allowed: 1 },

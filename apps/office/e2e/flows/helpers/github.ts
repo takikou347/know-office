@@ -77,3 +77,15 @@ export async function fakeGitHubRoute(page: Page, route: string, body: unknown):
   const res = await page.request.post(`${FAKE_GITHUB}/__fake/routes`, { data: { route: prefixed, body } });
   if (!res.ok()) throw new Error(`返事を置けない: ${route}`);
 }
+
+/**
+ * 代わりの GitHub に置いた返事を外す。後の通しに置いた返事を残さない
+ * @param page 開いているページ
+ * @param route 「メソッド 道」。fakeGitHubRoute に渡した物と同じ形
+ */
+export async function forgetGitHubRoute(page: Page, route: string): Promise<void> {
+  const [method, path] = route.split(" ");
+  const prefixed = `${method ?? ""} ${new URL(FAKE_GITHUB).pathname}${path ?? ""}`;
+  const res = await page.request.post(`${FAKE_GITHUB}/__fake/routes`, { data: { route: prefixed } });
+  if (!res.ok()) throw new Error(`返事を外せない: ${route}`);
+}

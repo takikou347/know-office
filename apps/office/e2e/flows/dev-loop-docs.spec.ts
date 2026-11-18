@@ -54,9 +54,9 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
   const docsBase = await commit(docs, []);
   const docsHead = await commit(docs, [docsBase]);
   const suffix = crypto.randomUUID().slice(0, 6);
-  const codeName = `make${suffix}`;
   const docsName = `docs${suffix}`;
-  const codeBranch = `ko/019a7b00-${codeName}`;
+  // コードのブランチは開発担当がタスクを取った時に、ゲートウェイが ko/<タスク ID> に決める
+  const codeBranch = `ko/${ids.task}`;
   const docsBranch = `ko/019a7b00-${docsName}`;
   const issue = z.object({ number: z.number() }).parse(await (await page.request.post(`${FAKE_GITHUB}/repos/${REPO}/issues`, { ...GITHUB, data: { title: "動画を作る", body: "設計書: 詳細設計 1-video の要件「動画を作る」", labels: ["feature"] } })).json()).number;
 
@@ -96,7 +96,7 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
     const docsPr = Math.max(0, ...used.map((i) => i.number)) + 1;
     // 代わりの Claude が、開発担当に docs_pr_open、続けて docsPr を結んだ pr_open を呼ばせて終える
     await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_docs_pr_open", name: "mcp__staff__docs_pr_open", input: { name: docsName, title: "概要を直す", body: "仕様が変わった" } }], "tool_use");
-    await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { name: codeName, title: "動画を作る", body: "動画を作った", docsPr } }], "tool_use");
+    await scriptReply(page, "builder", [{ type: "tool_use", id: "toolu_flow_pr_open", name: "mcp__staff__pr_open", input: { title: "動画を作る", body: "動画を作った", docsPr } }], "tool_use");
     await scriptReply(page, "builder", [{ type: "text", text: "PR を出した" }], "end_turn");
     expect((await page.request.patch(`/api/v1/nodes/${ids.task}`, { headers: { Origin: origin }, data: { version: 1, assignee: "builder" } })).status()).toBe(200);
 

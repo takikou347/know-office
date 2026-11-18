@@ -52,12 +52,11 @@ export async function openReview(w: WorkWorld): Promise<Opened> {
   const { goal } = await purposeAndGoal(w);
   await clockIn(w, "president", "builder", "reviewer");
   const project = idOf(await api(w, "POST", "/api/v1/nodes", { kind: "project", parentId: goal, scope: "office", title: "勤怠" }, 201));
-  const task = idOf(await api(w, "POST", "/api/v1/nodes", { kind: "task", parentId: project, scope: "office", title: "勤怠の表をつなぐ", taskKind: "build", assignee: "builder" }, 201));
-  await w.d1.DB.prepare("UPDATE nodes SET repo = ? WHERE id = ?").bind(REPO, task).run();
+  const task = idOf(await api(w, "POST", "/api/v1/nodes", { kind: "task", parentId: project, scope: "office", title: "勤怠の表をつなぐ", taskKind: "build", assignee: "builder", repo: REPO }, 201));
   await staffOf(w, "builder").pull(w.clock.now());
   w.gate.github.set(`POST /repos/${REPO}/pulls`, { number: 1, base: { sha: BASE }, head: { sha: HEAD } });
   const forge = appForge(w);
-  const opened = await runTool(w.gate.env, forge, { staffId: "builder", tool: "pr_open", input: { name: "attendance-table", title: "勤怠の表をつなぐ", body: "" }, now: w.clock.now(), guard: w.gate.deps });
+  const opened = await runTool(w.gate.env, forge, { staffId: "builder", tool: "pr_open", input: { title: "勤怠の表をつなぐ", body: "" }, now: w.clock.now(), guard: w.gate.deps });
   if (opened.isError) throw new Error(opened.content);
   await staffOf(w, "reviewer").pull(w.clock.now());
   return { c, task, pr: 1, forge };

@@ -334,7 +334,7 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
     },
     compare: async (repo, from, to) => {
       const compare = await call(repo, readContents, { method: "GET", path: `/compare/${from}...${to}` }, GitHubCompare);
-      return { files: compare.files.map(changedFile), truncated: compare.files.length >= COMPARE_FILES };
+      return { files: compare.files.map(changedFile), truncated: compare.files.length >= COMPARE_FILES, baseSha: compare.merge_base_commit?.sha ?? null };
     },
     readFile: async (repo, ref, path) => {
       // ref は道に入るので、コミットの形だけを通す
@@ -445,10 +445,9 @@ export function httpForge(base: string, fetcher: Fetcher, access: GitHubAccess, 
       if (!res.ok) throw new AppError("upstream_failed", `GitHub が ${String(res.status)} を返した`);
       return info.default_branch;
     },
-    branchHead: async (repo, branch) => {
-      const ref = await call(repo, readContents, { method: "GET", path: `/git/ref/heads/${branchPath(branch)}` }, GitHubRef);
-      return commitSha(ref.object.sha);
-    },
+    branchHead: async (repo, branch) => commitSha((await call(repo, readContents, { method: "GET", path: `/git/ref/heads/${branchPath(branch)}` }, GitHubRef)).object.sha),
+    // GET /repos/{o}/{r}/git/ref/heads/{branch} は名前の完全に合う ref だけを返し、無ければ 404 (GitHub の REST API の Get a reference)
+    findBranchHead: async (repo, branch) => send(repo, readContents, { method: "GET", path: `/git/ref/heads/${branchPath(branch)}` }).then(async (res) => (res.status === 404 ? null : commitSha((await parse(res, GitHubRef)).object.sha))),
     listFiles: async (repo, ref, prefix) => {
       // GET /repos/{o}/{r}/git/trees/{tree_sha}?recursive=1 は、木が 100,000 件か 7MB を超えると truncated を true にして切る (GitHub の REST API の Git trees)
       const tree = await call(repo, readContents, { method: "GET", path: `/git/trees/${commitSha(ref)}?recursive=1` }, GitHubGitTree);

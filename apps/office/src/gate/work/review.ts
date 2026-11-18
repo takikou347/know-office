@@ -1,6 +1,6 @@
 // レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
 import { AppError, CommitSha, decideRepo, docsMergeNeeds, log, newId, ownerGuardedPath, type ReleaseCondition, type RepoAction, type ServiceRules, StaffId } from "@know-office/core";
-import { and, eq, ne, type SQL, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
 import { nodes, reviews, services } from "../db/main.ts";
@@ -195,11 +195,32 @@ export async function mergeIfReady(
  * @param nodeId 作った社員のタスク ID
  * @returns レビューの行
  * @throws not_found レビューが無い時
+ * @throws conflict PR を出す前の作業中のタスクの時
  */
 export async function findReview(db: D1Database, nodeId: string): Promise<ReviewRow> {
-  const [row] = await drizzle(db).select().from(reviews).where(eq(reviews.nodeId, nodeId)).limit(1);
-  if (!row) throw new AppError("not_found", "レビューが無い");
-  return row;
+  const found = await findReviewOrWorking(db, nodeId);
+  // 作業中の変更はプルリクエストの前なので、承認、指摘、その場の直し、読んだ印を書く先が無い
+  if (found.kind === "working") throw new AppError("conflict", "プルリクエストを出す前の作業中の変更には書けない");
+  return found.row;
+}
+
+/** プルリクエストを出す前の作業中のブランチ。タスクを取った時に決まったブランチで、レビューの行はまだ無い */
+export type WorkingBranch = { nodeId: string; repo: string; branch: string };
+
+/**
+ * レビューの行を読む。無ければ、リポジトリとブランチがあり PR の無いタスク (作業中の変更) を読む
+ * @param db 今の状態の D1
+ * @param nodeId 作った社員のタスク ID
+ * @returns レビューの行か、作業中のブランチ
+ * @throws not_found レビューの行も作業中のブランチも無い時
+ */
+export async function findReviewOrWorking(db: D1Database, nodeId: string): Promise<{ kind: "review"; row: ReviewRow } | ({ kind: "working" } & WorkingBranch)> {
+  const orm = drizzle(db);
+  const [row] = await orm.select().from(reviews).where(eq(reviews.nodeId, nodeId)).limit(1);
+  if (row) return { kind: "review", row };
+  const [task] = await orm.select({ repo: nodes.repo, branch: nodes.branch }).from(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.kind, "task"), ne(nodes.taskKind, "review"), isNull(nodes.prNumber))).limit(1);
+  if (!task || task.repo === null || task.branch === null) throw new AppError("not_found", "レビューが無い");
+  return { kind: "working", nodeId, repo: task.repo, branch: task.branch };
 }
 
 /**

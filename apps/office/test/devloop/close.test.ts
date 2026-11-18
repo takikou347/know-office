@@ -17,10 +17,10 @@ async function reviewed(closes?: (real: DevIssues) => DevIssues): Promise<number
   await world.d1.DB.prepare("UPDATE nodes SET status = 'dropped' WHERE title LIKE '設計書:%'").run();
   await clockIn(world, "president", "builder", "reviewer");
   const made = await plan(world, planOf(id, [child("動画を作る", { kind: "feature" })]));
-  world.forge.compare = () => Promise.resolve({ files: [{ path: "src/a.test.ts", status: "added", patch: null }], truncated: false });
+  world.forge.compare = () => Promise.resolve({ files: [{ path: "src/a.test.ts", status: "added", patch: null }], truncated: false, baseSha: null });
   const real = pacedForge(world).issues;
   world.forge.issues = closes === undefined ? real : closes(real);
-  expect(await tool(world, "builder", "pr_open", { name: "make", title: "動画を作る", body: "" })).toMatchObject({ isError: false });
+  expect(await tool(world, "builder", "pr_open", { title: "動画を作る", body: "" })).toMatchObject({ isError: false });
   return made.children[0]?.number ?? 0;
 }
 

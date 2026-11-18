@@ -33,7 +33,7 @@ function openDocs(name = "spec") {
  * @returns ツールの答え
  */
 function openCode(docsPr?: number) {
-  return tool(world, "builder", "pr_open", { name: "make", title: "動画を作る", body: "", ...(docsPr === undefined ? {} : { docsPr }) });
+  return tool(world, "builder", "pr_open", { title: "動画を作る", body: "", ...(docsPr === undefined ? {} : { docsPr }) });
 }
 
 /**

@@ -13,7 +13,7 @@ export const NEXT = "c".repeat(40);
 /** もう一度進んだ後の先 */
 export const NEWER = "e".repeat(40);
 /** 開発担当が出し直す時の入力 */
-export const AGAIN = { name: "attendance-table", title: "勤怠の表をつなぐ", body: "空の日のテストを足した" };
+export const AGAIN = { title: "勤怠の表をつなぐ", body: "空の日のテストを足した" };
 
 /**
  * 社員のツールを、代わりの GitHub につないだ口で呼ぶ

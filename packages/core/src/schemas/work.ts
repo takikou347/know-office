@@ -38,6 +38,7 @@ export const Node = z
     body: z.string(),
     taskKind: TaskKind.nullable(),
     assignee: z.string().nullable(),
+    branch: z.string().nullable().meta({ description: "社員が作業するブランチ。リポジトリのあるタスクは、社員が取った時に `ko/<タスク ID>` に決まる" }),
     status: NodeStatus,
     priority: z.number().int().meta({ description: "小さいほど先に取る" }),
     progress: z.number().min(0).max(1).meta({ description: "配下のタスクのうち済んだ割合。見送ったタスクは数えない。タスクは済めば 1" }),

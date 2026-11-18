@@ -22,12 +22,37 @@ export interface ReviewPageProps {
  */
 function useMarkSeen(nodeId: string, head: ReviewHead | null): void {
   const api = useContext(ApiContext);
-  const sha = head?.headSha ?? null;
+  // 作業中の変更は読んだ印を置く先が無い
+  const sha = head?.working === false ? head.headSha : null;
   const seen = head?.lastSeenSha ?? null;
   useEffect(() => {
     // 間に push が届いていれば入口が 409 で断り、印は前のまま残るので、返事を待たない
     if (api && sha !== null && sha !== seen) void api.api.v1.reviews[":nodeId"].seen.$put({ param: { nodeId }, json: { sha } }).catch(() => null);
   }, [api, nodeId, sha, seen]);
+}
+
+interface WorkingProps {
+  /** 作業中の変更の概要 */
+  head: ReviewHead;
+}
+
+/** プルリクエストを出す前の作業中の変更。読むだけで、承認と差し戻し、行の指摘、その場の直しは出さない */
+function Working({ head }: WorkingProps) {
+  return (
+    <>
+      <p>作業中の変更 (プルリクエストの前)</p>
+      <p>
+        {head.repo} の {head.branch}
+      </p>
+      <Part title="変更">
+        {head.baseSha === null || head.headSha === null ? (
+          <p>まだ push がありません</p>
+        ) : (
+          <ReviewFiles key={head.headSha} nodeId={head.nodeId} files={head.files} since={null} head={head.headSha} range={{ baseSha: head.baseSha, headSha: head.headSha }} onNote={() => undefined} />
+        )}
+      </Part>
+    </>
+  );
 }
 
 interface VerdictProps {
@@ -42,7 +67,7 @@ function Verdict({ head, onDone }: VerdictProps) {
   const [busy, setBusy] = useState<"approve" | "request_changes" | null>(null);
   const [failed, setFailed] = useState<Failed | null>(null);
   const send = async (verdict: "approve" | "request_changes") => {
-    if (!api) return setFailed(NETWORK);
+    if (!api || head.headSha === null) return setFailed(NETWORK);
     setBusy(verdict);
     const res = await api.api.v1.reviews[":nodeId"].verdict.$post({ param: { nodeId: head.nodeId }, json: { verdict, body, baseSha: head.headSha } }).catch(() => null);
     setBusy(null);
@@ -73,7 +98,7 @@ export function ReviewPage({ nodeId, staffId }: ReviewPageProps) {
   const head = loaded.state === "ok" ? loaded.data : null;
   // 開いた時の印を持ち、読んだ事にした後も、この画面の間は前に見た所からの差を出せるようにする
   const [opened, setOpened] = useState<{ head: string; since: string | null } | null>(null);
-  if (head && opened?.head !== head.headSha) setOpened({ head: head.headSha, since: head.lastSeenSha });
+  if (head?.headSha && opened?.head !== head.headSha) setOpened({ head: head.headSha, since: head.lastSeenSha });
   useMarkSeen(nodeId, head);
   const [view, setView] = useState("all");
   const [editing, setEditing] = useState<string | null>(null);
@@ -86,8 +111,19 @@ export function ReviewPage({ nodeId, staffId }: ReviewPageProps) {
   if (loaded.state === "loading") return <Stack gap={4}>{back}<p role="status">レビューを読んでいます</p></Stack>;
   if (loaded.state === "failed") return <Stack gap={4}>{back}<FailureAlert title="レビューを読めませんでした" failed={loaded} /></Stack>;
   const data = loaded.data;
+  // 画面は自分から読み直さず、開いた時と押した時だけ読む
+  if (data.working) {
+    return (
+      <Stack gap={4}>
+        {back}
+        <h2>変更のレビュー</h2>
+        <Working head={data} />
+      </Stack>
+    );
+  }
+  const headSha = data.headSha ?? "";
   const since = opened?.since ?? null;
-  const fixed = since !== null && since !== data.headSha;
+  const fixed = since !== null && since !== headSha;
   const onlyNew = fixed && view === "since";
   const reload = (text: string) => {
     setDone(text);
@@ -99,7 +135,7 @@ export function ReviewPage({ nodeId, staffId }: ReviewPageProps) {
       {back}
       <h2>変更のレビュー</h2>
       <p>
-        {data.repo} の #{data.prNumber} ({data.branch})
+        {data.repo} {data.prNumber === null ? "" : `の #${String(data.prNumber)} `}({data.branch})
       </p>
       <Part title="要点">
         <p>{data.reviewerSummary === "" ? "レビュー担当の要点はまだありません" : data.reviewerSummary}</p>
@@ -124,7 +160,7 @@ export function ReviewPage({ nodeId, staffId }: ReviewPageProps) {
             ]}
           />
         ) : null}
-        <ReviewFiles key={`${view}/${data.headSha}`} nodeId={nodeId} files={onlyNew ? data.files.filter((f) => !f.seen) : data.files} since={onlyNew ? since : null} head={data.headSha} onNote={setDone} />
+        <ReviewFiles key={`${view}/${headSha}`} nodeId={nodeId} files={onlyNew ? data.files.filter((f) => !f.seen) : data.files} since={onlyNew ? since : null} head={headSha} onNote={setDone} />
       </Part>
       {done ? (
         <Alert tone="success" live>
@@ -136,7 +172,7 @@ export function ReviewPage({ nodeId, staffId }: ReviewPageProps) {
       </Part>
       <Part title="直す">
         <Select aria-label="直すファイル" placeholder="直すファイルを選ぶ" value={editing} onValueChange={setEditing} options={data.files.filter((f) => f.status !== "removed").map((f) => ({ value: f.path, label: f.path }))} />
-        {editing ? <ReviewEditor key={`${editing}/${data.headSha}`} nodeId={nodeId} path={editing} head={data.headSha} onCommitted={reload} /> : null}
+        {editing ? <ReviewEditor key={`${editing}/${headSha}`} nodeId={nodeId} path={editing} head={headSha} onCommitted={reload} /> : null}
       </Part>
     </Stack>
   );

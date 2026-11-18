@@ -57,7 +57,7 @@ describe("社員のツールの MCP の受け手", () => {
     const deps: StaffToolDeps = { fetcher: gateway(OK).fetcher, token: () => "ticket-1" };
     const tools = staffToolDefinitions(deps, ["pr_open", "ask_boss"]);
     expect(tools.map((t) => t.name)).toEqual(["pr_open", "ask_boss"]);
-    expect(Object.keys(tools[0]?.inputSchema ?? {}).toSorted()).toEqual(["body", "docsPr", "name", "title"]);
+    expect(Object.keys(tools[0]?.inputSchema ?? {}).toSorted()).toEqual(["body", "docsPr", "title"]);
     expect(tools.every((t) => t.description !== "")).toBe(true);
     const server = staffServer(deps, ["ask_boss"]);
     expect(server).toMatchObject({ type: "sdk", name: "staff" });
