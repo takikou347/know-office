@@ -104,13 +104,16 @@ export interface FailedAlertProps {
   title: string;
   /** 理由 */
   failure: Failed;
+  /** 入口が返した説明も出す時に true。足りない条件など、オーナーが次にする事が分かる失敗だけに付ける */
+  withDetail?: boolean;
 }
 
 /** 読めなかった事、送れなかった事を出す */
-export function FailedAlert({ title, failure }: FailedAlertProps) {
+export function FailedAlert({ title, failure, withDetail = false }: FailedAlertProps) {
   return (
     <Alert tone="error" title={title} live>
       {REASON[failure.code] ?? `理由: ${failure.code}。`}
+      {withDetail && failure.detail ? ` ${failure.detail}。` : null}
       {failure.traceId ? (
         <>
           {` 問い合わせの番号: ${failure.traceId} `}

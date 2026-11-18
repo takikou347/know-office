@@ -1,6 +1,6 @@
 // サービスに進める時の、デプロイの条件 (deployWhen) の確かめ。main に入れる確かめと同じ条件の照らし方 (checkConditions) を使う (サービスと拡張の 3.1)
 import { AppError, type ReleaseCondition } from "@know-office/core";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { reviews } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
@@ -35,7 +35,7 @@ export async function requireDeployConditions(env: Bindings, forge: Forge, servi
   const [approved] = await drizzle(env.DB)
     .select({ id: reviews.id })
     .from(reviews)
-    .where(and(eq(reviews.repo, service.repo), eq(reviews.headSha, head), eq(reviews.reviewerVerdict, "approve")))
+    .where(and(eq(reviews.repo, service.repo), eq(reviews.headSha, head), eq(reviews.reviewerVerdict, "approve"), or(isNull(reviews.ownerVerdict), ne(reviews.ownerVerdict, "reject"))))
     .limit(1);
   const met = await checkConditions(forge, deployWhen, { repo: service.repo, sha: head }, { reviewer: approved !== undefined, owner: true }, { all: true });
   if (met.kind === "met") return;

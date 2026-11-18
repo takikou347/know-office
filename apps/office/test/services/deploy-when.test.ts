@@ -30,10 +30,11 @@ function checks(w: WorkWorld, run: "passed" | "failed" | "pending"): void {
  * @param w テストの物
  * @param verdict レビュー担当の判断
  * @param sha レビューで確かめたコミット
+ * @param owner オーナーの判断。無ければ null
  */
-async function reviewed(w: WorkWorld, verdict: "approve" | "reject", sha = HEAD): Promise<void> {
-  await w.d1.DB.prepare("INSERT INTO reviews (id, node_id, repo, pr_number, branch, base_sha, head_sha, checks, reviewer_verdict) VALUES (?, ?, ?, 1, 'x', ?, ?, '[]', ?)")
-    .bind(crypto.randomUUID(), crypto.randomUUID(), REPO, "a".repeat(40), sha, verdict)
+async function reviewed(w: WorkWorld, verdict: "approve" | "reject", sha = HEAD, owner: "reject" | null = null): Promise<void> {
+  await w.d1.DB.prepare("INSERT INTO reviews (id, node_id, repo, pr_number, branch, base_sha, head_sha, checks, reviewer_verdict, owner_verdict) VALUES (?, ?, ?, 1, 'x', ?, ?, '[]', ?, ?)")
+    .bind(crypto.randomUUID(), crypto.randomUUID(), REPO, "a".repeat(40), sha, verdict, owner)
     .run();
 }
 
@@ -114,6 +115,12 @@ describe("段階ごとのオーナーの判断", () => {
       const id = await prototype(world, ["reviewer"]);
       await reviewed(world, "approve", OTHER);
       await reviewed(world, "reject");
+      expect(Problem.parse(await toService(world, id, 409)).detail).toContain("reviewer");
+    });
+
+    it("オーナーが断ったレビューの承認は数えない", async () => {
+      const id = await prototype(world, ["reviewer"]);
+      await reviewed(world, "approve", HEAD, "reject");
       expect(Problem.parse(await toService(world, id, 409)).detail).toContain("reviewer");
     });
 
