@@ -229,6 +229,20 @@ describe("開発環境の代わりの物", () => {
     expect({ placed, removed }).toEqual({ placed: 200, removed: 404 });
   });
 
+  it("代わりの GitHub は、置いた返事をまとめて外すと、どれも 404 に戻す", async () => {
+    const github = createFakeGitHub();
+    const outer = new Hono().route("/github", github.app);
+    const headers = { authorization: "Bearer e2e", "user-agent": "know-office-test" };
+    const paths = ["/github/repos/example/know-office/git/ref/heads/main", "/github/repos/example/know-office/pulls/1/files"];
+    for (const path of paths) {
+      await outer.request("/github/__fake/routes", { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ route: `GET ${path}`, body: {} }) });
+    }
+    const placed = await Promise.all(paths.map(async (path) => (await outer.request(path, { headers })).status));
+    const cleared = (await outer.request("/github/__fake/routes", { method: "DELETE", headers })).status;
+    const after = await Promise.all(paths.map(async (path) => (await outer.request(path, { headers })).status));
+    expect({ placed, cleared, after }).toEqual({ placed: [200, 200], cleared: 204, after: [404, 404] });
+  });
+
   it("代わりの GitHub は鍵が無ければ 401 を返す", async () => {
     const res = await ask(createFakeGitHub().app, "/repos/o/r/pulls");
     expect(res.status).toBe(401);

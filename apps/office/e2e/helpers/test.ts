@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { test as base } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
+import { FAKES } from "./fakes.ts";
 
 export { expect } from "@playwright/test";
 
@@ -14,9 +15,23 @@ export function testSourceIp(testId: string): string {
   return `2001:db8:${hex.slice(0, 4)}:${hex.slice(4, 8)}::1`;
 }
 
-/** 画面の通しの test。要求の送信元をテストごとに変える */
-export const test = base.extend({
+/** 画面の通しの test。要求の送信元をテストごとに変え、利用場面の通しが代わりの GitHub に置いた返事を 1 本ごとに外す */
+export const test = base.extend<{ forgetGitHubRoutes: void }>({
   extraHTTPHeaders: async ({ extraHTTPHeaders }, use, testInfo) => {
     await use({ ...extraHTTPHeaders, "CF-Connecting-IP": testSourceIp(testInfo.testId) });
   },
+  // 利用場面の通しは 1 本ずつ流れ、同じ代わりの GitHub を使う。置いた返事が残ると、後の通しが同じ道 (main の ref、同じ番号の PR) で前の返事を受ける
+  forgetGitHubRoutes: [
+    async ({ playwright }, use, testInfo) => {
+      await use();
+      if (testInfo.project.name !== "flows") return;
+      const request = await playwright.request.newContext();
+      try {
+        expect((await request.delete(`${FAKES}/github/__fake/routes`)).status()).toBe(204);
+      } finally {
+        await request.dispose();
+      }
+    },
+    { auto: true },
+  ],
 });

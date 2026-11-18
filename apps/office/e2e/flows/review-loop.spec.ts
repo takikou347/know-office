@@ -5,6 +5,7 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { readMain, seedMain } from "./helpers/seed.ts";
+import { settle } from "./helpers/settle.ts";
 import { part, post } from "./helpers/screen.ts";
 import { clockIn, forgetReplies, idleStaff, ownerPasskey, scriptReply } from "./helpers/staff.ts";
 
@@ -126,7 +127,9 @@ test.describe("別のモデルによる確認", () => {
     // 開発担当を出勤させるために広げた勤務の時刻も戻す。後から広げた方を先に戻し、最後に始めの時刻へ戻す。出勤させる前に落ちた時は始めの時刻へ 2 度戻すだけ
     let restoreBuilder = restore;
     const stops: string[] = [];
-    try {
+    // 途中で落ちても、積んだまま残った返事で開発担当が見本のタスクを終えないよう、返事を外してから止めたタスクを再開し、後から広げた勤務の時刻から戻す。後始末が落ちても最初のエラーを残す
+    const undo = [() => forgetLoop(false), () => forgetReplies(page, "builder"), () => forgetReplies(page, "reviewer"), () => resumeBuilderTasks(page, stops), () => restoreBuilder(), () => restore()];
+    await settle(async () => {
       await stopBuilderTasks(page, stops);
       // 開発担当も出勤させ、前の通しのタスクを離れて手が空くのを待つ
       restoreBuilder = await clockIn(page, "builder");
@@ -204,17 +207,6 @@ test.describe("別のモデルによる確認", () => {
       await expect(page.getByText("承認を出し、GitHub にも写しました")).toBeVisible();
       await expect.poll(() => statusOf(page, NODE)).toBe("done");
       expect(await received(page, `PATCH /repos/${REPO}/git/refs/heads/main`)).toContainEqual({ sha: fixed, force: false });
-    } finally {
-      // 途中で落ちても、積んだまま残った返事で開発担当が見本のタスクを終えないよう、返事を外してから止めたタスクを再開する
-      forgetLoop(false);
-      await forgetReplies(page, "builder");
-      await forgetReplies(page, "reviewer");
-      await resumeBuilderTasks(page, stops);
-      try {
-        await restoreBuilder();
-      } finally {
-        await restore();
-      }
-    }
+    }, undo);
   });
 });

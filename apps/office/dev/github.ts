@@ -133,6 +133,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
       else routes.set(route, body);
       return c.body(null, 204);
     })
+    // 置いた返事をまとめて外す。利用場面の通しが 1 本ごとに呼び、置いた返事を後の通しに残さない
+    .delete("/__fake/routes", (c) => { routes.clear(); return c.body(null, 204); })
     .get("/__fake/requests", (c) => c.json(requests))
     .route("/", flowRoutes(apps, failures, { installations, pulls, hookUrl: options.hookUrl }))
     // 画面: オーナーが「作成」を押すと App ができ、manifest の redirect_url に code と state を付けて戻す
