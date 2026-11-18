@@ -104,11 +104,27 @@ describe("タスクの繰り返し", () => {
     expect(repos.merges).toEqual([]);
     expect(await statusOf(world, task)).toBe("review");
     expect(await mergedAt(task)).toBeNull();
+    // 戻した時に入れ始めた印も消える
+    expect(await rows(world.d1.DB, "SELECT merge_started_at AS at, merge_started_sha AS sha FROM reviews WHERE node_id = ?", task)).toEqual([{ at: null, sha: null }]);
     // 落ちたチェックのままの求めでも、定期の入れ直しは社員の求めでないので、自動停止に数えない
     expect(await rows(world.d1.DB, "SELECT id FROM stops")).toEqual([]);
     expect(world.gate.deps.rollbacks).toEqual([]);
     // 未送信の閉じの順番待ちは消えている (Issue はまだ閉じない)
     expect(await rows(world.d1.DB, "SELECT id FROM github_mirrors WHERE kind = 'issue_close'")).toEqual([]);
+  });
+
+  it("入れ直せずに戻した後に差し戻され、社員が終えた done は拾わない", async () => {
+    const { task, repos, now } = await stopped();
+    repos.checks[REPO] = "failed";
+    const at = now + RESUME_AFTER_MS + 1;
+    await resume(at);
+    expect(await statusOf(world, task)).toBe("review");
+    // オーナーが差し戻して社員が直し、同じ先のまま finishTask で done にした形
+    repos.checks[REPO] = "passed";
+    await world.d1.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ?").bind(at, task).run();
+    expect(await resume(at + RESUME_AFTER_MS + 1)).toBe(0);
+    expect(await statusOf(world, task)).toBe("done");
+    expect(repos.merges).toEqual([]);
   });
 
   it("同時に拾っても 1 度だけ入れる", async () => {

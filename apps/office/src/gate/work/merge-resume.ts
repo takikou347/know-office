@@ -96,6 +96,8 @@ async function resumeOne(env: Bindings, forge: Forge, guard: GuardDeps, found: S
     env.DB.prepare(
       "DELETE FROM github_mirrors WHERE kind = 'issue_close' AND sent_at IS NULL AND review_id IN (SELECT id FROM reviews WHERE node_id = ?1) AND EXISTS (SELECT 1 FROM nodes WHERE id = ?1 AND version = ?2 AND status = 'review')",
     ).bind(found.id, found.version + 1),
+    // 戻したら入れ始めた印も消す。残すと、後で差し戻されて社員が終えた同じ先の done を拾い、断ったコミットを入れてしまう。入れ直す時は mergeMade がまた書く
+    env.DB.prepare("UPDATE reviews SET merge_started_at = NULL, merge_started_sha = NULL WHERE node_id = ?1 AND EXISTS (SELECT 1 FROM nodes WHERE id = ?1 AND version = ?2 AND status = 'review')").bind(found.id, found.version + 1),
   ]);
   if ((back?.meta.changes ?? 0) === 0) return false;
   const made = await findNode(env.DB, found.id);
