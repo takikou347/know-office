@@ -119,3 +119,35 @@ test("案を見送ると、元の案に見送った理由が残る", async ({ pa
   await main.getByRole("tab", { name: "元の案" }).click();
   await expect(main.getByText("今は手が回らない")).toBeVisible();
 });
+
+test("デプロイの条件がそろわないとサービスにできず、足りない条件が画面に出る", async ({ page }) => {
+  await useOwnerPasskey(page);
+  freeRepoNames();
+  await page.goto("/services");
+  await connectGitHub(page);
+  await chooseDocsRepo(page);
+  const id = await addIdea(page, `デプロイの条件の案 ${crypto.randomUUID().slice(0, 8)}`);
+  const main = page.getByRole("main");
+  await move(page, "検討に進める", "調べる");
+  await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
+  await choose(page, "移す先", "作ると決める");
+  await choose(page, "リポジトリ", REPO);
+  await move(page, "作ると決める", "作る");
+  await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
+  // オーナーの承認に、チェックとレビュー担当の承認を足す (足すだけなので、パスキーは要らない)
+  const origin = new URL(page.url()).origin;
+  const set = await page.request.put(`/api/v1/services/${id}/settings/deployWhen`, { headers: { Origin: origin }, data: { version: 0, value: ["owner", "checks", "reviewer"], reason: "チェックとレビューも見る" } });
+  expect(set.ok()).toBe(true);
+  // 既定のブランチの先のチェックはまだ終わっていない
+  const head = "d".repeat(40);
+  await fakeGitHubRoute(page, `GET /repos/${REPO}`, { full_name: REPO, private: false, default_branch: "main" });
+  await fakeGitHubRoute(page, `GET /repos/${REPO}/git/ref/heads/main`, { ref: "refs/heads/main", object: { sha: head } });
+  await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${head}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "in_progress", conclusion: null }] });
+  await page.reload();
+  await move(page, "サービスにする", "本番に出す");
+  await expect(main.getByText("段階を移せませんでした")).toBeVisible();
+  await expect(main.getByText(/足りない条件: checks .*、reviewer /)).toBeVisible();
+  // 段階は試作のまま
+  await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
+  await expect(main.getByRole("button", { name: "サービスにする" })).toBeVisible();
+});

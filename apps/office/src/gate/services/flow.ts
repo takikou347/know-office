@@ -20,10 +20,11 @@ import { nodes, services, serviceEvents } from "../db/main.ts";
 import { insertWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
-import { notifyStaff } from "../work/loop.ts";
+import { type Forge, notifyStaff } from "../work/loop.ts";
 import type { TokenDeps } from "../github/app.ts";
 import { requireDocsRepo } from "../devloop/docs-repo.ts";
 import { chooseRepo } from "./repo.ts";
+import { requireDeployConditions } from "./deploy-when.ts";
 import { serviceStatus } from "./status.ts";
 import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated } from "../work/nodes.ts";
 
@@ -171,13 +172,14 @@ async function designTask(env: Bindings, row: ServiceRow, repo: string, docsRepo
  * @param input 移る先、理由、試作の担当
  * @param actor 移した人。今はオーナーだけ
  * @param github リポジトリを確かめる GitHub の鍵の出し手
+ * @param forge サービスに進める時に、チェックと先のコミットを読む GitHub の口
  * @returns 移した後の行
  * @throws not_found サービスが無い時
- * @throws conflict 今の段階から移れない時、読んだ後に段階か GitHub との連携か設計書のリポジトリが変わった時、GitHub とつないでいないのにリポジトリを選んだ時、設計書のリポジトリが無いか使えない時、リポジトリが設計書のリポジトリと同じか、同じ名前のリポジトリを持つ別のサービスがある時
+ * @throws conflict 今の段階から移れない時、service に進めるのにデプロイの条件 (deployWhen) がそろっていない時と確かめられない時、読んだ後に段階か GitHub との連携か設計書のリポジトリが変わった時、GitHub とつないでいないのにリポジトリを選んだ時、設計書のリポジトリが無いか使えない時、リポジトリが設計書のリポジトリと同じか、同じ名前のリポジトリを持つ別のサービスがある時
  * @throws validation_failed prototype に進めるのに担当の社員かリポジトリが無い時、リポジトリの名前が設計書の置き場にできない形の時、ほかの段階にリポジトリを送った時、触れるリポジトリに無い時
- * @throws upstream_failed 触れるリポジトリを GitHub から読めない時
+ * @throws upstream_failed 触れるリポジトリ、既定のブランチの先、チェックを GitHub から読めない時
  */
-export async function advanceService(env: Bindings, serviceId: string, input: AdvanceInput, actor: Actor, github: TokenDeps): Promise<ServiceRow> {
+export async function advanceService(env: Bindings, serviceId: string, input: AdvanceInput, actor: Actor, github: TokenDeps, forge: Forge): Promise<ServiceRow> {
   const row = await findService(env.DB, serviceId);
   if (!NEXT_STAGES[row.stage].includes(input.to)) throw new AppError("conflict", "今の段階から移れない");
   const prototype = input.to === "prototype";
@@ -190,7 +192,8 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
     ...(prototype && input.repo !== undefined && !SERVICE_NAME.test((input.repo.split("/")[1] ?? "").toLowerCase()) ? [{ pointer: "#/repo", detail: "設計書の置き場にできる名前 (小文字、数字、. _ - で、頭は英数字) のリポジトリを選ぶ" }] : []),
   ];
   if (missing.length > 0) throw new AppError("validation_failed", "作ると決める時は担当の社員とリポジトリが要る", { errors: missing });
-  // TODO(#71): service に進める時は、サービスの deployWhen のチェックとレビュー担当の承認を GitHub から確かめる
+  // service に進める時は、サービスの deployWhen を確かめる。足りなければ何も書かずに断る
+  if (input.to === "service") await requireDeployConditions(env, forge, row);
   const change: Partial<ServiceRow> = { stage: input.to };
   if (prototype) {
     change.staffId = input.staffId ?? null;

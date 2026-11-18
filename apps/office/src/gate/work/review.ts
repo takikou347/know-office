@@ -1,5 +1,5 @@
 // レビューの判断に共通の中身。リポジトリへの操作をルールと照らし、main に入れられるかを決めて入れ、レビューと作った社員のタスクを読む (タスクとレビューの 3.1、3.4、3.6)
-import { AppError, CommitSha, decideRepo, docsMergeNeeds, log, missingConditions, newId, ownerGuardedPath, type ReleaseCondition, type RepoAction, type ServiceRules, StaffId } from "@know-office/core";
+import { AppError, CommitSha, decideRepo, docsMergeNeeds, log, newId, ownerGuardedPath, type ReleaseCondition, type RepoAction, type ServiceRules, StaffId } from "@know-office/core";
 import { and, eq, ne, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
@@ -12,6 +12,7 @@ import { repoScope } from "../github/rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { clockAt } from "./attendance.ts";
+import { checkConditions } from "./conditions.ts";
 import { type Forge, notifyStaff } from "./loop.ts";
 import { type DocsTarget, linkedGate } from "./docs-merge.ts";
 import { mergeMade } from "./merge-made.ts";
@@ -118,13 +119,9 @@ export async function mergeGate(env: Bindings, forge: Forge, made: NodeRow, revi
     when = guarded && !checked.rules.mergeWhen.includes("owner") ? [...checked.rules.mergeWhen, "owner" as const] : checked.rules.mergeWhen;
   }
   const approvals = { reviewer: review.reviewer ?? row.reviewerVerdict === "approve", owner: row.ownerVerdict === "approve" };
-  const others = missingConditions(when, { checks: true, ...approvals });
-  if (others.length > 0) return { kind: "waiting", reason: others.join(",") };
-  // チェックが分からない時は入れない
-  const checks = when.includes("checks") ? await forge.checkState(review.repo, sha.data) : "passed";
-  if (checks === "failed") return { kind: "failed", reason: "checks" };
-  const missing = missingConditions(when, { checks: checks === "passed", ...approvals });
-  if (missing.length > 0) return { kind: "waiting", reason: missing.join(",") };
+  const met = await checkConditions(forge, when, { repo: review.repo, sha: sha.data }, approvals);
+  if (met.kind === "failed") return { kind: "failed", reason: "checks" };
+  if (met.kind === "waiting") return { kind: "waiting", reason: met.missing.join(",") };
   // 設計書の PR を結んだタスクは、設計書の側の条件もそろった時だけ入れる
   const linked = await linkedGate(env, forge, made, row.docsHeadSha, approvals, (repo, docsSha) => checkRepo(env, forge, { action: "merge", repo, branch: docsSha }));
   if (linked.kind === "none") return { kind: "ready", sha: sha.data };

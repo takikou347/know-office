@@ -112,7 +112,22 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
           {to ? MOVE_LABEL[to] : "移す"}
         </Button>
       </Stack>
-      {failure ? <FailedAlert title="段階を移せませんでした" failure={failure} /> : null}
+      {failure ? <MoveFailure failure={failure} /> : null}
     </Stack>
+  );
+}
+
+interface MoveFailureProps {
+  /** 段階を移せなかった理由 */
+  failure: Failed;
+}
+
+/** 段階を移せなかった事を出す。デプロイの条件が足りない時など、入口が返した説明 (足りない条件) も添える */
+export function MoveFailure({ failure }: MoveFailureProps) {
+  return (
+    <>
+      <FailedAlert title="段階を移せませんでした" failure={failure} />
+      {failure.code === "conflict" && failure.detail ? <p>{failure.detail}</p> : null}
+    </>
   );
 }

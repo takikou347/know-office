@@ -83,16 +83,17 @@ const advanceServiceRoute = createRoute({
     "サービスを取得し、現在の段階から移れる段階かを確認する。移れるのは `idea` から `study` か `dropped`、`study` から `prototype` か `dropped`、`prototype` から `service` か `dropped`、`service` から `operation` か `closed`、`operation` から `closed`",
     "`prototype` に進める場合は担当の社員を `staffId` で、リポジトリを `repo` で決める。`repo` は `prototype` に進める時だけ受ける。`dropped` にする場合は理由を `dropped_reason` に残す",
     "`repo` は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を `GET /installation/repositories` で確かめる",
+    "`service` に進める場合は、サービスの `deployWhen` を確かめる。オーナーの承認は、この操作そのもの。`checks` と `reviewer` を求める時だけ、GitHub とつないでいる事を確かめ、既定のブランチの先のコミットのチェックが全部通っている事と、`reviews` にそのコミットをレビュー担当が承認した行がある事を確かめる。足りなければ何も書かずに断り、足りない条件を `detail` に並べる",
     "`study` に進める場合は、office の受け付けのプロジェクトの下に置く、似た物、作る量、セキュリティの要る所を調べる社長のタスクを組み立てる",
     "読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない",
     "監査ログに `service.advance` を記録する",
   ],
   "x-errors": [
     "404 `not_found`: サービスが存在しない",
-    "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、または確かめた後に連携が変わった",
+    "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、または `service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)",
     "422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い",
     "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
-    "502 `upstream_failed`: GitHub がエラーを返した",
+    "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない時も)",
   ],
   request: { params: ServiceParam, body: jsonBody(AdvanceInput) },
   responses: { 200: okResponse(ServiceCard), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
@@ -144,7 +145,7 @@ export const serviceRoutes = router
   .openapi(advanceServiceRoute, async (c) => {
     const { serviceId } = c.req.valid("param");
     const input = c.req.valid("json");
-    const row = await advanceService(c.env, serviceId, input, { by: "owner", now: c.var.clock.now(), traceId: c.var.traceId }, c.var.github);
+    const row = await advanceService(c.env, serviceId, input, { by: "owner", now: c.var.clock.now(), traceId: c.var.traceId }, c.var.github, c.var.forge);
     await audit(c, "service.advance", serviceId, { to: input.to, reason: input.reason, ...(input.repo === undefined ? {} : { repo: input.repo }) });
     return ok(c, toCard(row));
   })
