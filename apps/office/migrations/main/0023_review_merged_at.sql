@@ -1,1 +1,0 @@
-ALTER TABLE `reviews` ADD `merged_at` integer;

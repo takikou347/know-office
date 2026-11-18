@@ -12,7 +12,7 @@ import { announceNotice } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 import { type DocsTarget, type Landed, landBoth, type Rehash, rehashFor } from "./docs-merge.ts";
 import type { Forge } from "./loop.ts";
-import { moveNode, type NodeRow } from "./nodes.ts";
+import type { NodeRow } from "./nodes.ts";
 import { wakeWaiting } from "./wake.ts";
 
 /** 設計書だけが入った時の知らせの文。社員の書いた文は入れない */
@@ -41,22 +41,27 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
   const child = await childOf(env.DB, made);
   const rehash = review.docs === undefined ? null : await rehashFor(env.DB, forge, made, review.docs);
   let closeId: string | null = null;
-  if (child === null) {
-    if (!(await moveNode(env.DB, made, "done", now))) throw new AppError("conflict", "確かめるタスクが変わった");
-  } else {
+  // done にする文と同じバッチで、入れ始めた印と入れる先のコミットを reviews に書く。止まった入れ直しだけを定期の確かめ (resumeMerges) が拾えるようにする
+  const statements = [env.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ? AND version = ?").bind(now, made.id, made.version)];
+  statements.push(
+    env.DB.prepare(
+      "UPDATE reviews SET merge_started_at = ?, merge_started_sha = ?, merge_tries = 0, merge_retry_at = NULL WHERE node_id = ? AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'done')",
+    ).bind(now, review.sha, made.id, made.id, made.version + 1),
+  );
+  if (child !== null) {
     const [row] = await drizzle(env.DB).select({ id: reviews.id }).from(reviews).where(eq(reviews.nodeId, made.id)).limit(1);
     if (!row) throw new AppError("not_found", "レビューが無い");
     const close = enqueueMirror(env, row.id, { kind: "issue_close", payload: { issueNumber: child.number, sha: review.sha } }, clockAt(now), {
       sql: "EXISTS (SELECT 1 FROM nodes WHERE id = ? AND version = ? AND status = 'done')",
       args: [made.id, made.version + 1],
     });
-    const statements = [env.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ? AND version = ?").bind(now, made.id, made.version), close.statement];
+    statements.push(close.statement);
     // 要件のハッシュを直す文は、このタスクが done になっている時だけ書く (rehashFor の条件)。負けた側は書かない
     if (rehash !== null) statements.push(rehash.apply);
-    const [done] = await env.DB.batch(statements);
-    if ((done?.meta.changes ?? 0) === 0) throw new AppError("conflict", "確かめるタスクが変わった");
     closeId = close.id;
   }
+  const [done] = await env.DB.batch(statements);
+  if ((done?.meta.changes ?? 0) === 0) throw new AppError("conflict", "確かめるタスクが変わった");
   let outcome: Landed;
   try {
     outcome = review.docs === undefined || review.docs.landed === true ? await mergeCode(forge, review) : await landBoth(forge, review, review.docs);
@@ -75,7 +80,10 @@ export async function mergeMade(env: Bindings, forge: Forge, made: NodeRow, revi
     return outcome;
   }
   // 入れた印。書く前に止まっても、定期の確かめが main に入っている事を読んで書く (resumeMerges)
-  await env.DB.prepare("UPDATE reviews SET merged_at = ? WHERE node_id = ? AND merged_at IS NULL").bind(now, made.id).run();
+  await env.DB.prepare("UPDATE reviews SET merged_at = ? WHERE node_id = ? AND merged_at IS NULL")
+    .bind(now, made.id)
+    .run()
+    .catch((error: unknown) => recordError(env, { source: "gate", level: "warn", code: "merged_mark_failed", error }, clockAt(now)));
   // 入った子と重なって待っていた子を、取らせる
   if (made.repo !== null) await wakeWaiting(env, made.repo, now);
   if (closeId !== null) await sendMirror(env, forge, closeId, clockAt(now));
@@ -109,6 +117,7 @@ async function undoMerge(env: Bindings, nodeId: string, to: "review" | "todo", c
   const statements = [env.DB.prepare("UPDATE nodes SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = 'done'").bind(to, now, nodeId)];
   if (closeId !== null) statements.push(env.DB.prepare("DELETE FROM github_mirrors WHERE id = ? AND sent_at IS NULL").bind(closeId));
   if (rehash !== null) statements.push(rehash.revert);
+  statements.push(env.DB.prepare("UPDATE reviews SET merge_started_at = NULL, merge_started_sha = NULL WHERE node_id = ?").bind(nodeId));
   await env.DB.batch(statements);
 }
 
@@ -130,6 +139,7 @@ async function splitMerge(env: Bindings, made: NodeRow, split: { split: "todo" |
     env.DB.prepare("INSERT INTO notices (id, at, level, kind, title, body, scope) SELECT ?, ?, 'warn', 'devloop_split', '設計書だけが main に入った', ?, ? WHERE changes() > 0").bind(noticeId, now, SPLIT_BODY, made.scope),
   ];
   if (closeId !== null) statements.push(env.DB.prepare("DELETE FROM github_mirrors WHERE id = ? AND sent_at IS NULL").bind(closeId));
+  statements.push(env.DB.prepare("UPDATE reviews SET merge_started_at = NULL, merge_started_sha = NULL WHERE node_id = ?").bind(made.id));
   const [, notice] = await env.DB.batch(statements);
   if ((notice?.meta.changes ?? 0) > 0) await announceNotice(env, noticeId, clockAt(now));
   if (split.error !== undefined) await recordError(env, { source: "gate", level: "warn", code: "devloop_split", error: split.error }, clockAt(now));

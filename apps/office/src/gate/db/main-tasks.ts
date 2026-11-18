@@ -66,8 +66,16 @@ export const reviews = sqliteTable(
     reviewerVerdict: text("reviewer_verdict"),
     ownerVerdict: text("owner_verdict"),
     mergedAt: time("merged_at"),
+    /** main に入れ始めた時刻。タスクを done にする文と同じバッチで書き、入れ直す前に戻した時に消す */
+    mergeStartedAt: time("merge_started_at"),
+    /** 入れ始めた時に確かめたコミット。head_sha と違えば出し直しがあったので拾わない */
+    mergeStartedSha: text("merge_started_sha"),
+    /** 定期の入れ直しで失敗した回数 */
+    mergeTries: integer("merge_tries").notNull().default(0),
+    /** 定期の入れ直しを次に試す時刻。失敗のたびに後ろへ回す */
+    mergeRetryAt: time("merge_retry_at"),
   },
-  (t) => [uniqueIndex("reviews_node").on(t.nodeId)],
+  (t) => [uniqueIndex("reviews_node").on(t.nodeId), index("reviews_merge_pending").on(t.mergeStartedAt).where(sql`${t.mergedAt} IS NULL AND ${t.mergeStartedAt} IS NOT NULL`)],
 );
 
 /** レビューの書き込み。追記専用 */

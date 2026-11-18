@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "47260dfa-8ae1-4cd7-b3e0-11342a70da0b",
+  "id": "8da6d2ae-c4bf-4de2-8f3d-ff362b74b7fb",
   "prevId": "0c176c96-b3a7-45cc-b535-b405a571d4ea",
   "tables": {
     "health_checks": {
@@ -2461,6 +2461,35 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "merge_started_at": {
+          "name": "merge_started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "merge_started_sha": {
+          "name": "merge_started_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "merge_tries": {
+          "name": "merge_tries",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "merge_retry_at": {
+          "name": "merge_retry_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -2470,6 +2499,14 @@
             "node_id"
           ],
           "isUnique": true
+        },
+        "reviews_merge_pending": {
+          "name": "reviews_merge_pending",
+          "columns": [
+            "merge_started_at"
+          ],
+          "isUnique": false,
+          "where": "\"reviews\".\"merged_at\" IS NULL AND \"reviews\".\"merge_started_at\" IS NOT NULL"
         }
       },
       "foreignKeys": {},

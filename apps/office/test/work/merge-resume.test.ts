@@ -1,10 +1,11 @@
 // main に入れる途中で Worker が止まった時に、done のまま残るタスクを定期の確かめが拾う事を確かめる (タスクとレビューの 3.1 の 5、開発の回し方の 3.6)
 import { describe, expect, it } from "vitest";
-import { RESUME_AFTER_MS, RESUME_LIMIT, resumeMerges } from "../../src/gate/work/merge-resume.ts";
+import { RESUME_AFTER_MS, RESUME_LIMIT, RESUME_TRIES, resumeMerges } from "../../src/gate/work/merge-resume.ts";
 import { DOCS, REPO } from "../helpers/docs.ts";
 import { CODE_HEAD, DOCS_HEAD } from "../helpers/docs-together.ts";
 import { reviewed, statusOf } from "../helpers/docs-land.ts";
 import { issuesOf } from "../helpers/issues.ts";
+import { GitHubRateLimited } from "../../src/gate/github/rate-error.ts";
 import { rows, useWork } from "../helpers/work.ts";
 
 const world = useWork({ github: true });
@@ -19,11 +20,26 @@ async function stopped() {
   const now = world.clock.now();
   const [review] = await rows(world.d1.DB, "SELECT id FROM reviews WHERE node_id = ?", made.task);
   await world.d1.DB.batch([
-    world.d1.DB.prepare("UPDATE reviews SET reviewer_verdict = 'approve' WHERE node_id = ?").bind(made.task),
+    world.d1.DB.prepare("UPDATE reviews SET reviewer_verdict = 'approve', merge_started_at = ?2, merge_started_sha = ?3 WHERE node_id = ?1").bind(made.task, now, CODE_HEAD),
     world.d1.DB.prepare("UPDATE nodes SET status = 'done', version = version + 1, updated_at = ? WHERE id = ?").bind(now, made.task),
     world.d1.DB.prepare("INSERT INTO github_mirrors (id, review_id, kind, payload, created_at, attempts) VALUES ('stale-close', ?, 'issue_close', ?, ?, 0)").bind(review?.["id"], JSON.stringify({ issueNumber: made.number, sha: CODE_HEAD }), now),
   ]);
   return { ...made, now };
+}
+
+/**
+ * 入れ始めたまま止まったタスクを、main に入っていない形で n 件足す。入れ始めた時刻は古い順に並ぶ
+ * @param n 件数
+ * @param sha 確かめたコミットの 1 字
+ */
+async function seed(n: number, sha: string): Promise<void> {
+  for (let i = 0; i < n; i += 1) {
+    const id = `019a7b00-0000-7000-8000-${i.toString(16).padStart(12, "0")}`;
+    await world.d1.DB.batch([
+      world.d1.DB.prepare("INSERT INTO nodes (id, kind, scope, title, task_kind, assignee, status, priority, repo, branch, pr_number, created_by, created_at, updated_at) VALUES (?, 'task', 'office', '勤怠', 'build', 'builder', 'done', 1, ?, ?, ?, 'president', 1, ?)").bind(id, REPO, `ko/${String(i)}`, 100 + i, i + 1),
+      world.d1.DB.prepare("INSERT INTO reviews (id, node_id, repo, pr_number, branch, base_sha, head_sha, merge_started_at, merge_started_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(`r-${id}`, id, REPO, 100 + i, `ko/${String(i)}`, "a".repeat(40), sha.repeat(40), i + 1, sha.repeat(40)),
+    ]);
+  }
 }
 
 /**
@@ -88,6 +104,9 @@ describe("タスクの繰り返し", () => {
     expect(repos.merges).toEqual([]);
     expect(await statusOf(world, task)).toBe("review");
     expect(await mergedAt(task)).toBeNull();
+    // 落ちたチェックのままの求めでも、定期の入れ直しは社員の求めでないので、自動停止に数えない
+    expect(await rows(world.d1.DB, "SELECT id FROM stops")).toEqual([]);
+    expect(world.gate.deps.rollbacks).toEqual([]);
     // 未送信の閉じの順番待ちは消えている (Issue はまだ閉じない)
     expect(await rows(world.d1.DB, "SELECT id FROM github_mirrors WHERE kind = 'issue_close'")).toEqual([]);
   });
@@ -102,18 +121,73 @@ describe("タスクの繰り返し", () => {
 
   it("1 回に拾うのは 20 件まで", async () => {
     const { task, now } = await stopped();
-    // 同じ行を写した止まったタスクを足して 21 件にする。古い順に拾うので、最初のタスクが後ろになる
-    for (let n = 0; n < RESUME_LIMIT; n += 1) {
-      const id = `019a7b00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
-      await world.d1.DB.batch([
-        world.d1.DB.prepare("INSERT INTO nodes (id, kind, scope, title, task_kind, assignee, status, priority, repo, branch, pr_number, created_by, created_at, updated_at) VALUES (?, 'task', 'office', '勤怠', 'build', 'builder', 'done', 1, ?, ?, ?, 'president', 1, ?)").bind(id, REPO, `ko/${String(n)}`, 100 + n, n + 1),
-        world.d1.DB.prepare("INSERT INTO reviews (id, node_id, repo, pr_number, branch, base_sha, head_sha, merged_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)").bind(`r-${id}`, id, REPO, 100 + n, `ko/${String(n)}`, "a".repeat(40), "c".repeat(40)),
-      ]);
-    }
-    // main に入っていない 20 件は、承認が無いので review に戻って待つ。21 件目 (最後に変えた物) は次の回に残る
+    await seed(RESUME_LIMIT, "c");
+    // main に入っていない 20 件は、承認が無いので review に戻って待つ。21 件目 (入れ始めた時刻が一番新しい物) は次の回に残る
     expect(await resume(now + RESUME_AFTER_MS + 1)).toBe(RESUME_LIMIT);
     expect(await rows(world.d1.DB, "SELECT COUNT(*) AS n FROM nodes WHERE status = 'review' AND id LIKE '019a7b00-%'")).toEqual([{ n: RESUME_LIMIT }]);
     expect(await statusOf(world, task)).toBe("done");
+  });
+
+  it("入れ始めた印の無い done と、出し直しの後の done は拾わない", async () => {
+    const { task, repos, now } = await stopped();
+    // 社員が finishTask で終えた物や、差し戻しの後に終えた物は印を持たない
+    await world.d1.DB.prepare("UPDATE reviews SET merge_started_at = NULL WHERE node_id = ?").bind(task).run();
+    expect(await resume(now + RESUME_AFTER_MS + 1)).toBe(0);
+    // 入れ始めた後に出し直して、先が変わった物も拾わない
+    await world.d1.DB.prepare("UPDATE reviews SET merge_started_at = ?, head_sha = ? WHERE node_id = ?").bind(now, "d".repeat(40), task).run();
+    expect(await resume(now + RESUME_AFTER_MS + 1)).toBe(0);
+    expect(await statusOf(world, task)).toBe("done");
+    expect(repos.merges).toEqual([]);
+  });
+
+  it("1 件が落ちても残りを続ける", async () => {
+    const { task, repos, now } = await stopped();
+    await seed(1, "c");
+    world.forge.inMain = (repo, sha) => (sha === "c".repeat(40) ? Promise.reject(new Error("GitHub を読めない")) : Promise.resolve(repos.landed.has(`${repo}:${sha}`)));
+    const at = now + RESUME_AFTER_MS + 1;
+    expect(await resume(at)).toBe(1);
+    expect(repos.merges).toHaveLength(2);
+    expect(await statusOf(world, task)).toBe("done");
+    // 落ちた行は回数を数え、次に試す時刻を後ろへ回す
+    expect(await rows(world.d1.DB, "SELECT merge_tries AS tries, merge_retry_at > ? AS later FROM reviews WHERE head_sha = ?", at, "c".repeat(40))).toEqual([{ tries: 1, later: 1 }]);
+  });
+
+  it("落ち続ける行が先頭を塞がない", async () => {
+    const { task, now, repos } = await stopped();
+    await seed(RESUME_LIMIT, "c");
+    let failing = 0;
+    world.forge.inMain = (repo, sha) => (sha === "c".repeat(40) ? (failing += 1, Promise.reject(new Error("GitHub を読めない"))) : Promise.resolve(repos.landed.has(`${repo}:${sha}`)));
+    const at = now + RESUME_AFTER_MS + 1;
+    // 1 回目は古い 20 件が落ちて上限を使い切る。2 回目は後ろへ回した 20 件を飛ばし、後ろに居たタスクに届く
+    expect(await resume(at)).toBe(0);
+    expect(failing).toBe(RESUME_LIMIT);
+    expect(await resume(at)).toBe(1);
+    expect(failing).toBe(RESUME_LIMIT);
+    expect(await statusOf(world, task)).toBe("done");
+  });
+
+  it("続けて落ちた行は諦めて 1 回だけ知らせる", async () => {
+    const { now, repos } = await stopped();
+    await seed(1, "c");
+    world.forge.inMain = (repo, sha) => (sha === "c".repeat(40) ? Promise.reject(new Error("GitHub を読めない")) : Promise.resolve(repos.landed.has(`${repo}:${sha}`)));
+    let at = now + RESUME_AFTER_MS + 1;
+    for (let n = 0; n < RESUME_TRIES + 3; n += 1) {
+      await resume(at);
+      at += RESUME_TRIES * RESUME_AFTER_MS;
+    }
+    expect(await rows(world.d1.DB, "SELECT merge_tries AS tries, merge_started_at AS started FROM reviews WHERE head_sha = ?", "c".repeat(40))).toEqual([{ tries: RESUME_TRIES, started: null }]);
+    expect(await rows(world.d1.DB, "SELECT kind FROM notices WHERE kind = 'merge_resume_gave_up'")).toHaveLength(1);
+  });
+
+  it("GitHub の上限に当たったら残りを試さず通知に任せる", async () => {
+    const { now } = await stopped();
+    await seed(2, "c");
+    let reads = 0;
+    world.forge.inMain = () => (reads += 1, Promise.reject(new GitHubRateLimited(30)));
+    expect(await resume(now + RESUME_AFTER_MS + 1)).toBe(0);
+    expect(reads).toBe(1);
+    expect(await rows(world.d1.DB, "SELECT SUM(merge_tries) AS n FROM reviews")).toEqual([{ n: 0 }]);
+    expect(await rows(world.d1.DB, "SELECT kind FROM notices WHERE kind = 'github_rate_limited'")).toHaveLength(1);
   });
 });
 
