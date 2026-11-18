@@ -52,6 +52,8 @@ export type Spec = {
   title: string;
   body: string;
   key: string;
+  /** 見つけて直す仕組みの子の時の、原因の種類。設計書の子には無い */
+  origin?: "error" | "slow" | "cost";
 };
 
 /**
@@ -132,6 +134,7 @@ export async function claim(env: Bindings, ids: { id: string; repo: string }, sp
  */
 function taskBody(input: { repo: string; docs: string; spec: Spec; number: number }): string {
   const { spec } = input;
+  if (spec.origin !== undefined) return [`Issue: ${input.repo}#${String(input.number)}`, `原因の種類: ${spec.origin}`, "Issue の本文の手順に従って直す。bug なら落ちるテストから作る"].join("\n");
   return [
     `Issue: ${input.repo}#${String(input.number)}`,
     `要件: ${spec.requirement ?? ""} (${spec.feature})`,

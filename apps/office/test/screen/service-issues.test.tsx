@@ -2,7 +2,7 @@
 import type { ServiceIssues } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ServiceIssuesList } from "../../src/screen/pages/services/ServiceIssuesView.tsx";
+import { ServiceIssuesBody, ServiceIssuesList } from "../../src/screen/pages/services/ServiceIssuesView.tsx";
 
 const TASK = "0190f4a8-0000-7000-8000-000000000001";
 
@@ -32,7 +32,7 @@ function tree(change: Partial<ServiceIssues> = {}): ServiceIssues {
   };
 }
 
-describe("サービスの Issue の画面", () => {
+describe("リリースと運用につなぐ", () => {
   it("木が空なら、設計書から Issue をまだ作っていない事を出す", () => {
     const html = renderToString(<ServiceIssuesList issues={tree({ parents: [] })} stage="prototype" name="動画" />);
     expect(html).toContain("Issue はまだ無い");
@@ -58,5 +58,12 @@ describe("サービスの Issue の画面", () => {
     expect(renderToString(<ServiceIssuesList issues={tree({ ready: true })} stage="prototype" name="動画" />)).toContain("サービスに進められる");
     expect(renderToString(<ServiceIssuesList issues={tree({ ready: true })} stage="service" name="動画" />)).not.toContain("サービスに進められる");
     expect(renderToString(<ServiceIssuesList issues={tree({ ready: false })} stage="prototype" name="動画" />)).not.toContain("サービスに進められる");
+  });
+
+  it("読めなければ、読めなかった事と問い合わせの番号を出す", () => {
+    const html = renderToString(<ServiceIssuesBody loaded={{ state: "failed", code: "network", traceId: "a".repeat(32) }} stage="prototype" name="動画" />);
+    expect(html).toContain("Issue を読めませんでした");
+    expect(html).toContain("a".repeat(32));
+    expect(html).not.toContain("Issue はまだ無い");
   });
 });

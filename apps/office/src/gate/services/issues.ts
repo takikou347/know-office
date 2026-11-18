@@ -58,9 +58,9 @@ export async function loadServiceIssues(env: Bindings, serviceId: string): Promi
 }
 
 /**
- * D1 の束ねる値の上限 (100) に収めるため、100 件ずつに分ける
+ * D1 の束ねる値の上限 (100) に収めるため、90 件ずつに分ける
  * @param values 値
- * @returns 100 件までの束
+ * @returns 90 件までの束
  */
 function chunk(values: string[]): string[][] {
   const out: string[][] = [];

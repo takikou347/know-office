@@ -67,6 +67,7 @@ export async function opsIssue(env: Bindings, issues: DevIssues, repo: string, f
     // 触るファイルは決まらないので、行の heads は空の頭 1 つにして、同じリポジトリのほかの子と重ねる (運用の子が回る間はほかの子が止まる)
     paths: null,
     high: false,
+    origin: finding.kind,
     title: finding.title,
     body: finding.body,
     key: await devIssueKey({ serviceId: service.id, kind: "child", feature: OPERATIONS, requirement, hash: finding.fingerprint }),

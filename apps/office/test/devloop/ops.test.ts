@@ -49,7 +49,7 @@ function opsRows() {
   return rows(world.d1.DB, "SELECT kind, number, parent_number, state, issue_kind, paths, heads FROM dev_issues WHERE feature = 'operations' ORDER BY kind DESC, number");
 }
 
-describe("運用の Issue", () => {
+describe("リリースと運用につなぐ", () => {
   it("運用の段階のサービスの原因は、運用の親の子の Issue になり、開発担当のタスクが付く", async () => {
     await serviceAt();
     await finding("a".repeat(64));
@@ -62,6 +62,12 @@ describe("運用の Issue", () => {
     const task = await rows(world.d1.DB, "SELECT assignee, task_kind FROM nodes WHERE source = ?", `issue:${String(got[1]?.["number"])}`);
     expect(task).toEqual([{ assignee: "builder", task_kind: "fix" }]);
     expect(issuesOf(world)).toHaveLength(2);
+    const [body] = await rows(world.d1.DB, "SELECT body FROM nodes WHERE source = ?", `issue:${String(got[1]?.["number"])}`);
+    expect(String(body?.["body"]).split("\n")).toEqual([
+      `Issue: ${REPO}#${String(got[1]?.["number"])}`,
+      "原因の種類: error",
+      "Issue の本文の手順に従って直す。bug なら落ちるテストから作る",
+    ]);
   });
 
   it("遅い所と無駄な費用は chore の子になる。リポジトリは大文字小文字を問わず探す", async () => {

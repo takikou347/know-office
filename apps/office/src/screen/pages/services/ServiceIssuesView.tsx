@@ -1,7 +1,7 @@
 // サービスの Issue のタブ。親ごとに子の済みを出し、設計書の PR を並べ、試作で全部済んだらサービスに進められると知らせる (開発の回し方の 3.7)
 import { ServiceIssues, type ServiceStage } from "@know-office/core";
 import { Accordion, Alert, Badge, List, Stack } from "knowidea-ui";
-import { FailedAlert, useLoad } from "../../parts/load.tsx";
+import { FailedAlert, type Loaded, useLoad } from "../../parts/load.tsx";
 import { NODE_STATUSES } from "../../parts/tasks.ts";
 
 const KIND_TEXT = { bug: "バグ", feature: "機能", chore: "雑務" } as const;
@@ -65,6 +65,22 @@ export function ServiceIssuesList({ issues, stage, name }: ServiceIssuesListProp
   );
 }
 
+export interface ServiceIssuesBodyProps {
+  /** 読んだ結果 */
+  loaded: Loaded<ServiceIssues>;
+  /** サービスの段階 */
+  stage: ServiceStage;
+  /** サービスの名前 */
+  name: string;
+}
+
+/** 読み込み中、読めなかった時、読めた時の出し分け */
+export function ServiceIssuesBody({ loaded, stage, name }: ServiceIssuesBodyProps) {
+  if (loaded.state === "loading") return <p role="status">Issue を読んでいます</p>;
+  if (loaded.state === "failed") return <FailedAlert title="Issue を読めませんでした" failure={loaded} />;
+  return <ServiceIssuesList issues={loaded.data} stage={stage} name={name} />;
+}
+
 export interface ServiceIssuesViewProps {
   /** サービス ID */
   serviceId: string;
@@ -79,7 +95,5 @@ export interface ServiceIssuesViewProps {
 /** サービスの Issue のタブ */
 export function ServiceIssuesView({ serviceId, stage, name, tick }: ServiceIssuesViewProps) {
   const loaded = useLoad(ServiceIssues, (a) => a.api.v1.services[":serviceId"].issues.$get({ param: { serviceId } }), tick);
-  if (loaded.state === "loading") return <p role="status">Issue を読んでいます</p>;
-  if (loaded.state === "failed") return <FailedAlert title="Issue を読めませんでした" failure={loaded} />;
-  return <ServiceIssuesList issues={loaded.data} stage={stage} name={name} />;
+  return <ServiceIssuesBody loaded={loaded} stage={stage} name={name} />;
 }

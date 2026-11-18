@@ -27,7 +27,7 @@ async function planned() {
   return { id, parent: made.parents[0]?.number ?? 0, kids: made.children.map((c) => c.number) };
 }
 
-describe("サービスの Issue の木", () => {
+describe("リリースと運用につなぐ", () => {
   it("設計書より前のサービスは空の木を返す", async () => {
     const id = await withDocs(world);
     expect(await tree(id)).toEqual({ ready: false, docsPrs: [], parents: [] });

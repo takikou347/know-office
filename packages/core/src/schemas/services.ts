@@ -243,7 +243,7 @@ export const DeployDetail = z.union([
 /** service_events の rollback の detail */
 export const RollbackDetail = z.object({ reason: z.string().max(2000), ref: z.string().max(255), stopId: z.uuid().nullable() }).strict();
 
-/** Issue の状態。closed の理由は completed か not_planned */
+/** Issue の状態 */
 export const DevIssueState = z.enum(["open", "closed"]);
 
 /** 子 Issue 1 件。task は同じ番号の開発担当のタスクで、まだ無ければ null */
