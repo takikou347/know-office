@@ -15,8 +15,8 @@ test.afterEach(() => {
 test.describe("サービスの種類", () => {
   test("Cron で読んだ Cloudflare の値から、Web アプリの失敗率とコンテンツの読まれた数を画面に出す", async ({ page }) => {
     // 代わりの Cloudflare は、置いていないスクリプトに requests 100、errors 2 を返す。Web アプリは know-office、コンテンツは knowidea-ui のスクリプト名で読む
-    seedMain(`UPDATE services SET repo = 'takikou347/know-office' WHERE id = '${OFFICE_ID}'`);
-    seedMain(`UPDATE services SET kind = 'content', repo = 'takikou347/knowidea-ui' WHERE id = '${UI_ID}'`);
+    seedMain(`UPDATE services SET repo = 'example/know-office' WHERE id = '${OFFICE_ID}'`);
+    seedMain(`UPDATE services SET kind = 'content', repo = 'example/knowidea-ui' WHERE id = '${UI_ID}'`);
     const fired = await page.request.get(`/cdn-cgi/local/scheduled?cron=${encodeURIComponent("*/5 * * * *")}`);
     expect(fired.ok()).toBe(true);
     await expect(async () => {

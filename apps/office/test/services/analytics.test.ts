@@ -138,6 +138,13 @@ describe("サービスの種類", () => {
     expect(await metrics()).toEqual([{ service_id: OFFICE_ID, requests: 100, errors: 2, users: null, reads: null }]);
   });
 
+  it("4 件以上飛ばしても、同じエラーの続きの通知は出さない", async () => {
+    const skipped = Array.from({ length: 5 }, (_, n) => ({ serviceId: `s${String(n)}`, reason: "スクリプト名の形が違う" }));
+    await collectMetrics(world.gate.env, { read: () => Promise.resolve({ metrics: new Map(), skipped }) }, world.clock.now() + 10 * MINUTE, world.gate.deps);
+    expect(await failures()).toHaveLength(5);
+    expect(await rows(world.d1.DB, "SELECT kind FROM notices WHERE kind = 'error_burst'")).toEqual([]);
+  });
+
   it("全部のサービスを 1 回の問い合わせで読む", async () => {
     await watched("web_app");
     const fakes = connected();
