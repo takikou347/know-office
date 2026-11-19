@@ -1,5 +1,5 @@
 // ゲートウェイの Hono の型。バインディングと、要求ごとの値を Variables に置く
-import type { D1Database, DurableObjectNamespace, R2Bucket, Rpc } from "@cloudflare/workers-types";
+import type { AnalyticsEngineDataset, D1Database, DurableObjectNamespace, R2Bucket, Rpc } from "@cloudflare/workers-types";
 import type { Clock, Fetcher, GuardKeys, KeyKind, RestoreInput, StaffStatus } from "@know-office/core";
 import type { Admission, Challenge, RateBucket } from "./auth/guard-book.ts";
 import type { SessionRow } from "./auth/session.ts";
@@ -225,6 +225,10 @@ export type Bindings = {
   CLOUDFLARE_ANALYTICS_TOKEN?: string;
   /** Analytics を読む Cloudflare のアカウント ID */
   CLOUDFLARE_ACCOUNT_ID?: string;
+  /** know-office 自身の訪問を書く Workers Analytics Engine のデータセット (knowidea_requests)。無い間は何も書かない */
+  REQUESTS?: AnalyticsEngineDataset;
+  /** 点に書く、この Worker のスクリプト名。wrangler.jsonc の name と同じ値で、プレビューは別の名前。無い間は何も書かない */
+  WORKER_NAME?: string;
   /** know-office 自身のリポジトリ (owner/name)。見つけて直す仕組みが Issue を置く。無い間は数えるだけ */
   OFFICE_REPO?: string;
   /** 急ぐ故障を見つけた時の調べ。費用が出るので、オーナーの はい の後に on にする。初期値は off */

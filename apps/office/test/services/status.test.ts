@@ -1,6 +1,7 @@
 // サービスの様子。種類ごとに出す項目、knowidea-ui のバージョンのそろい、使う側のバージョンを上げるタスク、手で前のバージョンに戻す (サービスと拡張の 3.2)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { resetLedger } from "../helpers/d1.ts";
 import { connect, type Connected, hook, stepUp } from "../helpers/github.ts";
 import { api, idOf, rows, useWork, type WorkWorld } from "../helpers/work.ts";
 
@@ -151,6 +152,21 @@ describe("サービスの種類", () => {
     expect(await statusOf(world, OFFICE_ID)).toEqual({ kind: "web_app", version: null, deployedAt: null, rolledBackAt: null, users: null, errorRate: null, costMicroUsd: 0 });
     const blog = idOf(await api(world, "POST", "/api/v1/services", { title: "読み物", kind: "content", aim: "作り方を伝える", users: "作る人", costEstimateMicroUsd: 0, revenueEstimateMicroUsd: 0 }, 201));
     expect(await statusOf(world, blog)).toEqual({ kind: "content", published: [], reads: null });
+  });
+
+  it("利用者数は直前 24 時間の訪問の和で、どの行も null なら null", async () => {
+    await resetLedger(world.d1.REC_2026);
+    const now = world.clock.now();
+    const metric = (n: number, ago: number, users: number | null) =>
+      world.d1.REC_2026.prepare("INSERT INTO service_metrics (id, service_id, at, requests, errors, users, reads) VALUES (?, ?, ?, 10, 0, ?, NULL)").bind(`00000000-0000-7000-8000-00000000090${String(n)}`, OFFICE_ID, now - ago, users).run();
+    // 訪問を数えていない区切りは null で、和に入れない
+    await metric(1, 10 * 60_000, null);
+    expect(await statusOf(world, OFFICE_ID)).toMatchObject({ users: null });
+    // 24 時間ちょうど前の区切りは入れない
+    await metric(2, 24 * 60 * 60_000, 100);
+    await metric(3, 60 * 60_000, 3);
+    await metric(4, 5 * 60_000, 4);
+    expect(await statusOf(world, OFFICE_ID)).toMatchObject({ users: 7 });
   });
 });
 

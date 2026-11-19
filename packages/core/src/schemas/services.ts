@@ -118,7 +118,7 @@ const WebAppStatus = z
     version: z.string().nullable(),
     deployedAt: At.nullable(),
     rolledBackAt: At.nullable(),
-    users: z.number().int().nullable().openapi({ description: "最新の 5 分の利用者数。まだ無ければ null" }),
+    users: z.number().int().nullable().openapi({ description: "直前 24 時間の訪問の数 (画面が知らせた訪問を Workers Analytics Engine で数えた和)。訪問を数えていなければ null" }),
     errorRate: z.number().nullable().openapi({ description: "直前 24 時間の失敗の割合 (0 から 1)。返事が無ければ null" }),
     costMicroUsd: z.number().int().openapi({ description: "今月の費用" }),
   })

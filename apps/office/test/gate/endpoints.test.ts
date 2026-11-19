@@ -10,6 +10,7 @@ const REAL = {
   githubGit: "https://github.com",
   codeload: "https://codeload.github.com",
   cloudflareGraphql: "https://api.cloudflare.com/client/v4/graphql",
+  cloudflareApi: "https://api.cloudflare.com/client/v4",
 };
 const FAKES = {
   accessCerts: "http://localhost:5199/access/cdn-cgi/access/certs",
@@ -19,6 +20,7 @@ const FAKES = {
   githubGit: "http://localhost:5199/github/git",
   codeload: "http://localhost:5199/codeload",
   cloudflareGraphql: "http://localhost:5199/cloudflare/client/v4/graphql",
+  cloudflareApi: "http://localhost:5199/cloudflare/client/v4",
 };
 
 describe("開発環境の代わりの物", () => {

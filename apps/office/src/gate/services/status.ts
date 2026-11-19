@@ -104,22 +104,26 @@ async function libraryStatus(db: D1Database, row: ServiceRow): Promise<ServiceSt
 }
 
 /**
- * 直前 24 時間の様子の和と、最新の利用者数を読む
+ * 直前 24 時間の様子の和を読む。利用者数は訪問の和で、どの行も null (訪問を数えていない) なら null
  * @param env バインディング
  * @param serviceId サービス ID
  * @param now 今の時刻
- * @returns 返事、失敗、読まれた数の和と行の数、最新の利用者数
+ * @returns 返事、失敗、読まれた数、利用者数の和と行の数
  */
 async function recentMetrics(env: Bindings, serviceId: string, now: number) {
   const orm = drizzle(recordsOf(env, now));
-  const [[sum], [latest]] = await Promise.all([
-    orm
-      .select({ n: sql<number>`COUNT(*)`, requests: sql<number>`COALESCE(SUM(${serviceMetrics.requests}), 0)`, errors: sql<number>`COALESCE(SUM(${serviceMetrics.errors}), 0)`, reads: sql<number>`COALESCE(SUM(${serviceMetrics.reads}), 0)` })
-      .from(serviceMetrics)
-      .where(and(eq(serviceMetrics.serviceId, serviceId), gt(serviceMetrics.at, now - DAY_MS))),
-    orm.select({ users: serviceMetrics.users }).from(serviceMetrics).where(eq(serviceMetrics.serviceId, serviceId)).orderBy(desc(serviceMetrics.at)).limit(1),
-  ]);
-  return { n: sum?.n ?? 0, requests: sum?.requests ?? 0, errors: sum?.errors ?? 0, reads: sum?.reads ?? 0, users: latest?.users ?? null };
+  const [sum] = await orm
+    .select({
+      n: sql<number>`COUNT(*)`,
+      requests: sql<number>`COALESCE(SUM(${serviceMetrics.requests}), 0)`,
+      errors: sql<number>`COALESCE(SUM(${serviceMetrics.errors}), 0)`,
+      reads: sql<number>`COALESCE(SUM(${serviceMetrics.reads}), 0)`,
+      // SUM は null の行を飛ばし、どの行も null なら null を返す
+      users: sql<number | null>`SUM(${serviceMetrics.users})`,
+    })
+    .from(serviceMetrics)
+    .where(and(eq(serviceMetrics.serviceId, serviceId), gt(serviceMetrics.at, now - DAY_MS)));
+  return { n: sum?.n ?? 0, requests: sum?.requests ?? 0, errors: sum?.errors ?? 0, reads: sum?.reads ?? 0, users: sum?.users ?? null };
 }
 
 /**

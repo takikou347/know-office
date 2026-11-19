@@ -7,13 +7,13 @@ import { Extension, type Health } from "@know-office/core";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
-import { ApiContext, createApi, sessionFetch } from "./api.ts";
+import { ApiContext, createApi, isVisit, sessionFetch } from "./api.ts";
 import { ExtensionFetchContext, withScreens } from "./extensions.ts";
 import { send } from "./parts/load.tsx";
 import { routeOfClick } from "./link.ts";
 import { titleOf } from "./routes.ts";
 
-const api = createApi(window.location.origin);
+const api = createApi(window.location.origin, undefined, isVisit(document.referrer, window.location.host));
 
 /** 拡張の画面が自分のルートを呼ぶ口。ログインセッションの作り直しは入口の RPC と同じ */
 const extensionOrigin = { base: window.location.origin, fetch: sessionFetch(window.location.origin) };

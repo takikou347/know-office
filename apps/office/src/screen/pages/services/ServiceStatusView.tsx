@@ -150,7 +150,7 @@ export function ServiceStatusView({ service, onChanged }: ServiceStatusViewProps
     <Stack gap={3}>
       <Stack direction="row" gap={3} wrap>
         <Stat label="版" value={status.version ?? "まだ無い"} sub={`デプロイ ${when(status.deployedAt)}`} />
-        <Stat label="利用者数" value={status.users ?? "まだ無い"} />
+        <Stat label="利用者数" value={status.users ?? "まだ無い"} sub="直前 24 時間の訪問" />
         <Stat label="直前 24 時間の失敗率" value={status.errorRate === null ? "まだ無い" : `${(status.errorRate * 100).toFixed(1)}%`} />
         <Stat label="今月の費用" value={dollars(status.costMicroUsd)} />
       </Stack>

@@ -18,6 +18,7 @@ import { type GitHubAccess, httpForge } from "./github/forge.ts";
 import { connectRollback, type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
 import { connectReview } from "./guard/review.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
+import { countRequests } from "./services/requests.ts";
 import { trace } from "./trace.ts";
 
 /** 401、403、429 を数える道。GitHub の通知と画面のファイルは入れない */
@@ -122,6 +123,8 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
   app.use("*", trace);
   // 401、403、429 を 5 分ごとに数えて知らせる (API の決まりの 4.5 の 8)。429 とロックアウトの 403 は入口の admit が数える
   app.use("*", countDenied);
+  // 訪問を Analytics Engine に数える (サービスと拡張の 3.2)。入口の守りより外に置き、onError が直した後の応えを見る
+  app.use("/api/*", countRequests);
   // 順は API の決まりの 4.2。ここで落ちた要求はルートの処理に届かない
   app.use("/api/*", securityHeaders);
   app.use("/api/*", admission);

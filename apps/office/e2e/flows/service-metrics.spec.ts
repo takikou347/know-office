@@ -23,12 +23,23 @@ test.describe("サービスの種類", () => {
       await page.goto(`/services/${OFFICE_ID}`);
       await expect(page.getByText("2.0%")).toBeVisible({ timeout: 1000 });
     }).toPass({ timeout: 20_000 });
-    // 一意の訪問者は Workers の Analytics に無いので、利用者数は #256 まで出ない
-    await expect(page.getByText("利用者数")).toBeVisible();
-    await expect(page.getByText("まだ無い").first()).toBeVisible();
     await page.goto(`/services/${UI_ID}`);
     // 記録の行は残るので、前の通しの分が足されて 100 の倍数になる
     await expect(page.getByText("直前 24 時間に読まれた数")).toBeVisible();
     await expect(page.getByText(/^[1-9]\d*00$/)).toBeVisible();
+  });
+
+  test("Cron で読んだ訪問の数を、Web アプリの利用者数として画面に出す", async ({ page }) => {
+    // 代わりの Cloudflare の Analytics Engine は、置いていないスクリプトに訪問 7 を返す。画面は直前 24 時間の訪問の和を出す
+    seedMain(`UPDATE services SET repo = 'example/know-office' WHERE id = '${OFFICE_ID}'`);
+    const fired = await page.request.get(`/cdn-cgi/local/scheduled?cron=${encodeURIComponent("*/5 * * * *")}`);
+    expect(fired.ok()).toBe(true);
+    const users = page.getByRole("group", { name: "利用者数" });
+    await expect(async () => {
+      await page.goto(`/services/${OFFICE_ID}`);
+      // 記録の行は残るので、前の通しの分が足されて 7 の倍数になる
+      await expect(users.locator(".ki-stat__num")).toHaveText(/^[1-9][\d,]*$/, { timeout: 1000 });
+    }).toPass({ timeout: 20_000 });
+    await expect(users).toContainText("直前 24 時間の訪問");
   });
 });

@@ -25,6 +25,8 @@ export type Endpoints = {
   githubGit: string;
   /** Cloudflare の GraphQL Analytics API */
   cloudflareGraphql: string;
+  /** Cloudflare の API の頭。Workers Analytics Engine の SQL API はこの下の /accounts/<ID>/analytics_engine/sql */
+  cloudflareApi: string;
   /** GitHub の tarball の 302 の先。この下の道だけを鍵を付けずに追う (タスクとレビューの 3.2) */
   codeload: string;
 };
@@ -49,6 +51,7 @@ export function endpoints(env: EndpointEnv): Endpoints {
       githubGit: "https://github.com",
       codeload: "https://codeload.github.com",
       cloudflareGraphql: "https://api.cloudflare.com/client/v4/graphql",
+      cloudflareApi: "https://api.cloudflare.com/client/v4",
     };
   }
   const base = env.DEV_FAKES_URL ?? "";
@@ -62,6 +65,7 @@ export function endpoints(env: EndpointEnv): Endpoints {
     githubGit: `${base}/github/git`,
     codeload: `${base}/codeload`,
     cloudflareGraphql: `${base}/cloudflare/client/v4/graphql`,
+    cloudflareApi: `${base}/cloudflare/client/v4`,
   };
 }
 

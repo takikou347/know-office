@@ -1,5 +1,6 @@
 // API の文書 (OpenAPI 3.1) をコードのルートとスキーマから作る。apps/office/openapi/v1.yaml はこれを書き出した物で、手で直さない
 import { OpenAPIHono, z } from "@hono/zod-openapi";
+import { VisitHeader } from "@know-office/core";
 import { stringify } from "yaml";
 import { workspaceGateRoutes } from "./egress.ts";
 import gate from "./index.ts";
@@ -99,6 +100,8 @@ export function openApiDocument() {
   const docs = new OpenAPIHono().route("/", gate).route("/", workspaceGateRoutes());
   for (const route of WORKSPACE_ROUTES) docs.openAPIRegistry.registerPath(route);
   for (const { route } of PLANNED_ROUTES) docs.openAPIRegistry.registerPath(route);
+  // どの API の呼び出しにも付けられるヘッダーなので、ルートごとでなく components の parameters に置く (サービスと拡張の 3.2)
+  docs.openAPIRegistry.registerParameter("VisitHeader", VisitHeader);
   const generated = docs.getOpenAPI31Document({
     openapi: "3.1.0",
     info: {

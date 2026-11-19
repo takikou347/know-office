@@ -48,7 +48,7 @@ const getServiceRoute = createRoute({
   summary: "サービスの詳細",
   "x-steps": [
     "`services` と `service_events` を取得し、検討の材料を R2 の `study_key` から読む",
-    "種類ごとの様子を組み立てる。ライブラリは最新の `release` の版とそろい、最新の `deploy` (npm への公開の結果)、使っているサービスごとの最新の `uses` の版。Web アプリは最新の `deploy` と `rollback`、`service_metrics` の最新の利用者数と直前 24 時間の失敗率、`usage` の今月の費用。コンテンツは `deploy` の一覧と、直前 24 時間の読まれた数",
+    "種類ごとの様子を組み立てる。ライブラリは最新の `release` の版とそろい、最新の `deploy` (npm への公開の結果)、使っているサービスごとの最新の `uses` の版。Web アプリは最新の `deploy` と `rollback`、`service_metrics` の直前 24 時間の利用者数 (訪問の和) と失敗率、`usage` の今月の費用。コンテンツは `deploy` の一覧と、直前 24 時間の読まれた数",
   ],
   "x-errors": ["404 `not_found`: サービスが存在しない"],
   request: { params: ServiceParam },

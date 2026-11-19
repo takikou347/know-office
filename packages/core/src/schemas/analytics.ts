@@ -24,3 +24,32 @@ export const WorkersInvocationsResponse = z
 
 /** GraphQL Analytics API の返事の型 */
 export type WorkersInvocationsResponse = z.infer<typeof WorkersInvocationsResponse>;
+
+/** 画面が「訪問か」を知らせるヘッダーの名前。画面が開いて最初の API の呼び出しだけに付ける */
+export const VISIT_HEADER = "x-visit";
+
+/**
+ * 訪問の知らせ。画面が document.referrer から決めた真偽の 1 値だけを受け、referrer の文字列は受けない。
+ * 偽っても know-office の訪問の数が増えるだけで、ほかの判断に効かない
+ */
+export const VisitHeader = z.literal("1").openapi({
+  param: { name: "X-Visit", in: "header", required: false },
+  description: "画面が開いて最初の API の呼び出しで、直に開いたかほかのサイトから来た時だけ `1` を付ける。ログインを通った呼び出しの時だけ、Workers Analytics Engine に訪問として 1 点書く (サービスと拡張の 3.2)",
+});
+
+/** SUM の結果。小数になりうる。64 ビットの数は文字列で返る事があるので、数の文字列も受ける。負と数でない物は断る */
+const Sum = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/).transform(Number)]).pipe(z.number().finite().min(0));
+
+/**
+ * Workers Analytics Engine の SQL API が FORMAT JSON で返す、スクリプトごとの訪問の数
+ * 出典 (形 {meta, data, rows}): https://developers.cloudflare.com/analytics/analytics-engine/sql-reference/statements/
+ */
+export const AnalyticsEngineVisits = z
+  .object({ data: z.array(z.object({ script: z.string(), visits: Sum }).loose()) })
+  .loose();
+
+/** Workers Analytics Engine の SQL API の返事の型 */
+export type AnalyticsEngineVisits = z.infer<typeof AnalyticsEngineVisits>;
+
+/** SHOW TABLES の返事。列の名前は文書に無いので、行の文字列の値だけを見る */
+export const AnalyticsEngineTables = z.object({ data: z.array(z.record(z.string(), z.unknown())) }).loose();

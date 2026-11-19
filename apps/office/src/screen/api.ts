@@ -1,4 +1,5 @@
 // 画面から入口を呼ぶ口。道と返す形は入口の型から決まる
+import { VISIT_HEADER } from "@know-office/core";
 import { hc } from "hono/client";
 import { createContext } from "react";
 import { z } from "zod";
@@ -50,13 +51,48 @@ export function sessionFetch(base: string, fetcher: Fetch = (input, init) => fet
 }
 
 /**
+ * 画面を開いたのが訪問か (直に開いたか、ほかのサイトから来たか) を決める。Cloudflare Web Analytics の visit と同じく、referrer のホストが自分と違えば訪問
+ * (https://developers.cloudflare.com/web-analytics/data-metrics/high-level-metrics/)
+ * @param referrer document.referrer
+ * @param host location.host
+ * @returns 訪問か
+ */
+export function isVisit(referrer: string, host: string): boolean {
+  if (referrer === "") return true;
+  try {
+    return new URL(referrer).host !== host;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 画面が開いて最初の API の呼び出しだけに、訪問の印を付ける fetch を作る。referrer の文字列は送らない
+ * @param fetcher 包む fetch
+ * @param visit 訪問か
+ * @returns 包んだ fetch
+ */
+export function visitFetch(fetcher: Fetch, visit: boolean): Fetch {
+  let pending = visit;
+  return (input, init) => {
+    if (!pending) return fetcher(input, init);
+    pending = false;
+    const headers = new Headers(init?.headers);
+    headers.set(VISIT_HEADER, "1");
+    return fetcher(input, { ...init, headers });
+  };
+}
+
+/**
  * 入口を呼ぶ口を作る
  * @param base 入口の origin
  * @param fetcher 包む fetch。無ければブラウザーの fetch
+ * @param visit 画面を開いたのが訪問か。最初の呼び出しに印を付ける
  * @returns Hono の RPC のクライアント
  */
-export function createApi(base: string, fetcher?: Fetch) {
-  return hc<Gate>(base, { fetch: sessionFetch(base, fetcher) });
+export function createApi(base: string, fetcher?: Fetch, visit = false) {
+  // ログインセッションを作り直して呼び直す時も同じ印が付くが、ゲートウェイはログインを通った呼び出しだけを数える
+  return hc<Gate>(base, { fetch: visitFetch(sessionFetch(base, fetcher), visit) });
 }
 
 /** 入口を呼ぶ口の型 */

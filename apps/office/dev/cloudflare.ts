@@ -1,4 +1,4 @@
-// 開発環境の代わりの Cloudflare の GraphQL Analytics API。workersInvocationsAdaptive だけを、本物と同じ鍵、変数、上限で返す
+// 開発環境の代わりの Cloudflare。GraphQL Analytics API の workersInvocationsAdaptive と、Workers Analytics Engine の SQL API を、本物と同じ鍵、変数、上限で返す
 // 出典: https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/ (項目と返事の形)、
 // https://developers.cloudflare.com/analytics/graphql-api/limits/ (5 分に 300 クエリ)、https://developers.cloudflare.com/workers/observability/metrics-and-analytics/ (期間は 1 週間までの区間)
 import { Hono } from "hono";
@@ -20,7 +20,24 @@ export type FakeCloudflare = {
   requests: { variables: Record<string, unknown>; authorization: string | null }[];
   /** 次の要求から返す失敗の HTTP ステータス。null なら通す */
   failWith: 429 | 500 | 502 | null;
+  /** Analytics Engine のスクリプトごとの点の和。置かないスクリプトは訪問 7 を返し、null なら行を返さない */
+  points: Map<string, FakePoints | null>;
+  /** 受けた SQL と、宛先のアカウント ID と Authorization */
+  sqlRequests: { accountId: string; authorization: string | null; sql: string }[];
+  /** 次の SQL から返す失敗の HTTP ステータス。null なら通す */
+  sqlFailWith: 429 | 500 | 503 | null;
+  /** データセットにまだ点が無く、テーブルが無いか */
+  datasetMissing: boolean;
 };
+
+/** Analytics Engine の 1 スクリプトの和 */
+export type FakePoints = { visits: number };
+
+/** 点の残る長さ (3 か月)。これより長い期間の問い合わせは断る。https://developers.cloudflare.com/analytics/analytics-engine/limits/ */
+const POINT_RETENTION_S = 92 * 24 * 60 * 60;
+
+/** 読み手が使うデータセットの名前 */
+const DATASET = "knowidea_requests";
 
 /** 1 回の要求の期間の上限 (1 週間)。本物の Workers の Analytics の最大の区間 */
 const MAX_RANGE_MS = 7 * 24 * 60 * 60_000;
@@ -46,7 +63,7 @@ const Body = z.object({
  * @returns 代わりの Cloudflare
  */
 export function createFakeCloudflare(options: { token: string; accountId: string; now: () => number }): FakeCloudflare {
-  const fake: FakeCloudflare = { app: new Hono(), invocations: new Map(), requests: [], failWith: null };
+  const fake: FakeCloudflare = { app: new Hono(), invocations: new Map(), requests: [], failWith: null, points: new Map(), sqlRequests: [], sqlFailWith: null, datasetMissing: false };
   const stamps: number[] = [];
   fake.app.post("/client/v4/graphql", async (c) => {
     const authorization = c.req.header("authorization") ?? null;
@@ -71,6 +88,33 @@ export function createFakeCloudflare(options: { token: string; accountId: string
     const rows = scriptNames.flatMap((scriptName) => (fake.invocations.get(scriptName) ?? [{ requests: 100, errors: 2 }]).map((sum) => ({ sum, dimensions: { scriptName } })));
     const found = accountTag === options.accountId ? [{ workersInvocationsAdaptive: rows.slice(0, limit) }] : [];
     return c.json({ data: { viewer: { accounts: found } }, errors: null });
+  });
+  // Workers Analytics Engine の SQL API。本文は SQL の文で、FORMAT JSON は {meta, data, rows} を返す
+  // 出典: https://developers.cloudflare.com/analytics/analytics-engine/sql-api/ 、https://developers.cloudflare.com/analytics/analytics-engine/sql-reference/statements/ 、
+  // 失敗の形 (SQL の誤りは 422 と text/plain、鍵の断りは Cloudflare の API の JSON): https://developers.cloudflare.com/analytics/sql-api/errors/
+  fake.app.post("/client/v4/accounts/:accountId/analytics_engine/sql", async (c) => {
+    const authorization = c.req.header("authorization") ?? null;
+    const sql = await c.req.text();
+    const accountId = c.req.param("accountId");
+    fake.sqlRequests.push({ accountId, authorization, sql });
+    if (fake.sqlFailWith !== null) return c.text("failed", fake.sqlFailWith);
+    if (authorization !== `Bearer ${options.token}` || accountId !== options.accountId) return c.json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] }, 403);
+    if (/^SHOW TABLES FORMAT JSON$/.test(sql)) {
+      const data = fake.datasetMissing ? [] : [{ name: DATASET }];
+      return c.json({ meta: [{ name: "name", type: "String" }], data, rows: data.length });
+    }
+    if (fake.datasetMissing) return c.text(`Input was invalid: unknown table ${DATASET}`, 422);
+    const scripts = /blob1 IN \(((?:'[A-Za-z0-9-]+'(?:, )?)+)\)/.exec(sql)?.[1]?.split(", ").map((q) => q.slice(1, -1));
+    const times = [...sql.matchAll(/toDateTime\((\d+)\)/g)].map((m) => Number(m[1]));
+    const limit = Number(/ LIMIT (\d+) /.exec(sql)?.[1] ?? "0");
+    if (!scripts || times.length !== 2 || limit === 0 || !sql.includes(`FROM ${DATASET} `) || !sql.endsWith(" FORMAT JSON")) return c.text("Input was invalid: unsupported query", 422);
+    const [start = 0, end = 0] = times;
+    if (end <= start || end - start > POINT_RETENTION_S) return c.text("Input was invalid: time range", 422);
+    const data = scripts.flatMap((script) => {
+      const sum = fake.points.has(script) ? fake.points.get(script) : { visits: 7 };
+      return sum ? [{ script, visits: sum.visits }] : [];
+    });
+    return c.json({ meta: [{ name: "script", type: "String" }, { name: "visits", type: "Float64" }], data: data.slice(0, limit), rows: Math.min(data.length, limit) });
   });
   return fake;
 }
