@@ -35,9 +35,14 @@ for (const s of screens) {
   });
 }
 
-test("最初に開くのはダッシュボード", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "ダッシュボード" })).toBeVisible();
+test.describe("画面の一覧", () => {
+  test("最初に開く", async ({ page }) => {
+    // ログインした後に開く入口の道は / で、ダッシュボードを出し、切り替えでも今いる所にする
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { level: 1, name: "ダッシュボード" })).toBeVisible();
+    await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/ダッシュボード/);
+  });
 });
 
 test("その他から、下の切り替えに無い画面へ移れる", async ({ page }) => {
@@ -59,15 +64,20 @@ test("社員と仕事で、社員を選ぶと会話と勤怠の表が出る", as
   await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
 });
 
-test("社員と仕事で、変更のある仕事を選ぶと同じ画面にレビューが開く", async ({ page }) => {
-  await stubReview(page);
-  await page.goto("/staff");
-  await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
-  await page.getByRole("tab", { name: "仕事の山" }).click();
-  await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
-  await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "承認する" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "差し戻す" })).toBeVisible();
+test.describe("画面の一覧", () => {
+  test("タスクからレビューに移る", async ({ page }) => {
+    await stubReview(page);
+    await page.goto("/staff");
+    await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
+    await page.getByRole("tab", { name: "仕事の山" }).click();
+    await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
+    // 同じ社員とタスクの画面のまま、右にレビューが開く
+    await expect(page).toHaveURL(new RegExp(`${REVIEW_PATH}$`));
+    await expect(page.getByRole("heading", { level: 1, name: "社員と仕事" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "承認する" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "差し戻す" })).toBeVisible();
+  });
 });
 
 // 一番幅の出る所も、どの幅でも横にはみ出さない
@@ -86,16 +96,32 @@ for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", REVIEW_PATH]
   });
 }
 
-test("スマートフォンの勤怠の表は 3 列を出し、行を開くと残りが出る", async ({ page }) => {
-  await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
-  const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
-  await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
-  const phone = (page.viewportSize()?.width ?? 0) < 600;
-  await expect(table.getByRole("columnheader", { name: "掛かった" })).toBeVisible({ visible: !phone });
-  if (phone) {
-    await table.locator("summary", { hasText: "DiffView の行番号を直す" }).click();
-    await expect(table.getByText("掛かった 1 時間 40 分")).toBeVisible();
-  }
+// 3-workday の要件。狭い幅では始めた、終えた、仕事の 3 列を出し、行を開くと残りが出る。広い幅では全部の列を出す
+test.describe("日ごとのタスク", () => {
+  test("スマートフォンで勤怠を見る", async ({ page }) => {
+    await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
+    const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
+    await expect(table.getByRole("columnheader", { name: "始めた" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "終えた" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
+    const phone = narrow(page);
+    await expect(table.getByRole("columnheader", { name: "掛かった" })).toBeVisible({ visible: !phone });
+    if (phone) {
+      await table.locator("summary", { hasText: "DiffView の行番号を直す" }).click();
+      await expect(table.getByText("掛かった 1 時間 40 分")).toBeVisible();
+    }
+  });
+});
+
+test.describe("言葉と時刻", () => {
+  test("時刻の表示", async ({ page }) => {
+    // e2e/seed.sql の出勤と最初の仕事は 2026-11-13T00:00:00Z (協定世界時の 0 時) に始まる。日本時間の 9:00 で出す
+    await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
+    await expect(page.getByText(/11\/13 \(金\) 出勤 9:00、/)).toBeVisible();
+    const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
+    await expect(table.getByRole("row").nth(1)).toContainText("9:00");
+    await expect(table.getByRole("row").nth(1)).not.toContainText("0:00");
+  });
 });
 
 test("勤怠の上の 1 行は、出勤から止められていた時間までを出す", async ({ page }) => {
@@ -153,31 +179,42 @@ test("レビューから戻ると、仕事の山のタブに戻る", async ({ pa
   await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
 });
 
-test("スマートフォンで社員、仕事と進み、戻るで 1 つ前の列に戻る", async ({ page }) => {
-  test.skip((page.viewportSize()?.width ?? 0) >= 600, "1 列になる幅だけ");
-  await page.goto("/staff");
-  await stubReview(page);
-  await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
-  await page.getByRole("tab", { name: "仕事の山" }).click();
-  await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
-  await page.getByRole("button", { name: "仕事の山へ戻る" }).click();
-  await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("button", { name: "社員の一覧へ戻る" }).click();
-  await expect(page.getByRole("main").getByRole("link", { name: /レビュー担当/ })).toBeVisible();
+test.describe("画面の一覧", () => {
+  test("スマートフォンで深く進む", async ({ page }) => {
+    test.skip(!narrow(page), "1 列になる幅だけ");
+    await page.goto("/staff");
+    await stubReview(page);
+    // 1 列ずつ右へ進む。社員を選ぶと一覧は隠れ、会話とタスクの列だけになる
+    await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
+    await expect(page.getByRole("main").getByRole("link", { name: /レビュー担当/ })).toBeHidden();
+    await page.getByRole("tab", { name: "仕事の山" }).click();
+    await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
+    await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "仕事の山" })).toBeHidden();
+    // 戻るで 1 つ前の列に戻る
+    await page.getByRole("button", { name: "仕事の山へ戻る" }).click();
+    await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("button", { name: "社員の一覧へ戻る" }).click();
+    await expect(page.getByRole("main").getByRole("link", { name: /レビュー担当/ })).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
 });
 
-test("サービスを選ぶと、その様子と記録と設定が出る", async ({ page }) => {
-  test.skip(narrow(page), WIDE_ONLY);
-  await page.goto("/services");
-  await page.getByRole("main").getByRole("link", { name: "knowidea-ui" }).click();
-  await expect(page.getByText("公開した版")).toBeVisible();
-  await page.getByRole("tab", { name: "設定" }).click();
-  // 登録した時から本番にデプロイする条件を変えてある
-  await expect(page.getByRole("heading", { level: 3, name: "本番にデプロイする条件" })).toBeVisible();
-  await expect(page.getByText("初期値から変えている")).toBeVisible();
-  // 設計書から作った Issue がまだ無いサービスの Issue のタブ
-  await page.getByRole("tab", { name: "Issue" }).click();
-  await expect(page.getByText("Issue はまだ無い")).toBeVisible();
+test.describe("設定と記録の置き場を分ける", () => {
+  test("サービスの設定を開く", async ({ page }) => {
+    test.skip(narrow(page), WIDE_ONLY);
+    await page.goto("/services");
+    await page.getByRole("main").getByRole("link", { name: "knowidea-ui" }).click();
+    await expect(page.getByText("公開した版")).toBeVisible();
+    await page.getByRole("tab", { name: "設定" }).click();
+    // サービスごとの設定はサービスの画面に出る。登録した時から本番にデプロイする条件を変えてある
+    await expect(page.getByRole("heading", { level: 3, name: "本番にデプロイする条件" })).toBeVisible();
+    await expect(page.getByText("初期値から変えている")).toBeVisible();
+    // 設計書から作った Issue がまだ無いサービスの Issue のタブ
+    await page.getByRole("tab", { name: "Issue" }).click();
+    await expect(page.getByText("Issue はまだ無い")).toBeVisible();
+  });
 });
 
 test("画面を移ると、題が変わり、中身に移る", async ({ page }) => {

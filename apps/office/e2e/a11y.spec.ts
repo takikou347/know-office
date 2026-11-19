@@ -260,10 +260,11 @@ test.describe("使いやすさ", () => {
     expect(await focusProblem(page)).toBeNull();
   });
 
-  // 1 ページに 2 秒ほど掛かり、14 ページを 1 つの test で回すと 5 秒を超えるので、ページごとに分ける
-  test.describe("自動のチェック", () => {
-    for (const p of pages) {
-      test(p.name, async ({ page }) => {
+  // 1 ページに 2 秒ほど掛かり、14 ページを 1 つの test で回すと 5 秒を超えるので、ページごとに分ける。
+  // scripts/scenarios.ts は test の名前でシナリオを探すので、ページの名前を describe にし、test をシナリオの名前にする
+  for (const p of pages) {
+    test.describe(p.name, () => {
+      test("自動のチェック", async ({ page }) => {
         await p.mock?.(page);
         await page.goto(p.path);
         await expect(page.getByRole("heading", { level: 1, name: p.heading })).toBeVisible();
@@ -279,6 +280,6 @@ test.describe("使いやすさ", () => {
           .map((v) => ({ page: p.path, id: v.id, impact: v.impact, help: v.help, targets: v.nodes.map((n) => n.target.join(" ")) }));
         expect(bad).toEqual([]);
       });
-    }
-  });
+    });
+  }
 });
