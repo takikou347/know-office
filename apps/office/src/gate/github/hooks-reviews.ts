@@ -1,6 +1,6 @@
 // GitHub の画面でオーナーが出した可と不可、行のコメントの通知を受け、know-office のレビューと作った社員のタスクに写す (タスクとレビューの 3.2、GitHub の連携の 3.4)
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
-import { AppError, log, newId, PullRequestReviewCommentEvent, PullRequestReviewEvent } from "@know-office/core";
+import { log, newId, PullRequestReviewCommentEvent, PullRequestReviewEvent } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { recordError } from "../ledger/errors.ts";
@@ -155,21 +155,24 @@ async function applyFromGitHub(env: Bindings, found: FromGitHub, review: ReviewO
   if (found.kind === "review") {
     // レビューしたコミットがレビューの今の先の時だけ写す。古い先へのレビューを、新しい先の判断にしない
     const current = { sql: "EXISTS (SELECT 1 FROM reviews WHERE id = ? AND head_sha = ?)", args: [review.id, found.commitId] };
-    const statements = [
-      db.prepare("UPDATE reviews SET owner_verdict = ? WHERE id = ? AND head_sha = ?").bind(found.verdict, review.id, found.commitId),
-      // 最初に受けた時刻を GitHub のレビュー 1 つに 1 行だけ残す。送り直しは配信 ID も時刻も変わるが、この行は変わらない
+    // 判断とタスクを戻す事は、GitHub のレビューを初めて写す時だけ書く。受け直しで、後に画面で変えた判断を戻さない
+    const fresh = { sql: `${current.sql} AND NOT EXISTS (SELECT 1 FROM github_reviews WHERE github_review_id = ?)`, args: [...current.args, found.githubId] };
+    const statements = [db.prepare(`UPDATE reviews SET owner_verdict = ? WHERE id = ? AND ${fresh.sql}`).bind(found.verdict, review.id, ...fresh.args)];
+    if (found.verdict === "request_changes") statements.push(backToTodo(db, review.node_id, now, fresh));
+    statements.push(
+      // 最初に受けた時刻を GitHub のレビュー 1 つに 1 行だけ残す。送り直しは配信 ID も時刻も変わるが、この行は変わらない。判断の後に置き、判断の文からは初めてに見せる
       db.prepare(`INSERT INTO github_reviews (github_review_id, received_at) SELECT ?, ? WHERE ${current.sql} ON CONFLICT (github_review_id) DO NOTHING`).bind(found.githubId, now, ...current.args),
-    ];
-    if (found.verdict === "request_changes") statements.push(backToTodo(db, review.node_id, now, current));
-    const [updated] = await db.batch(statements);
-    if ((updated?.meta.changes ?? 0) === 0) {
+      // 写した行と、今の先のままかを同じバッチで読む。初めてでも、途中で落ちた後の受け直しでも、今の先なら出来事を足す
+      db.prepare(`SELECT received_at AS at FROM github_reviews WHERE github_review_id = ? AND ${current.sql}`).bind(found.githubId, ...current.args),
+    );
+    const results = await db.batch<{ at: number }>(statements);
+    const first = results.at(-1)?.results[0];
+    if (first === undefined) {
       log("info", "github_review_stale", { reviewId: review.id, githubReviewId: found.githubId });
       return;
     }
     // 出来事の node_events は年ごとの記録の D1 にあり、D1 のバッチは 1 つの D1 の中だけなので、同じバッチに入れられない
     // 鍵を GitHub のレビュー ID、時刻を最初に受けた時刻にして、送り直しでも、途中で落ちた後の受け直しでも同じ ID の 1 行にする
-    const first = await db.prepare("SELECT received_at AS at FROM github_reviews WHERE github_review_id = ?").bind(found.githubId).first<{ at: number }>();
-    if (first === null) throw new AppError("internal", "写した GitHub のレビューの行が無い");
     const event = { key: `github_review:${review.node_id}:${String(found.githubId)}`, actor: { by: "github", now: first.at } satisfies Actor };
     const detail = { by: "owner", summary: found.body, githubReviewId: found.githubId };
     if (found.verdict === "request_changes") {

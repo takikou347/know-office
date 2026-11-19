@@ -1,10 +1,10 @@
-// 同じ GitHub のレビューを配信 ID を替えて受け直しても、作った社員のタスクの出来事は 1 行で、オフィスの出来事も 1 度だけ配る (タスクとレビューの 3.2、画面の全体の 3.2)
+// 同じ GitHub のレビューを配信 ID を替えて受け直しても、作った社員のタスクの出来事は 1 行で、オフィスの出来事も 1 度だけ配り、画面で変えたオーナーの判断を戻さない (タスクとレビューの 3.2、画面の全体の 3.2)
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { hook } from "../helpers/github.ts";
-import { eventsOf, openReview, reviewHook } from "../helpers/review.ts";
-import { advance, MINUTE, useWork } from "../helpers/work.ts";
+import { eventsOf, HEAD, openReview, reviewHook } from "../helpers/review.ts";
+import { advance, api, MINUTE, rows, useWork } from "../helpers/work.ts";
 
 const world = useWork();
 
@@ -101,4 +101,21 @@ describe("GitHub のレビューを受け直す", () => {
     expect((await eventsOf(world, task)).filter((e) => e.kind === "review_rejected")).toHaveLength(1);
     expect(workMarksOf(task)).toHaveLength(1);
   });
+
+  for (const [label, state, screen] of [
+    ["可", "approved", "request_changes"],
+    ["不可", "changes_requested", "approve"],
+  ] as const) {
+    it(`GitHub の${label}を写した後に画面で判断を変えれば、同じ${label}の通知を配信 ID を替えて受け直しても、画面の判断のまま残る`, async () => {
+      const { c, task } = await openReview(world);
+      const payload = reviewHook(c, state, "見た");
+      expect((await hook(world, { event: "pull_request_review", payload, secret: c.webhookSecret, delivery: crypto.randomUUID() })).status).toBe(204);
+      await api(world, "POST", `/api/v1/reviews/${task}/verdict`, { verdict: screen, body: "変える", baseSha: HEAD });
+      await advance(world, world.clock.now() + 5 * MINUTE);
+      // 送り直しは本文の細部も変わり得るので、本文の SHA-256 では見分けられない形にする
+      const again = { ...payload, sender: { login: "example", type: "User", id: 2 } };
+      expect((await hook(world, { event: "pull_request_review", payload: again, secret: c.webhookSecret, delivery: crypto.randomUUID() })).status).toBe(204);
+      expect(await rows(world.d1.DB, "SELECT owner_verdict FROM reviews WHERE node_id = ?", task)).toEqual([{ owner_verdict: screen }]);
+    });
+  }
 });
