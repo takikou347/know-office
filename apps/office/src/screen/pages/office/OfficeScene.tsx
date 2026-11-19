@@ -8,7 +8,7 @@ import { type Loop, browserClock, createLoop } from "./loop.ts";
 import type { EventBatch } from "./OfficePage.tsx";
 import { planMotions } from "./plan.ts";
 import { type ColorResolver, type Room, createRoom } from "./room.ts";
-import { type TagSizer, createTagSizer, separateBoxes, spreadTags } from "./tags.ts";
+import { type TagSizer, createTagSizer, growBoxes, separateBoxes, spreadTags } from "./tags.ts";
 import { OFFICE_THEME, themeOf } from "./themes.ts";
 
 export interface OfficeSceneProps {
@@ -23,6 +23,9 @@ export interface OfficeSceneProps {
   /** 部屋の上に置く物 (動きを止めるボタンと、直近の出来事) */
   children: ReactNode;
 }
+
+/** 押せる大きさのトークンが読めない時の大きさ (CSS のピクセル) */
+const HIT_SIZE = 44;
 
 /** 組んだ部屋と、描く回し方を今の様子に合わせる関数 */
 interface Control {
@@ -60,9 +63,10 @@ function colorResolver(host: HTMLElement): ColorResolver {
  * @param links 社員の id ごとのリンク
  * @param labels 社員の id ごとの名札
  * @param sizer 名札の大きさを覚えて返す物。字が変わった時だけ測る
+ * @param hitSize 押せる大きさ (CSS のピクセル)
  * @returns 重ねる関数
  */
-function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, labels: ReadonlyMap<string, HTMLAnchorElement>, sizer: TagSizer): () => void {
+function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, labels: ReadonlyMap<string, HTMLAnchorElement>, sizer: TagSizer, hitSize: number): () => void {
   const written = new Map<string, string>();
   return () => {
     const boxes = room.boxes();
@@ -72,14 +76,15 @@ function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, label
       const { width, height } = sizer.sizeOf(b.id, tag.textContent);
       return [{ id: b.id, x: b.left + b.width / 2, bottom: b.top, width, height }];
     });
-    const shift = spreadTags(tags);
-    // リンクは重ならないように削り、名札は姿の箱の上に置く
-    const hits = new Map(separateBoxes(boxes).map((h) => [h.id, h]));
+    // リンクは押せる大きさに広げてから重ならないように削る。名札は姿の箱の上に置き、ほかの名札とほかの社員のリンクを避ける
+    const separated = separateBoxes(growBoxes(boxes, hitSize));
+    const shift = spreadTags(tags, separated);
+    const hits = new Map(separated.map((h) => [h.id, h]));
     for (const b of boxes) {
       const a = links.get(b.id);
       const h = hits.get(b.id);
       if (!a || !h) continue;
-      const style = [h.left, h.top, h.width, h.height, b.left, b.top, b.width, shift[b.id] ?? 0].map(Math.round).join("|");
+      const style = [h.left, h.top, h.width, h.height, b.left, b.top, b.width, b.height, shift[b.id] ?? 0].map(Math.round).join("|");
       if (written.get(b.id) === style) continue;
       written.set(b.id, style);
       a.style.transform = `translate(${Math.round(h.left)}px, ${Math.round(h.top)}px)`;
@@ -89,6 +94,7 @@ function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, label
       if (!label) continue;
       label.style.transform = `translate(${Math.round(b.left)}px, ${Math.round(b.top)}px)`;
       label.style.width = `${Math.round(b.width)}px`;
+      label.style.height = `${Math.round(b.height)}px`;
       label.style.setProperty("--ko-tag-shift", `${Math.round(shift[b.id] ?? 0)}px`);
     }
   };
@@ -131,7 +137,9 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
       const tag = labels.current.get(id)?.firstElementChild;
       return tag instanceof HTMLElement ? { width: tag.offsetWidth, height: tag.offsetHeight } : { width: 0, height: 0 };
     });
-    const place = placer(room, links.current, labels.current, sizer);
+    // 押せる大きさはトークンから読む。CSS の最小の大きさで広げると、削った箱が隣に掛かる
+    const hitSize = Number.parseFloat(getComputedStyle(box).getPropertyValue("--size-hit")) || HIT_SIZE;
+    const place = placer(room, links.current, labels.current, sizer, hitSize);
     const loop = createLoop((t) => {
       room.render(t);
       place();

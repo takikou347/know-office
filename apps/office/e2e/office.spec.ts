@@ -35,11 +35,41 @@ test.describe("画面の一覧", () => {
     await page.goto("/office");
     const room = roomOf(page);
     await expect(room.locator("canvas")).toBeVisible();
-    // 社員の名札を押す。休憩所で待つ社員が並ぶと姿を覆う所は重なるが、名札は重ならないようずらし、ほかの社員の箱より上に置いてある
+    // 社員の名札を押す。名札はほかの名札とほかの社員の姿を覆う箱に重ならないようずらし、ほかの社員の箱より上に置いてある
     await room.getByText("開発担当", { exact: true }).click();
     await expect(page).toHaveURL(/\/staff\/builder$/);
     await expect(page.getByRole("log", { name: "開発担当との会話" })).toBeVisible();
   });
+
+  // 幅 360 では社員の姿が近く、押せる大きさに広げた箱と名札が隣の社員の姿に掛かっていた (#200)
+  const staff = [
+    ["president", "社長"],
+    ["builder", "開発担当"],
+    ["reviewer", "レビュー担当"],
+  ] as const;
+  for (const [id, role] of staff) {
+    test.describe(role, () => {
+      test("社員の姿を押す", async ({ page }) => {
+        await page.goto("/office");
+        const room = roomOf(page);
+        await expect(room.locator("canvas")).toBeVisible();
+        const links = staff.map(([, r]) => room.getByRole("link", { name: new RegExp(`^${r} `) }));
+        for (const link of links) await expect(link).toBeAttached();
+        // 社員を開くリンクの箱は互いに重ならない
+        const hits = await Promise.all(links.map((link) => link.boundingBox()));
+        const overlapping = hits.flatMap((a, i) =>
+          hits.slice(i + 1).filter((b) => a && b && Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 0.5 && Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > 0.5),
+        );
+        expect(overlapping).toEqual([]);
+        // 名札の置き場は姿を覆う箱と同じ所にあるので、その真ん中が姿の真ん中
+        const figure = await room.locator(`.ko-office-label[href="/staff/${id}"]`).boundingBox();
+        if (!figure) throw new Error(`${role}の姿が無い`);
+        await page.mouse.click(figure.x + figure.width / 2, figure.y + figure.height / 2);
+        await expect(page).toHaveURL(new RegExp(`/staff/${id}$`));
+        await expect(page.getByRole("log", { name: `${role}との会話` })).toBeVisible();
+      });
+    });
+  }
 });
 
 test.describe("速さ", () => {

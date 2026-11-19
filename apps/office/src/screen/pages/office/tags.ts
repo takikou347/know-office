@@ -13,23 +13,30 @@ export interface TagBox {
 const GAP = 2;
 
 /**
- * 名札が重ならないように、上へずらす量を決める。手前 (下の端が下) の名札から順に置き、重なる奥の名札をその上へ動かす
+ * 名札が、ほかの名札とほかの社員のリンクの箱に重ならないように、上へずらす量を決める。手前 (下の端が下) の名札から順に置き、重なる名札をその上へ動かす。
+ * 名札はリンクの箱より上に重なるので、ほかの社員の箱に掛かると、その社員の姿を押しても名札の社員が開く
  * @param tags 名札の箱
+ * @param hits 社員を開くリンクの箱。名札は自分のほかの箱を避ける
  * @returns 社員の id ごとの、上へずらす量
  */
-export function spreadTags(tags: readonly TagBox[]): Record<string, number> {
+export function spreadTags(tags: readonly TagBox[], hits: readonly HitBox[] = []): Record<string, number> {
   const shift: Record<string, number> = {};
   const placed: { box: TagBox; top: number }[] = [];
   for (const box of tags.toSorted((a, b) => b.bottom - a.bottom)) {
     let top = box.bottom - box.height;
-    // 置いた名札と重なる間は、その上へ動かす。動かした先で別の名札と重なる事もあるので、重ならなくなるまで繰り返す
+    // 箱にした避ける物。置いた名札と、ほかの社員のリンクの箱
+    const avoid = [
+      ...placed.map((p) => ({ left: p.box.x - p.box.width / 2, top: p.top, width: p.box.width, height: p.box.height })),
+      ...hits.filter((h) => h.id !== box.id),
+    ];
+    // 重なる間は、その上へ動かす。動かした先で別の物と重なる事もあるので、重ならなくなるまで繰り返す
     for (let moved = true; moved; ) {
       moved = false;
-      for (const p of placed) {
-        const sideBySide = Math.abs(box.x - p.box.x) < (box.width + p.box.width) / 2;
-        const stacked = top < p.top + p.box.height && p.top < top + box.height;
+      for (const o of avoid) {
+        const sideBySide = Math.abs(box.x - (o.left + o.width / 2)) < (box.width + o.width) / 2;
+        const stacked = top < o.top + o.height && o.top < top + box.height;
         if (sideBySide && stacked) {
-          top = p.top - box.height - GAP;
+          top = o.top - box.height - GAP;
           moved = true;
         }
       }
@@ -80,6 +87,20 @@ export interface HitBox {
   top: number;
   width: number;
   height: number;
+}
+
+/**
+ * 社員のリンクの箱を、姿の真ん中を軸に押せる大きさまで広げる。分ける前に広げ、分けた後は広げ直さない。広げ直すと隣の箱に掛かる
+ * @param boxes 社員の姿を覆う箱
+ * @param min 押せる大きさ (CSS のピクセル)
+ * @returns 広げた箱。並びは受けた順
+ */
+export function growBoxes(boxes: readonly HitBox[], min: number): HitBox[] {
+  return boxes.map((b) => {
+    const width = Math.max(b.width, min);
+    const height = Math.max(b.height, min);
+    return { id: b.id, left: b.left - (width - b.width) / 2, top: b.top - (height - b.height) / 2, width, height };
+  });
 }
 
 /**

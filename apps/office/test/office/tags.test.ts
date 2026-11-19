@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type TagBox, createTagSizer, separateBoxes, spreadTags } from "../../src/screen/pages/office/tags.ts";
+import { type TagBox, createTagSizer, growBoxes, separateBoxes, spreadTags } from "../../src/screen/pages/office/tags.ts";
 
 // 名札が重ならないように、上にずらす。画面の全体の 3.2
 
@@ -122,5 +122,41 @@ describe("社員のリンクの箱を分ける", () => {
   it("3 つが重なっても、どの 2 つも重ならない", () => {
     const out = separateBoxes([hit("a", 0, 0), hit("b", 20, 20), hit("c", 10, 40)]);
     for (const [i, a] of out.entries()) for (const b of out.slice(i + 1)) expect(hitsOverlap(a, b)).toBe(false);
+  });
+});
+
+describe("社員のリンクの箱を押せる大きさにする", () => {
+  it("小さい箱は、姿の真ん中を軸に押せる大きさまで広げる", () => {
+    expect(growBoxes([hit("a", 100, 100, 30, 40)], 44)).toEqual([hit("a", 93, 98, 44, 44)]);
+  });
+
+  it("押せる大きさより大きい箱はそのまま返す", () => {
+    expect(growBoxes([hit("a", 0, 0, 60, 80)], 44)).toEqual([hit("a", 0, 0, 60, 80)]);
+  });
+
+  it("広げてから分けると、どの 2 つも重ならず、姿の真ん中はその社員の箱に入り、押す的は 24 ピクセルを切らない", () => {
+    // 幅 360 の画面で 3 人が休憩所に並んだ時に測った、姿を覆う箱 (部屋の左上から)
+    const figures = [hit("president", 165, 221, 38, 47), hit("builder", 208, 236, 38, 47), hit("reviewer", 198, 215, 38, 47)];
+    const out = separateBoxes(growBoxes(figures, 44));
+    for (const [i, a] of out.entries()) for (const b of out.slice(i + 1)) expect(hitsOverlap(a, b)).toBe(false);
+    for (const [i, f] of figures.entries()) {
+      const box = out[i] ?? hit("", 0, 0, 0, 0);
+      const [x, y] = [f.left + f.width / 2, f.top + f.height / 2];
+      expect(x >= box.left && x <= box.left + box.width && y >= box.top && y <= box.top + box.height).toBe(true);
+      // WCAG 2.2 の 2.5.8 (押す的の大きさの下限)
+      expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24);
+    }
+  });
+});
+
+describe("名札をほかの社員の箱からずらす", () => {
+  it("手前の社員の名札が奥の社員の箱に重なる時は、その箱の上へずらす", () => {
+    // 手前の front の名札 (80 から 100) が、奥の back の姿を覆う箱 (40 から 100) に重なる
+    const shift = spreadTags([tag("front", 0, 100)], [hit("back", -20, 40, 40, 60), hit("front", -20, 100)]);
+    expect(shift["front"]).toBe(80 - (40 - 20 - 2));
+  });
+
+  it("自分の箱とは重なってもずらさない", () => {
+    expect(spreadTags([tag("a", 0, 100)], [hit("a", -20, 60, 40, 60)])).toEqual({ a: 0 });
   });
 });

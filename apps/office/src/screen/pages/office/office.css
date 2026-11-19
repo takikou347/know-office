@@ -21,7 +21,7 @@
   block-size: 100%;
 }
 
-/* 姿を覆う透けた箱。押す所と、キーボードで選んだ時の輪になる */
+/* 姿を覆う透けた箱。押す所と、キーボードで選んだ時の輪になる。押せる大きさへは部屋が重ならないように広げるので、最小の大きさを付けない */
 .ko-office-who {
   position: absolute;
   inset-block-start: 0;
@@ -30,8 +30,6 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  min-inline-size: var(--size-hit);
-  min-block-size: var(--size-hit);
   border-radius: var(--radius-2);
   color: var(--color-text);
   text-decoration: none;
