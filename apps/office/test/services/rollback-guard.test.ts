@@ -60,7 +60,7 @@ async function deployIds(w: WorkWorld): Promise<unknown[]> {
  * いつも失敗だけを返す、5 分ごとの様子の代わり
  * @returns 様子を読む口
  */
-const failing = (): Analytics => ({ read: (watched) => Promise.resolve({ metrics: new Map(watched.map((w) => [w.id, { requests: 30, errors: 30, users: 1, reads: 0 }])), skipped: [] }) });
+const failing = (): Analytics => ({ read: (watched) => Promise.resolve({ metrics: new Map(watched.map((w) => [w.id, { requests: 30, errors: 30, serverErrors: 0, users: 1, reads: 0 }])), skipped: [] }) });
 
 describe("戻した直後のデプロイを数えない", () => {
   it("戻してから 10 分ちょうどまでに届いたデプロイは、task が rollback でなくても deploy にしない", async () => {

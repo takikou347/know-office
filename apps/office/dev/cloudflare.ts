@@ -20,7 +20,7 @@ export type FakeCloudflare = {
   requests: { variables: Record<string, unknown>; authorization: string | null }[];
   /** 次の要求から返す失敗の HTTP ステータス。null なら通す */
   failWith: 429 | 500 | 502 | null;
-  /** Analytics Engine のスクリプトごとの点の和。置かないスクリプトは訪問 7 を返し、null なら行を返さない */
+  /** Analytics Engine のスクリプトごとの点の和。置かないスクリプトは訪問 7 と 5xx 3 を返し、null なら行を返さない */
   points: Map<string, FakePoints | null>;
   /** 受けた SQL と、宛先のアカウント ID と Authorization */
   sqlRequests: { accountId: string; authorization: string | null; sql: string }[];
@@ -31,7 +31,7 @@ export type FakeCloudflare = {
 };
 
 /** Analytics Engine の 1 スクリプトの和 */
-export type FakePoints = { visits: number };
+export type FakePoints = { visits: number; serverErrors?: number };
 
 /** 点の残る長さ (3 か月)。これより長い期間の問い合わせは断る。https://developers.cloudflare.com/analytics/analytics-engine/limits/ */
 const POINT_RETENTION_S = 92 * 24 * 60 * 60;
@@ -111,10 +111,11 @@ export function createFakeCloudflare(options: { token: string; accountId: string
     const [start = 0, end = 0] = times;
     if (end <= start || end - start > POINT_RETENTION_S) return c.text("Input was invalid: time range", 422);
     const data = scripts.flatMap((script) => {
-      const sum = fake.points.has(script) ? fake.points.get(script) : { visits: 7 };
-      return sum ? [{ script, visits: sum.visits }] : [];
+      const sum = fake.points.has(script) ? fake.points.get(script) : { visits: 7, serverErrors: 3 };
+      return sum ? [{ script, visits: sum.visits, server_errors: sum.serverErrors ?? 0 }] : [];
     });
-    return c.json({ meta: [{ name: "script", type: "String" }, { name: "visits", type: "Float64" }], data: data.slice(0, limit), rows: Math.min(data.length, limit) });
+    const meta = [{ name: "script", type: "String" }, { name: "visits", type: "Float64" }, { name: "server_errors", type: "Float64" }];
+    return c.json({ meta, data: data.slice(0, limit), rows: Math.min(data.length, limit) });
   });
   return fake;
 }

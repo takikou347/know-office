@@ -1,10 +1,11 @@
 // デプロイの通知と 5 分ごとの様子の読み取りから、service_events の deploy、service_metrics、自動停止の deploy_result を作る。戻しはサービスごとに 1 度だけ動かす (サービスと拡張の 3.2、自動停止の 3.1)
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { httpForge } from "../../src/gate/github/forge.ts";
 import { type Analytics, collectMetrics, UNCONNECTED_ANALYTICS } from "../../src/gate/services/deploys.ts";
 import { rollbackService } from "../../src/gate/services/rollback.ts";
+import { resetLedger } from "../helpers/d1.ts";
 import { connect, type Connected, hook } from "../helpers/github.ts";
-import { MINUTE, rows, useWork, type WorkWorld } from "../helpers/work.ts";
+import { at, MINUTE, rows, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork({ github: true });
 
@@ -61,13 +62,13 @@ function deployed(w: WorkWorld, link: Connected, input: { id: number; commit: nu
  * @param answers 順に返す様子
  * @returns 様子を読む口と、読んだ数
  */
-function fakeAnalytics(...answers: { requests: number; errors: number }[]): Analytics & { calls: number } {
+function fakeAnalytics(...answers: { requests: number; errors: number; serverErrors?: number }[]): Analytics & { calls: number } {
   const fake = {
     calls: 0,
     read: (watched: { id: string }[]) => {
       const answer = answers[fake.calls] ?? answers.at(-1) ?? null;
       fake.calls += 1;
-      return Promise.resolve(answer === null ? null : { metrics: new Map(watched.map((w) => [w.id, { ...answer, users: 3, reads: 0 }])), skipped: [] });
+      return Promise.resolve(answer === null ? null : { metrics: new Map(watched.map((w) => [w.id, { requests: answer.requests, errors: answer.errors, serverErrors: answer.serverErrors ?? 0, users: 3, reads: 0 }])), skipped: [] });
     },
   };
   return fake;
@@ -166,6 +167,54 @@ describe("5 分ごとの様子", () => {
     world.clock.advance(FIRST_STEP);
     await collectMetrics(world.gate.env, fakeAnalytics({ requests: 30, errors: 30 }), world.clock.now(), world.gate.deps);
     expect(await serviceStops(world)).toEqual([]);
+  });
+});
+
+/**
+ * デプロイの前の区切りの様子を置く
+ * @param w テストの物
+ * @param n 行の番号
+ * @param end 区切りの終わり
+ * @param requests 呼び出しの数
+ * @param serverErrors アプリの 5xx。数える前の行は null
+ */
+async function baseline(w: WorkWorld, n: number, end: number, requests: number, serverErrors: number | null): Promise<void> {
+  await w.d1.REC_2026.prepare("INSERT INTO service_metrics (id, service_id, at, requests, errors, users, reads, server_errors) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?)")
+    .bind(`00000000-0000-7000-8000-00000000080${String(n)}`, OFFICE_ID, end, requests, serverErrors)
+    .run();
+}
+
+describe("サービスの種類", () => {
+  beforeEach(async () => {
+    await resetLedger(world.d1.REC_2026);
+  });
+
+  it("アプリが返した 5xx で、デプロイの後の失敗率が上がれば止めて戻す", async () => {
+    const link = await linked(world);
+    await deployed(world, link, { id: 7, commit: 1 });
+    // Worker のエラーは 0 で、アプリが 30 件の全部に 5xx を返した
+    world.clock.advance(FIRST_STEP);
+    await collectMetrics(world.gate.env, fakeAnalytics({ requests: 30, errors: 0, serverErrors: 30 }), world.clock.now(), world.gate.deps);
+    expect(await serviceStops(world)).toEqual([{ scope: "service", target: OFFICE_ID, signal: "deploy_failure" }]);
+    expect(world.gate.deps.rollbacks).toEqual([OFFICE_ID]);
+  });
+
+  it("5xx を数え始めた日をまたぐ baseline は、5xx を数えた行だけから出し、無ければ止める判断を飛ばす", async () => {
+    const link = await linked(world);
+    // 5xx を数える前の行しか無い時は、5xx を足した今の失敗率と比べられないので判断しない (5xx を数え始めたデプロイ自身を戻さない)
+    await baseline(world, 1, at(7, 30), 1000, null);
+    await deployed(world, link, { id: 7, commit: 1 });
+    world.clock.advance(FIRST_STEP);
+    await collectMetrics(world.gate.env, fakeAnalytics({ requests: 30, errors: 0, serverErrors: 30 }), world.clock.now(), world.gate.deps);
+    expect(await serviceStops(world)).toEqual([]);
+    // 5xx を数えた行があれば、その行だけで baseline (60 / 130 で 46%) を出して比べる。数える前の 1000 件の行を混ぜると 5% になり、今の 50% で止めてしまう
+    world.clock.advance(at(8, 20) - world.clock.now());
+    await baseline(world, 2, at(8, 15), 100, 30);
+    await deployed(world, link, { id: 8, commit: 2 });
+    world.clock.advance(FIRST_STEP);
+    await collectMetrics(world.gate.env, fakeAnalytics({ requests: 30, errors: 0, serverErrors: 15 }), world.clock.now(), world.gate.deps);
+    expect(await serviceStops(world)).toEqual([]);
+    expect(await rows(world.d1.REC_2026, "SELECT server_errors FROM service_metrics WHERE service_id = ? ORDER BY at", OFFICE_ID)).toEqual([{ server_errors: null }, { server_errors: 30 }, { server_errors: 30 }, { server_errors: 15 }]);
   });
 });
 

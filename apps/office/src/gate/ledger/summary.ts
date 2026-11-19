@@ -69,7 +69,7 @@ async function countMain(db: D1Database, group: RecordGroup, range: SummaryRange
 async function countRecords(db: D1Database, group: RecordGroup, range: SummaryRange): Promise<CountRow[]> {
   const col = COLUMNS[group];
   const usage = `SELECT ${col.usage} AS k, cost_micro_usd AS costMicroUsd, input_tokens + output_tokens + cache_read_tokens + cache_write_tokens AS tokens, 0 AS requests, 0 AS errors FROM usage WHERE (?1 IS NULL OR at >= ?1) AND (?2 IS NULL OR at < ?2)`;
-  const metrics = `SELECT service_id AS k, 0, 0, requests, errors FROM service_metrics WHERE (?1 IS NULL OR at >= ?1) AND (?2 IS NULL OR at < ?2)`;
+  const metrics = `SELECT service_id AS k, 0, 0, requests, errors + COALESCE(server_errors, 0) FROM service_metrics WHERE (?1 IS NULL OR at >= ?1) AND (?2 IS NULL OR at < ?2)`;
   const body = group === "service" ? `${usage} UNION ALL ${metrics}` : usage;
   const res = await db.prepare(rollup(body, ["costMicroUsd", "tokens", "requests", "errors"])).bind(range.start, range.end).all<CountRow>();
   return res.results;

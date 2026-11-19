@@ -127,6 +127,8 @@ export const serviceMetrics = sqliteTable(
     errors: integer("errors").notNull(),
     users: integer("users"),
     reads: integer("reads"),
+    // アプリが返した 5xx の数。errors (Worker のエラー) と別に持ち、5xx を数える前の行は null
+    serverErrors: integer("server_errors"),
     traceId: traceId(),
   },
   (t) => [index("service_metrics_trace").on(t.traceId)],

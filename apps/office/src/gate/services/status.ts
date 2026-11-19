@@ -116,7 +116,8 @@ async function recentMetrics(env: Bindings, serviceId: string, now: number) {
     .select({
       n: sql<number>`COUNT(*)`,
       requests: sql<number>`COALESCE(SUM(${serviceMetrics.requests}), 0)`,
-      errors: sql<number>`COALESCE(SUM(${serviceMetrics.errors}), 0)`,
+      // 失敗は Worker のエラーとアプリの 5xx の和。5xx を数える前の行は Worker のエラーだけ
+      errors: sql<number>`COALESCE(SUM(${serviceMetrics.errors} + COALESCE(${serviceMetrics.serverErrors}, 0)), 0)`,
       reads: sql<number>`COALESCE(SUM(${serviceMetrics.reads}), 0)`,
       // SUM は null の行を飛ばし、どの行も null なら null を返す
       users: sql<number | null>`SUM(${serviceMetrics.users})`,

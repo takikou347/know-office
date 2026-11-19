@@ -157,9 +157,10 @@ describe("サービスごとの記録", () => {
  * @param time 時刻
  * @param requests 要求の数
  * @param errors 失敗の数
+ * @param serverErrors アプリが返した 5xx の数。数える前の行は null
  */
-async function metrics(w: WorkWorld, serviceId: string, time: number, requests: number, errors: number): Promise<void> {
-  await drizzle(recordsAt(w, time)).insert(serviceMetrics).values({ id: newId(w.clock), serviceId, at: time, requests, errors, users: null, reads: null, traceId: null });
+async function metrics(w: WorkWorld, serviceId: string, time: number, requests: number, errors: number, serverErrors: number | null = null): Promise<void> {
+  await drizzle(recordsAt(w, time)).insert(serviceMetrics).values({ id: newId(w.clock), serviceId, at: time, requests, errors, serverErrors, users: null, reads: null, traceId: null });
 }
 
 /**
@@ -224,12 +225,22 @@ describe("記録の集計の決まり", () => {
     await metrics(world, b, on(13, 12), 10, 5);
     const got = await summary(world, "group=service");
     // 追記専用の記録はほかのテストの分も残るので、置き場から和を読んで比べる
-    const sums = await Promise.all([world.d1.REC_2026, world.d1.REC_2027].map((db) => rows(db, "SELECT COALESCE(SUM(requests), 0) AS r, COALESCE(SUM(errors), 0) AS e FROM service_metrics")));
+    const sums = await Promise.all([world.d1.REC_2026, world.d1.REC_2027].map((db) => rows(db, "SELECT COALESCE(SUM(requests), 0) AS r, COALESCE(SUM(errors + COALESCE(server_errors, 0)), 0) AS e FROM service_metrics")));
     const requests = sums.reduce((n, [r]) => n + Number(r?.["r"]), 0);
     const errors = sums.reduce((n, [r]) => n + Number(r?.["e"]), 0);
     expect(got.total.failureRatio).toBeCloseTo(errors / requests, 10);
     expect(got.rows.find((r) => r.key === b)?.failureRatio).toBe(0.5);
     expect(got.rows.find((r) => r.key === a)?.failureRatio).toBe(0.01);
+    expectSums(got);
+  });
+
+  it("サービスの失敗率に、アプリが返した 5xx を足す", async () => {
+    const a = await service(world, "a");
+    // 5xx を数える前の行 (null) は Worker のエラーだけ
+    await metrics(world, a, on(13, 12), 100, 5, 15);
+    await metrics(world, a, on(13, 13), 100, 0, null);
+    const got = await summary(world, "group=service");
+    expect(got.rows.find((r) => r.key === a)?.failureRatio).toBe(0.1);
     expectSums(got);
   });
 });

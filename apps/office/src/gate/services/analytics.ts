@@ -42,7 +42,7 @@ const SCRIPT_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const VISITS_ROW_LIMIT = 100;
 
 /**
- * 訪問の数をスクリプトごとに読む SQL を組み立てる。SQL API に値を渡す口が無いので、名前の形と時刻をここで確かめてから文に入れる。
+ * 訪問の数とアプリが返した 5xx の数をスクリプトごとに読む SQL を組み立てる。SQL API に値を渡す口が無いので、名前の形と時刻をここで確かめてから文に入れる。
  * _sample_interval を掛けて足す (https://developers.cloudflare.com/analytics/analytics-engine/sql-api/)。IN と toDateTime は SQL の決まりの物
  * (https://developers.cloudflare.com/analytics/analytics-engine/sql-reference/operators/ 、https://developers.cloudflare.com/analytics/analytics-engine/sql-reference/date-time-functions/)
  * @param scripts スクリプト名。workers.dev の Worker の名前の形だけ
@@ -56,7 +56,7 @@ export function visitsQuery(scripts: string[], from: number, to: number): string
   const names = scripts.map((script) => `'${script}'`).join(", ");
   const start = String(Math.floor(from / 1000));
   const end = String(Math.floor(to / 1000));
-  return `SELECT blob1 AS script, SUM(_sample_interval * double1) AS visits FROM ${REQUESTS_DATASET} WHERE blob1 IN (${names}) AND timestamp >= toDateTime(${start}) AND timestamp < toDateTime(${end}) GROUP BY blob1 LIMIT ${String(VISITS_ROW_LIMIT)} FORMAT JSON`;
+  return `SELECT blob1 AS script, SUM(_sample_interval * double1) AS visits, SUM(_sample_interval * double2) AS server_errors FROM ${REQUESTS_DATASET} WHERE blob1 IN (${names}) AND timestamp >= toDateTime(${start}) AND timestamp < toDateTime(${end}) GROUP BY blob1 LIMIT ${String(VISITS_ROW_LIMIT)} FORMAT JSON`;
 }
 
 /** Analytics を読めなかった失敗。メッセージに鍵を入れない */
@@ -105,12 +105,13 @@ export function cloudflareAnalytics(env: Bindings, fetcher: Fetcher): Analytics 
       // GraphQL が通っても訪問が読めなければ、その区切りは書かない
       const sql = (body: string) =>
         fetcher(`${base}/accounts/${encodeURIComponent(accountId)}/analytics_engine/sql`, { method: "POST", headers: { authorization: `Bearer ${secret.reveal()}` }, body, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-      const visits = await visitsOf(sql, visitsQuery([...scripts], from, to));
+      const points = await pointsOf(sql, visitsQuery([...scripts], from, to));
       for (const q of queried) {
         // 呼び出しの無かったスクリプトは行が無いので、0 件の区切りにする
         const total = totals.get(q.script) ?? { requests: 0, errors: 0 };
-        // 点の無いスクリプトは訪問を数えていない (書かないサービスか、訪問が無かった) ので null
-        metrics.set(q.id, { ...total, users: q.kind === "web_app" ? (visits.get(q.script) ?? null) : null, reads: q.kind === "content" ? total.requests : null });
+        // 点の無いスクリプトは訪問を数えていない (書かないサービスか、訪問が無かった) ので利用者数は null。5xx は読めたので 0 と数える
+        const point = points.get(q.script);
+        metrics.set(q.id, { ...total, serverErrors: point?.serverErrors ?? 0, users: q.kind === "web_app" ? (point?.visits ?? null) : null, reads: q.kind === "content" ? total.requests : null });
       }
       return { metrics, skipped };
     },
@@ -118,15 +119,15 @@ export function cloudflareAnalytics(env: Bindings, fetcher: Fetcher): Analytics 
 }
 
 /**
- * Analytics Engine からスクリプトごとの訪問の数を読む。断られた時は SHOW TABLES でデータセットがあるかを確かめ、まだ点が 1 つも無く
+ * Analytics Engine からスクリプトごとの訪問の数と 5xx の数を読む。断られた時は SHOW TABLES でデータセットがあるかを確かめ、まだ点が 1 つも無く
  * テーブルが無い時だけ 0 件とする (テーブルは最初に書いた時に作られる: https://developers.cloudflare.com/analytics/analytics-engine/sql-api/)。
  * テーブルが無い時の失敗の形は文書に無いので、失敗の中身でなく SHOW TABLES で分ける
  * @param sql SQL の文を送る口
  * @param query 訪問を読む SQL
- * @returns スクリプト名ごとの訪問の数 (丸めた整数)
+ * @returns スクリプト名ごとの訪問の数と 5xx の数 (丸めた整数)
  * @throws AnalyticsReadError 読めない時、形が違う時、行が上限に届いた時
  */
-async function visitsOf(sql: (body: string) => Promise<Response>, query: string): Promise<Map<string, number>> {
+async function pointsOf(sql: (body: string) => Promise<Response>, query: string): Promise<Map<string, { visits: number; serverErrors: number }>> {
   const response = await sql(query);
   if (!response.ok) {
     const status = response.status;
@@ -142,9 +143,12 @@ async function visitsOf(sql: (body: string) => Promise<Response>, query: string)
   if (!parsed.success) throw new AnalyticsReadError("Cloudflare の Analytics Engine の返事の形が違う");
   // 上限ちょうどの行数は切れたかもしれないので、足りない数を残さない
   if (parsed.data.data.length >= VISITS_ROW_LIMIT) throw new AnalyticsReadError("Cloudflare の Analytics Engine の返事が行の上限に届いた");
-  const visits = new Map<string, number>();
-  for (const row of parsed.data.data) visits.set(row.script, (visits.get(row.script) ?? 0) + Math.round(row.visits));
-  return visits;
+  const points = new Map<string, { visits: number; serverErrors: number }>();
+  for (const row of parsed.data.data) {
+    const sum = points.get(row.script) ?? { visits: 0, serverErrors: 0 };
+    points.set(row.script, { visits: sum.visits + Math.round(row.visits), serverErrors: sum.serverErrors + Math.round(row.server_errors) });
+  }
+  return points;
 }
 
 /**

@@ -15,6 +15,13 @@
       "when": 1794657195429,
       "tag": "0001_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795052555339,
+      "tag": "0002_service_server_errors",
+      "breakpoints": true
     }
   ]
 }

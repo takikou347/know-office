@@ -8,7 +8,7 @@ import { insertedWhen } from "../db/when.ts";
 import type { Bindings } from "../env.ts";
 import type { GuardDeps } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
-import { ANALYTICS_FAILED_CODE, ANALYTICS_SKIPPED_CODE, recordError } from "../ledger/errors.ts";
+import { ANALYTICS_CAPPED_CODE, ANALYTICS_FAILED_CODE, ANALYTICS_SKIPPED_CODE, recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
 import { recordsOf } from "../work/nodes.ts";
 import { AnalyticsReadError, noticeIfFailing } from "./analytics.ts";
@@ -31,7 +31,18 @@ export const ROLLBACK_TASK = "rollback";
 export const PUBLISH_WORKFLOW = ".github/workflows/publish.yml";
 
 /** サービスの 5 分の様子 */
-export type Metrics = { requests: number; errors: number; users: number | null; reads: number | null };
+export type Metrics = {
+  /** 呼び出しの数 (Workers の Analytics) */
+  requests: number;
+  /** Worker のエラー (例外、資源超過、内部エラー) の数 */
+  errors: number;
+  /** アプリが返した 5xx の数 (Analytics Engine)。数えていなければ null */
+  serverErrors: number | null;
+  /** 訪問の数。数えていなければ null */
+  users: number | null;
+  /** コンテンツの読まれた数 */
+  reads: number | null;
+};
 
 /** 外から読んだ様子。読んだサービスごとの様子と、読まなかったサービスと訳 */
 export type AnalyticsRead = {
@@ -123,13 +134,16 @@ export async function receiveWorkflowRun(env: Bindings, action: string | null, p
 }
 
 /**
- * Web アプリの、直前のデプロイの時刻と、その前 24 時間の失敗率を読む
+ * Web アプリの、直前のデプロイの時刻と、その前 24 時間の失敗率を読む。
+ * 今の区切りが 5xx を数えていれば、baseline も 5xx を数えた行 (server_errors が null でない) だけから Worker のエラーと 5xx の和で出す。
+ * 5xx を数える前の行しか無ければ、比べられないので null (判断を飛ばす)。5xx を数え始めたデプロイ自身を戻さないため
  * @param env バインディング
  * @param serviceId サービス ID
  * @param at 区切りの終わり
- * @returns デプロイの時刻と失敗率。窓の中のデプロイが無ければ null
+ * @param countsServerErrors 今の区切りが 5xx を数えているか
+ * @returns デプロイの時刻と失敗率。窓の中のデプロイが無いか、比べられる行が無ければ null
  */
-async function recentDeploy(env: Bindings, serviceId: string, at: number): Promise<{ deployedAt: number; baselineRate: number } | null> {
+async function recentDeploy(env: Bindings, serviceId: string, at: number, countsServerErrors: boolean): Promise<{ deployedAt: number; baselineRate: number } | null> {
   const [deploy] = await drizzle(env.DB)
     .select({ at: serviceEvents.at, detail: serviceEvents.detail })
     .from(serviceEvents)
@@ -139,12 +153,20 @@ async function recentDeploy(env: Bindings, serviceId: string, at: number): Promi
   // 窓はデプロイからちょうど 10 分の区切りまで
   if (!deploy || !DeployDetail.safeParse(deploy.detail).success || at > deploy.at + DEPLOY_WINDOW_MS) return null;
   if (await rolledBackBefore(env, serviceId, deploy.at)) return null;
+  // 5xx を数えた行だけを和に入れ、数える前の行は数だけを数える
+  const counted = countsServerErrors ? sql`${serviceMetrics.serverErrors} IS NOT NULL` : sql`1`;
   const [base] = await drizzle(recordsOf(env, deploy.at))
-    .select({ requests: sql<number>`COALESCE(SUM(${serviceMetrics.requests}), 0)`, errors: sql<number>`COALESCE(SUM(${serviceMetrics.errors}), 0)` })
+    .select({
+      rows: sql<number>`COUNT(*)`,
+      countedRows: sql<number>`COALESCE(SUM(CASE WHEN ${counted} THEN 1 ELSE 0 END), 0)`,
+      requests: sql<number>`COALESCE(SUM(CASE WHEN ${counted} THEN ${serviceMetrics.requests} ELSE 0 END), 0)`,
+      failures: sql<number>`COALESCE(SUM(CASE WHEN ${counted} THEN ${serviceMetrics.errors} + COALESCE(${serviceMetrics.serverErrors}, 0) ELSE 0 END), 0)`,
+    })
     .from(serviceMetrics)
     .where(and(eq(serviceMetrics.serviceId, serviceId), gt(serviceMetrics.at, deploy.at - BASELINE_MS), lte(serviceMetrics.at, deploy.at)));
+  if ((base?.rows ?? 0) > 0 && (base?.countedRows ?? 0) === 0) return null;
   const requests = base?.requests ?? 0;
-  return { deployedAt: deploy.at, baselineRate: requests > 0 ? Math.min(1, (base?.errors ?? 0) / requests) : 0 };
+  return { deployedAt: deploy.at, baselineRate: requests > 0 ? Math.min(1, (base?.failures ?? 0) / requests) : 0 };
 }
 
 /**
@@ -178,14 +200,20 @@ export async function collectMetrics(env: Bindings, analytics: Analytics, now: n
     const metrics = read.metrics.get(service.id);
     if (metrics === undefined) continue;
     try {
+      // 2 つの API は別々に集まるので、Worker のエラーと 5xx の和が呼び出しの数を超える事がある。失敗は呼び出しの数までにする
+      const room = Math.max(0, metrics.requests - metrics.errors);
+      const serverErrors = metrics.serverErrors === null ? null : Math.min(metrics.serverErrors, room);
+      if (serverErrors !== null && serverErrors < (metrics.serverErrors ?? 0)) {
+        await recordError(env, { source: "job", level: "warn", code: ANALYTICS_CAPPED_CODE, error: new AnalyticsReadError(`5xx の数を呼び出しの数までにした (${service.id})`) }, clockAt(now));
+      }
       const rec = recordsOf(env, at);
-      const row = { id: newId(clockAt(now)), serviceId: service.id, at, requests: metrics.requests, errors: metrics.errors, users: metrics.users, reads: metrics.reads, traceId: null };
+      const row = { id: newId(clockAt(now)), serviceId: service.id, at, requests: metrics.requests, errors: metrics.errors, serverErrors, users: metrics.users, reads: metrics.reads, traceId: null };
       const written = await insertedWhen(rec, serviceMetrics, row, sql`NOT EXISTS (SELECT 1 FROM ${serviceMetrics} WHERE ${serviceMetrics.serviceId} = ${service.id} AND ${serviceMetrics.at} = ${at})`);
       if (!written || service.kind !== "web_app") continue;
-      const deploy = await recentDeploy(env, service.id, at);
+      const deploy = await recentDeploy(env, service.id, at, serverErrors !== null);
       // 区切りの始まりがデプロイより前なら、デプロイの前の返事が混ざるので数えない
       if (!deploy || at - METRICS_STEP_MS < deploy.deployedAt) continue;
-      await observe(env, { type: "deploy_result", serviceId: service.id, kind: "web", deployedAt: deploy.deployedAt, baselineRate: deploy.baselineRate, responses: metrics.requests, failures: metrics.errors }, at, deps);
+      await observe(env, { type: "deploy_result", serviceId: service.id, kind: "web", deployedAt: deploy.deployedAt, baselineRate: deploy.baselineRate, responses: metrics.requests, failures: metrics.errors + (serverErrors ?? 0) }, at, deps);
     } catch (error) {
       // 1 つのサービスが書けなくても、ほかのサービスは書く
       await recordError(env, { source: "job", level: "warn", code: "service_metrics_failed", error }, clockAt(now));

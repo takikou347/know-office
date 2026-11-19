@@ -41,11 +41,11 @@ export const VisitHeader = z.literal("1").openapi({
 const Sum = z.union([z.number(), z.string().regex(/^\d+(\.\d+)?$/).transform(Number)]).pipe(z.number().finite().min(0));
 
 /**
- * Workers Analytics Engine の SQL API が FORMAT JSON で返す、スクリプトごとの訪問の数
+ * Workers Analytics Engine の SQL API が FORMAT JSON で返す、スクリプトごとの訪問の数とアプリが返した 5xx の数
  * 出典 (形 {meta, data, rows}): https://developers.cloudflare.com/analytics/analytics-engine/sql-reference/statements/
  */
 export const AnalyticsEngineVisits = z
-  .object({ data: z.array(z.object({ script: z.string(), visits: Sum }).loose()) })
+  .object({ data: z.array(z.object({ script: z.string(), visits: Sum, server_errors: Sum }).loose()) })
   .loose();
 
 /** Workers Analytics Engine の SQL API の返事の型 */

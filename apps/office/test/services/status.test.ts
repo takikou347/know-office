@@ -168,6 +168,17 @@ describe("サービスの種類", () => {
     await metric(4, 5 * 60_000, 4);
     expect(await statusOf(world, OFFICE_ID)).toMatchObject({ users: 7 });
   });
+
+  it("失敗率は Worker のエラーとアプリの 5xx の和を呼び出しの数で割る", async () => {
+    await resetLedger(world.d1.REC_2026);
+    const now = world.clock.now();
+    const metric = (n: number, serverErrors: number | null) =>
+      world.d1.REC_2026.prepare("INSERT INTO service_metrics (id, service_id, at, requests, errors, users, reads, server_errors) VALUES (?, ?, ?, 10, 1, NULL, NULL, ?)").bind(`00000000-0000-7000-8000-00000000091${String(n)}`, OFFICE_ID, now - n * 5 * 60_000, serverErrors).run();
+    // 5xx を数える前の行は null で、Worker のエラーだけを数える
+    await metric(1, 2);
+    await metric(2, null);
+    expect(await statusOf(world, OFFICE_ID)).toMatchObject({ errorRate: 0.2 });
+  });
 });
 
 describe("最初のサービスは knowidea-ui", () => {
