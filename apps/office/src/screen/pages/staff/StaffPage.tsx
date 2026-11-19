@@ -1,6 +1,7 @@
 // 社員と仕事の画面。社員の一覧を入口から読み、会話と仕事の山と勤怠のタブ、今日だけの指示、タスクの詳細とレビューを 1 つの一覧と詳細に並べる (社員と勤怠の 3.4、社員と自動の 3.7)
-import { StaffOverview } from "@know-office/core";
+import { jstDay, Order, StaffOverview, systemClock } from "@know-office/core";
 import { EmptyState, List, ListDetail, Stack, Tabs } from "knowidea-ui";
+import { useState } from "react";
 import { z } from "zod";
 import { useLiveTick } from "../../parts/live.tsx";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
@@ -25,19 +26,27 @@ export function staffTabOf(param: string | null): StaffTab {
   return isStaffTab(param) ? param : "talk";
 }
 
-interface StaffDetailProps {
+export interface StaffDetailProps {
+  /** 様子を出す社員 */
   s: StaffOverview;
+  /** 開くタブ */
   tab: StaffTab;
+  /** 勤怠のタブで開く日。無ければ今日 */
   day: string | null;
+  /** タブを替えた時に道の問いを変える */
   navigate: Navigate;
 }
 
 /**
- * 社員 1 人の様子。今の状態とタスク、今日だけの指示、会話と仕事の山と勤怠のタブ
+ * 社員 1 人の様子。今の状態とタスク、今日だけの指示、会話と仕事の山と勤怠のタブ。
+ * タブは上に並ぶ今日だけの指示の一覧を読み終えてから出す。読み終えた一覧の行の数でタブの位置が変わり、押し下げてから離すまでの間に動くと押した事にならないため
  * @param props 社員、開くタブ、勤怠の日
  * @returns 様子
  */
-function StaffDetail({ s, tab, day, navigate }: StaffDetailProps) {
+export function StaffDetail({ s, tab, day, navigate }: StaffDetailProps) {
+  const today = jstDay(systemClock.now());
+  const [ordersTick, setOrdersTick] = useState(0);
+  const orders = useLoad(z.array(Order), (a) => a.api.v1.staff[":staffId"].orders.$get({ param: { staffId: s.id }, query: { day: today } }), ordersTick);
   return (
     <Stack gap={4}>
       <Stack direction="row" gap={2} align="center" wrap>
@@ -46,18 +55,20 @@ function StaffDetail({ s, tab, day, navigate }: StaffDetailProps) {
       </Stack>
       <p>{s.nodeTitle === null ? "今のタスクは無い" : `今のタスク: ${s.nodeTitle}`}</p>
       <Part title="今日だけの指示">
-        <DayOrders key={s.id} staff={s} />
+        <DayOrders staff={s} day={today} orders={orders} onChanged={() => setOrdersTick((t) => t + 1)} />
       </Part>
-      <Tabs
-        label={`${s.role}の様子`}
-        value={tab}
-        onValueChange={(v) => navigate(`/staff/${s.id}?tab=${v}`, { replace: true })}
-        items={[
-          { value: "talk", label: "会話", content: <Talk key={s.id} staff={s} /> },
-          { value: "tasks", label: "仕事の山", content: <TaskPile key={s.id} staff={s} /> },
-          { value: "attendance", label: "勤怠", content: <AttendanceTable staffId={s.id} role={s.role} day={day} /> },
-        ]}
-      />
+      {orders.state === "loading" ? null : (
+        <Tabs
+          label={`${s.role}の様子`}
+          value={tab}
+          onValueChange={(v) => navigate(`/staff/${s.id}?tab=${v}`, { replace: true })}
+          items={[
+            { value: "talk", label: "会話", content: <Talk staff={s} /> },
+            { value: "tasks", label: "仕事の山", content: <TaskPile staff={s} /> },
+            { value: "attendance", label: "勤怠", content: <AttendanceTable staffId={s.id} role={s.role} day={day} /> },
+          ]}
+        />
+      )}
     </Stack>
   );
 }
@@ -85,7 +96,7 @@ export function StaffPage({ pathname, query, navigate }: StaffPageProps) {
   // タスク ID は UUID だけを受け、ほかは社員の様子を出す
   const inTask = selected !== undefined && z.uuid().safeParse(taskId).success;
   const tab = staffTabOf(query.get("tab"));
-  const detail = (s: StaffOverview) => (inTask ? <TaskDetail key={taskId} staffId={s.id} nodeId={taskId} /> : <StaffDetail s={s} tab={tab} day={query.get("day")} navigate={navigate} />);
+  const detail = (s: StaffOverview) => (inTask ? <TaskDetail key={taskId} staffId={s.id} nodeId={taskId} /> : <StaffDetail key={s.id} s={s} tab={tab} day={query.get("day")} navigate={navigate} />);
   return (
     <ListDetail
       listLabel="社員"

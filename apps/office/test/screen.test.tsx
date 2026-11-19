@@ -1,9 +1,13 @@
+import type { StaffOverview } from "@know-office/core";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { App } from "../src/screen/App.tsx";
 import { ApiContext, createApi } from "../src/screen/api.ts";
 import { RecordBreakdown } from "../src/screen/pages/ledger/RecordBreakdown.tsx";
-import { staffTabOf } from "../src/screen/pages/staff/StaffPage.tsx";
+import { StaffDetail, staffTabOf } from "../src/screen/pages/staff/StaffPage.tsx";
+
+/** 社員の様子を描く時の社員 */
+const REVIEWER: StaffOverview = { id: "reviewer", role: "レビュー担当", model: "claude-opus-5-5", state: "working", nodeId: null, nodeTitle: null, workedMsToday: 0 };
 
 describe("画面", () => {
   it("入口の様子を受け取る前は、確かめている事を出す", () => {
@@ -57,5 +61,16 @@ describe("画面", () => {
       </ApiContext>,
     );
     expect(html).toMatch(/<p role="status"[^>]*>サービスごとの記録を読んでいます/);
+  });
+
+  it("社員の様子は、上に並ぶ今日だけの指示を読み終えるまでタブを出さない。読み終えた一覧の高さでタブが動き、押す途中のタブが外れるため", () => {
+    const api = createApi("http://gate.invalid", () => new Promise<Response>(() => undefined));
+    const html = renderToString(
+      <ApiContext value={api}>
+        <StaffDetail s={REVIEWER} tab="talk" day={null} navigate={() => {}} />
+      </ApiContext>,
+    );
+    expect(html).not.toContain('role="tab"');
+    expect(html).toMatch(/role="status"[^>]*>指示を読んでいます/);
   });
 });

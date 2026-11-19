@@ -1,11 +1,10 @@
 // その日だけの指示。今日の延長、早退、休みを出し、出した指示を並べて取り消せるようにする。延長はパスキーで確かめる (社員と勤怠の 3.4)
-import { jstDay, Order, type StaffOverview, systemClock } from "@know-office/core";
+import type { Order, StaffOverview } from "@know-office/core";
 import { Alert, Button, List, SegmentedControl, Stack, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";
-import { z } from "zod";
 import { ApiContext } from "../../api.ts";
 import { jstTime } from "../../format.ts";
-import { type Failed, FailedAlert, send, useLoad } from "../../parts/load.tsx";
+import { type Failed, FailedAlert, type Loaded, send } from "../../parts/load.tsx";
 
 /** 指示の種類と言葉 */
 const KINDS = [
@@ -21,18 +20,21 @@ const labelOf = (kind: Kind) => KINDS.find((k) => k.value === kind)?.label ?? ki
 export interface DayOrdersProps {
   /** 指示を出す社員 */
   staff: StaffOverview;
+  /** 日本時間の今日 (YYYY-MM-DD)。指示はこの日に出す */
+  day: string;
+  /** 今日の指示を読んだ物。社員の様子が読み、読み終えてからタブを出す */
+  orders: Loaded<Order[]>;
+  /** 指示を出した、取り消した後に読み直させる */
+  onChanged: () => void;
 }
 
 /**
  * 今日だけの指示を出す欄と、出した指示の一覧
- * @param props 指示を出す社員
+ * @param props 指示を出す社員、今日、読んだ指示、読み直させる口
  * @returns 指示の欄
  */
-export function DayOrders({ staff }: DayOrdersProps) {
+export function DayOrders({ staff, day, orders: loaded, onChanged }: DayOrdersProps) {
   const api = useContext(ApiContext);
-  const day = jstDay(systemClock.now());
-  const [tick, setTick] = useState(0);
-  const loaded = useLoad(z.array(Order), (a) => a.api.v1.staff[":staffId"].orders.$get({ param: { staffId: staff.id }, query: { day } }), tick);
   const [kind, setKind] = useState<Kind>("extend");
   const [until, setUntil] = useState("19:00");
   const [busy, setBusy] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export function DayOrders({ staff }: DayOrdersProps) {
     setBusy(null);
     if (sent.ok) setDone(text);
     else setFailure(sent.failure);
-    setTick((t) => t + 1);
+    onChanged();
   };
   const submit = () => {
     if (!api) return;
