@@ -63,3 +63,7 @@ vulnerabilities:
     paths:
       - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
     expired_at: 2027-02-17
+  - id: CVE-2026-97054
+    paths:
+      - "opt/workspace/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-02-17
