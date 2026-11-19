@@ -127,8 +127,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # 500 本ほどの通しを 2 並びで流すと 9 分を超える。止まった時だけ切れるよう、流れる長さの倍に取る
-    timeout-minutes: 20
+    # 通しを 2 並びで流すと、準備を含めて 14 分から 18 分かかる。止まった時だけ切れるよう、流れる長さの倍ほどに取る
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
