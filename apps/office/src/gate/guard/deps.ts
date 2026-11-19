@@ -1,5 +1,5 @@
 // 自動停止が外へ頼む口と、DO が返す数えた答えの形 (自動停止の 3.3、3.5)
-import { type Judgment, newId } from "@know-office/core";
+import { type Judgment, newId, type ReviewAnswer } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import { notices } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
@@ -39,9 +39,9 @@ export type StopRecord = {
 };
 
 /** レビュー担当の答え。resume が true なら再開する */
-export type ReviewAnswer = { resume: boolean; reason: string };
+export type { ReviewAnswer };
 
-/** 自動停止が外へ頼む口。GitHub とレビュー担当のモデルは後でつなぐ */
+/** 自動停止が外へ頼む口。入口と定期ジョブが GitHub とレビュー担当のモデルにつなぐ */
 export type GuardDeps = {
   /** Web アプリを前のバージョンに戻す。そのリポジトリの rollback.yml を、止めた記録ごとに 1 度だけ動かす */
   rollback(serviceId: string, stopId: string): Promise<void>;
@@ -49,10 +49,11 @@ export type GuardDeps = {
   review(record: StopRecord): Promise<ReviewAnswer | null>;
   /** ためた GitHub の 1 時間の鍵を GitHub の側で取り消し、ためる所を空にする */
   revokeGitHubTokens(env: Bindings): Promise<void>;
+  /** 返事の後に処理を回す口。要求の中で止めた時、レビュー担当に聞くのをここに渡し、止めた返事を待たせない。無ければその場で待つ */
+  later?(task: Promise<void>): void;
 };
 
-/** まだつないでいない口。戻しは失敗として返し、止めた側が通知とエラーログに残す。レビュー担当は答えず、再開はオーナーが行う。入口と定期ジョブは戻しを connectRollback でつなぐ */
-// TODO(#48): review を 7 章のモデルの呼び出しにつなぐ
+/** まだつないでいない口。戻しは失敗として返し、止めた側が通知とエラーログに残す。レビュー担当は答えず、再開はオーナーが行う。入口と定期ジョブは戻しを connectRollback で、レビュー担当を connectReview でつなぐ */
 export const UNCONNECTED_DEPS: GuardDeps = {
   rollback: () => Promise.reject(new Error("rollback.yml をまだつないでいない")),
   review: () => Promise.resolve(null),

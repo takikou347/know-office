@@ -136,6 +136,13 @@ export const stopUpdates = sqliteTable("stop_updates", {
   detail: json("detail"),
 });
 
+/** 止めた記録をレビュー担当のモデルに聞いた印。止めた記録 1 件に 1 行で、日本時間の日ごとに数えて 1 日の回数を決める。追記専用 */
+export const guardReviewReads = sqliteTable("guard_review_reads", {
+  stopId: text("stop_id").primaryKey(),
+  day: text("day").notNull(),
+  createdAt: time("created_at").notNull(),
+}, (t) => [index("guard_review_reads_day").on(t.day)]);
+
 /** 蒸留の案 */
 export const lessons = sqliteTable("lessons", {
   id: id(),

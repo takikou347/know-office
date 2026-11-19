@@ -1,6 +1,6 @@
-// 費用の出る口を開くか閉じるかの設定。時間外の呼び出しと会話の言葉の指示が同じ形で持つ (社員と勤怠の 3.2、3.4)
+// 費用の出る口を開くか閉じるかの設定。時間外の呼び出し、会話の言葉の指示、レビュー担当に止めた記録を聞く事が同じ形で持つ (社員と勤怠の 3.2、3.4、自動停止の 3.5)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, ChatOrders, DEFAULT_CHAT_ORDERS, DEFAULT_OFF_HOURS_CALL, newId, OffHoursCall, type Setting } from "@know-office/core";
+import { AppError, ChatOrders, DEFAULT_CHAT_ORDERS, DEFAULT_GUARD_REVIEW, DEFAULT_OFF_HOURS_CALL, GuardReview, newId, OffHoursCall, type Setting } from "@know-office/core";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { ZodType } from "zod";
@@ -8,8 +8,8 @@ import { settings } from "../db/main.ts";
 import { clockAt } from "../work/attendance.ts";
 import { checkValue } from "./settings.ts";
 
-/** 開くか閉じるかと 1 日の回数。2 つの設定で同じ形 */
-type SwitchValue = OffHoursCall & ChatOrders;
+/** 開くか閉じるかと 1 日の回数。3 つの設定で同じ形 */
+type SwitchValue = OffHoursCall & ChatOrders & GuardReview;
 
 /** 費用の出る口の設定 1 つ。キー、値の形、閉じた初期値 */
 export type CostSwitch = { key: string; schema: ZodType<SwitchValue>; fallback: SwitchValue };
@@ -20,8 +20,11 @@ export const OFF_HOURS_CALL = { key: "workday.offHoursCall", schema: OffHoursCal
 /** 会話の言葉の指示。perDay は office 全体の 1 日の抜き出しの回数 */
 export const CHAT_ORDERS = { key: "workday.chatOrders", schema: ChatOrders, fallback: DEFAULT_CHAT_ORDERS } satisfies CostSwitch;
 
+/** レビュー担当に止めた記録を聞く事。perDay は office 全体の 1 日の聞く回数 */
+export const GUARD_REVIEW = { key: "guard.review", schema: GuardReview, fallback: DEFAULT_GUARD_REVIEW } satisfies CostSwitch;
+
 /** このファイルが受け持つ設定の並び。設定の一覧に出す順 */
-export const COST_SWITCHES = [OFF_HOURS_CALL, CHAT_ORDERS] as const;
+export const COST_SWITCHES = [OFF_HOURS_CALL, CHAT_ORDERS, GUARD_REVIEW] as const;
 
 /**
  * 設定を最新の版と一緒に読む。行が無いか形が違えば、閉じた初期値とみなす

@@ -312,6 +312,26 @@ export const Lesson = z
 /** 蒸留の案の型 */
 export type Lesson = z.infer<typeof Lesson>;
 
+/** 止めた記録をレビュー担当のモデルに聞く設定 `guard.review` の値。perDay は office 全体の 1 日の回数 */
+export const GuardReview = z
+  .object({
+    enabled: z.boolean().meta({ description: "タスクと社員を止めた時に、止めた記録をレビュー担当のモデル (Opus) に渡し、問題が無いと返れば再開するか。開くと Claude の費用が出る" }),
+    perDay: z.number().int().min(1).max(50).meta({ description: "office 全体の 1 日の聞く回数。1 回は止めた記録 1 件、出力 800 トークンまで" }),
+  })
+  .strict();
+
+/** レビュー担当に聞く設定の型 */
+export type GuardReview = z.infer<typeof GuardReview>;
+
+/** レビュー担当に聞く設定の初期値。閉じて 1 日 10 回 */
+export const DEFAULT_GUARD_REVIEW: GuardReview = { enabled: false, perDay: 10 };
+
+/** 止めた記録を読んだレビュー担当が返す答え。resume が true なら再開する */
+export const ReviewAnswer = z.object({ resume: z.boolean(), reason: z.string().trim().min(1).max(500) }).strict();
+
+/** レビュー担当の答えの型 */
+export type ReviewAnswer = z.infer<typeof ReviewAnswer>;
+
 /** 蒸留でレビュー担当が返す答え。原因ごとに案を 3 件まで */
 export const DistillAnswer = z
   .object({

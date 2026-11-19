@@ -5,6 +5,8 @@ import type { Bindings } from "../env.ts";
 import { applyStop, askReviewer, guardDo, recordNear, staffOf, type StopInput } from "./actions.ts";
 import type { GuardDeps, Observed } from "./deps.ts";
 import { loadThresholds, thresholdsHash } from "./thresholds.ts";
+import { recordError } from "../ledger/errors.ts";
+import { clockAt } from "../work/attendance.ts";
 
 /** 基準の最新の行のうち、確かめに使う所 */
 const LatestThresholds = z.object({ id: z.string(), value: z.string().nullable(), version: z.number().int(), created_at: z.number() });
@@ -64,7 +66,14 @@ async function settle(env: Bindings, observed: Observed, rulesVersion: number, n
     return;
   }
   const stopId = await applyStop(env, input, now, deps);
-  if (stopId) await askReviewer(env, stopId, input, now, deps);
+  if (!stopId) return;
+  const ask = askReviewer(env, stopId, input, now, deps);
+  if (!deps.later) {
+    await ask;
+    return;
+  }
+  // 止めるのは同じ要求の中で済んでいる。モデルの答えは長く掛かるので、止めた返事を待たせず返事の後に聞く
+  deps.later(ask.catch((error: unknown) => recordError(env, { source: "gate", level: "error", code: "guard_review_failed", error, ...(traceId === undefined ? {} : { traceId }) }, clockAt(now))));
 }
 
 /**

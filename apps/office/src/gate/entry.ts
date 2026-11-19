@@ -2,7 +2,8 @@
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { systemClock } from "@know-office/core";
 import type { Bindings } from "./env.ts";
-import { UNCONNECTED_DEPS } from "./guard/deps.ts";
+import { type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
+import { connectReview } from "./guard/review.ts";
 import gate from "./index.ts";
 import { devWorkspaceEgress } from "./work/dev-container.ts";
 import { devStaffRoute } from "./work/dev-staff.ts";
@@ -16,5 +17,7 @@ import { devStaffRoute } from "./work/dev-staff.ts";
  */
 export function entryFetch(request: Request, env: Bindings, ctx?: ExecutionContext): Response | Promise<Response> {
   const waitUntil = ctx ? (p: Promise<unknown>) => ctx.waitUntil(p) : undefined;
-  return devWorkspaceEgress(request, env, { clock: systemClock, guard: UNCONNECTED_DEPS, ...(waitUntil ? { waitUntil } : {}) }) ?? devStaffRoute(request, env, { clock: systemClock }) ?? gate.fetch(request, env, ctx);
+  // 開発の代わりのワークスペースも、止めた時は返事の後にレビュー担当のモデルに聞く
+  const guard: GuardDeps = { ...UNCONNECTED_DEPS, review: connectReview(env, (input, init) => fetch(input, init), systemClock), ...(waitUntil ? { later: waitUntil } : {}) };
+  return devWorkspaceEgress(request, env, { clock: systemClock, guard, ...(waitUntil ? { waitUntil } : {}) }) ?? devStaffRoute(request, env, { clock: systemClock }) ?? gate.fetch(request, env, ctx);
 }

@@ -16,6 +16,7 @@ import { GitHubRateLimited } from "./github/rate-error.ts";
 import { vaultForge } from "./github/vault-forge.ts";
 import { type GitHubAccess, httpForge } from "./github/forge.ts";
 import { connectRollback, type GuardDeps, UNCONNECTED_DEPS } from "./guard/deps.ts";
+import { connectReview } from "./guard/review.ts";
 import { notFound, onError, problemResponse } from "./problem.ts";
 import { trace } from "./trace.ts";
 
@@ -73,6 +74,21 @@ export function createRouter() {
 }
 
 /**
+ * 返事の後も処理を走らせる口を作る。実行の文脈が無ければ口を付けず、その場で待たせる
+ * @param executionCtx 要求の実行の文脈を返す関数。Hono は文脈が無い時に投げる
+ * @returns GuardDeps の later を持つ物か、空の物
+ */
+function laterOf(executionCtx: () => { waitUntil(promise: Promise<unknown>): void }): Pick<GuardDeps, "later"> {
+  try {
+    const ctx = executionCtx();
+    return { later: (task) => ctx.waitUntil(task) };
+  } catch {
+    // Hono は ctx が無い時に executionCtx を読むと投げる
+    return {};
+  }
+}
+
+/**
  * 共通のミドルウェアと失敗の返し方を付けた Hono を作る
  * @param options テストは決まった時刻と、外への fetch の代わりを渡す
  * @param options.clock 今の時刻
@@ -95,7 +111,8 @@ export function createApp(options: { clock?: Clock; fetch?: Fetcher; guard?: Gua
     // vault はルートが GitHub を呼ぶ時に初めて読む
     const forge = github ? httpForge(endpoints(c.env).github, fetcher, github) : vaultForge(c.env, tokens);
     // 全体を止めた時は、この入口がためた鍵を、この入口の fetch で取り消す。サービスを止めた時は、この入口の GitHub の口で戻す
-    const guard = options.guard ?? { ...UNCONNECTED_DEPS, rollback: connectRollback(c.env, forge, () => clock.now()) };
+    // タスクと社員を止めた時は、返事の後にレビュー担当のモデルに聞く
+    const guard = options.guard ?? { ...UNCONNECTED_DEPS, rollback: connectRollback(c.env, forge, () => clock.now()), review: connectReview(c.env, fetcher, clock), ...laterOf(() => c.executionCtx) };
     c.set("guard", { ...guard, revokeGitHubTokens: (env) => revokeTokens(env, tokens) });
     c.set("github", tokens);
     c.set("forge", forge);

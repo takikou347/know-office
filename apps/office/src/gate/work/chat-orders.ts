@@ -1,9 +1,7 @@
 // オーナーの発言から勤務の指示 (休み、早退、延長) を Haiku で抜き出し、ボタンと同じ確かめで足す (社員と勤怠の 3.4)
 import {
-  allowedFetch,
   AppError,
   type ClaudeUsage,
-  costMicroUsd,
   CreateOrderInput,
   type Fetcher,
   HAIKU,
@@ -13,25 +11,19 @@ import {
   log,
   MESSAGE_INLINE_CHARS,
   type MessageOrder,
-  newId,
   type SkippedOrder,
   type StaffId,
 } from "@know-office/core";
 import type { Context } from "hono";
 import { z } from "zod";
 import { hasStepUp } from "../auth/passkey.ts";
-import { endpoints } from "../endpoints.ts";
 import type { Bindings, GateEnv } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { audit } from "../ledger/record.ts";
 import { CHAT_ORDERS, loadSwitch } from "../services/switches.ts";
-import { clockAt, loadSchedule } from "./attendance.ts";
-import { claudeKey } from "./claude-key.ts";
-import { recordsOf } from "./nodes.ts";
+import { loadSchedule } from "./attendance.ts";
+import { callTool, recordGateUsage } from "./claude-tool.ts";
 import { addOrder, untilOf } from "./orders.ts";
-
-/** Anthropic の API の版 */
-const ANTHROPIC_VERSION = "2023-06-01";
 
 /** 抜き出しを待つ上限。発言を送った返事がこの分だけ遅れうる */
 const EXTRACT_TIMEOUT_MS = 10_000;
@@ -82,19 +74,6 @@ const RECORD_ORDERS = {
   },
 } as const;
 
-const UsageBody = z.looseObject({
-  input_tokens: z.number().int().nonnegative().nullish(),
-  output_tokens: z.number().int().nonnegative().nullish(),
-  cache_read_input_tokens: z.number().int().nonnegative().nullish(),
-  cache_creation_input_tokens: z.number().int().nonnegative().nullish(),
-});
-
-const Reply = z.looseObject({
-  stop_reason: z.string().nullish(),
-  content: z.array(z.looseObject({ type: z.string(), name: z.string().optional(), input: z.unknown().optional() })),
-  usage: UsageBody.optional(),
-});
-
 const ToolInput = z.looseObject({ orders: z.array(z.unknown()) });
 
 /** 抜き出した指示と使った量。2xx でなければ投げるので、使った量はいつもある */
@@ -131,30 +110,17 @@ export async function reserveRead(db: Bindings["DB"], input: { messageId: string
  * @throws upstream_failed 届かない時か、2xx でない時
  */
 export async function extractOrders(env: Bindings, fetch: Fetcher, input: { body: string; today: string; end: string }): Promise<Extracted> {
-  const secret = await claudeKey(env);
-  const base = endpoints(env).anthropic;
-  const headers = new Headers({ "anthropic-version": ANTHROPIC_VERSION, "x-api-key": secret.reveal(), "content-type": "application/json" });
-  const body = {
+  const reply = await callTool(env, fetch, {
     model: HAIKU,
-    max_tokens: MAX_TOKENS,
+    maxTokens: MAX_TOKENS,
     system: `${SYSTEM}\n今日: ${input.today}\n所定の勤務の終わり: ${input.end}`,
-    tools: [RECORD_ORDERS],
-    tool_choice: { type: "tool", name: TOOL },
+    tool: RECORD_ORDERS,
     // 本文は JSON の文字列にして渡し、区切りを偽った文を発言の外に出させない
-    messages: [{ role: "user", content: JSON.stringify(headChars(input.body, MESSAGE_INLINE_CHARS)) }],
-  };
-  let res: Response;
-  try {
-    res = await allowedFetch(fetch, `${base}/v1/messages`, [`${base}/v1/`], { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS) });
-  } catch {
-    throw new AppError("upstream_failed", "Claude の API に届かない");
-  }
-  if (!res.ok) throw new AppError("upstream_failed", `Claude の API が ${String(res.status)} を返した`);
-  const reply = Reply.safeParse(await res.json().catch(() => null));
-  const usage = toUsage(reply.success ? reply.data.usage : undefined);
-  if (!reply.success || reply.data.stop_reason === "max_tokens") return { orders: [], usage };
-  const call = reply.data.content.find((b) => b.type === "tool_use" && b.name === TOOL);
-  const raw = ToolInput.safeParse(call?.input);
+    content: JSON.stringify(headChars(input.body, MESSAGE_INLINE_CHARS)),
+    timeoutMs: EXTRACT_TIMEOUT_MS,
+  });
+  const usage = reply.usage;
+  const raw = ToolInput.safeParse(reply.input);
   if (!raw.success || raw.data.orders.length > MAX_ORDERS) return { orders: [], usage };
   // 組の合わない物 (休みに時刻、早退に時刻が無い) や、実在しない日は捨てる
   const orders = raw.data.orders.flatMap((o) => {
@@ -162,21 +128,6 @@ export async function extractOrders(env: Bindings, fetch: Fetcher, input: { body
     return parsed.success ? [parsed.data] : [];
   });
   return { orders, usage };
-}
-
-/**
- * 返事の使った量を、足りない項目を 0 にして直す
- * @param body 返事の使った量
- * @returns 使った量
- */
-function toUsage(body: z.infer<typeof UsageBody> | undefined): ClaudeUsage {
-  return {
-    inputTokens: body?.input_tokens ?? 0,
-    outputTokens: body?.output_tokens ?? 0,
-    cacheReadTokens: body?.cache_read_input_tokens ?? 0,
-    cacheWriteTokens: body?.cache_creation_input_tokens ?? 0,
-    cacheWrite1hTokens: 0,
-  };
 }
 
 /**
@@ -190,14 +141,7 @@ function toUsage(body: z.infer<typeof UsageBody> | undefined): ClaudeUsage {
  * @param now 今の時刻
  */
 async function recordUsage(env: Bindings, input: { staffId: StaffId; messageId: string; usage: ClaudeUsage; traceId: string }, now: number): Promise<void> {
-  const u = input.usage;
-  const requestId = `chat_orders:${input.messageId}`;
-  await recordsOf(env, now)
-    .prepare(
-      "INSERT INTO usage (id, at, staff_id, node_id, scope, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micro_usd, request_id, waited_ms, trace_id) SELECT ?, ?, ?, NULL, 'office', ?, ?, ?, ?, ?, ?, ?, NULL, ? WHERE NOT EXISTS (SELECT 1 FROM usage WHERE request_id = ?)",
-    )
-    .bind(newId(clockAt(now)), now, input.staffId, HAIKU, u.inputTokens, u.outputTokens, u.cacheReadTokens, u.cacheWriteTokens, costMicroUsd(HAIKU, u), requestId, input.traceId, requestId)
-    .run();
+  await recordGateUsage(env, { staffId: input.staffId, nodeId: null, model: HAIKU, usage: input.usage, requestId: `chat_orders:${input.messageId}`, traceId: input.traceId }, now);
 }
 
 /**

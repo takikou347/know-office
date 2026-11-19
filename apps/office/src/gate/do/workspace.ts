@@ -5,6 +5,7 @@ import { z } from "zod";
 import { routeEgress } from "../egress.ts";
 import type { Bindings, WorkspaceContainer } from "../env.ts";
 import { UNCONNECTED_DEPS } from "../guard/deps.ts";
+import { connectReview } from "../guard/review.ts";
 import type { Caller } from "../work/ticket.ts";
 import { announceNotice, liveOf } from "../live/publish.ts";
 import { EditorLsp, type LspPrepared } from "../work/editor-lsp.ts";
@@ -61,7 +62,10 @@ export class WorkspaceEgress extends WorkerEntrypoint<Bindings, EgressProps> {
    * @returns 返事
    */
   override fetch(request: Request): Promise<Response> {
-    return routeEgress(request, this.env, this.ctx.props, { clock: systemClock, guard: UNCONNECTED_DEPS, waitUntil: (p) => this.ctx.waitUntil(p) });
+    const later = (task: Promise<unknown>) => this.ctx.waitUntil(task);
+    // ルールの外の操作でタスクと社員を止めた時は、返事の後にレビュー担当のモデルに聞く
+    const guard = { ...UNCONNECTED_DEPS, review: connectReview(this.env, (input, init) => fetch(input, init), systemClock), later };
+    return routeEgress(request, this.env, this.ctx.props, { clock: systemClock, guard, waitUntil: later });
   }
 }
 

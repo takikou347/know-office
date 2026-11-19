@@ -155,10 +155,12 @@ export { checkServiceDocs, isRedactedName, requirementsOf, DOCS_REPO_KEY, SERVIC
 export { Finding, FindingAnswer, FindingEffect, FindingKind, FindingNeeds, FindingStatus, Fingerprint } from "./schemas/findings.ts";
 export {
   CreateStopInput,
+  DEFAULT_GUARD_REVIEW,
   DEFAULT_THRESHOLDS,
   DistillAnswer,
   GuardEffect,
   GuardEvent,
+  GuardReview,
   GuardScope,
   GuardSignal,
   GuardKeys,
@@ -172,6 +174,7 @@ export {
   ReplaceClaudeKeyInput,
   ReplaceGitHubAppKeyInput,
   Resumption,
+  ReviewAnswer,
   Stop,
   StopDetail,
   StopPreview,
