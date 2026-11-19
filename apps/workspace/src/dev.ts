@@ -1,4 +1,4 @@
-// 開発環境の代わりのワークスペース。本物と同じサーバーと Runner を手元の空いた番号で起こし、出来事と SDK の Claude の呼び出しはゲートウェイの開発の道に送る (ログインと記録の 3.9、社員が考えるの 3.2)
+// 開発環境の代わりのワークスペース。本物と同じサーバーと Runner を手元の空いた番号で起こし、出来事と会話の記録と SDK の Claude の呼び出しはゲートウェイの開発の道に送る (ログインと記録の 3.9、社員が考えるの 3.2、3.7)
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,6 +13,7 @@ import { tscSpawner } from "./lsp-tsc.ts";
 import { Runner } from "./run.ts";
 import { sdkAgent } from "./sdk.ts";
 import { createWorkspaceServer } from "./server.ts";
+import { TranscriptShipper } from "./transcript.ts";
 import { TreeStore } from "./tree.ts";
 
 /** ゲートウェイの開発の道 (/__dev/workspace/<社員 ID>)。これでない宛先には出来事を送らない */
@@ -54,7 +55,7 @@ function devGateFetch(gateUrl: string): Fetcher {
 }
 
 /**
- * 代わりのワークスペースを 127.0.0.1 の空いた番号で起こす。SDK の作業の置き場とホームは一時の置き場に作り、閉じる時に消す
+ * 代わりのワークスペースを 127.0.0.1 の空いた番号で起こす。SDK の作業の置き場とホームは一時の置き場に作り、閉じる時に消す。会話の記録はホームの下から送り、戻す
  * SDK はゲートウェイの開発の道の Claude のプロキシ (<gateUrl>/anthropic) を呼ぶ。本物のコンテナと同じく、作業トークンを確かめ、使った量と上限を数えてから代わりの Claude API に回る
  * @param options ゲートウェイの鍵、ゲートウェイの開発の道、呼び出しの代わり
  * @param options.key ゲートウェイの鍵
@@ -77,7 +78,8 @@ export async function startDevWorkspace(options: { key: string; gateUrl: string;
     options.agent ?? sdkAgent(),
     (error) => log("warn", "dev_run_failed", { error: error instanceof Error ? error.name : "unknown" }),
     { fetcher, clock: systemClock, record: (call) => log("warn", "hook_denied", call) },
-    undefined,
+    // 会話の記録は本物と同じ形でゲートウェイの開発の道に送り、戻された記録を手元のホームに書く。手元は root でないので持ち主は見ない
+    new TranscriptShipper({ fetcher, home, cwd }),
     {
       report: (ticket, sent) => {
         rememberEvents(events, sent);
