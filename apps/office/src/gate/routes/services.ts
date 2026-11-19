@@ -6,6 +6,7 @@ import { audit } from "../ledger/record.ts";
 import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
 import { stepUpGate } from "../auth/passkey.ts";
 import { accepted, created, list, ok } from "../respond.ts";
+import { deployService } from "../services/deploy.ts";
 import { rollbackService } from "../services/rollback.ts";
 import { loadServiceIssues } from "../services/issues.ts";
 import { advanceService, createIdea, listServices, loadService, toCard } from "../services/flow.ts";
@@ -125,6 +126,35 @@ const rollbackServiceRoute = createRoute({
   responses: { 202: okResponse(Deployment, "受け付けた。処理は非同期で完了する"), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 502) },
 });
 
+const deployServiceRoute = createRoute({
+  method: "post",
+  path: "/api/v1/services/{serviceId}/deploy",
+  operationId: "deployService",
+  tags: ["services"],
+  summary: "本番にデプロイする",
+  description:
+    "15 分以内のパスキーの確認が必要。デプロイの条件を見るのはこの口だけで、main への push の自動デプロイは見ない。動かせるのは、`deploy.yml` が `workflow_dispatch` で `sha` を受けるリポジトリだけ。",
+  "x-steps": [
+    "サービスを取得し、Web アプリで、段階が `service` か `operation` で、リポジトリがある事を確かめる",
+    "サービスの `deployWhen` を、版 (`service_settings` の `deployWhen` の最大の版と、受け継いでいる時は `settings` の `service.deployWhen` の最大の版) を先に、値を後に読む",
+    "GitHub とつないでいる事を確かめ、既定のブランチの先のコミットを読む",
+    "条件をサービスに進める時と同じ `checkConditions` で照らす。オーナーの承認は、この操作そのもの。足りなければ何も書かず、何も送らずに断り、足りない条件を `detail` に並べる",
+    "`locks` の `service.deploy:<サービス ID>` を 10 分の長さで、1 文の条件付きの書きで取る。条件は、読んだ版のまま、リポジトリと段階が読んだまま、`service.rollback:<サービス ID>` の錠が切れている、レビュー担当を求める時は確かめた承認の行がまだあってオーナーが断っていない事。取れなければ断る。取った錠は切れるまで持ち、同時と直前のデプロイを重ねない",
+    "そのリポジトリの `deploy.yml` を、既定のブランチを ref にし、確かめたコミットを入力 `sha` に入れて GitHub App で動かす (`actions` の書きに絞った鍵)。失敗したら錠を外し、何も残さない。錠を取ってから動かすまでの 1 回の呼び出しの間の変更は止められない。workflow は既定のブランチの先が `sha` と違えば (頼んだ後に main が進んだ時) 本番に出さない",
+    "監査ログに `service.deploy` を記録する。デプロイの記録 (`service_events` の `deploy`) は、本番のデプロイの通知が残す",
+  ],
+  "x-errors": [
+    "404 `not_found`: サービスが存在しない",
+    "409 `conflict`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、`deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった",
+    "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
+    "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない、`deploy.yml` を動かせない時も)",
+  ],
+  "x-step-up": true,
+  middleware: [stepUpGate] as const,
+  request: { params: ServiceParam },
+  responses: { 202: okResponse(Deployment, "受け付けた。処理は非同期で完了する"), ...problems(401, 403, 404, 409, 429, 500, 502) },
+});
+
 /** サービスのルート */
 export const serviceRoutes = router
   .openapi(listServicesRoute, async (c) => {
@@ -156,5 +186,11 @@ export const serviceRoutes = router
     // 手で戻す時は直前の戻しを 409 で断るので、null は返らない
     if (!deployment) throw new AppError("internal", "戻しを受け付けられなかった");
     await audit(c, "service.rollback", serviceId, { reason, deploymentId: deployment.id });
+    return accepted(c, deployment);
+  })
+  .openapi(deployServiceRoute, async (c) => {
+    const { serviceId } = c.req.valid("param");
+    const { sha, ref, ...deployment } = await deployService(c.env, c.var.forge, { serviceId, now: c.var.clock.now() });
+    await audit(c, "service.deploy", serviceId, { sha, ref, deploymentId: deployment.id });
     return accepted(c, deployment);
   });

@@ -206,9 +206,12 @@ export const RollbackInput = z.object({ reason: z.string().min(1).max(2000) }).s
 /** 前のバージョンに戻す入力の型 */
 export type RollbackInput = z.infer<typeof RollbackInput>;
 
-/** 戻しやデプロイの受け付け。id は service_events の行 */
+/** 戻しやデプロイの受け付け。id は、戻しは service_events の rollback の行の ID、本番へのデプロイは受け付けの ID (デプロイの錠と監査ログの deploymentId) */
 export const Deployment = z
-  .object({ id: z.uuid().openapi({ description: "UUID v7" }), status: z.enum(["queued", "running", "done", "failed"]) })
+  .object({
+    id: z.uuid().openapi({ description: "UUID v7。戻しは `service_events` の `rollback` の行の ID、本番へのデプロイは受け付けの ID (監査ログ `service.deploy` の `deploymentId`)" }),
+    status: z.enum(["queued", "running", "done", "failed"]),
+  })
   .strict()
   .meta({ id: "Deployment" });
 

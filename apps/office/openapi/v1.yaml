@@ -2230,7 +2230,7 @@ components:
         id:
           type: string
           format: uuid
-          description: UUID v7
+          description: UUID v7。戻しは `service_events` の `rollback` の行の ID、本番へのデプロイは受け付けの ID (監査ログ `service.deploy` の `deploymentId`)
         status:
           type: string
           enum:
@@ -7284,6 +7284,85 @@ paths:
           $ref: "#/components/responses/UnsupportedMediaType"
         "422":
           $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+      security: *a1
+  /api/v1/services/{serviceId}/deploy:
+    post:
+      operationId: deployService
+      tags:
+        - services
+      summary: 本番にデプロイする
+      description: |-
+        15 分以内のパスキーの確認が必要。デプロイの条件を見るのはこの口だけで、main への push の自動デプロイは見ない。動かせるのは、`deploy.yml` が `workflow_dispatch` で `sha` を受けるリポジトリだけ。
+
+        処理の流れ:
+
+        1. サービスを取得し、Web アプリで、段階が `service` か `operation` で、リポジトリがある事を確かめる
+        2. サービスの `deployWhen` を、版 (`service_settings` の `deployWhen` の最大の版と、受け継いでいる時は `settings` の `service.deployWhen` の最大の版) を先に、値を後に読む
+        3. GitHub とつないでいる事を確かめ、既定のブランチの先のコミットを読む
+        4. 条件をサービスに進める時と同じ `checkConditions` で照らす。オーナーの承認は、この操作そのもの。足りなければ何も書かず、何も送らずに断り、足りない条件を `detail` に並べる
+        5. `locks` の `service.deploy:<サービス ID>` を 10 分の長さで、1 文の条件付きの書きで取る。条件は、読んだ版のまま、リポジトリと段階が読んだまま、`service.rollback:<サービス ID>` の錠が切れている、レビュー担当を求める時は確かめた承認の行がまだあってオーナーが断っていない事。取れなければ断る。取った錠は切れるまで持ち、同時と直前のデプロイを重ねない
+        6. そのリポジトリの `deploy.yml` を、既定のブランチを ref にし、確かめたコミットを入力 `sha` に入れて GitHub App で動かす (`actions` の書きに絞った鍵)。失敗したら錠を外し、何も残さない。錠を取ってから動かすまでの 1 回の呼び出しの間の変更は止められない。workflow は既定のブランチの先が `sha` と違えば (頼んだ後に main が進んだ時) 本番に出さない
+        7. 監査ログに `service.deploy` を記録する。デプロイの記録 (`service_events` の `deploy`) は、本番のデプロイの通知が残す
+
+        このルート固有のエラー:
+
+        - 404 `not_found`: サービスが存在しない
+        - 409 `conflict`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、`deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった
+        - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
+        - 502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない、`deploy.yml` を動かせない時も)
+      x-steps:
+        - サービスを取得し、Web アプリで、段階が `service` か `operation` で、リポジトリがある事を確かめる
+        - サービスの `deployWhen` を、版 (`service_settings` の `deployWhen` の最大の版と、受け継いでいる時は `settings` の `service.deployWhen` の最大の版) を先に、値を後に読む
+        - GitHub とつないでいる事を確かめ、既定のブランチの先のコミットを読む
+        - 条件をサービスに進める時と同じ `checkConditions` で照らす。オーナーの承認は、この操作そのもの。足りなければ何も書かず、何も送らずに断り、足りない条件を `detail` に並べる
+        - "`locks` の `service.deploy:<サービス ID>` を 10 分の長さで、1 文の条件付きの書きで取る。条件は、読んだ版のまま、リポジトリと段階が読んだまま、`service.rollback:<サービス ID>` の錠が切れている、レビュー担当を求める時は確かめた承認の行がまだあってオーナーが断っていない事。取れなければ断る。取った錠は切れるまで持ち、同時と直前のデプロイを重ねない"
+        - そのリポジトリの `deploy.yml` を、既定のブランチを ref にし、確かめたコミットを入力 `sha` に入れて GitHub App で動かす (`actions` の書きに絞った鍵)。失敗したら錠を外し、何も残さない。錠を取ってから動かすまでの 1 回の呼び出しの間の変更は止められない。workflow は既定のブランチの先が `sha` と違えば (頼んだ後に main が進んだ時) 本番に出さない
+        - 監査ログに `service.deploy` を記録する。デプロイの記録 (`service_events` の `deploy`) は、本番のデプロイの通知が残す
+      x-errors:
+        - "404 `not_found`: サービスが存在しない"
+        - "409 `conflict`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、`deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった"
+        - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
+        - "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない、`deploy.yml` を動かせない時も)"
+      x-step-up: true
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            description: UUID v7
+          required: true
+          description: UUID v7
+          name: serviceId
+          in: path
+      responses:
+        "202":
+          description: 受け付けた。処理は非同期で完了する
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Deployment"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":

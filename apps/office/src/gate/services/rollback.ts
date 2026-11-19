@@ -14,6 +14,13 @@ import { findService } from "./flow.ts";
 /** 戻した後に、同じサービスを次に戻せるまでの間。戻した版のデプロイの通知が届き、様子が落ち着くまで重ねて戻さない */
 export const ROLLBACK_COOLDOWN_MS = 10 * 60_000;
 
+/**
+ * 戻しの錠の名前。デプロイもこの錠が持たれている間は走らせない
+ * @param serviceId サービス ID
+ * @returns 錠の名前
+ */
+export const rollbackLockName = (serviceId: string): string => `service.rollback:${serviceId}`;
+
 /** 戻す workflow。そのリポジトリの .github/workflows/ に置く */
 export const ROLLBACK_WORKFLOW = "rollback.yml";
 
@@ -41,7 +48,7 @@ export async function rollbackService(env: Bindings, forge: Forge, input: { serv
   if (row.kind !== "web_app") throw new AppError("conflict", "Web アプリでないので戻せない");
   if (row.repo === null) throw new AppError("conflict", "リポジトリが無いので戻せない");
   const id = newId(clockAt(now));
-  const lock = `service.rollback:${serviceId}`;
+  const lock = rollbackLockName(serviceId);
   // 錠は 1 文の条件付きの書きで取り、切れるまで持ったままにする。同時の 2 つと直前の戻しは送らない
   if (!(await claimLock(env.DB, { name: lock, holder: id, now, ttlMs: ROLLBACK_COOLDOWN_MS }))) {
     if (by === "system") return null;

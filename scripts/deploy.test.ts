@@ -93,7 +93,7 @@ void describe("自動のデプロイとプレビュー環境", () => {
   void it("main ではチェックの後にマイグレーション、デプロイ、確かめを回し、確かめが落ちたら戻す", () => {
     const production = all.get("production") ?? "";
     assert.match(production, /^ {4}needs: \[ready, check\]$/m);
-    assert.match(production, /&& github\.event_name == 'push'$/m);
+    assert.match(production, /&& \(github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'\)\)$/m);
     inOrder(production, ["pnpm build", "wrangler d1 migrations apply", "wrangler deploy", "node scripts/smoke.ts", "wrangler rollback", "node scripts/smoke.ts"]);
     assert.match(production, /^ {8}if: failure\(\) && steps\.deploy\.outcome == 'success'$/m);
     // 戻した後にもう一度聞き、戻した先が返るかを出す
@@ -116,6 +116,25 @@ void describe("自動のデプロイとプレビュー環境", () => {
     const group = /^ {4}concurrency:\n {6}group: (.+)\n {6}cancel-in-progress: (\w+)$/m;
     assert.equal(group.exec(remove)?.[1], group.exec(preview)?.[1]);
     assert.equal(group.exec(remove)?.[2], "false");
+  });
+
+  void it("know-office が確かめたコミットを sha に入れて main で手で動かし、main の先が違うか main のほかの ref なら本番に出さない", () => {
+    assert.match(deploy, /^ {2}workflow_dispatch:\n {4}inputs:\n {6}sha:\n {8}description: .+\n {8}required: true\n {8}type: string$/m);
+    const ready = all.get("ready") ?? "";
+    const guard = /^ {6}- name: .+\n {8}if: github\.event_name == 'workflow_dispatch'\n {8}env:\n {10}SHA: \$\{\{ inputs\.sha \}\}\n {10}REF: \$\{\{ github\.ref \}\}\n {8}run: \|\n((?: {10}.*\n)+)/m.exec(ready);
+    assert.ok(guard, "ready に、手で動かした時の ref と sha の確かめが無い");
+    const script = guard[1] ?? "";
+    assert.match(script, /"\$REF" != "refs\/heads\/main"/);
+    assert.match(script, /\^\[0-9a-f\]\{40\}\$/);
+    assert.match(script, /"\$SHA" != "\$GITHUB_SHA"/);
+    // 入力は命令の文に直に埋めず、env で渡す
+    for (const line of deploy.split("\n").filter((l) => l.includes("inputs.sha"))) assert.match(line, /^ {10}SHA: \$\{\{ inputs\.sha \}\}$/);
+    // 確かめが落ちれば ready が落ち、後の job は回らない
+    for (const name of ["check", "production"]) assert.match(all.get(name) ?? "", /^ {4}needs: (ready|\[ready, check\])$/m);
+  });
+
+  void it("手で動かした時も、作り終えた事を確かめるチェックの後に本番に出す", () => {
+    assert.match(all.get("check") ?? "", /^ {6}release: \$\{\{ github\.event_name != 'pull_request' \}\}$/m);
   });
 
   void it("本番の job は environment の production で回し、GitHub がデプロイ (task は deploy) と結果を残す", () => {
