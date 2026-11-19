@@ -22,4 +22,5 @@ export const MAIN_APPEND_ONLY = [
   "owner_data_reads",
   "message_deliveries",
   "guard_review_reads",
+  "github_reviews",
 ] as const;

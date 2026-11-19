@@ -130,6 +130,7 @@ const receiveGitHubWebhookRoute = createRoute({
     "イベントの種類ごとに、チェック結果、レビュー、Issue、App を外した事の処理に渡す。直す文と `github_deliveries` への追加を 1 回のバッチに入れ、`github_deliveries` に同じ本文の SHA-256 がある通知 (配信 ID を変えた送り直しも) では何も直さない",
     "Issue は先に `github_deliveries` に追加し、追加できた時だけ社長の `plan` のタスクを足す。足せなければその記録を消す",
     "レビュー (`pull_request_review`) と行のコメント (`pull_request_review_comment`) は、App が写した物と、持ち主 (`author_association` が OWNER) でない者の物を捨てる。残りは Issue と同じく先に `github_deliveries` に追加し、可と不可は `owner_verdict` に、行のコメントは `review_notes` に写して、不可と行のコメントは作った社員のタスクを `todo` に戻す",
+    "可と不可は同じバッチで `github_reviews` に GitHub のレビュー ID ごとに最初に受けた時刻を 1 行だけ残し、タスクの出来事の ID をレビュー ID とその時刻から決める。配信 ID と本文が変わった送り直しでも、出来事とオフィスの出来事は 1 度だけ",
   ],
   "x-errors": [
     "400 `malformed_request`: 配信 ID か種類か本文の形が違う",

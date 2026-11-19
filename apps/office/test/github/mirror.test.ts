@@ -260,7 +260,7 @@ describe("GitHub に写す", () => {
     } finally {
       spy.restore();
     }
-    expect(sameBatch(spy.batches, "UPDATE reviews SET owner_verdict", "UPDATE nodes SET status = 'todo'")).toBe(true);
+    expect(sameBatch(spy.batches, "UPDATE reviews SET owner_verdict", "INSERT INTO github_reviews", "UPDATE nodes SET status = 'todo'")).toBe(true);
     expect(sameBatch(spy.batches, "INSERT INTO review_notes", "UPDATE nodes SET status = 'todo'")).toBe(true);
   });
 

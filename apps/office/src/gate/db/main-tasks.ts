@@ -119,6 +119,12 @@ export const githubDeliveries = sqliteTable("github_deliveries", {
   receivedAt: time("received_at").notNull(),
 });
 
+/** 写したオーナーの GitHub のレビュー。レビュー 1 つに 1 行で、最初に受けた時刻からタスクの出来事の ID を決め、送り直しで出来事を 2 度足さない。追記専用 */
+export const githubReviews = sqliteTable("github_reviews", {
+  githubReviewId: integer("github_review_id").primaryKey(),
+  receivedAt: time("received_at").notNull(),
+});
+
 /** GitHub App を作りに出した state の使い捨ての値。callback で 1 度だけ消せる */
 export const githubStates = sqliteTable("github_states", {
   nonce: text("nonce").primaryKey(),
