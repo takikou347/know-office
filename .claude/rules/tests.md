@@ -14,7 +14,7 @@ paths:
 - うまくいく道と一緒に、同時の更新 (2 つが同じ版を読む)、二重の決定、途中で落ちた時に何も残らない事、境目の値 (上限ちょうど、形の違う入力) のテストを先に書く。順に呼ぶだけのテストは同時を確かめない。書く直前に別の変更を挟むには、テストの env の `DB.batch` や `FILES.put` を包む
 - 最初から通る守りのテストは、作った所を壊して落ちる事を確かめてから残す
 - 要件のシナリオのテストは、`describe` を要件の名前、`it` をシナリオの名前と同じ日本語にする。要件とシナリオと置き場は、テスト設計 (`docs/05-test/<番号>-<名前>.md`) の 1 章と 2 章。`node scripts/scenarios.ts` が名前の合うテストを探す
-- 1 つのシナリオを多くの画面や入力で回し、1 つの `it` では 5 秒を超える時は、`describe` をシナリオの名前にして、その中の `it` を画面や入力の名前にする
+- 1 つのシナリオを多くの画面や入力で回し、1 つの `it` では 5 秒を超える時は、要件の `describe` の中に画面や入力の名前の `describe` を入れ子にし、その中の `it` をシナリオの名前にする (`scenarios.ts` は `it` と `test` の名前だけを拾う)
 - 置き場: 共通 `packages/core/test/<物>.test.ts`、ゲートウェイと DO `apps/office/test/<まとまり>/<物>.test.ts`、画面の通し `apps/office/e2e/<画面か流れ>.spec.ts`、ワークスペース `apps/workspace/test/<物>.test.ts`、型の食い違い `<物>.types.ts` に `@ts-expect-error`、リポジトリの道具 `scripts/<物>.test.ts` (`node:test`)
 - モックは境目だけ。D1 は `test/helpers/d1.ts` (wrangler の手元の本物の D1)、DO は `test/helpers/worker.ts` (本物の workerd に起こしたテストの入口)、時刻は `Clock` のモック、Claude と GitHub は記録した返事を返すモック
 - 並んで走る処理の順や長さを、実の時間の待ち (`setTimeout`) と共にある `Clock` の進みで作らない。ほかの処理が遅いと揺れるので、長さを測る口か合図を引数で渡して決める
