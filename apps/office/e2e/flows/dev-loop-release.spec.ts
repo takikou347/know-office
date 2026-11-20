@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, releaseReviewTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
+import { findTaskId, giveBackTasks, prototypeService, releaseBuilderTask, releaseReviewTask, REPO, setAsideTasks } from "./helpers/dev-loop.ts";
 import { readNoticesTitled } from "./helpers/notice-bar.ts";
 import { Held, openTree } from "./helpers/staff-work.ts";
 import { clockIn, scriptReply } from "./helpers/staff.ts";
@@ -21,7 +21,7 @@ test("子 Issue が入って閉じると、親も閉じ、サービスに進め�
   seedMain(`UPDATE notices SET read_at = ${String(Date.now())} WHERE kind IN ('sdk_auth_failed', 'claude_spend_limit') AND read_at IS NULL`);
   // 前の通しが開発担当に残したタスク (見本のタスクや設計書のタスク) は、先に取られて積んだ返事を使われるので、通しの間だけ開発担当から外し、終わりに戻す。
   // 持って呼び出し中の物は、止めて再開しても続きから呼ぶので、見送りにして離させる
-  const aside = await setAsideBuilderTasks(page);
+  const aside = await setAsideTasks(page);
   try {
     // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
     const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
@@ -133,6 +133,6 @@ test("子 Issue が入って閉じると、親も閉じ、サービスに進め�
       }
     }
   } finally {
-    giveBackBuilderTasks(aside);
+    giveBackTasks(aside);
   }
 });

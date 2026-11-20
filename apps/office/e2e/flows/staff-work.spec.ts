@@ -7,40 +7,44 @@ import { FAKES } from "../helpers/fakes.ts";
 import { clockIn, ownerPasskey, scriptReply, staffState } from "./helpers/staff.ts";
 import { CARRY_TITLE, claudeReceived, dropLeftovers, NodeStatus, NodeVersion, PROJECT, Runs, addTask, finishedBy, openTree, sayToReviewer, scriptFinish, scriptWork } from "./helpers/staff-work.ts";
 
-test("オーナーが画面で頼んだタスクを社員が取り、発言とチェックポイントを伝えて終え、記録に残る", async ({ page }) => {
-  // 勤務の時刻を変え、SDK が 3 度呼ぶのを待つ
-  test.slow();
-  await openTree(page);
-  const restore = await clockIn(page, "reviewer");
-  try {
-    const said = `通しのタスクを読んだ ${String(Date.now())}`;
-    await scriptWork(page, said);
-    await page.goto("/goals");
-    // レビュー担当には見本の todo が無いので、頼んだタスクをすぐ取る
-    const title = `通しのタスク ${String(Date.now())}`;
-    const nodeId = await addTask(page, title, "レビュー担当");
-    await finishedBy(page, nodeId);
+test.describe("タスクの繰り返し", () => {
+  test("タスクの流れ", async ({ page }) => {
+    // オーナーが画面で頼んだタスクを社員が取り、発言とチェックポイントを伝えて終え、記録に残る
+    // 勤務の時刻を変え、SDK が 3 度呼ぶのを待つ
+    test.slow();
+    await openTree(page);
+    const restore = await clockIn(page, "reviewer");
+    try {
+      const said = `通しのタスクを読んだ ${String(Date.now())}`;
+      await scriptWork(page, said);
+      await page.goto("/goals");
+      // レビュー担当には見本の todo が無いので、頼んだタスクをすぐ取る
+      const title = `通しのタスク ${String(Date.now())}`;
+      const nodeId = await addTask(page, title, "レビュー担当");
+      await finishedBy(page, nodeId);
 
-    // タスクの木で済になる
-    await page.reload();
-    await expect(page.getByRole("main").getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("済", { exact: true })).toBeVisible();
+      // タスクの木で済になる
+      await page.reload();
+      await expect(page.getByRole("main").getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("済", { exact: true })).toBeVisible();
 
-    // 社員と仕事の画面の会話に、社員の発言が出る
-    await page.goto("/staff/reviewer?tab=talk");
-    await expect(page.getByRole("log", { name: "レビュー担当との会話" }).getByText(said)).toBeVisible();
+      // 社員と仕事の画面の会話に、社員の発言が出る
+      await page.goto("/staff/reviewer?tab=talk");
+      await expect(page.getByRole("log", { name: "レビュー担当との会話" }).getByText(said)).toBeVisible();
 
-    // タスクの詳細の作業の流れに、始めた、チェックポイント、終えたが出る
-    await page.goto(`/staff/reviewer/tasks/${nodeId}`);
-    await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
-    const flow = part(page, "作業の流れ");
-    for (const kind of ["started", "checkpoint", "finished"]) await expect(flow.getByText(kind, { exact: true })).toBeVisible();
-  } finally {
-    await restore();
-  }
+      // タスクの詳細の作業の流れに、始めた、チェックポイント、終えたが出る
+      await page.goto(`/staff/reviewer/tasks/${nodeId}`);
+      await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+      const flow = part(page, "作業の流れ");
+      for (const kind of ["started", "checkpoint", "finished"]) await expect(flow.getByText(kind, { exact: true })).toBeVisible();
+    } finally {
+      await restore();
+    }
+  });
 });
 
-test.describe("オーナーの発言を社員に渡す", () => {
-  test("タスクの途中に話しかけると「社員に渡しました」", async ({ page }) => {
+test.describe("オーナーの発言を渡す", () => {
+  test("タスク中に話しかける", async ({ page }) => {
+    // タスクの途中に話しかけると「社員に渡しました」と出る
     test.slow();
     await openTree(page);
     const restore = await clockIn(page, "reviewer");
@@ -63,7 +67,8 @@ test.describe("オーナーの発言を社員に渡す", () => {
     }
   });
 
-  test("タスクの外で話しかけて次のタスクを取ると「次のタスクの頭で渡しました」", async ({ page }) => {
+  test("タスクの外で話しかけて次のタスクで渡す", async ({ page }) => {
+    // タスクの外で話しかけて次のタスクを取ると「次のタスクの頭で渡しました」と出る
     test.slow();
     await openTree(page);
     const restore = await clockIn(page, "reviewer");
@@ -122,56 +127,60 @@ test.describe("気付く", () => {
   });
 });
 
-test("オーナーが画面でタスクを取り消し、頼む先を後から変える", async ({ page }) => {
-  await openTree(page);
-  const main = page.getByRole("main");
+test.describe("目的からタスクまでの木", () => {
+  test("止めたタスクを取り消すと見送りになり、止めを再開しても待ちに戻らない", async ({ page }) => {
+    await openTree(page);
+    const main = page.getByRole("main");
+    const dropped = `取り消すタスク ${String(Date.now())}`;
+    const droppedId = await addTask(page, dropped, "まだ頼まない");
+    const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "task", target: droppedId, reason: "取り消す前に止める" } });
+    expect(stopped.status()).toBe(201);
+    const { stopId } = z.object({ data: z.object({ stopId: z.string() }) }).parse(await stopped.json()).data;
+    await page.reload();
+    await main.getByRole("button", { name: `${dropped}を変える` }).click();
+    await page.getByRole("dialog", { name: `${dropped}を変える` }).getByRole("button", { name: "タスクを取り消す" }).click();
+    await expect(page.getByRole("dialog", { name: `${dropped}を変える` })).toBeHidden();
+    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${dropped}` }).last().getByText("見送り")).toBeVisible();
+    expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
+    expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${droppedId}`)).json()).data.status).toBe("dropped");
+  });
 
-  const dropped = `取り消すタスク ${String(Date.now())}`;
-  const droppedId = await addTask(page, dropped, "まだ頼まない");
-  // 止めたタスクも取り消せ、取り消した後に止めを再開しても待ちに戻らない
-  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "task", target: droppedId, reason: "取り消す前に止める" } });
-  expect(stopped.status()).toBe(201);
-  const { stopId } = z.object({ data: z.object({ stopId: z.string() }) }).parse(await stopped.json()).data;
-  await page.reload();
-  await main.getByRole("button", { name: `${dropped}を変える` }).click();
-  await page.getByRole("dialog", { name: `${dropped}を変える` }).getByRole("button", { name: "タスクを取り消す" }).click();
-  await expect(page.getByRole("dialog", { name: `${dropped}を変える` })).toBeHidden();
-  await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${dropped}` }).last().getByText("見送り")).toBeVisible();
-  expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
-  expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${droppedId}`)).json()).data.status).toBe("dropped");
+  test("オーナーが画面でタスクを足し、後から頼む先を付けるとその社員が取る", async ({ page }) => {
+    await openTree(page);
+    const main = page.getByRole("main");
+    // 頼む先の無いタスクは誰も取らず、頼む先を付けるとその社員が取る
+    const later = `後から頼むタスク ${String(Date.now())}`;
+    const nodeId = await addTask(page, later, "まだ頼まない");
+    await scriptFinish(page);
+    await main.getByRole("button", { name: `${later}を変える` }).click();
+    const dialog = page.getByRole("dialog", { name: `${later}を変える` });
+    await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "レビュー担当" }).click();
+    await dialog.getByRole("button", { name: "頼む先を変える" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${later}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
+    await finishedBy(page, nodeId);
+  });
 
-  // 頼む先の無いタスクは誰も取らず、頼む先を付けるとその社員が取る
-  const later = `後から頼むタスク ${String(Date.now())}`;
-  const nodeId = await addTask(page, later, "まだ頼まない");
-  await scriptFinish(page);
-  await main.getByRole("button", { name: `${later}を変える` }).click();
-  const dialog = page.getByRole("dialog", { name: `${later}を変える` });
-  await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "レビュー担当" }).click();
-  await dialog.getByRole("button", { name: "頼む先を変える" }).click();
-  await expect(dialog).toBeHidden();
-  await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${later}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
-  await finishedBy(page, nodeId);
-});
-
-test("ほかで先に頼む先が変わっていたら、木の上に知らせて今の頼む先を出す", async ({ page }) => {
-  await openTree(page);
-  const main = page.getByRole("main");
-  const title = `先に変わるタスク ${String(Date.now())}`;
-  const nodeId = await addTask(page, title, "まだ頼まない");
-  // 直に頼む先をレビュー担当に変えると、レビュー担当が取って終える
-  await scriptFinish(page);
-  await main.getByRole("button", { name: `${title}を変える` }).click();
-  const dialog = page.getByRole("dialog", { name: `${title}を変える` });
-  await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "社長" }).click();
-  // 画面が読んだ後に、ゲートウェイへ直に頼む先を変えて版を進める
-  const { version } = NodeVersion.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data;
-  const moved = await page.request.patch(`/api/v1/nodes/${nodeId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, assignee: "reviewer" } });
-  expect(moved.status()).toBe(200);
-  await dialog.getByRole("button", { name: "頼む先を変える" }).click();
-  await expect(main.getByText("ほかで先に変わっていたので読み直しました")).toBeVisible();
-  await expect(dialog).toBeHidden();
-  await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
-  await finishedBy(page, nodeId);
+  test("ほかで先に頼む先が変わっていたら、木の上に知らせて今の頼む先を出す", async ({ page }) => {
+    await openTree(page);
+    const main = page.getByRole("main");
+    const title = `先に変わるタスク ${String(Date.now())}`;
+    const nodeId = await addTask(page, title, "まだ頼まない");
+    // 直に頼む先をレビュー担当に変えると、レビュー担当が取って終える
+    await scriptFinish(page);
+    await main.getByRole("button", { name: `${title}を変える` }).click();
+    const dialog = page.getByRole("dialog", { name: `${title}を変える` });
+    await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: "社長" }).click();
+    // 画面が読んだ後に、ゲートウェイへ直に頼む先を変えて版を進める
+    const { version } = NodeVersion.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data;
+    const moved = await page.request.patch(`/api/v1/nodes/${nodeId}`, { headers: { Origin: new URL(page.url()).origin }, data: { version, assignee: "reviewer" } });
+    expect(moved.status()).toBe(200);
+    await dialog.getByRole("button", { name: "頼む先を変える" }).click();
+    await expect(main.getByText("ほかで先に変わっていたので読み直しました")).toBeVisible();
+    await expect(dialog).toBeHidden();
+    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${title}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
+    await finishedBy(page, nodeId);
+  });
 });
 
 /**

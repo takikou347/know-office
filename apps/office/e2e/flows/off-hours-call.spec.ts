@@ -1,9 +1,9 @@
-// 時間外にオーナーが話しかけた時の呼び出しの通し。設定の画面で開き、退勤したレビュー担当に話しかけると、残っていたタスクを取って発言を最初の呼び出しの頭で受ける。ゲートウェイの返事は差し替えない (社員と勤怠の 3.4)
+// 時間外の呼び出しの通し。退勤したレビュー担当に、オーナーが目的と組織図の画面でタスクを頼むと、その社員だけが呼び出されて進める。設定の画面で時間外の呼び出しを開いて話しかけると、残っていたタスクを取って発言を最初の呼び出しの頭で受ける。ゲートウェイの返事は差し替えない (社員と勤怠の 3.4)
 import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders, seedMain } from "./helpers/seed.ts";
-import { ownerPasskey, staffState } from "./helpers/staff.ts";
-import { CARRY_TITLE, claudeReceived, dropLeftovers, finishedBy, NodeStatus, openTree, PROJECT, sayToReviewer, scriptFinish } from "./helpers/staff-work.ts";
+import { idleStaff, ownerPasskey, scriptReply, staffState, unstick } from "./helpers/staff.ts";
+import { addTask, CARRY_TITLE, claudeReceived, dropLeftovers, finishedBy, NodeStatus, openTree, PROJECT, sayToReviewer, scriptFinish } from "./helpers/staff-work.ts";
 
 /**
  * 設定の画面で時間外の呼び出しを開くか閉じる。開く時はパスキーで確かめる
@@ -51,6 +51,40 @@ function seedReviewerTodo(title: string): string {
 }
 
 test.describe("オーナーの指示に合わせる", () => {
+  test("時間外の呼び出し", async ({ page }) => {
+    test.slow();
+    await openTree(page);
+    cancelLeftOrders("reviewer");
+    await dropLeftovers(page);
+    try {
+      // 時間外の話しかけの呼び出しは閉じたままでも、オーナーが頼んだタスクでは呼び出す
+      await setOffHoursCall(page, false);
+      // 前の通しが落ちて残した待ちと持っているタスクがあれば、片付けてから休みにする
+      await unstick(page, "reviewer");
+      await idleStaff(page, "reviewer");
+      await restReviewer(page);
+      const others = await Promise.all(["president", "builder"].map((id) => staffState(page, id)));
+      // 呼び出された間を画面で見られるよう、終わりの返事を少し遅らせる
+      await scriptReply(page, "reviewer", [{ type: "text", text: "時間外のタスクを終えた" }], "end_turn", 15_000);
+      await page.goto("/goals");
+      const title = `${CARRY_TITLE} 時間外に頼む ${String(Date.now())}`;
+      const nodeId = await addTask(page, title, "レビュー担当");
+      // 退勤していたレビュー担当だけが呼び出しで出勤し、頼まれたタスクを進める
+      await expect.poll(() => staffState(page, "reviewer"), { timeout: 30_000 }).toBe("called");
+      await page.goto("/staff/reviewer");
+      await expect(page.getByRole("main").getByText("呼ばれて働いている").first()).toBeVisible();
+      // ほかの社員は呼び出さない
+      const after = await Promise.all(["president", "builder"].map((id) => staffState(page, id)));
+      for (const [i, state] of after.entries()) if (others[i] !== "called") expect(state).not.toBe("called");
+      await finishedBy(page, nodeId);
+      // 頼まれたタスクを終えたら退勤する
+      await expect.poll(() => staffState(page, "reviewer"), { timeout: 30_000 }).toBe("off");
+    } finally {
+      cancelLeftOrders("reviewer");
+      await dropLeftovers(page);
+    }
+  });
+
   test("時間外の話しかけで呼び出す", async ({ page }) => {
     test.slow();
     await openTree(page);

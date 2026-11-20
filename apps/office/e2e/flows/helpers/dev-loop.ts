@@ -61,11 +61,12 @@ export async function prototypeService(page: Page, label = "Issue の案"): Prom
 }
 
 /**
- * setAsideBuilderTasks で外したタスクを、待ちのタスクとして開発担当に戻す
+ * setAsideTasks で外したタスクを、待ちのタスクとしてその社員に戻す
  * @param ids 外したタスクの ID を SQL の並びにした物
+ * @param staffId 戻す先の社員。無ければ開発担当
  */
-export function giveBackBuilderTasks(ids: string): void {
-  if (ids !== "") seedMain(`UPDATE nodes SET assignee = 'builder', status = 'todo' WHERE id IN (${ids})`);
+export function giveBackTasks(ids: string, staffId = "builder"): void {
+  if (ids !== "") seedMain(`UPDATE nodes SET assignee = '${staffId}', status = 'todo' WHERE id IN (${ids})`);
 }
 
 /**
@@ -101,28 +102,41 @@ export async function releaseReviewTask(page: Page, id: string): Promise<void> {
     .not.toBe(id);
 }
 
+const Assigned = z.object({ data: z.array(z.object({ id: z.string(), status: z.string() }).loose()) });
+
 /**
- * 開発担当のまだ済んでいないタスクを開発担当から外す。持っているタスクは見送りにして離させる
+ * 社員に割り振られた、その状態のタスクを読む
  * @param page 画面を開いたページ
- * @returns 外したタスクの ID を SQL の並びにした物。戻す時は、待ちのタスクとして開発担当に戻す
+ * @param staffId 社員
+ * @param status 状態
+ * @returns 先頭の 100 件
  */
-export async function setAsideBuilderTasks(page: Page): Promise<string> {
-  const Assigned = z.object({ data: z.array(z.object({ id: z.string(), status: z.string() }).loose()) });
+async function assigned(page: Page, staffId: string, status: string): Promise<{ id: string; status: string }[]> {
+  return Assigned.parse(await (await page.request.get(`/api/v1/nodes?assignee=${staffId}&status=${status}&limit=100`)).json()).data;
+}
+
+/**
+ * 社員のまだ済んでいないタスクをその社員から外す。持っているタスクは見送りにして離させる
+ * @param page 画面を開いたページ
+ * @param staffId 外す社員。無ければ開発担当
+ * @returns 外したタスクの ID を SQL の並びにした物。戻す時は、待ちのタスクとしてその社員に戻す
+ */
+export async function setAsideTasks(page: Page, staffId = "builder"): Promise<string> {
   const aside = new Set<string>();
   const listed = () => [...aside].map((id) => `'${id}'`).join(", ");
-  const held = async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === "builder")?.nodeId ?? null;
+  const held = async () => Held.parse(await (await page.request.get("/api/v1/staff")).json()).data.find((s) => s.id === staffId)?.nodeId ?? null;
   // 待ちに戻してから取り消すので、Issue を持つタスクでも重なって待つ兄弟を起こさない (起こすのは作業中かレビューの見送りだけ)
   const release = async (id: string) => {
     aside.add(id);
-    await releaseBuilderTask(page, id);
+    await releaseTask(page, id, staffId);
   };
   try {
-    // 外す間にも開発担当は待ちのタスクを取り、呼び出し中の社員は版を進めるので、持つ物も待つ物も無くなるまで読み直す
+    // 外す間にも社員は待ちのタスクを取り、呼び出し中の社員は版を進めるので、持つ物も待つ物も無くなるまで読み直す
     await expect(async () => {
       const holding = await held();
       if (holding !== null) await release(holding);
-      const all = Assigned.parse(await (await page.request.get("/api/v1/nodes?assignee=builder&limit=100")).json()).data;
-      // 上限の 100 件に当たったら取りこぼすので、外し切れないとして落とす
+      // 済んだタスクの多い社員 (社長) もいるので、作業中と待ちを分けて読む。上限の 100 件に当たったら取りこぼすので、外し切れないとして落とす
+      const all = [...(await assigned(page, staffId, "doing")), ...(await assigned(page, staffId, "todo"))];
       expect(all.length).toBeLessThan(100);
       for (const n of all.filter((x) => x.status === "doing")) await release(n.id);
       const todo = all.filter((x) => x.status === "todo").map((x) => x.id);
@@ -132,7 +146,7 @@ export async function setAsideBuilderTasks(page: Page): Promise<string> {
     }).toPass({ timeout: 60_000 });
   } catch (error) {
     // 離れずに落ちても、外したタスクを後の通しに残さない
-    giveBackBuilderTasks(listed());
+    giveBackTasks(listed(), staffId);
     throw error;
   }
   return listed();

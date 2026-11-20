@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
-import { findTaskId, giveBackBuilderTasks, prototypeService, releaseBuilderTask, releaseReviewTask, REPO, setAsideBuilderTasks } from "./helpers/dev-loop.ts";
+import { findTaskId, giveBackTasks, prototypeService, releaseBuilderTask, releaseReviewTask, REPO, setAsideTasks } from "./helpers/dev-loop.ts";
 import { restoreSeedServices, seedMain } from "./helpers/seed.ts";
 import { clockIn, scriptReply } from "./helpers/staff.ts";
 import { Held, openTree } from "./helpers/staff-work.ts";
@@ -13,7 +13,7 @@ const state = { aside: "" };
 test.afterEach(() => {
   forgetGitHub();
   restoreSeedServices();
-  giveBackBuilderTasks(state.aside);
+  giveBackTasks(state.aside);
   state.aside = "";
 });
 
@@ -30,7 +30,7 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
   // 前の通しが残した読んでいない鍵と上限の通知は、どの社員の呼び出しも止めるので、先に読んだ事にする
   seedMain(`UPDATE notices SET read_at = ${String(Date.now())} WHERE kind IN ('sdk_auth_failed', 'claude_spend_limit') AND read_at IS NULL`);
   // 前の通しが開発担当に残したタスクは、先に取られて積んだ返事を使われるので、通しの間だけ開発担当から外す
-  state.aside = await setAsideBuilderTasks(page);
+  state.aside = await setAsideTasks(page);
   // 前の通しが落ちて消したタスクを持ったままの開発担当は、止めて再開して作り直させる
   const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: origin }, data: { scope: "staff", target: "builder", reason: "開発の回し方の通しの前に作り直す" } });
   expect(stopped.status()).toBe(201);

@@ -135,6 +135,19 @@ function widened({ start, end }: { start: string; end: string }): boolean {
 }
 
 /**
+ * 前に流した時のワークスペースが落ちて社員が待っていれば、止めて再開して作り直させる
+ * @param page 画面を開いたページ
+ * @param staffId 社員
+ */
+export async function unstick(page: Page, staffId: string): Promise<void> {
+  if ((await staffState(page, staffId)) !== "waiting") return;
+  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: staffId, reason: "社員の仕事の通しの前に作り直す" } });
+  expect(stopped.status()).toBe(201);
+  await resumeStaff(page);
+  await expect.poll(() => staffState(page, staffId), { timeout: 30_000 }).not.toMatch(/^(waiting|stopped)$/);
+}
+
+/**
  * 社員を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
  * 前に流した時のワークスペースが落ちて待っていれば、止めて再開して作り直させる。勤務の中でなければ、勤務の時刻を一日に広げて出勤させる
  * @param page 画面を開いたページ
@@ -143,12 +156,7 @@ function widened({ start, end }: { start: string; end: string }): boolean {
  * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
  */
 export async function clockIn(page: Page, staffId: string, allDay = false): Promise<() => Promise<void>> {
-  if ((await staffState(page, staffId)) === "waiting") {
-    const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: new URL(page.url()).origin }, data: { scope: "staff", target: staffId, reason: "社員の仕事の通しの前に作り直す" } });
-    expect(stopped.status()).toBe(201);
-    await resumeStaff(page);
-    await expect.poll(() => staffState(page, staffId), { timeout: 30_000 }).not.toMatch(/^(waiting|stopped)$/);
-  }
+  await unstick(page, staffId);
   // 時間外の呼び出し (called) の間も、勤務の中と同じにタスクを進める
   if (!allDay && /^(working|called)$/.test((await staffState(page, staffId)) ?? "")) return () => Promise.resolve();
   await ownerPasskey(page);
