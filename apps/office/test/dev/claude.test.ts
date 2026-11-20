@@ -135,6 +135,25 @@ describe("開発環境の代わりの物", () => {
     expect(await res.json()).toMatchObject({ content: [{ type: "text", text: "レビュー担当へ" }] });
   });
 
+  it("レートの上限に切り替えた社員の呼び出しには、使用の上限でない 429 の rate_limit_error を返し続け、戻すと積んだ返事を返す", async () => {
+    const claude = createFakeClaude({ keys: ["dev-fake-anthropic-key"], workTokens: true });
+    const limit = (body: unknown) => claude.app.request("/__fake/limit", { method: "POST", body: JSON.stringify(body) });
+    expect((await limit({ staffId: "president", limit: "rate" })).status).toBe(204);
+    claude.push({ content: [{ type: "text", text: "戻った" }] });
+    const call = () => claude.app.request("/v1/messages", { method: "POST", headers: { ...HEADERS, "x-api-key": "dev-fake-anthropic-key", [DEV_STAFF_HEADER]: "president" }, body: BODY });
+    for (let i = 0; i < 2; i += 1) {
+      const res = await call();
+      expect(res.status).toBe(429);
+      // 本物のレートの上限は待つ秒を retry-after に付ける。SDK に待ち直させず 1 回で終えさせ、通しの間に数える 429 を社員ごとに 1 回にする
+      expect(res.headers.get("retry-after")).toMatch(/^\d+$/);
+      expect(res.headers.get("x-should-retry")).toBe("false");
+      // ゲートウェイは使用の上限と見分け、社員を待ちに入れる
+      expect(claudeSpendLimit(res.status, await res.json())).toBeNull();
+    }
+    expect((await limit({ staffId: "president", limit: null })).status).toBe(204);
+    expect(await (await call()).json()).toMatchObject({ content: [{ text: "戻った" }] });
+  });
+
   it("使用の上限に切り替えた社員は、開発のプロキシが付けた社員の印でも見分ける", async () => {
     const claude = createFakeClaude({ keys: ["dev-fake-anthropic-key"], workTokens: true });
     await claude.app.request("/__fake/limit", { method: "POST", body: JSON.stringify({ staffId: "reviewer", limit: "monthly" }) });

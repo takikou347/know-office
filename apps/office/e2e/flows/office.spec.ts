@@ -1,11 +1,19 @@
+import type { Page } from "@playwright/test";
+import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
+import { FAKES } from "../helpers/fakes.ts";
 import { connectGitHub, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { boxOf, pictureOf, roomOf } from "../helpers/room.ts";
+import { readNoticesTitled } from "./helpers/notice-bar.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
+import { post } from "./helpers/screen.ts";
 import { seedMain } from "./helpers/seed.ts";
-import { clockIn } from "./helpers/staff.ts";
+import { settle } from "./helpers/settle.ts";
+import { clockIn, forgetReplies, scriptReply, staffState } from "./helpers/staff.ts";
+import { addTask, NodeDetail, openTree, PURPOSE, type Tree, Trees } from "./helpers/staff-work.ts";
 
 // オフィスの部屋が、本物のゲートウェイのレビューの判断を、配信で届いた出来事として見せる。GitHub は手元の代わりにつなぎ、プルリクエストの変更だけを置く (画面の全体の 3.2)
+// 社員が待つ時は休憩所に並び、狭い幅でも広い幅でも各社員の姿を押せる。社員は本物の入口で待たせ、ゲートウェイの返事は差し替えない
 
 const NODE = "019a7b00-0000-7000-8000-0000000000e7";
 const REVIEW = "019a7b00-0000-7000-8000-0000000000e8";
@@ -115,5 +123,118 @@ test.describe("オフィスの部屋", () => {
     } finally {
       await restore();
     }
+  });
+});
+
+/** 休憩所に並べる 3 人。社員 ID と役職 */
+const RESTING = [
+  ["president", "社長"],
+  ["builder", "開発担当"],
+  ["reviewer", "レビュー担当"],
+] as const;
+
+/** 止めた時の返事 */
+const Stopped = z.object({ data: z.object({ stopId: z.string() }).loose() });
+
+/** 社員を止めた時の通知の題。待ちから戻すために止めた物は、後の通しの帯に残さない */
+const STOP_TITLE = "社員を止めた";
+
+/** 休憩所で待たせるタスクの題の頭。前の通しが落ちて残した物を探す */
+const REST_TASK = "休憩所で待つタスク";
+
+/** 休憩所の並びを押す幅。狭い幅 (360) では姿が近く、押せる箱を分けて並べる */
+const WIDTHS = [
+  { width: 1280, height: 800 },
+  { width: 360, height: 780 },
+] as const;
+
+/**
+ * 代わりの Claude API で、社員の呼び出しをレートの上限に切り替えるか戻す
+ * @param page 画面を開いたページ
+ * @param staffId 社員
+ * @param on 切り替えるか。false で戻す
+ */
+async function rateLimit(page: Page, staffId: string, on: boolean): Promise<void> {
+  expect((await page.request.post(`${FAKES}/anthropic/__fake/limit`, { data: { staffId, limit: on ? "rate" : null } })).status()).toBe(204);
+}
+
+/**
+ * レートの上限を戻し、休憩所で待たせるタスクのうち終わっていない物を見送りにし、待ったままの社員を止めて再開して待ちから戻し、止めた通知を読む。残すと後の通しで社員が先に取り、待ったままになり、帯に通知が出る
+ * @param page 画面を開いたページ
+ */
+async function leaveRest(page: Page): Promise<void> {
+  const headers = { Origin: new URL(page.url()).origin };
+  for (const [id] of RESTING) await rateLimit(page, id, false);
+  const left = Trees.parse(await (await page.request.get(`/api/v1/nodes?rootId=${PURPOSE}`)).json())
+    .data.flatMap(function walk(n: Tree): Tree[] {
+      return [n, ...n.children.flatMap(walk)];
+    })
+    .filter((n) => n.title.startsWith(`${REST_TASK} `));
+  const statusOf = async (id: string) => NodeDetail.parse(await (await page.request.get(`/api/v1/nodes/${id}`)).json()).data.status;
+  for (const n of left) {
+    // SDK が上限の返事で終えるとタスクは待ちに戻る。前の通しが途中で落ちて作業中に残した物は、見送りにできないので終わりの返事で終えさせる
+    if ((await statusOf(n.id)) === "doing") {
+      const [owner] = RESTING.find(([id]) => n.title.startsWith(`${REST_TASK} ${id} `)) ?? [];
+      if (owner !== undefined) await scriptReply(page, owner, [{ type: "text", text: "休憩所の通しの前に終えた" }], "end_turn");
+      await expect.poll(() => statusOf(n.id), { timeout: 240_000 }).not.toBe("doing");
+    }
+    const { status, version } = NodeDetail.parse(await (await page.request.get(`/api/v1/nodes/${n.id}`)).json()).data;
+    if (status === "done" || status === "dropped") continue;
+    expect((await page.request.patch(`/api/v1/nodes/${n.id}`, { headers, data: { version, status: "dropped" } })).status()).toBe(200);
+  }
+  // 上限の待ちは次の呼び出しが通るまで解けないので、止めて再開し、待つ前の様子に戻す
+  for (const [id] of RESTING) {
+    if ((await staffState(page, id)) !== "waiting") continue;
+    const stopped = await page.request.post("/api/v1/guard/stops", { headers, data: { scope: "staff", target: id, reason: "休憩所の通しの後に待ちから戻す" } });
+    expect(stopped.status()).toBe(201);
+    const { stopId } = Stopped.parse(await stopped.json()).data;
+    expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
+    await expect.poll(() => staffState(page, id), { timeout: 30_000 }).not.toMatch(/^(waiting|stopped)$/);
+  }
+  await readNoticesTitled(page, STOP_TITLE);
+  // 使われずに残った終わりの返事を、後の通しの社員の呼び出しに返さない
+  for (const [id] of RESTING) await forgetReplies(page, id);
+}
+
+test.describe("画面の一覧", () => {
+  test("休憩所に並んだ社員の姿を押す", async ({ page }) => {
+    // 3 人を出勤させ、タスクを渡して上限の返事で待たせる
+    test.slow();
+    await openTree(page);
+    await leaveRest(page);
+    const restores: (() => Promise<void>)[] = [];
+    await settle(
+      async () => {
+        for (const [id] of RESTING) restores.push(await clockIn(page, id));
+        // 社員の呼び出しが Claude の API のレートの上限に当たると、ゲートウェイのプロキシが社員を待つ様子にする
+        for (const [id] of RESTING) await rateLimit(page, id, true);
+        await page.goto("/goals");
+        for (const [id, role] of RESTING) await addTask(page, `${REST_TASK} ${id} ${String(Date.now())}`, role);
+        for (const [id] of RESTING) await expect.poll(() => staffState(page, id), { timeout: 60_000 }).toBe("waiting");
+
+        for (const viewport of WIDTHS) {
+          await page.setViewportSize(viewport);
+          for (const [id, role] of RESTING) {
+            await page.goto("/office");
+            const room = roomOf(page);
+            await expect(room.locator("canvas")).toBeVisible();
+            // 3 人とも休憩所で待つ姿で並ぶ
+            for (const [, r] of RESTING) await expect(room.getByRole("link", { name: `${r} 待っている` })).toBeAttached();
+            // 名札の置き場は姿を覆う箱と同じ所にあるので、その真ん中が姿の真ん中
+            const figure = await room.locator(`.ko-office-label[href="/staff/${id}"]`).boundingBox();
+            if (!figure) throw new Error(`${role}の姿が無い`);
+            await page.mouse.click(figure.x + figure.width / 2, figure.y + figure.height / 2);
+            await expect(page).toHaveURL(new RegExp(`/staff/${id}$`));
+            await expect(page.getByRole("log", { name: `${role}との会話` })).toBeVisible();
+          }
+        }
+      },
+      [
+        () => page.setViewportSize(WIDTHS[0]),
+        () => leaveRest(page),
+        // 広げた勤務の時刻は、最初に広げた社員の戻しが元に戻す。後の社員は広げていないので何もしない
+        ...[0, 1, 2].map((i) => () => restores[i]?.()),
+      ],
+    );
   });
 });

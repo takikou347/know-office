@@ -1,4 +1,4 @@
-// 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、使用の上限に切り替えられ、届いた要求と鍵を残す。バッチ処理は受けた後にテストが終えさせる
+// 開発環境の代わりの Claude API。テストが積んだ返事と上限の失敗を順に返し、使用の上限とレートの上限に切り替えられ、届いた要求と鍵を残す。バッチ処理は受けた後にテストが終えさせる
 import { DEV_STAFF_HEADER, SPEND_LIMIT_KINDS, type SpendLimitKind, StaffId } from "@know-office/core";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -133,8 +133,22 @@ function errorResponse(scripted: ScriptedError): Response {
   return new Response(JSON.stringify({ type: "error", error, request_id: "req_fake_error" }), { status, headers: { "content-type": "application/json", ...headers } });
 }
 
-/** 使用の上限に切り替える口の本文。limit が null なら元に戻す */
-const LimitInput = z.object({ staffId: StaffId, limit: z.enum(SPEND_LIMIT_KINDS).nullable() }).strict();
+/**
+ * レートの上限の返事。本物は 429 の rate_limit_error に待つ秒の retry-after を付ける (platform.claude.com/docs/en/api/rate-limits)。
+ * SDK は x-should-retry を読んで待ち直すかを決めるので、false にして 1 回で終えさせる。待ち直すと 5 分に 5 回の 429 で通知 claude_rate_limited が出て、後の通しの帯を変える
+ */
+const RATE_LIMIT_ERROR: ScriptedError = {
+  error: { status: 429, type: "rate_limit_error", message: "This request would exceed the rate limit for your organization.", headers: { "retry-after": "60", "x-should-retry": "false" } },
+};
+
+/** 社員の呼び出しを切り替える上限。使用の上限の種類か、レートの上限 (rate) */
+const LIMIT_KINDS = [...SPEND_LIMIT_KINDS, "rate"] as const;
+
+/** 切り替える上限の型 */
+type LimitKind = (typeof LIMIT_KINDS)[number];
+
+/** 使用の上限かレートの上限に切り替える口の本文。limit が null なら元に戻す */
+const LimitInput = z.object({ staffId: StaffId, limit: z.enum(LIMIT_KINDS).nullable() }).strict();
 
 const MessagesRequest = z.looseObject({ model: z.string().optional(), stream: z.boolean().optional() });
 
@@ -213,8 +227,8 @@ export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
   const keys: string[] = [];
   const accepted = new Set(options.keys);
   const batches: FakeBatch[] = [];
-  // 使用の上限に切り替えた社員。戻すまで、その社員の呼び出しに上限の返事を返し続ける
-  const limits = new Map<StaffId, SpendLimitKind>();
+  // 使用の上限かレートの上限に切り替えた社員。戻すまで、その社員の呼び出しに上限の返事を返し続ける
+  const limits = new Map<StaffId, LimitKind>();
   // 待ちを付けた返事を待っている、社員ごとの呼び出し
   const waiting = new Map<StaffId, Waiter>();
   const toBatch = (b: FakeBatch) => {
@@ -277,9 +291,9 @@ export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
       const body = MessagesRequest.parse(await c.req.json());
       requests.push(body);
       const staffId = staffOfCall(c.req.header("x-api-key"), c.req.header(DEV_STAFF_HEADER));
-      // 本物の使用の上限は、直すまでどの呼び出しも断る
+      // 本物の使用の上限は、直すまでどの呼び出しも断る。レートの上限は、通しが戻すまで断り続ける (社員を待つ様子に置いたままにする)
       const limit = staffId === null ? undefined : limits.get(staffId);
-      if (limit !== undefined) return errorResponse(spendLimitError(limit));
+      if (limit !== undefined) return errorResponse(limit === "rate" ? RATE_LIMIT_ERROR : spendLimitError(limit));
       // ゲートウェイのプロキシを通ると、SDK が切った呼び出しは切れたと届かない。同じ社員の同じモデルの呼び直しが来たら、待っている前の呼び出しを捨てて、待っていた返事を呼び直しに渡す
       const waiter = staffId === null ? undefined : waiting.get(staffId);
       const taken = waiter?.model === body.model ? waiter : undefined;
@@ -326,7 +340,7 @@ export function createFakeClaude(options: FakeClaudeOptions): FakeClaude {
       queue.push({ item: message, staffId: staffId ?? null, ...(delayMs === undefined ? {} : { notBefore: Date.now() + delayMs }), ...(forGate === true ? { forGate } : {}) });
       return c.body(null, 204);
     })
-    // 通しが社員の呼び出しを使用の上限に切り替え、終わりに戻す
+    // 通しが社員の呼び出しを使用の上限かレートの上限に切り替え、終わりに戻す
     .post("/__fake/limit", async (c) => {
       const input = LimitInput.safeParse(await c.req.json().catch(() => null));
       if (!input.success) return c.json({ type: "error", error: { type: "invalid_request_error", message: "切り替えの形が違う" } }, 400);
