@@ -1,8 +1,9 @@
 // 開発用の vite のプラグインが、API への要求に代わりの Access の証明を付ける事を確かめる。ログインと記録の 3.9
-import { IncomingMessage, ServerResponse } from "node:http";
+import { createServer, get, IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { attachAccess, localSessionCookie, upgradeAccess } from "../../dev/plugin.ts";
+import { attachAccess, edgeGzip, localSessionCookie, upgradeAccess } from "../../dev/plugin.ts";
 import { cookieHeader, SESSION_COOKIE } from "../../src/gate/auth/session.ts";
 
 /**
@@ -75,5 +76,72 @@ describe("開発環境の代わりの物", () => {
     upgradeAccess(req, "signed.jwt.token");
     expect(req.headers["cf-access-jwt-assertion"]).toBeUndefined();
     expect(req.headers.cookie).toBe("ko_session=abc");
+  });
+});
+
+const TEXT = "const screen = 'ダッシュボード';\n".repeat(200);
+
+/**
+ * edgeGzip を通して、cloudflare のプラグインと同じ形 (writeHead に状態と文と見出し、write、end) で返すサーバーに 1 度要求する
+ * @param type 返す Content-Type
+ * @param acceptEncoding ブラウザーが送る Accept-Encoding。無ければ送らない
+ * @param body 返す中身
+ * @returns 届いた見出しと、送られたままの中身
+ */
+async function fetchThrough(type: string, acceptEncoding?: string, body = Buffer.from(TEXT)): Promise<{ headers: IncomingMessage["headers"]; raw: Buffer }> {
+  const server = createServer((req, res) => {
+    edgeGzip(req, res);
+    res.writeHead(200, "OK", { "content-type": type, "content-length": String(body.length) });
+    // cloudflare のプラグインと同じく 16 KB ずつ書き、詰まったら drain を待つ
+    void (async () => {
+      for (let at = 0; at < body.length; at += 16_384) {
+        if (!res.write(body.subarray(at, at + 16_384))) await new Promise((resolve) => res.once("drain", resolve));
+      }
+      res.end();
+    })();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("待ち受けの番号が無い");
+    const { port } = address;
+    return await new Promise((resolve, reject) => {
+      get({ port, host: "127.0.0.1", path: "/assets/index.js", headers: acceptEncoding ? { "accept-encoding": acceptEncoding } : {} }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => resolve({ headers: res.headers, raw: Buffer.concat(chunks) }));
+      }).on("error", reject);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+describe("build した画面のプレビュー", () => {
+  it("文字のファイルは、本物の入口と同じく gzip で縮めて返す", async () => {
+    const { headers, raw } = await fetchThrough("text/javascript; charset=utf-8", "gzip, deflate, br");
+    expect(headers["content-encoding"]).toBe("gzip");
+    expect(headers["content-length"]).toBeUndefined();
+    expect(headers.vary).toContain("Accept-Encoding");
+    const text = gunzipSync(raw).toString("utf8");
+    expect(text).toBe(TEXT);
+    expect(raw.length).toBeLessThan(text.length);
+  });
+
+  it("画面の JS ほどの大きなファイルも、gzip の詰まりで止まらずに最後まで返す", async () => {
+    const body = Buffer.from(Array.from({ length: 60_000 }, (_, i) => `const v${String(i)} = ${String((i * 7919) % 10_007)};\n`).join(""));
+    const { raw } = await fetchThrough("text/javascript", "gzip", body);
+    expect(gunzipSync(raw).equals(body)).toBe(true);
+  });
+
+  it("gzip を受けないブラウザーと、縮まない画像やフォントはそのまま返す", async () => {
+    for (const [type, accept] of [
+      ["text/javascript", undefined],
+      ["font/woff2", "gzip"],
+    ] as const) {
+      const { headers, raw } = await fetchThrough(type, accept);
+      expect(headers["content-encoding"]).toBeUndefined();
+      expect(raw.toString("utf8")).toBe(TEXT);
+    }
   });
 });

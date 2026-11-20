@@ -1,21 +1,24 @@
 // 8 画面と「その他」と入れた拡張の画面を、道に合わせて選ぶ。中身は screen/pages/<画面>/ に画面ごとに置く
 import type { Extension, Health } from "@know-office/core";
-import { ApprovalsPage } from "./pages/approvals/ApprovalsPage.tsx";
+import { lazy, Suspense } from "react";
 import { DashboardPage } from "./pages/dashboard/DashboardPage.tsx";
-import { GoalsPage } from "./pages/goals/GoalsPage.tsx";
-import { GuardPage } from "./pages/guard/GuardPage.tsx";
-import { RecordsPage } from "./pages/ledger/RecordsPage.tsx";
-import { ExtensionPage } from "./pages/more/ExtensionPage.tsx";
-import { MorePage } from "./pages/more/MorePage.tsx";
-import { OfficePage } from "./pages/office/OfficePage.tsx";
-import { ServicesPage } from "./pages/services/ServicesPage.tsx";
-import { SettingsPage } from "./pages/settings/SettingsPage.tsx";
-import { StaffPage } from "./pages/staff/StaffPage.tsx";
 import type { Navigate, ToggleExtension } from "./parts/navigate.ts";
 import { Section } from "./parts/section.tsx";
 import { APPROVALS_PATH, type ExtensionScreenId, type ScreenId, isExtensionScreen } from "./routes.ts";
 
 export type { Navigate, ToggleExtension } from "./parts/navigate.ts";
+
+// 最初に開くダッシュボードだけを入口の JS に入れ、ほかの画面は開いた時に読む。スマートフォンの 4G で 2 秒以内に出すため (画面の全体の 3.4)
+const ApprovalsPage = lazy(() => import("./pages/approvals/ApprovalsPage.tsx").then((m) => ({ default: m.ApprovalsPage })));
+const GoalsPage = lazy(() => import("./pages/goals/GoalsPage.tsx").then((m) => ({ default: m.GoalsPage })));
+const GuardPage = lazy(() => import("./pages/guard/GuardPage.tsx").then((m) => ({ default: m.GuardPage })));
+const RecordsPage = lazy(() => import("./pages/ledger/RecordsPage.tsx").then((m) => ({ default: m.RecordsPage })));
+const ExtensionPage = lazy(() => import("./pages/more/ExtensionPage.tsx").then((m) => ({ default: m.ExtensionPage })));
+const MorePage = lazy(() => import("./pages/more/MorePage.tsx").then((m) => ({ default: m.MorePage })));
+const OfficePage = lazy(() => import("./pages/office/OfficePage.tsx").then((m) => ({ default: m.OfficePage })));
+const ServicesPage = lazy(() => import("./pages/services/ServicesPage.tsx").then((m) => ({ default: m.ServicesPage })));
+const SettingsPage = lazy(() => import("./pages/settings/SettingsPage.tsx").then((m) => ({ default: m.SettingsPage })));
+const StaffPage = lazy(() => import("./pages/staff/StaffPage.tsx").then((m) => ({ default: m.StaffPage })));
 
 export interface PageProps {
   screen: ScreenId | ExtensionScreenId | "more";
@@ -29,7 +32,15 @@ export interface PageProps {
   toggleExtension: ToggleExtension;
 }
 
-export function Page({ screen, pathname, query, health, navigate, extensions, toggleExtension }: PageProps) {
+export function Page(props: PageProps) {
+  return (
+    <Suspense fallback={<p role="status">画面を読んでいます</p>}>
+      <Chosen {...props} />
+    </Suspense>
+  );
+}
+
+function Chosen({ screen, pathname, query, health, navigate, extensions, toggleExtension }: PageProps) {
   if (isExtensionScreen(screen)) return <ExtensionPage id={screen.slice("ext:".length)} />;
   switch (screen) {
     case "dashboard":

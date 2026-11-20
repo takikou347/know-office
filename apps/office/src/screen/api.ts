@@ -67,15 +67,20 @@ export function isVisit(referrer: string, host: string): boolean {
 }
 
 /**
- * 画面が開いて最初の API の呼び出しだけに、訪問の印を付ける fetch を作る。referrer の文字列は送らない
+ * 画面が開いて最初の API の呼び出しだけに、訪問の印を付ける fetch を作る。referrer の文字列は送らない。
+ * HTML が先読みした道 (<link rel=preload as=fetch>) は、最初の 1 度だけ印を付けずに呼ぶ。先読みは印を持たないので、印を付けると
+ * ブラウザーが先読みの返事を使えば印が届かず、使わなければ 2 度読む。印はその次の呼び出しに付ける
  * @param fetcher 包む fetch
  * @param visit 訪問か
+ * @param preloaded HTML が先読みした道 (絶対の URL)
  * @returns 包んだ fetch
  */
-export function visitFetch(fetcher: Fetch, visit: boolean): Fetch {
+export function visitFetch(fetcher: Fetch, visit: boolean, preloaded: readonly string[] = []): Fetch {
   let pending = visit;
+  const unused = new Set(preloaded);
   return (input, init) => {
-    if (!pending) return fetcher(input, init);
+    const url = input instanceof Request ? input.url : String(input);
+    if (unused.delete(url) || !pending) return fetcher(input, init);
     pending = false;
     const headers = new Headers(init?.headers);
     headers.set(VISIT_HEADER, "1");
@@ -88,11 +93,12 @@ export function visitFetch(fetcher: Fetch, visit: boolean): Fetch {
  * @param base 入口の origin
  * @param fetcher 包む fetch。無ければブラウザーの fetch
  * @param visit 画面を開いたのが訪問か。最初の呼び出しに印を付ける
+ * @param preloaded HTML が先読みした道 (絶対の URL)。最初の 1 度は印を付けずに呼び、先読みの返事を使わせる
  * @returns Hono の RPC のクライアント
  */
-export function createApi(base: string, fetcher?: Fetch, visit = false) {
+export function createApi(base: string, fetcher?: Fetch, visit = false, preloaded: readonly string[] = []) {
   // ログインセッションを作り直して呼び直す時も同じ印が付くが、ゲートウェイはログインを通った呼び出しだけを数える
-  return hc<Gate>(base, { fetch: visitFetch(sessionFetch(base, fetcher), visit) });
+  return hc<Gate>(base, { fetch: visitFetch(sessionFetch(base, fetcher), visit, preloaded) });
 }
 
 /** 入口を呼ぶ口の型 */

@@ -5,27 +5,28 @@ import { App } from "../src/screen/App.tsx";
 import { ApiContext, createApi } from "../src/screen/api.ts";
 import { RecordBreakdown } from "../src/screen/pages/ledger/RecordBreakdown.tsx";
 import { StaffDetail, staffTabOf } from "../src/screen/pages/staff/StaffPage.tsx";
+import { renderAll } from "./helpers/render.ts";
 
 /** 社員の様子を描く時の社員 */
 const REVIEWER: StaffOverview = { id: "reviewer", role: "レビュー担当", model: "claude-opus-5-5", state: "working", nodeId: null, nodeTitle: null, workedMsToday: 0 };
 
 describe("画面", () => {
-  it("入口の様子を受け取る前は、確かめている事を出す", () => {
-    const html = renderToString(<App />);
+  it("入口の様子を受け取る前は、確かめている事を出す", async () => {
+    const html = await renderAll(<App />);
     expect(html).toContain("know-office");
     expect(html).toContain("入口を確かめています");
   });
 
-  it("入口の様子を受け取ったら、つながった事を出す", () => {
-    const html = renderToString(<App health={{ ok: true, part: "gate" }} />);
+  it("入口の様子を受け取ったら、つながった事を出す", async () => {
+    const html = await renderAll(<App health={{ ok: true, part: "gate" }} />);
     expect(html).toContain("入口とつながりました");
   });
 
-  it("道に合わせて画面の題を出し、知らない道はダッシュボードにする", () => {
-    expect(renderToString(<App url="/guard" />)).toContain("止めた記録");
-    expect(renderToString(<App url="/more" />)).toContain("その他の画面");
-    expect(renderToString(<App url="/nowhere" />)).toContain('<h1 class="ki-appbar__title">ダッシュボード</h1>');
-    expect(renderToString(<App url="/nowhere" />)).toContain("承認を待つ物");
+  it("道に合わせて画面の題を出し、知らない道はダッシュボードにする", async () => {
+    expect(await renderAll(<App url="/guard" />)).toContain("止めた記録");
+    expect(await renderAll(<App url="/more" />)).toContain("その他の画面");
+    expect(await renderAll(<App url="/nowhere" />)).toContain('<h1 class="ki-appbar__title">ダッシュボード</h1>');
+    expect(await renderAll(<App url="/nowhere" />)).toContain("承認を待つ物");
   });
 
   it("社員と仕事は、道の問いで開くタブを決め、知らない値は会話にする", () => {
@@ -35,18 +36,18 @@ describe("画面", () => {
     expect(staffTabOf(null)).toBe("talk");
   });
 
-  it("記録の内訳は、入口を呼ぶ口が無ければ、読んでいるままにせず読めなかった事を出す", () => {
-    const html = renderToString(<App url="/records" />);
+  it("記録の内訳は、入口を呼ぶ口が無ければ、読んでいるままにせず読めなかった事を出す", async () => {
+    const html = await renderAll(<App url="/records" />);
     expect(html).toContain("記録を読めませんでした");
     expect(html).not.toContain("記録を読んでいます");
   });
 
-  it("セキュリティと設定は、入口を呼ぶ口が無ければ、仮のデータを出さず読めなかった事を出す", () => {
-    const guard = renderToString(<App url="/guard" />);
+  it("セキュリティと設定は、入口を呼ぶ口が無ければ、仮のデータを出さず読めなかった事を出す", async () => {
+    const guard = await renderAll(<App url="/guard" />);
     expect(guard).toContain("止めている物を読めませんでした");
     expect(guard).toContain("止めた記録を読めませんでした");
     expect(guard).toContain("基準を読めませんでした");
-    const settings = renderToString(<App url="/settings" />);
+    const settings = await renderAll(<App url="/settings" />);
     expect(settings).toContain("全体のルールを読めませんでした");
     expect(settings).toContain("セッションを読めませんでした");
     expect(settings).toContain("パスキーを読めませんでした");

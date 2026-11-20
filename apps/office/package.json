@@ -7,7 +7,7 @@
     "build": "node --experimental-strip-types scripts/swagger-assets.ts && vite build && (test -f dist/client/_headers || (echo 'dist/client/_headers が無い。画面のファイルにセキュリティヘッダーが付かない' && exit 1))",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "test": "vitest run",
-    "e2e": "playwright test",
+    "e2e": "playwright test && playwright test -c playwright.speed.config.ts",
     "db:local": "for db in DB REC_2026 REC_2027 REC_2028 REC_2029 REC_2030 REC_2031; do wrangler d1 migrations apply $db --local --persist-to \"${KO_PERSIST_DIR:-.wrangler/state}\" || exit 1; done",
     "openapi": "vitest run test/gate/openapi.test.ts --update"
   },

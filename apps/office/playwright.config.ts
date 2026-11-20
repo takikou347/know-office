@@ -64,7 +64,8 @@ const screenProjects = chosen.flatMap((b, i) =>
   widths.map((w, j) => ({
     name: `${b.name}-${w.name}`,
     ...(w.testMatch ? { testMatch: w.testMatch } : {}),
-    testIgnore: [/attack\.spec\.ts/, /flows\//],
+    // 速さは build した画面で測るので、playwright.speed.config.ts で流す
+    testIgnore: [/attack\.spec\.ts/, /flows\//, /speed\.spec\.ts/],
     dependencies: [`${LOGIN_PROJECT}${b.name}`],
     use: { ...b.use, viewport: w.viewport, storageState: sessionState(b.name), extraHTTPHeaders: { "CF-Connecting-IP": sourceIp(i * widths.length + j) } },
   })),

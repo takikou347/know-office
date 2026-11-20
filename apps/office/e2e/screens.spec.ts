@@ -264,6 +264,8 @@ test("画面を移ると、中身の先頭に戻り、中身に Tab で入れる
   expect(await main.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   await page.locator("nav:visible").getByRole("link", { name: "守り" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "守り" })).toBeVisible();
+  // 守りの画面は開いた時に読むので、読み終えて中身が長くなってから確かめる
+  await expect(main.getByText("画面を読んでいます")).toBeHidden();
   expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
   await expect(main).toBeFocused();
   await expect.poll(() => main.evaluate((el) => el.scrollTop)).toBe(0);

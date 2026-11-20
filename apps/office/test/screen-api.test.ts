@@ -112,4 +112,25 @@ describe("サービスの種類", () => {
     await quiet("http://localhost/api/v1/me");
     expect(inside).toEqual([null]);
   });
+
+  it("HTML が先読みした道は印を付けずに呼び、先読みを使わせて、印は次の呼び出しに付ける", async () => {
+    // 先読み (<link rel=preload as=fetch>) は x-visit を持たない。印を付けた fetch では先読みの返事を使わず 2 度読むか、使えば印が届かない
+    const sent: { path: string; visit: string | null }[] = [];
+    const call = visitFetch(
+      (input, init) => {
+        sent.push({ path: new URL(input instanceof Request ? input.url : input).pathname, visit: new Headers(init?.headers).get(VISIT_HEADER) });
+        return Promise.resolve(Response.json({ data: 1 }));
+      },
+      true,
+      ["http://localhost/api/v1/dashboard"],
+    );
+    await call(new URL("http://localhost/api/v1/dashboard"));
+    await call("http://localhost/api/v1/notices");
+    await call("http://localhost/api/v1/dashboard");
+    expect(sent).toEqual([
+      { path: "/api/v1/dashboard", visit: null },
+      { path: "/api/v1/notices", visit: "1" },
+      { path: "/api/v1/dashboard", visit: null },
+    ]);
+  });
 });

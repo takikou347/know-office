@@ -10,6 +10,12 @@ export const CSP_NONCE_PLACEHOLDER = "KO_CSP_NONCE";
 export type ScreenEnv = Pick<Bindings, "ASSETS"> & EndpointEnv;
 
 /**
+ * ダッシュボード (/) の HTML の頭に置く、ダッシュボードの API の先読み。画面の JS を運ぶのと同じ時に読み始め、スマートフォンの 4G で 2 秒以内に出す (画面の全体の 3.4)。
+ * 画面の fetch と同じ形 (cors、同じ源のクッキー) で読むので、画面が同じ道を呼んだ時にこの返事を使う
+ */
+const DASHBOARD_PRELOAD = '<link rel="preload" href="/api/v1/dashboard" as="fetch" crossorigin>';
+
+/**
  * 要求ごとの nonce を作る。CSP の nonce は 128 ビット以上の乱数 (CSP Level 3 の 7.1)
  * @returns base64 の 24 文字
  */
@@ -40,7 +46,8 @@ export async function screenResponse(request: Request, env: ScreenEnv): Promise<
   const res = await env.ASSETS.fetch(request);
   if (!(res.headers.get("Content-Type") ?? "").startsWith("text/html")) return res;
   const nonce = newNonce();
-  const html = (await res.text()).replaceAll(CSP_NONCE_PLACEHOLDER, nonce);
+  const page = (await res.text()).replaceAll(CSP_NONCE_PLACEHOLDER, nonce);
+  const html = new URL(request.url).pathname === "/" ? page.replace("<head>", `<head>\n    ${DASHBOARD_PRELOAD}`) : page;
   const headers = new Headers(res.headers);
   const csp = screenCsp(nonce);
   headers.set("Content-Security-Policy", env.ENVIRONMENT === "development" ? devCsp(csp, nonce, env) : csp);

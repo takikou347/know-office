@@ -13,7 +13,9 @@ import { send } from "./parts/load.tsx";
 import { routeOfClick } from "./link.ts";
 import { titleOf } from "./routes.ts";
 
-const api = createApi(window.location.origin, undefined, isVisit(document.referrer, window.location.host));
+// 入口がダッシュボードの HTML に置いた API の先読み (src/gate/screen-html.ts)。最初の呼び出しはその返事を使う
+const preloaded = [...document.querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="fetch"]')].map((link) => link.href);
+const api = createApi(window.location.origin, undefined, isVisit(document.referrer, window.location.host), preloaded);
 
 /** 拡張の画面が自分のルートを呼ぶ口。ログインセッションの作り直しは入口の RPC と同じ */
 const extensionOrigin = { base: window.location.origin, fetch: sessionFetch(window.location.origin) };

@@ -2,8 +2,9 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, OutgoingHttpHeader, OutgoingHttpHeaders, ServerResponse } from "node:http";
 import { join } from "node:path";
+import { createGzip } from "node:zlib";
 import { systemClock } from "@know-office/core";
-import type { Plugin } from "vite";
+import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 import { SESSION_COOKIE } from "../src/gate/auth/session.ts";
 import { startFakes } from "./server.ts";
 
@@ -98,6 +99,49 @@ export function localSessionCookie(req: IncomingMessage, res: ServerResponse): v
     typeof a === "string" ? writeHead(status, a, devHeaders(b)) : writeHead(status, devHeaders(a));
 }
 
+/** 本物の入口 (Cloudflare) が縮めて返す、文字のファイルの形 */
+const COMPRESSIBLE = /^(text\/|application\/(javascript|json|problem\+json))/;
+
+/**
+ * build した画面のプレビューで、文字のファイルを gzip で縮めて返す。本物の入口は縮めて返すが、cloudflare のプラグインの
+ * プレビューは縮めないので、e2e の速さの通しが本物より多くを運ぶ。見出しをオブジェクトで渡す writeHead (cloudflare のプラグインの形) だけを縮める
+ * @param req 要求
+ * @param res 返事
+ */
+export function edgeGzip(req: IncomingMessage, res: ServerResponse): void {
+  if (!/\bgzip\b/.test(req.headers["accept-encoding"] ?? "") || req.method === "HEAD") return;
+  const write = res.write.bind(res);
+  const end = res.end.bind(res);
+  const writeHead = res.writeHead.bind(res);
+  const gzip = createGzip();
+  let zipping = false;
+  res.writeHead = (status: number, a?: string | OutgoingHttpHeaders | OutgoingHttpHeader[], b?: OutgoingHttpHeaders | OutgoingHttpHeader[]) => {
+    const headers = typeof a === "string" ? b : a;
+    const plain = headers === undefined || Array.isArray(headers) ? undefined : headers;
+    if (status !== 200 || !plain || !COMPRESSIBLE.test(plain["content-type"] ?? "") || plain["content-encoding"] !== undefined) {
+      return typeof a === "string" ? writeHead(status, a, b) : writeHead(status, a);
+    }
+    zipping = true;
+    gzip.on("data", (chunk: Buffer) => write(chunk));
+    gzip.on("end", () => end());
+    const { "content-length": _length, ...rest } = plain;
+    const zipped = { ...rest, "content-encoding": "gzip", vary: [res.getHeader("vary"), rest["vary"], "Accept-Encoding"].flat().filter(Boolean).join(", ") };
+    return typeof a === "string" ? writeHead(status, a, zipped) : writeHead(status, zipped);
+  };
+  // 縮める間は gzip が溜めるので、返事の drain を待たせない。待たせると gzip の詰まりを返事の詰まりと取り違え、送り手が止まる
+  res.write = (chunk: Uint8Array | string) => {
+    if (!zipping) return write(chunk);
+    gzip.write(chunk);
+    return true;
+  };
+  // cloudflare のプラグインは中身を write で書き、end は何も渡さずに呼ぶ
+  res.end = (chunk?: Uint8Array | string | (() => void)) => {
+    if (!zipping) return end(chunk);
+    gzip.end(chunk);
+    return res;
+  };
+}
+
 /** .dev.vars から読む、代わりの物の設定 */
 export type DevVars = {
   /** 代わりの物の待ち受けの番号 (DEV_FAKES_URL のポート) */
@@ -133,37 +177,54 @@ export function parseDevVars(text: string): DevVars {
   return { port: Number(new URL(need("DEV_FAKES_URL")).port), team: need("ACCESS_TEAM"), aud: need("ACCESS_AUD"), email: need("OWNER_EMAIL"), claudeKey: need("ANTHROPIC_API_KEY") };
 }
 
+/** 代わりの物を据える先。開発のサーバーと、build した画面を返すプレビューのサーバーの共通の形 */
+type DevHost = Pick<ViteDevServer | PreviewServer, "config" | "httpServer" | "middlewares">;
+
 /**
- * 開発の時だけ代わりの物を立てるプラグインを作る。どの要求もオーナーとして通るので、vite を外へ開かない
+ * 代わりの物を立て、API への要求に証明を付け、ログインセッションのクッキーを http で使える名前にする
+ * @param server 開発かプレビューのサーバー
+ */
+async function mountFakes(server: DevHost): Promise<void> {
+  const vars = parseDevVars(readFileSync(join(server.config.root, ".dev.vars"), "utf8"));
+  // 代わりのワークスペースが出来事を送る先は、このサーバーが待ち受けた番号
+  const gateBase = () => {
+    const address = server.httpServer?.address();
+    return `http://localhost:${String(typeof address === "object" && address !== null ? address.port : server.config.server.port)}`;
+  };
+  const fakes = await startFakes({ ...vars, clock: systemClock, gateBase });
+  // 証明は 1 時間で切れるので、切り替えの要求に渡す物を 10 分ごとに出し直す
+  let token = await fakes.access.sign();
+  const refresh = setInterval(() => {
+    fakes.access.sign().then((next) => (token = next), (error: unknown) => server.config.logger.error(String(error)));
+  }, 600_000);
+  server.httpServer?.once("close", () => {
+    clearInterval(refresh);
+    fakes.close();
+  });
+  // cloudflare のプラグインより先に切り替えの要求を受ける
+  server.httpServer?.prependListener("upgrade", (req: IncomingMessage) => upgradeAccess(req, token));
+  server.middlewares.use((req, res, next) => {
+    localSessionCookie(req, res);
+    attachAccess(req, fakes.access.sign).then(() => next(), next);
+  });
+}
+
+/**
+ * 開発の時と、build した画面をプレビューで返す時 (e2e の速さの通し) だけ代わりの物を立てるプラグインを作る。どの要求もオーナーとして通るので、vite を外へ開かない
  * @returns vite のプラグイン
  */
 export function devFakes(): Plugin {
   return {
     name: "know-office-dev-fakes",
+    // vite preview も serve として読まれるので、build の時だけ外れる
     apply: "serve",
-    async configureServer(server) {
-      const vars = parseDevVars(readFileSync(join(server.config.root, ".dev.vars"), "utf8"));
-      // 代わりのワークスペースが出来事を送る先は、この開発サーバーが待ち受けた番号
-      const gateBase = () => {
-        const address = server.httpServer?.address();
-        return `http://localhost:${String(typeof address === "object" && address !== null ? address.port : server.config.server.port)}`;
-      };
-      const fakes = await startFakes({ ...vars, clock: systemClock, gateBase });
-      // 証明は 1 時間で切れるので、切り替えの要求に渡す物を 10 分ごとに出し直す
-      let token = await fakes.access.sign();
-      const refresh = setInterval(() => {
-        fakes.access.sign().then((next) => (token = next), (error: unknown) => server.config.logger.error(String(error)));
-      }, 600_000);
-      server.httpServer?.once("close", () => {
-        clearInterval(refresh);
-        fakes.close();
-      });
-      // cloudflare のプラグインより先に切り替えの要求を受ける
-      server.httpServer?.prependListener("upgrade", (req: IncomingMessage) => upgradeAccess(req, token));
+    configureServer: mountFakes,
+    configurePreviewServer: async (server) => {
       server.middlewares.use((req, res, next) => {
-        localSessionCookie(req, res);
-        attachAccess(req, fakes.access.sign).then(() => next(), next);
+        edgeGzip(req, res);
+        next();
       });
+      await mountFakes(server);
     },
   };
 }

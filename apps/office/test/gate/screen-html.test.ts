@@ -26,3 +26,18 @@ describe("画面の HTML の CSP", () => {
     expect(csp).toContain("script-src 'self';");
   });
 });
+
+describe("ダッシュボードの先読み", () => {
+  it("ダッシュボード (/) の HTML は、画面の JS と同じ時にダッシュボードの API を読み始める", async () => {
+    const res = await screenResponse(new Request("https://office.example/"), envOf({ ENVIRONMENT: "production" }));
+    // 画面の fetch と同じ形 (cors、同じ源のクッキー) で読み、画面が同じ道を呼んだ時に先読みの返事を使わせる
+    expect(await res.text()).toMatch(/^<html><head>\s*<link rel="preload" href="\/api\/v1\/dashboard" as="fetch" crossorigin>/);
+  });
+
+  it("ほかの画面の HTML は、使わない API を先読みしない", async () => {
+    for (const path of ["/staff", "/approvals", "/settings?tab=keys"]) {
+      const res = await screenResponse(new Request(`https://office.example${path}`), envOf({ ENVIRONMENT: "production" }));
+      expect(await res.text()).not.toContain("preload");
+    }
+  });
+});
