@@ -7278,7 +7278,7 @@ paths:
         - services
       summary: 本番にデプロイする
       description: |-
-        15 分以内のパスキーの確認が必要。デプロイの条件を見るのはこの口だけで、main への push の自動デプロイは見ない。動かせるのは、`deploy.yml` が `workflow_dispatch` で `sha` を受けるリポジトリだけ。
+        15 分以内のパスキーの確認が必要。main への push でも、know-office が通知を受けて同じ確かめを通す (オーナーの承認は満たさない)。動かせるのは、`deploy.yml` が `workflow_dispatch` で `sha` を受けるリポジトリだけ。
 
         処理の流れ:
 

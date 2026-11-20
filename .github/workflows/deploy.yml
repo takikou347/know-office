@@ -1,5 +1,5 @@
-# main に入ると、チェックの後に D1 のマイグレーション、画面とゲートウェイとコンテナのデプロイ、デプロイした先の確かめを順に回し、確かめが落ちたら前のバージョンに戻す。
-# know-office の本番にデプロイするボタンは、デプロイの条件を確かめたコミットを sha に入れて main で手で動かす。main の先が sha と違えば本番に出さない。
+# know-office がデプロイの条件 (deployWhen) を確かめたコミットを sha に入れて main で手で動かすと、チェックの後に D1 のマイグレーション、画面とゲートウェイとコンテナのデプロイ、デプロイした先の確かめを順に回し、確かめが落ちたら前のバージョンに戻す。
+# 動かすのはオーナーの本番にデプロイするボタンと、main への push の通知を受けた know-office で、どちらも条件がそろった時だけ。main の先が sha と違えば本番に出さない。
 # プルリクエストごとに、プレビュー用の D1 と R2 を結んだプレビュー (wrangler preview) を出して確かめる。Cloudflare の鍵が無い間は、どちらも回さない
 name: Deploy
 
@@ -7,9 +7,7 @@ on:
   pull_request:
     # 閉じた時はプレビューを消す
     types: [opened, synchronize, reopened, closed]
-  push:
-    branches: [main]
-  # 動かせるのはリポジトリに書ける人と know-office の GitHub App。条件を飛ばして main の先で動かすのは push の自動デプロイと同じ
+  # main への push では回さない。動かせるのはリポジトリに書ける人と know-office の GitHub App
   workflow_dispatch:
     inputs:
       sha:
@@ -64,13 +62,13 @@ jobs:
     needs: ready
     if: needs.ready.outputs.ok == 'true' && github.event.action != 'closed'
     uses: ./.github/workflows/check.yml
-    # main への push と手で動かした時は本番に出すので、作り終えた事も確かめる。PR のプレビューは途中の物でも出す
+    # 手で動かした時は本番に出すので、作り終えた事も確かめる。PR のプレビューは途中の物でも出す
     with:
       release: ${{ github.event_name != 'pull_request' }}
 
   production:
     needs: [ready, check]
-    if: needs.ready.outputs.ok == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    if: needs.ready.outputs.ok == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:

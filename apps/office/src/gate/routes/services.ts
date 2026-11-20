@@ -133,7 +133,7 @@ const deployServiceRoute = createRoute({
   tags: ["services"],
   summary: "本番にデプロイする",
   description:
-    "15 分以内のパスキーの確認が必要。デプロイの条件を見るのはこの口だけで、main への push の自動デプロイは見ない。動かせるのは、`deploy.yml` が `workflow_dispatch` で `sha` を受けるリポジトリだけ。",
+    "15 分以内のパスキーの確認が必要。main への push でも、know-office が通知を受けて同じ確かめを通す (オーナーの承認は満たさない)。動かせるのは、`deploy.yml` が `workflow_dispatch` で `sha` を受けるリポジトリだけ。",
   "x-steps": [
     "サービスを取得し、Web アプリで、段階が `service` か `operation` で、リポジトリがある事を確かめる",
     "サービスの `deployWhen` を、版 (`service_settings` の `deployWhen` の最大の版と、受け継いでいる時は `settings` の `service.deployWhen` の最大の版) を先に、値を後に読む",
@@ -190,7 +190,7 @@ export const serviceRoutes = router
   })
   .openapi(deployServiceRoute, async (c) => {
     const { serviceId } = c.req.valid("param");
-    const { sha, ref, ...deployment } = await deployService(c.env, c.var.forge, { serviceId, now: c.var.clock.now() });
+    const { sha, ref, ...deployment } = await deployService(c.env, c.var.forge, { serviceId, now: c.var.clock.now(), by: "owner" });
     await audit(c, "service.deploy", serviceId, { sha, ref, deploymentId: deployment.id });
     return accepted(c, deployment);
   });

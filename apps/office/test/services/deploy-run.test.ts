@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { deployService } from "../../src/gate/services/deploy.ts";
 import type { Forge } from "../../src/gate/work/loop.ts";
-import { connect, seedDocsRepo, stepUp } from "../helpers/github.ts";
+import { connect, type Connected, hook, seedDocsRepo, stepUp } from "../helpers/github.ts";
 import { api, idOf, MINUTE, rows, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork({ github: true });
@@ -16,6 +16,9 @@ const CHECK_RUNS = `GET /repos/${REPO}/commits/${HEAD}/check-runs`;
 
 const Problem = z.object({ code: z.string(), detail: z.string() }).loose();
 const Accepted = z.object({ id: z.uuid(), status: z.literal("queued") }).strict();
+
+/** liveService がつないだ GitHub。push の通知を署名して送るのに使う */
+let link: Connected | null = null;
 
 /**
  * 既定のブランチの先のチェックを置く
@@ -49,7 +52,7 @@ async function approved(w: WorkWorld, owner: "reject" | null = null): Promise<st
  */
 async function liveService(w: WorkWorld, when?: string[]): Promise<string> {
   await seedDocsRepo(w);
-  await connect(w);
+  link = await connect(w);
   const id = idOf(await api(w, "POST", "/api/v1/services", { title: "動画を作るサービス", kind: "web_app", aim: "動画", users: "広報", costEstimateMicroUsd: 1, revenueEstimateMicroUsd: 2 }, 201));
   await api(w, "POST", `/api/v1/services/${id}/advance`, { to: "study", reason: "調べる" });
   await api(w, "POST", `/api/v1/services/${id}/advance`, { to: "prototype", reason: "作る", staffId: "builder", repo: REPO });
@@ -68,6 +71,24 @@ async function liveService(w: WorkWorld, when?: string[]): Promise<string> {
  */
 function deploy(w: WorkWorld, id: string, status = 202): Promise<unknown> {
   return api(w, "POST", `/api/v1/services/${id}/deploy`, undefined, status);
+}
+
+/**
+ * サービスのリポジトリへ push した通知を送る。本文は送るたびに変え、同じ本文の重ねた通知と見なされないようにする
+ * @param w テストの物
+ * @param ref push した ref
+ * @returns ゲートウェイのステータス
+ */
+async function pushed(w: WorkWorld, ref = "refs/heads/main"): Promise<number> {
+  if (link === null) throw new Error("GitHub をつないでいない");
+  const before = crypto.randomUUID().replaceAll("-", "").padEnd(40, "0");
+  const res = await hook(w, {
+    event: "push",
+    secret: link.webhookSecret,
+    delivery: crypto.randomUUID(),
+    payload: { ref, before, after: HEAD, repository: { full_name: REPO, default_branch: "main" }, installation: { id: link.installationId }, commits: [] },
+  });
+  return res.status;
 }
 
 /**
@@ -150,12 +171,77 @@ describe("段階ごとのオーナーの判断", () => {
     expect(world.gate.audits).toContainEqual(expect.objectContaining({ action: "service.deploy", target: id }));
   });
 
+  it("main に入った時もデプロイの条件を確かめる", async () => {
+    const id = await liveService(world, ["checks", "reviewer"]);
+    // 既定のブランチの先のチェックが終わらず、レビュー担当の承認も無ければ、通知は受けるが本番に出さない
+    checks(world, "pending");
+    expect(await pushed(world)).toBe(204);
+    expect(dispatched(world)).toEqual([]);
+    expect(await deployLock(world, id)).toEqual([]);
+    expect(world.gate.audits.filter((a) => a.action === "service.deploy")).toEqual([]);
+    // そろえば、ボタンと同じ口で、確かめた先のコミットを sha に入れて deploy.yml を 1 回動かし、頼んだ事を system の監査ログに残す
+    checks(world, "passed");
+    await approved(world);
+    expect(await pushed(world)).toBe(204);
+    expect(dispatched(world)).toEqual([{ ref: "main", inputs: { sha: HEAD } }]);
+    const [held] = await deployLock(world, id);
+    expect(world.gate.audits.filter((a) => a.action === "service.deploy")).toEqual([
+      expect.objectContaining({ actor: "system", target: id, detail: expect.objectContaining({ sha: HEAD, deploymentId: held?.holder }) as unknown }),
+    ]);
+  });
+
+  describe("main に入った時の境目", () => {
+    it("オーナーの承認を求める時は、push では GitHub を読まずに走らせず、ボタンでは走らせる", async () => {
+      const id = await liveService(world, ["owner", "checks"]);
+      checks(world, "passed");
+      const reads = world.gate.github.requests.filter((r) => r.route === CHECK_RUNS).length;
+      expect(await pushed(world)).toBe(204);
+      expect(world.gate.github.requests.filter((r) => r.route === CHECK_RUNS)).toHaveLength(reads);
+      expect(dispatched(world)).toEqual([]);
+      await deploy(world, id);
+      expect(dispatched(world)).toHaveLength(1);
+    });
+
+    it("既定のブランチのほかへの push と、Web アプリでないかサービスか運用の段階でない時は走らせない", async () => {
+      const id = await liveService(world, ["checks"]);
+      checks(world, "passed");
+      expect(await pushed(world, "refs/heads/ko/x")).toBe(204);
+      await world.d1.DB.prepare("UPDATE services SET kind = 'content' WHERE id = ?").bind(id).run();
+      expect(await pushed(world)).toBe(204);
+      await world.d1.DB.prepare("UPDATE services SET kind = 'web_app', stage = 'prototype' WHERE id = ?").bind(id).run();
+      expect(await pushed(world)).toBe(204);
+      expect(dispatched(world)).toEqual([]);
+    });
+
+    it("直前 10 分に頼んでいれば、push では重ねて走らせない", async () => {
+      const id = await liveService(world, ["checks"]);
+      checks(world, "passed");
+      await deploy(world, id);
+      world.clock.advance(10 * MINUTE - 1);
+      expect(await pushed(world)).toBe(204);
+      expect(dispatched(world)).toHaveLength(1);
+      world.clock.advance(1);
+      expect(await pushed(world)).toBe(204);
+      expect(dispatched(world)).toHaveLength(2);
+    });
+
+    it("push で workflow を動かせなくても通知は受け、錠を外して次の push で頼める", async () => {
+      const id = await liveService(world, ["checks"]);
+      checks(world, "passed");
+      world.gate.github.failNext(DISPATCH, 404);
+      expect(await pushed(world)).toBe(204);
+      expect(await deployLock(world, id)).toEqual([]);
+      expect(await pushed(world)).toBe(204);
+      expect(dispatched(world)).toHaveLength(2);
+    });
+  });
+
   it("条件を読んだ後に設定が変わればデプロイしない", async () => {
     const id = await liveService(world, ["checks"]);
     checks(world, "passed");
     // 条件を照らしている間に、オーナーが本番にデプロイする条件を変える
     const forge = forgeWith(world, () => setDeployWhen(world, id, 2, ["checks", "reviewer"]));
-    await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now() })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("設定が変わった") as unknown });
+    await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("設定が変わった") as unknown });
     expect(dispatched(world)).toEqual([]);
     expect(await deployLock(world, id)).toEqual([]);
   });
@@ -171,14 +257,14 @@ describe("段階ごとのオーナーの判断", () => {
     it("受け継いだ初期値を読んだ後に office の初期値が変われば断る", async () => {
       const id = await liveService(world);
       const forge = { ...world.gate.forge, defaultHead: async (repo: string) => (await setOfficeDeployWhen(world, 1, ["owner", "checks"]), world.gate.forge.defaultHead(repo)) };
-      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now() })).rejects.toMatchObject({ code: "conflict" });
+      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).rejects.toMatchObject({ code: "conflict" });
       expect(dispatched(world)).toEqual([]);
     });
 
     it("サービスで条件を変えている時は、office の初期値が変わっても断らない", async () => {
       const id = await liveService(world, ["owner"]);
       const forge = { ...world.gate.forge, defaultHead: async (repo: string) => (await setOfficeDeployWhen(world, 1, ["owner", "checks"]), world.gate.forge.defaultHead(repo)) };
-      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now() })).resolves.toMatchObject({ status: "queued" });
+      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).resolves.toMatchObject({ status: "queued" });
       expect(dispatched(world)).toHaveLength(1);
     });
 
@@ -187,7 +273,7 @@ describe("段階ごとのオーナーの判断", () => {
       const review = await approved(world);
       checks(world, "passed");
       const forge = forgeWith(world, () => world.d1.DB.prepare("UPDATE reviews SET owner_verdict = 'reject' WHERE id = ?").bind(review).run());
-      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now() })).rejects.toMatchObject({ code: "conflict" });
+      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).rejects.toMatchObject({ code: "conflict" });
       expect(dispatched(world)).toEqual([]);
     });
 
@@ -195,7 +281,7 @@ describe("段階ごとのオーナーの判断", () => {
       const id = await liveService(world, ["checks"]);
       checks(world, "passed");
       const forge = forgeWith(world, () => world.d1.DB.prepare("UPDATE services SET repo = 'example/other' WHERE id = ?").bind(id).run());
-      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now() })).rejects.toMatchObject({ code: "conflict" });
+      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).rejects.toMatchObject({ code: "conflict" });
       expect(dispatched(world)).toEqual([]);
     });
 
@@ -246,7 +332,7 @@ describe("段階ごとのオーナーの判断", () => {
     it("GitHub とつないでいなければ、外へ何も送らずに 409", async () => {
       const id = await liveService(world);
       const forge = { ...world.gate.forge, connected: () => Promise.resolve(false) };
-      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now() })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("GitHub と連携していない") as unknown });
+      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("GitHub と連携していない") as unknown });
       expect(dispatched(world)).toEqual([]);
     });
 

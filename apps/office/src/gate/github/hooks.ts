@@ -15,6 +15,7 @@ import { intakeReview } from "./hooks-reviews.ts";
 import { DROP_LINK, type GitHubLink, loadLink } from "./app.ts";
 import { repoScope } from "./rules.ts";
 import type { GuardDeps } from "../guard/deps.ts";
+import { deployPushed } from "../services/deploy.ts";
 import { receiveDeploymentStatus, receiveWorkflowRun } from "../services/deploys.ts";
 import { receiveDocsPush } from "../devloop/sync.ts";
 import { isDocsRepo } from "../devloop/docs-setting.ts";
@@ -167,7 +168,11 @@ async function intakeServiceHook(env: Bindings, hook: Hook, ctx: { forge: Forge;
   try {
     // 設計書のリポジトリの push は Issue を合わせるタスクに、ほかは依存と版の読みに回す
     if (hook.event === "push" && (await isDocsRepo(env.DB, hook.repo))) await receiveDocsPush(env, ctx.forge, hook.payload, hook.now);
-    else if (hook.event === "push") await receivePush(env, ctx.forge, hook.payload, hook.now);
+    else if (hook.event === "push") {
+      await receivePush(env, ctx.forge, hook.payload, hook.now);
+      // main への push も、ボタンと同じデプロイの条件の確かめを通ってから本番に出す
+      await deployPushed(env, ctx.forge, hook.payload, hook.now);
+    }
     else if (hook.event === "deployment_status") await receiveDeploymentStatus(env, hook.payload, hook.now);
     else await receiveWorkflowRun(env, hook.action, hook.payload, hook.now, ctx.guard);
   } catch (error) {

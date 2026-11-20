@@ -49,23 +49,25 @@ export function reviewerApproved(repo: string, head: string): SQL {
 }
 
 /**
- * デプロイの条件を、既定のブランチの先のコミットで照らす。オーナーの承認は、頼む操作そのもの
+ * デプロイの条件を、既定のブランチの先のコミットで照らす。オーナーの承認は、オーナーが頼む操作そのもの
  * @param env バインディング
  * @param forge GitHub を呼ぶ口
  * @param deployWhen デプロイの条件
  * @param target リポジトリと既定のブランチの先のコミット
  * @param target.repo リポジトリ
  * @param target.head 既定のブランチの先のコミット
+ * @param approvals オーナーの承認があるか。無ければ頼む操作そのもの (true)
+ * @param approvals.owner オーナーの承認があるか
  * @throws conflict 条件がそろっていない時 (足りない条件を detail に並べる)
  * @throws upstream_failed チェックを GitHub から読めない時
  */
-export async function requireDeployWhenAt(env: Bindings, forge: Forge, deployWhen: readonly ReleaseCondition[], target: { repo: string; head: string }): Promise<void> {
+export async function requireDeployWhenAt(env: Bindings, forge: Forge, deployWhen: readonly ReleaseCondition[], target: { repo: string; head: string }, approvals: { owner: boolean } = { owner: true }): Promise<void> {
   const [approved] = await drizzle(env.DB)
     .select({ id: reviews.id })
     .from(reviews)
     .where(and(eq(reviews.repo, target.repo), eq(reviews.headSha, target.head), eq(reviews.reviewerVerdict, "approve"), or(isNull(reviews.ownerVerdict), ne(reviews.ownerVerdict, "reject"))))
     .limit(1);
-  const met = await checkConditions(forge, deployWhen, { repo: target.repo, sha: target.head }, { reviewer: approved !== undefined, owner: true }, { all: true });
+  const met = await checkConditions(forge, deployWhen, { repo: target.repo, sha: target.head }, { reviewer: approved !== undefined, owner: approvals.owner }, { all: true });
   if (met.kind === "met") return;
   const lacking = [...(met.kind === "failed" ? ["checks (既定のブランチの先のチェックが落ちている)"] : []), ...met.missing.map((c) => MISSING[c])];
   throw new AppError("conflict", `デプロイの条件を満たしていない。足りない条件: ${lacking.join("、")}`);

@@ -1,4 +1,4 @@
-// アイデアとサービスの画面の通し。オーナーが画面で案を足し、検討して元の案をたどり、リポジトリを選んで作ると決め、設定でリポジトリを変え、前のバージョンに戻す。サービスで本番にデプロイする時も、デプロイの条件が足りなければ走らせない。見送る案も画面で見送る。デプロイの条件が足りなければサービスにできず、そろえるとサービスに進む。
+// アイデアとサービスの画面の通し。オーナーが画面で案を足し、検討して元の案をたどり、リポジトリを選んで作ると決め、設定でリポジトリを変え、前のバージョンに戻す。サービスで本番にデプロイする時も、main に push が入った時も、デプロイの条件が足りなければ走らせない。見送る案も画面で見送る。デプロイの条件が足りなければサービスにできず、そろえるとサービスに進む。
 // 画面から作れない検討の材料 (社長が出す) とデプロイの記録 (GitHub の通知が作る) だけを手元の D1 と R2 に置き、ゲートウェイの返事は差し替えない (サービスと拡張の 3.1 から 3.3)
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +46,70 @@ async function dispatches(page: Page): Promise<number> {
 
 /** 本番にデプロイする通しが使う、既定のブランチの先 */
 const DEPLOY_HEAD = "e".repeat(40);
+
+/**
+ * 代わりの GitHub に、サービスのリポジトリの main へ push した通知を送らせる。本文は送るたびに変え、同じ本文の重ねた通知と見なされないようにする
+ * @param page 開いているページ
+ */
+async function pushMain(page: Page): Promise<void> {
+  const before = crypto.randomUUID().replaceAll("-", "").padEnd(40, "0");
+  const res = await page.request.post(`${FAKE_GITHUB}/__fake/hooks`, {
+    data: { event: "push", payload: { ref: "refs/heads/main", before, after: DEPLOY_HEAD, commits: [], repository: { full_name: REPO, default_branch: "main" } } },
+  });
+  expect(res.status()).toBe(204);
+}
+
+/**
+ * 画面で案を足してサービスまで進め、設定の画面で本番にデプロイする条件を変える。既定のブランチの先は、チェックが終わらずレビュー担当の承認も無い所に置く
+ * @param page 開いているページ
+ * @param owner 条件にオーナーの承認を残すか
+ * @returns その前に代わりの GitHub が受けた、deploy.yml を動かす要求の数
+ */
+async function deployableService(page: Page, owner: boolean): Promise<number> {
+  await useOwnerPasskey(page);
+  freeRepoNames();
+  await page.goto("/services");
+  await connectGitHub(page);
+  await chooseDocsRepo(page);
+  await addIdea(page, `デプロイする案 ${crypto.randomUUID().slice(0, 8)}`);
+  const main = page.getByRole("main");
+  await move(page, "検討に進める", "調べる");
+  await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
+  await choose(page, "移す先", "作ると決める");
+  await choose(page, "リポジトリ", REPO);
+  await move(page, "作ると決める", "作る");
+  await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
+  // 初期値 (オーナーの承認だけ) のうちにサービスに進める
+  await move(page, "サービスにする", "本番に出す");
+  await expect(main.getByRole("button", { name: "サービスにする" })).toHaveCount(0);
+  // 設定の画面で、本番にデプロイする条件にチェックとレビュー担当の承認を足す
+  await main.getByRole("tab", { name: "設定" }).click();
+  const deployWhen = main.getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "本番にデプロイする条件", exact: true }) });
+  if (!owner) await deployWhen.getByRole("checkbox", { name: "オーナーの承認" }).uncheck();
+  await deployWhen.getByRole("checkbox", { name: "チェックの合格" }).check();
+  await deployWhen.getByRole("checkbox", { name: "レビュー担当の承認" }).check();
+  await deployWhen.getByLabel("本番にデプロイする条件を変える理由").fill("チェックとレビューも見る");
+  await deployWhen.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
+  await expect(deployWhen.getByText(/本番にデプロイする条件を変えました/)).toBeVisible();
+
+  // 既定のブランチの先のチェックはまだ終わらず、レビュー担当の承認も無い
+  await fakeGitHubRoute(page, `GET /repos/${REPO}`, { full_name: REPO, private: false, default_branch: "main" });
+  await fakeGitHubRoute(page, `GET /repos/${REPO}/git/ref/heads/main`, { ref: "refs/heads/main", object: { sha: DEPLOY_HEAD } });
+  await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${DEPLOY_HEAD}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "in_progress", conclusion: null }] });
+  await fakeGitHubRoute(page, `POST /repos/${REPO}/actions/workflows/deploy.yml/dispatches`, {});
+  return (await dispatchBodies(page, "deploy.yml")).length;
+}
+
+/**
+ * 既定のブランチの先のチェックを通し、レビュー担当がそのコミットを承認した所を置く。社員の承認は画面から作れないので手元の D1 に置く
+ * @param page 開いているページ
+ */
+async function meetDeployWhen(page: Page): Promise<void> {
+  await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${DEPLOY_HEAD}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] });
+  seedMain(
+    `INSERT INTO reviews (id, node_id, repo, pr_number, branch, base_sha, head_sha, checks, reviewer_verdict) VALUES ('${crypto.randomUUID()}', '${crypto.randomUUID()}', '${REPO}', 1, 'x', '${"a".repeat(40)}', '${DEPLOY_HEAD}', '[]', 'approve')`,
+  );
+}
 
 /**
  * 社長が出したのと同じ検討の材料を、手元の R2 に置いて案から指す
@@ -189,37 +253,8 @@ test("デプロイの条件がそろわないとサービスにできず、足�
 
 test.describe("段階ごとのオーナーの判断", () => {
   test("本番にデプロイする時にデプロイの条件を確かめる", async ({ page }) => {
-    await useOwnerPasskey(page);
-    freeRepoNames();
-    await page.goto("/services");
-    await connectGitHub(page);
-    await chooseDocsRepo(page);
-    await addIdea(page, `デプロイする案 ${crypto.randomUUID().slice(0, 8)}`);
+    const before = await deployableService(page, true);
     const main = page.getByRole("main");
-    await move(page, "検討に進める", "調べる");
-    await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
-    await choose(page, "移す先", "作ると決める");
-    await choose(page, "リポジトリ", REPO);
-    await move(page, "作ると決める", "作る");
-    await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
-    // 初期値 (オーナーの承認だけ) のうちにサービスに進める
-    await move(page, "サービスにする", "本番に出す");
-    await expect(main.getByRole("button", { name: "サービスにする" })).toHaveCount(0);
-    // 設定の画面で、本番にデプロイする条件にチェックとレビュー担当の承認を足す
-    await main.getByRole("tab", { name: "設定" }).click();
-    const deployWhen = main.getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "本番にデプロイする条件", exact: true }) });
-    await deployWhen.getByRole("checkbox", { name: "チェックの合格" }).check();
-    await deployWhen.getByRole("checkbox", { name: "レビュー担当の承認" }).check();
-    await deployWhen.getByLabel("本番にデプロイする条件を変える理由").fill("チェックとレビューも見る");
-    await deployWhen.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
-    await expect(deployWhen.getByText(/本番にデプロイする条件を変えました/)).toBeVisible();
-
-    // 既定のブランチの先のチェックはまだ終わらず、レビュー担当の承認も無い
-    await fakeGitHubRoute(page, `GET /repos/${REPO}`, { full_name: REPO, private: false, default_branch: "main" });
-    await fakeGitHubRoute(page, `GET /repos/${REPO}/git/ref/heads/main`, { ref: "refs/heads/main", object: { sha: DEPLOY_HEAD } });
-    await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${DEPLOY_HEAD}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "in_progress", conclusion: null }] });
-    await fakeGitHubRoute(page, `POST /repos/${REPO}/actions/workflows/deploy.yml/dispatches`, {});
-    const before = (await dispatchBodies(page, "deploy.yml")).length;
     await page.reload();
     await main.getByRole("button", { name: "本番にデプロイする" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "デプロイする", exact: true }).click();
@@ -228,14 +263,32 @@ test.describe("段階ごとのオーナーの判断", () => {
     expect(await dispatchBodies(page, "deploy.yml")).toHaveLength(before);
 
     // チェックが通り、レビュー担当が先のコミットを承認すれば、確かめたコミットを sha に入れて main で動かす
-    await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/${DEPLOY_HEAD}/check-runs`, { total_count: 1, check_runs: [{ name: "verify", status: "completed", conclusion: "success" }] });
-    seedMain(
-      `INSERT INTO reviews (id, node_id, repo, pr_number, branch, base_sha, head_sha, checks, reviewer_verdict) VALUES ('${crypto.randomUUID()}', '${crypto.randomUUID()}', '${REPO}', 1, 'x', '${"a".repeat(40)}', '${DEPLOY_HEAD}', '[]', 'approve')`,
-    );
+    await meetDeployWhen(page);
     await main.getByRole("button", { name: "本番にデプロイする" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "デプロイする", exact: true }).click();
     await expect(main.getByText("デプロイするよう GitHub に頼みました")).toBeVisible();
     await expect(main.getByText("デプロイできませんでした")).toHaveCount(0);
+    const sent = await dispatchBodies(page, "deploy.yml");
+    expect(sent).toHaveLength(before + 1);
+    expect(sent.at(-1)).toEqual({ ref: "main", inputs: { sha: DEPLOY_HEAD } });
+  });
+
+  test("main に入った時もデプロイの条件を確かめる", async ({ page }) => {
+    // 条件はチェックとレビュー担当の承認だけにする。オーナーの承認を求めると、push では走らせずにボタンを待つ
+    const before = await deployableService(page, false);
+    // 先のコミットのチェックが終わらず、レビュー担当の承認も無ければ、main に push が入っても走らせない
+    await pushMain(page);
+    expect(await dispatchBodies(page, "deploy.yml")).toHaveLength(before);
+    // ボタンで頼んでも同じ条件で断り、足りない条件が画面に出る
+    const main = page.getByRole("main");
+    await page.reload();
+    await main.getByRole("button", { name: "本番にデプロイする" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "デプロイする", exact: true }).click();
+    await expect(main.getByText(/足りない条件: checks .*、reviewer /)).toBeVisible();
+    expect(await dispatchBodies(page, "deploy.yml")).toHaveLength(before);
+    // そろえば、次の push でボタンと同じ口を通り、確かめたコミットを sha に入れて main で動かす
+    await meetDeployWhen(page);
+    await pushMain(page);
     const sent = await dispatchBodies(page, "deploy.yml");
     expect(sent).toHaveLength(before + 1);
     expect(sent.at(-1)).toEqual({ ref: "main", inputs: { sha: DEPLOY_HEAD } });

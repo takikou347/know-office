@@ -90,17 +90,22 @@ void describe("自動のデプロイとプレビュー環境", () => {
     assert.match(all.get("check") ?? "", /^ {4}uses: \.\/\.github\/workflows\/check\.yml$/m);
   });
 
-  void it("main ではチェックの後にマイグレーション、デプロイ、確かめを回し、確かめが落ちたら戻す", () => {
+  void it("本番はチェックの後にマイグレーション、デプロイ、確かめを回し、確かめが落ちたら戻す", () => {
     const production = all.get("production") ?? "";
     assert.match(production, /^ {4}needs: \[ready, check\]$/m);
-    assert.match(production, /&& \(github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'\)\)$/m);
+    assert.match(production, /&& github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'$/m);
     inOrder(production, ["pnpm build", "wrangler d1 migrations apply", "wrangler deploy", "node scripts/smoke.ts", "wrangler rollback", "node scripts/smoke.ts"]);
     assert.match(production, /^ {8}if: failure\(\) && steps\.deploy\.outcome == 'success'$/m);
     // 戻した後にもう一度聞き、戻した先が返るかを出す
     assert.match(production, /^ {6}- id: rollback\n/m);
     assert.match(production, /^ {8}if: failure\(\) && steps\.rollback\.outcome == 'success'\n(.*\n){4} {8}run: node scripts\/smoke\.ts$/m);
     assert.match(production, /^ {6}cancel-in-progress: false$/m);
-    assert.match(deploy, /^ {2}push:\n {4}branches: \[main\]$/m);
+  });
+
+  void it("main への push では本番に出さず、know-office がデプロイの条件を確かめて手で動かした時だけ出す", () => {
+    // push の道は know-office が通知を受けて deployWhen を確かめ、そろった時だけ workflow_dispatch で動かす (サービスと拡張の 3.1)
+    assert.doesNotMatch(deploy, /^ {2}push:$/m);
+    for (const [name, job] of all) assert.doesNotMatch(job, /'push'/, `${name} が push で回る`);
   });
 
   void it("プルリクエストごとにプレビュー用の置き場でプレビューを出して確かめ、閉じたら消す", () => {
