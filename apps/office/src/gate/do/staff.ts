@@ -123,7 +123,7 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
-   * 次の alarm が掛かっていなければ wake で掛ける。持っているタスクの呼び出しが始まっていなければ始める。5 分ごとの定期ジョブが呼ぶ
+   * 次の alarm が掛かっていなければ wake で掛ける。持っているタスクの呼び出しが始まっていなければ始め、働いていて手が空いていれば次のタスクを取る。5 分ごとの定期ジョブが呼ぶ
    * 新しい社員 DO は、誰かが呼ぶまで alarm を持たないので、9 時に出勤しない
    * @param now 今の時刻
    * @returns 掛かっている alarm の時刻。無ければ null
@@ -137,6 +137,8 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
       .catch((error: unknown) => log("warn", "editor_sweep_failed", { staffId: id, error: error instanceof Error ? error.message : "unknown" }));
     // pull でタスクを doing にした後、呼び出しを始める前に DO が落ちると、誰も始めない。ここで見つけて始める
     if (nodeId !== null && (state === "working" || state === "called") && !(await this.runState(nodeId)).started) this.#begin("continue", now);
+    // 知らせ (notifyStaff) は手の空いた時に来るとは限らない。waiting などから working に戻った時に残っていた todo を、次の知らせを待たずにここで取る
+    if (nodeId === null && state === "working") await this.pull(now);
     return { alarm: await this.ctx.storage.getAlarm() };
   }
 

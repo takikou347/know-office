@@ -196,6 +196,18 @@ describe("社員が自分で働き始める", () => {
     expect(failed).toHaveLength(1);
   });
 
+  it("働いていて手の空いた社員は、新しいタスクの知らせを待たずに arm で残った todo を取って呼ぶ", async () => {
+    // 知らせが来なかった形にするため、pull を通さずに arm だけを呼ぶ
+    await worker.staff("builder", "arm", jst(9, 2));
+    await until(async () => (await runs(worker)).length > 0);
+    expect(await runs(worker)).toHaveLength(1);
+    expect(await statusOf(worker)).toEqual({ status: "doing" });
+    // 持った後の arm は重ねて取らず、呼び出しも重ねない
+    await worker.staff("builder", "arm", jst(9, 3));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await runs(worker)).toHaveLength(1);
+  });
+
   it("タスクを取った後に runs を呼ばずに落ちても、arm が見つけて呼ぶ", async () => {
     await worker.query("DB", `UPDATE nodes SET status = 'doing' WHERE id = '${TASK.nodeId}'`);
     // pull を通らずに持たせ、runs を呼ぶ前に DO が落ちた形にする
