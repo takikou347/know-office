@@ -1,0 +1,95 @@
+# サービスのリポジトリの .github/workflows/deploy.yml に、そのまま置く雛形。know-office の本番にデプロイするボタンと、既定のブランチへの push の通知を受けた know-office が、
+# デプロイの条件を確かめたコミットを sha に入れて既定のブランチで動かす。既定のブランチのほかの ref と、既定のブランチの先が sha と違う時は本番に出さない。
+# 出すのはリポジトリ名と同じ名前の Worker で、出した後に SERVICE_URL に聞き、返らなければ前のバージョンに戻す (サービスと拡張の 3.1、運用手順の 1 章)
+# 前提: pnpm (package.json の packageManager)、build のスクリプト、devDependencies の wrangler、リポジトリの直下の wrangler の設定
+name: Deploy
+
+# push と PR では回らない。動かせるのはリポジトリに書ける人と know-office の GitHub App
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: know-office がデプロイの条件を確かめたコミット (40 桁)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # 入力と ref は env で渡し、命令の文に直に入れない
+      - name: 既定のブランチと確かめたコミットを確かめる
+        env:
+          SHA: ${{ inputs.sha }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+          if [ -z "$DEFAULT_BRANCH" ] || [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then echo "::error::既定のブランチのほかからは本番に出さない"; exit 1; fi
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then echo "::error::sha が 40 桁の 16 進でない"; exit 1; fi
+          if [ "$SHA" != "$GITHUB_SHA" ]; then echo "::error::確かめたコミットの後に既定のブランチが進んだので、本番に出さない"; exit 1; fi
+      # know-office が頼んだのに出ない事を runs に残すため、鍵が無ければ飛ばさずに落とす。名前だけを出し、値は出さない
+      - id: keys
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SERVICE_URL: ${{ vars.SERVICE_URL }}
+        run: |
+          set -eu
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID SERVICE_URL; do
+            if [ -z "$(printenv "$name" || true)" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then echo "::error::本番に出す鍵が無い。無い物:$missing"; exit 1; fi
+
+  production:
+    needs: ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # environment を持つ job には GitHub がデプロイ (task は deploy) を作って結果を送り、know-office はその success をデプロイとして数える
+    environment:
+      name: production
+      url: ${{ vars.SERVICE_URL }}
+    # rollback.yml と同じ並びで 1 つずつ。途中で止めない。待っている実行は、後から頼んだ実行が来ると GitHub が取り消す
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    # Cloudflare の鍵は、出すステップと戻すステップにだけ渡す。依存を入れるステップと build には渡さない
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # Worker の名前はリポジトリ名にする。know-office はこの名前でサービスの様子を読む
+      - id: deploy
+        name: 本番に出す
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --name "${GITHUB_REPOSITORY#*/}" --message "$GITHUB_SHA"
+      - name: 出した URL に聞く
+        env:
+          SERVICE_URL: ${{ vars.SERVICE_URL }}
+        run: curl --fail --silent --show-error --output /dev/null --max-time 10 --retry 5 --retry-delay 5 --retry-all-errors "$SERVICE_URL"
+      - id: rollback
+        name: 前のバージョンに戻す
+        if: failure() && steps.deploy.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler rollback --name "${GITHUB_REPOSITORY#*/}" --yes --message "$GITHUB_SHA の確かめが落ちた"
+      # 戻した先が返るかを出す。戻せても job は落ちたまま
+      - name: 戻した先の URL に聞く
+        if: failure() && steps.rollback.outcome == 'success'
+        env:
+          SERVICE_URL: ${{ vars.SERVICE_URL }}
+        run: curl --fail --silent --show-error --output /dev/null --max-time 10 --retry 5 --retry-delay 5 --retry-all-errors "$SERVICE_URL"
