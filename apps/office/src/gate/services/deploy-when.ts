@@ -7,7 +7,7 @@ import { reviews, serviceSettings, settings } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { checkConditions } from "../work/conditions.ts";
 import type { Forge } from "../work/loop.ts";
-import { DEFAULT_PREFIX, loadOfficeDefaults, loadServiceSettings, serviceRules } from "./settings.ts";
+import { DEFAULT_PREFIX, loadOfficeDefaults, loadServiceSettings } from "./settings.ts";
 
 /** 足りない条件を、オーナーに出す文にする */
 const MISSING: Record<ReleaseCondition, string> = {
@@ -76,19 +76,22 @@ export async function requireDeployWhenAt(env: Bindings, forge: Forge, deployWhe
 /**
  * サービスに進めてよいかを、サービスの deployWhen で確かめる。オーナーの承認は、進める操作そのもの。チェックは既定のブランチの先のコミットで、レビュー担当の承認は、そのコミットを確かめて承認した reviews の行で確かめる
  * チェックもレビュー担当も求めなければ GitHub を呼ばない。求めるのに GitHub とつないでいなければ、確かめられないので断る
+ * 条件は版を先に、値を後に読み、段階を書く文に重ねる「読んだ版のまま」の条件を返す。レビュー担当を求める時は、確かめた承認の行がまだあってオーナーが断っていない事も重ねる
  * @param env バインディング
  * @param forge GitHub を呼ぶ口
  * @param service サービス ID とリポジトリ
  * @param service.id サービス ID
  * @param service.repo リポジトリ。まだ決めていなければ null
  * @throws conflict 条件がそろっていない時 (足りない条件を detail に並べる)、確かめられない時 (GitHub とつないでいない、リポジトリが無い)
+ * @returns 段階を書く時に重ねる条件
  * @throws upstream_failed 先のコミットかチェックを GitHub から読めない時
  */
-export async function requireDeployConditions(env: Bindings, forge: Forge, service: { id: string; repo: string | null }): Promise<void> {
-  const { deployWhen } = await serviceRules(env.DB, service.id);
-  if (!deployWhen.includes("checks") && !deployWhen.includes("reviewer")) return;
+export async function requireDeployConditions(env: Bindings, forge: Forge, service: { id: string; repo: string | null }): Promise<SQL> {
+  const { deployWhen, still } = await readDeployRules(env.DB, service.id);
+  if (!deployWhen.includes("checks") && !deployWhen.includes("reviewer")) return still;
   if (service.repo === null) throw new AppError("conflict", "リポジトリが無いので、デプロイの条件を確かめられない");
   if (!(await forge.connected())) throw new AppError("conflict", `GitHub と連携していないので、デプロイの条件 (${deployWhen.join(", ")}) を確かめられない`);
   const head = await forge.defaultHead(service.repo);
   await requireDeployWhenAt(env, forge, deployWhen, { repo: service.repo, head });
+  return deployWhen.includes("reviewer") ? sql`${still} AND ${reviewerApproved(service.repo, head)}` : still;
 }

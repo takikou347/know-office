@@ -192,8 +192,8 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
     ...(prototype && input.repo !== undefined && !SERVICE_NAME.test((input.repo.split("/")[1] ?? "").toLowerCase()) ? [{ pointer: "#/repo", detail: "設計書の置き場にできる名前 (小文字、数字、. _ - で、頭は英数字) のリポジトリを選ぶ" }] : []),
   ];
   if (missing.length > 0) throw new AppError("validation_failed", "作ると決める時は担当の社員とリポジトリが要る", { errors: missing });
-  // service に進める時は、サービスの deployWhen を確かめる。足りなければ何も書かずに断る
-  if (input.to === "service") await requireDeployConditions(env, forge, row);
+  // service に進める時は、サービスの deployWhen を確かめる。足りなければ何も書かずに断る。確かめた後に条件の版か承認が変われば、段階を書く文で断る
+  const deployable = input.to === "service" ? await requireDeployConditions(env, forge, row) : undefined;
   const change: Partial<ServiceRow> = { stage: input.to };
   if (prototype) {
     change.staffId = input.staffId ?? null;
@@ -210,7 +210,7 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
   if (input.to === "study") task = await studyTask(env, row, actor);
   else if (docs !== null && input.repo !== undefined) task = await designTask(env, row, input.repo, docs.repo, actor);
   // 設計書のリポジトリの版、連携、同じ名前のサービスが無い事も、書く時に重ねる
-  const conditions = [stillAt(serviceId, row.stage), linked, docs?.still, sameName].filter((c): c is SQL => c !== undefined);
+  const conditions = [stillAt(serviceId, row.stage), linked, docs?.still, sameName, deployable].filter((c): c is SQL => c !== undefined);
   const still = and(...conditions) ?? stillAt(serviceId, row.stage);
   // 出来事と調べるタスクを先に足す。後の更新で段階が変わるので、どれも読んだ段階のままの時だけ書く。1 つでも失敗すれば全部を書かない
   const statements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
@@ -219,11 +219,11 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
     orm
       .update(services)
       .set(change)
-      .where(and(eq(services.id, serviceId), eq(services.stage, row.stage), linked, docs?.still, sameName))
+      .where(and(eq(services.id, serviceId), eq(services.stage, row.stage), linked, docs?.still, sameName, deployable))
       .returning({ id: services.id }),
   ];
   const results: unknown[] = await orm.batch(statements);
-  if (Moved.parse(results.at(-1)).length === 0) throw new AppError("conflict", "段階か GitHub との連携が変わった");
+  if (Moved.parse(results.at(-1)).length === 0) throw new AppError("conflict", "段階か GitHub との連携か、デプロイの条件が変わった");
   if (task) {
     await recordCreated(env, task, actor);
     // 調べるタスクは社長、設計書を書くタスクは開発担当を呼ぶ

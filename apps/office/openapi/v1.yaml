@@ -7100,13 +7100,13 @@ paths:
         - サービスを取得し、現在の段階から移れる段階かを確認する。移れるのは `idea` から `study` か `dropped`、`study` から `prototype` か `dropped`、`prototype` から `service` か `dropped`、`service` から `operation` か `closed`、`operation` から `closed`
         - "`prototype` に進める場合は担当の社員を `staffId` で、リポジトリを `repo` で決める。`repo` は `prototype` に進める時だけ受ける。`dropped` にする場合は理由を `dropped_reason` に残す"
         - "`repo` は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を `GET /installation/repositories` で確かめる"
-        - "`service` に進める場合は、サービスの `deployWhen` を確かめる。オーナーの承認は、この操作そのもの。`checks` と `reviewer` を求める時だけ、GitHub とつないでいる事を確かめ、既定のブランチの先のコミットのチェックが全部通っている事と、`reviews` にそのコミットをレビュー担当が承認した行がある事を確かめる。足りなければ何も書かずに断り、足りない条件を `detail` に並べる"
+        - "`service` に進める場合は、サービスの `deployWhen` を、版 (`service_settings` の `deployWhen` の最大の版と、受け継いでいる時は `settings` の `service.deployWhen` の最大の版) を先に、値を後に読んで確かめる。オーナーの承認は、この操作そのもの。`checks` と `reviewer` を求める時だけ、GitHub とつないでいる事を確かめ、既定のブランチの先のコミットのチェックが全部通っている事と、`reviews` にそのコミットをレビュー担当が承認した行がある事を確かめる。足りなければ何も書かずに断り、足りない条件を `detail` に並べる"
         - "`study` に進める場合は、office の受け付けのプロジェクトの下に置く、似た物、作る量、セキュリティの要る所を調べる社長のタスクを組み立てる"
-        - 読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
+        - 読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のまま、`service` に進める時は読んだ `deployWhen` の版のままで、レビュー担当を求める時は確かめた承認の行がまだあってオーナーが断っていない時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
         - 監査ログに `service.advance` を記録する
       x-errors:
         - "404 `not_found`: サービスが存在しない"
-        - "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、または `service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)"
+        - "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、`service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、または確かめた後に `deployWhen` の版かレビューの承認が変わった"
         - "422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない時も)"
@@ -7169,15 +7169,15 @@ paths:
         1. サービスを取得し、現在の段階から移れる段階かを確認する。移れるのは `idea` から `study` か `dropped`、`study` から `prototype` か `dropped`、`prototype` から `service` か `dropped`、`service` から `operation` か `closed`、`operation` から `closed`
         2. `prototype` に進める場合は担当の社員を `staffId` で、リポジトリを `repo` で決める。`repo` は `prototype` に進める時だけ受ける。`dropped` にする場合は理由を `dropped_reason` に残す
         3. `repo` は、GitHub と連携していて、GitHub App のインストールで選んだリポジトリの中にある事を `GET /installation/repositories` で確かめる
-        4. `service` に進める場合は、サービスの `deployWhen` を確かめる。オーナーの承認は、この操作そのもの。`checks` と `reviewer` を求める時だけ、GitHub とつないでいる事を確かめ、既定のブランチの先のコミットのチェックが全部通っている事と、`reviews` にそのコミットをレビュー担当が承認した行がある事を確かめる。足りなければ何も書かずに断り、足りない条件を `detail` に並べる
+        4. `service` に進める場合は、サービスの `deployWhen` を、版 (`service_settings` の `deployWhen` の最大の版と、受け継いでいる時は `settings` の `service.deployWhen` の最大の版) を先に、値を後に読んで確かめる。オーナーの承認は、この操作そのもの。`checks` と `reviewer` を求める時だけ、GitHub とつないでいる事を確かめ、既定のブランチの先のコミットのチェックが全部通っている事と、`reviews` にそのコミットをレビュー担当が承認した行がある事を確かめる。足りなければ何も書かずに断り、足りない条件を `detail` に並べる
         5. `study` に進める場合は、office の受け付けのプロジェクトの下に置く、似た物、作る量、セキュリティの要る所を調べる社長のタスクを組み立てる
-        6. 読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のままの時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
+        6. 読んだ段階のままで、`repo` を決める時は確かめた時の連携 (`vault` の `github_installation` の版) のまま、`service` に進める時は読んだ `deployWhen` の版のままで、レビュー担当を求める時は確かめた承認の行がまだあってオーナーが断っていない時だけ、`service_events` への追加、調べるタスクの追加、`services` の更新を 1 回のバッチで書く。どれかが失敗すれば、どれも書かない
         7. 監査ログに `service.advance` を記録する
 
         このルート固有のエラー:
 
         - 404 `not_found`: サービスが存在しない
-        - 409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、または `service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)
+        - 409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、`service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、または確かめた後に `deployWhen` の版かレビューの承認が変わった
         - 422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない時も)

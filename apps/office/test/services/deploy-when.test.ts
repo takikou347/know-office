@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { requireDeployConditions } from "../../src/gate/services/deploy-when.ts";
 import { UNCONNECTED_FORGE } from "../../src/gate/work/loop.ts";
-import { connect, seedDocsRepo, stepUp } from "../helpers/github.ts";
+import { connect, seedDocsRepo, stepUp, wrapDb } from "../helpers/github.ts";
 import { api, idOf, rows, useWork, type WorkWorld } from "../helpers/work.ts";
 
 const world = useWork({ github: true });
@@ -80,6 +80,48 @@ async function stateOf(w: WorkWorld, id: string): Promise<{ stage: unknown; even
   return { stage: row?.["stage"], events: events.length, audits: w.gate.audits.filter((a) => a.action === "service.advance").length };
 }
 
+/**
+ * サービスに進める段階の書きの直前に、別の書きを 1 度だけ挟む
+ * @param w テストの物
+ * @param between 挟む書き
+ */
+function beforeWrite(w: WorkWorld, between: () => Promise<unknown>): void {
+  const restore = wrapDb(w, {
+    batch: async (real, statements) => {
+      restore();
+      await between();
+      return real(statements);
+    },
+  });
+}
+
+/**
+ * サービスのデプロイの条件の新しい版を、画面の変更と同じ形で直に足す
+ * @param w テストの物
+ * @param id サービス ID
+ * @param version 足す版
+ * @param value 値
+ * @returns 書いた結果
+ */
+function setDeployWhen(w: WorkWorld, id: string, version: number, value: string[]): Promise<unknown> {
+  return w.d1.DB.prepare("INSERT INTO service_settings (id, service_id, key, value, version, by, created_at) VALUES (?, ?, 'deployWhen', ?, ?, 'owner', ?)")
+    .bind(crypto.randomUUID(), id, JSON.stringify(value), version, w.clock.now())
+    .run();
+}
+
+/**
+ * office の初期値のデプロイの条件の新しい版を直に足す
+ * @param w テストの物
+ * @param version 足す版
+ * @param value 値
+ * @returns 書いた結果
+ */
+function setOfficeDeployWhen(w: WorkWorld, version: number, value: string[]): Promise<unknown> {
+  return w.d1.DB.prepare("INSERT INTO settings (id, key, scope, value, version, changed_by, reason, created_at) VALUES (?, 'service.deployWhen', 'office', ?, ?, 'owner', '変える', ?)")
+    .bind(crypto.randomUUID(), JSON.stringify(value), version, w.clock.now())
+    .run();
+}
+
 describe("段階ごとのオーナーの判断", () => {
   it("サービスに進める時にデプロイの条件を確かめる", async () => {
     const id = await prototype(world, ["checks", "reviewer"]);
@@ -96,6 +138,16 @@ describe("段階ごとのオーナーの判断", () => {
     // 先のコミットをレビュー担当が承認すれば進める
     await reviewed(world, "approve");
     expect(await toService(world, id)).toMatchObject({ id, stage: "service" });
+  });
+
+  it("確かめた後に条件が変われば、サービスに進めない", async () => {
+    const id = await prototype(world, ["checks"]);
+    checks(world, "passed");
+    const before = await stateOf(world, id);
+    // 条件を照らした後、段階を書く前に、オーナーがデプロイの条件を強める
+    beforeWrite(world, () => setDeployWhen(world, id, 2, ["checks", "reviewer"]));
+    expect(await toService(world, id, 409)).toMatchObject({ code: "conflict" });
+    expect(await stateOf(world, id)).toEqual(before);
   });
 
   describe("サービスに進める条件の境目", () => {
@@ -143,10 +195,32 @@ describe("段階ごとのオーナーの判断", () => {
       // ゲートウェイの GitHub の口は連携の後は常につながっているので、つないでいない口を直に渡す
       const id = await prototype(world);
       const service = { id, repo: REPO };
-      await expect(requireDeployConditions(world.gate.env, UNCONNECTED_FORGE, service)).resolves.toBeUndefined();
+      await expect(requireDeployConditions(world.gate.env, UNCONNECTED_FORGE, service)).resolves.toBeDefined();
       await stepUp(world);
       await api(world, "PUT", `/api/v1/services/${id}/settings/deployWhen`, { version: 0, value: ["checks"], reason: "チェックで出す" });
       await expect(requireDeployConditions(world.gate.env, UNCONNECTED_FORGE, service)).rejects.toMatchObject({ code: "conflict", message: "GitHub と連携していないので、デプロイの条件 (checks) を確かめられない" });
+    });
+
+    it("受け継いだ初期値を確かめた後に office の初期値が変われば、進めずに 409 を返す", async () => {
+      const id = await prototype(world);
+      const before = await stateOf(world, id);
+      beforeWrite(world, () => setOfficeDeployWhen(world, 1, ["owner", "checks"]));
+      expect(await toService(world, id, 409)).toMatchObject({ code: "conflict" });
+      expect(await stateOf(world, id)).toEqual(before);
+    });
+
+    it("サービスで条件を変えている時は、office の初期値が変わっても進める", async () => {
+      const id = await prototype(world, ["owner"]);
+      beforeWrite(world, () => setOfficeDeployWhen(world, 1, ["owner", "checks"]));
+      expect(await toService(world, id)).toMatchObject({ stage: "service" });
+    });
+
+    it("確かめた後にオーナーがレビューの承認を断れば、進めずに 409 を返す", async () => {
+      const id = await prototype(world, ["reviewer"]);
+      await reviewed(world, "approve");
+      beforeWrite(world, () => world.d1.DB.prepare("UPDATE reviews SET owner_verdict = 'reject' WHERE repo = ? AND head_sha = ?").bind(REPO, HEAD).run());
+      expect(await toService(world, id, 409)).toMatchObject({ code: "conflict" });
+      expect((await stateOf(world, id)).stage).toBe("prototype");
     });
 
     it("見送る時は、デプロイの条件を確かめない", async () => {
