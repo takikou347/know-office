@@ -15,7 +15,7 @@ paths:
 - 最初から通る守りのテストは、作った所を壊して落ちる事を確かめてから残す
 - 要件のシナリオのテストは、`describe` を要件の名前、`it` をシナリオの名前と同じ日本語にする。要件とシナリオと置き場は、テスト設計 (`docs/05-test/<番号>-<名前>.md`) の 1 章と 2 章。`node scripts/scenarios.ts` が名前の合うテストを探す
 - 1 つのシナリオを多くの画面や入力で回し、1 つの `it` では 5 秒を超える時は、要件の `describe` の中に画面や入力の名前の `describe` を入れ子にし、その中の `it` をシナリオの名前にする (`scenarios.ts` は `it` と `test` の名前だけを拾う)
-- 置き場: 共通 `packages/core/test/<物>.test.ts`、ゲートウェイと DO `apps/office/test/<まとまり>/<物>.test.ts`、画面の通し `apps/office/e2e/<画面か流れ>.spec.ts`、ワークスペース `apps/workspace/test/<物>.test.ts`、型の食い違い `<物>.types.ts` に `@ts-expect-error`、リポジトリの道具 `scripts/<物>.test.ts` (`node:test`)
+- 置き場: 共通 `packages/core/test/<物>.test.ts`、共有の型 `packages/requests/test/<物>.test.ts`、ゲートウェイと DO `apps/office/test/<まとまり>/<物>.test.ts`、画面の通し `apps/office/e2e/<画面か流れ>.spec.ts`、ワークスペース `apps/workspace/test/<物>.test.ts`、型の食い違い `<物>.types.ts` に `@ts-expect-error`、リポジトリの道具 `scripts/<物>.test.ts` (`node:test`)
 - モックは境目だけ。D1 は `test/helpers/d1.ts` (wrangler の手元の本物の D1)、DO は `test/helpers/worker.ts` (本物の workerd に起こしたテストの入口)、時刻は `Clock` のモック、Claude と GitHub は記録した返事を返すモック
 - 並んで走る処理の順や長さを、実の時間の待ち (`setTimeout`) と共にある `Clock` の進みで作らない。ほかの処理が遅いと揺れるので、長さを測る口か合図を引数で渡して決める
 - テストは互いに独立させ、1 つ 5 秒以内。D1 と DO はテストのファイルごとに 1 度起こし、テストごとに戻す (D1 はマイグレーションの後の空、DO は空)

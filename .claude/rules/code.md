@@ -9,7 +9,7 @@ paths:
 
 ## 名前と置き場
 
-- 置き場は `../knowidea/services/know-office/docs/04-detail/index.md` の 2 章。ゲートウェイ `apps/office/src/gate/`、画面 `apps/office/src/screen/`、ワークスペース `apps/workspace/src/`、共通 `packages/core/src/`
+- 置き場は `../knowidea/services/know-office/docs/04-detail/index.md` の 2 章。ゲートウェイ `apps/office/src/gate/`、画面 `apps/office/src/screen/`、ワークスペース `apps/workspace/src/`、共通 `packages/core/src/`、Web アプリのサービスが訪問と 5xx を書く共有の型 `packages/requests/src/`
 - 関数と変数は lowerCamelCase、型とコンポーネントは PascalCase、決まった値の並びは UPPER_SNAKE_CASE
 - テーブルとカラムは snake_case。時刻は `<動き>_at` (協定世界時のミリ秒)、日本時間の日は `day`
 - Zod スキーマは `<動き><物>Input`、返す形の型は物の名前 (`CreateNodeInput`、`NodeDetail`)

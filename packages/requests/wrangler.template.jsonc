@@ -1,0 +1,12 @@
+{
+  // Web アプリのサービスの wrangler.jsonc に足す所 (サービスと拡張の 3.2)。<name> はリポジトリの名前 (owner/name の name) で、know-office はこの名前のスクリプトを読む
+  // WORKER_NAME は Analytics Engine の点に書くスクリプト名で、name と同じにする。プレビューは本番の数に混ざらないよう <name>-preview にする
+  "name": "<name>",
+  "vars": { "WORKER_NAME": "<name>" },
+  // 共通のデータセット。最初に書いた時に作られ、今は請求されない
+  "analytics_engine_datasets": [{ "binding": "REQUESTS", "dataset": "knowidea_requests" }],
+  "previews": {
+    "vars": { "WORKER_NAME": "<name>-preview" },
+    "analytics_engine_datasets": [{ "binding": "REQUESTS", "dataset": "knowidea_requests" }]
+  }
+}

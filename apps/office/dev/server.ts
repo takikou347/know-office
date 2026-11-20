@@ -5,6 +5,7 @@ import { createFakeAccess, type FakeAccess, type FakeAccessOptions } from "./acc
 import { createFakeCloudflare, DEV_CLOUDFLARE } from "./cloudflare.ts";
 import { createFakeClaude, type FakeClaude } from "./claude.ts";
 import { createFakeGitHub, type FakeGitHub } from "./github.ts";
+import { createSampleApp } from "./sample-app.ts";
 import { createDevWorkspaces, type DevWorkspaces } from "./workspace.ts";
 import { devUpgrade } from "./workspace-upgrade.ts";
 
@@ -23,7 +24,7 @@ export type RunningFakes = {
 };
 
 /**
- * 代わりの物を /access、/anthropic、/github、/codeload、/cloudflare、/workspace の下に立てる
+ * 代わりの物を /access、/anthropic、/github、/codeload、/cloudflare、/workspace の下に、見本の Web アプリのサービスを /sample-app の下に立てる
  * @param options 待ち受けの番号、手元のゲートウェイの宛先を返す関数、代わりの Access の設定、通す Claude の鍵
  * @returns 立てた代わりの物
  */
@@ -36,7 +37,7 @@ export async function startFakes(options: FakeAccessOptions & { port: number; ga
   const github = createFakeGitHub({ codeloadBase: `http://localhost:${String(options.port)}/codeload`, hookUrl: () => `${options.gateBase()}/hooks/v1/github` });
   // 代わりのワークスペースは、出来事も SDK の Claude の呼び出しも手元のゲートウェイの開発の道に送る。Claude の呼び出しはゲートウェイのプロキシからここの代わりの Claude API に届く
   const workspaces = createDevWorkspaces(options.gateBase);
-  const app = new Hono().route("/access", access.app).route("/anthropic", claude.app).route("/github", github.app).route("/codeload", github.codeload).route("/cloudflare", cloudflare.app).route("/workspace", workspaces.app);
+  const app = new Hono().route("/access", access.app).route("/anthropic", claude.app).route("/github", github.app).route("/codeload", github.codeload).route("/cloudflare", cloudflare.app).route("/workspace", workspaces.app).route("/sample-app", createSampleApp(cloudflare.dataset));
   const server = serve({ fetch: app.fetch, port: options.port, hostname: "127.0.0.1" });
   // 補完の切り替えは Hono を通らないので、upgrade を受けて Node のワークスペースへ TCP で渡す
   server.on("upgrade", devUpgrade(workspaces));

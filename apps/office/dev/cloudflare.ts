@@ -1,6 +1,7 @@
 // 開発環境の代わりの Cloudflare。GraphQL Analytics API の workersInvocationsAdaptive と、Workers Analytics Engine の SQL API を、本物と同じ鍵、変数、上限で返す
 // 出典: https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/ (項目と返事の形)、
 // https://developers.cloudflare.com/analytics/graphql-api/limits/ (5 分に 300 クエリ)、https://developers.cloudflare.com/workers/observability/metrics-and-analytics/ (期間は 1 週間までの区間)
+import type { RequestPoint, RequestsDataset } from "@know-office/requests";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -20,7 +21,7 @@ export type FakeCloudflare = {
   requests: { variables: Record<string, unknown>; authorization: string | null }[];
   /** 次の要求から返す失敗の HTTP ステータス。null なら通す */
   failWith: 429 | 500 | 502 | null;
-  /** Analytics Engine のスクリプトごとの点の和。置かないスクリプトは訪問 7 と 5xx 3 を返し、null なら行を返さない */
+  /** Analytics Engine のスクリプトごとの点の和。置かず dataset にも書かれていないスクリプトは訪問 7 と 5xx 3 を返し、null なら行を返さない */
   points: Map<string, FakePoints | null>;
   /** 受けた SQL と、宛先のアカウント ID と Authorization */
   sqlRequests: { accountId: string; authorization: string | null; sql: string }[];
@@ -28,6 +29,8 @@ export type FakeCloudflare = {
   sqlFailWith: 429 | 500 | 503 | null;
   /** データセットにまだ点が無く、テーブルが無いか */
   datasetMissing: boolean;
+  /** 共通のデータセット (knowidea_requests) の代わり。手元で動く Web アプリがここに書いた点は、スクリプト (blob1) ごとに足して SQL で返す */
+  dataset: RequestsDataset;
 };
 
 /** Analytics Engine の 1 スクリプトの和 */
@@ -63,7 +66,17 @@ const Body = z.object({
  * @returns 代わりの Cloudflare
  */
 export function createFakeCloudflare(options: { token: string; accountId: string; now: () => number }): FakeCloudflare {
-  const fake: FakeCloudflare = { app: new Hono(), invocations: new Map(), requests: [], failWith: null, points: new Map(), sqlRequests: [], sqlFailWith: null, datasetMissing: false };
+  const written = new Map<string, Required<FakePoints>>();
+  const dataset: RequestsDataset = {
+    // 本物と同じく blob1 で分け、double1 と double2 を足す。サンプリングはしないので _sample_interval は 1
+    writeDataPoint(point?: RequestPoint) {
+      const script = point?.blobs?.[0];
+      if (typeof script !== "string") return;
+      const sum = written.get(script) ?? { visits: 0, serverErrors: 0 };
+      written.set(script, { visits: sum.visits + (point?.doubles?.[0] ?? 0), serverErrors: sum.serverErrors + (point?.doubles?.[1] ?? 0) });
+    },
+  };
+  const fake: FakeCloudflare = { app: new Hono(), invocations: new Map(), requests: [], failWith: null, points: new Map(), sqlRequests: [], sqlFailWith: null, datasetMissing: false, dataset };
   const stamps: number[] = [];
   fake.app.post("/client/v4/graphql", async (c) => {
     const authorization = c.req.header("authorization") ?? null;
@@ -111,7 +124,8 @@ export function createFakeCloudflare(options: { token: string; accountId: string
     const [start = 0, end = 0] = times;
     if (end <= start || end - start > POINT_RETENTION_S) return c.text("Input was invalid: time range", 422);
     const data = scripts.flatMap((script) => {
-      const sum = fake.points.has(script) ? fake.points.get(script) : { visits: 7, serverErrors: 3 };
+      // 置いた和、点の書かれたスクリプトの和、どちらも無ければ決まった値の順に返す
+      const sum = fake.points.has(script) ? fake.points.get(script) : (written.get(script) ?? { visits: 7, serverErrors: 3 });
       return sum ? [{ script, visits: sum.visits, server_errors: sum.serverErrors ?? 0 }] : [];
     });
     const meta = [{ name: "script", type: "String" }, { name: "visits", type: "Float64" }, { name: "server_errors", type: "Float64" }];

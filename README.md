@@ -5,6 +5,7 @@ KNOW IDEA の社内の管理アプリ。AI 社員が自分でタスクを見つ�
 | 置き場 | 中身 |
 | --- | --- |
 | `packages/core/` | ゲートウェイ、ワークスペース、画面が共に使う型と判断 |
+| `packages/requests/` | Web アプリのサービスが訪問と 5xx を Workers Analytics Engine に書く共有の型 (Worker の fetch を包む関数と wrangler の雛形) |
 | `apps/office/` | 画面(Vite と React)とゲートウェイ(Hono)。1 つの Worker にまとめて配る |
 | `apps/workspace/` | ワークスペース。Node.js で動くコンテナの中身 |
 | `apps/office/openapi/v1.yaml` | API の文書 (OpenAPI 3.1)。ゲートウェイの `createRoute` と `core` の Zod スキーマから作る。動かしたゲートウェイの `/api/v1/docs` の Swagger UI で読める |
