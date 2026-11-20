@@ -90,6 +90,8 @@ const WorkspaceCalls = z.array(z.object({ method: z.string(), args: z.array(z.un
 
 /** ワークスペースのコンテナの DO の代わり。呼び出しを記憶に並べる */
 export class RecordingWorkspace extends IdleLsp implements WorkspaceContainer {
+  /** abort_hold で止めさせている間の、止め終えさせる関数。答え方を変えると呼ぶ */
+  #release: (() => void) | null = null;
   /**
    * 呼び出しを並べる
    * @param method メソッド
@@ -160,18 +162,20 @@ export class RecordingWorkspace extends IdleLsp implements WorkspaceContainer {
     await this.#push("run", input);
     // テストが決めた答え方。busy はもう走っている、down は届かない
     const mode = await this.ctx.storage.get("mode");
-    if (mode === "busy") throw new AppError("conflict", "ワークスペースがもう走っている");
+    // 本物の Runner と同じく、止めている途中の呼び出しが終わるまでは次の runs を断る
+    if (mode === "busy" || this.#release !== null) throw new AppError("conflict", "ワークスペースがもう走っている");
     if (mode === "down") throw new AppError("unavailable", "ワークスペースに届かない");
     return null;
   }
 
   /**
    * runs の答え方を決める
-   * @param mode ok、busy、down
+   * @param mode ok、busy、down、abort_down、abort_hold
    * @returns 無し
    */
   async setMode(mode: string): Promise<null> {
     await this.ctx.storage.put("mode", mode);
+    if (mode !== "abort_hold") this.#release?.();
     return null;
   }
 
@@ -183,7 +187,11 @@ export class RecordingWorkspace extends IdleLsp implements WorkspaceContainer {
   async abort(reason: string): Promise<null> {
     await this.#push("abort", reason);
     // テストが決めた答え方。abort_down は中断に答えない
-    if ((await this.ctx.storage.get("mode")) === "abort_down") throw new AppError("unavailable", "ワークスペースが中断に答えない");
+    const mode = await this.ctx.storage.get("mode");
+    if (mode === "abort_down") throw new AppError("unavailable", "ワークスペースが中断に答えない");
+    // abort_hold は、テストが答え方を変えるまで止め終えない
+    if (mode === "abort_hold") await new Promise<void>((resolve) => (this.#release = resolve));
+    this.#release = null;
     return null;
   }
 
@@ -263,6 +271,7 @@ const StaffCall = z.object({
     "rebuildDay",
     "appendTranscript",
     "loadTranscript",
+    "runState",
   ]),
   args: z.array(z.unknown()),
 });
@@ -370,6 +379,7 @@ export default {
         if (method === "take") return Response.json(await stub.take(args[0], z.number().nullable().parse(args[1]), num(2)));
         if (method === "observe") return Response.json(await stub.observe(args[0], num(1), args[2]));
         if (method === "dropTask") return Response.json(await stub.dropTask(z.string().parse(args[0]), num(1)));
+        if (method === "runState") return Response.json(await stub.runState(z.string().parse(args[0])));
         if (method === "resumeTask") return Response.json(await stub.resumeTask(z.string().parse(args[0])));
         if (method === "issueToken") return Response.json(await stub.issueToken(z.string().parse(args[0]), z.string().parse(args[1]), num(2)));
         if (method === "checkToken") return Response.json(await stub.checkToken(z.string().parse(args[0]), z.string().parse(args[1]), num(2)));
@@ -396,7 +406,7 @@ export default {
       return Response.json(files);
     }
     if (path === "/workspace-mode") {
-      const { staffId, mode } = z.object({ staffId: z.string(), mode: z.enum(["ok", "busy", "down", "abort_down"]) }).parse(body);
+      const { staffId, mode } = z.object({ staffId: z.string(), mode: z.enum(["ok", "busy", "down", "abort_down", "abort_hold"]) }).parse(body);
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion
       return Response.json(await (env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)) as unknown as RecordingWorkspace).setMode(mode));
     }

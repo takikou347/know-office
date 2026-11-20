@@ -154,6 +154,28 @@ describe("社員が自分で働き始める", () => {
     expect(await worker.staff("builder", "status", jst(9, 3))).toMatchObject({ nodeId: next });
   });
 
+  it("止め終える前に新しいタスクの知らせで取らせても、止め終えた後に次のタスクを取って呼ぶ", async () => {
+    const next = "0190f4a8-0000-7000-8000-000000000105";
+    await worker.staff("builder", "pull", jst(9, 1));
+    await until(async () => (await runs(worker)).length > 0);
+    await worker.workspaceMode("builder", "abort_hold");
+    await worker.query("DB", `UPDATE nodes SET status = 'stopped' WHERE id = '${TASK.nodeId}'`);
+    await worker.staff("builder", "dropTask", TASK.nodeId, jst(9, 2));
+    // 止めている間に足されたタスクの知らせ (notifyStaff) が、手の空いた社員に取らせる
+    await worker.query(
+      "DB",
+      `INSERT INTO nodes (id, kind, parent_id, scope, title, body, status, priority, assignee, task_kind, repo, created_by, created_at, updated_at) VALUES ('${next}', 'task', NULL, 'office', '次のタスク', NULL, 'todo', 0, 'builder', 'plan', NULL, 'owner', 0, 0)`,
+    );
+    await worker.staff("builder", "pull", jst(9, 2, 1));
+    // 止め終えさせる
+    await worker.workspaceMode("builder", "ok");
+    const started = async () => z.object({ started: z.boolean() }).loose().parse(await worker.staff("builder", "runState", next)).started;
+    await until(started);
+    expect(await started()).toBe(true);
+    expect(await worker.staff("builder", "status", jst(9, 3))).toMatchObject({ nodeId: next });
+    expect(await statusOf(worker)).toEqual({ status: "stopped" });
+  });
+
   it("ワークスペースが中断に答えなくても、エラーログを残して次のタスクを取る", async () => {
     const next = "0190f4a8-0000-7000-8000-000000000103";
     await worker.query(

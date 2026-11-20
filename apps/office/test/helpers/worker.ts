@@ -29,8 +29,8 @@ export type TestWorker = {
   liveUrl(query: { session: string; ip: string; at: number }): Promise<string>;
   /** 社員のワークスペースの代わりが受けた呼び出し */
   workspace(staffId: string): Promise<{ method: string; args: unknown[] }[]>;
-  /** 社員のワークスペースの代わりの答え方を決める。busy は runs にもう走っている、down は runs に届かない、abort_down は中断に答えない */
-  workspaceMode(staffId: string, mode: "ok" | "busy" | "down" | "abort_down"): Promise<void>;
+  /** 社員のワークスペースの代わりの答え方を決める。busy は runs にもう走っている、down は runs に届かない、abort_down は中断に答えない、abort_hold はほかの答え方に変えるまで止め終えず、その間の runs を断る */
+  workspaceMode(staffId: string, mode: "ok" | "busy" | "down" | "abort_down" | "abort_hold"): Promise<void>;
   /** DO と入口が出したエラーログの行 */
   errorLogs(): Promise<string[]>;
   /** 何もしない。workerd はファイルの終わりに止める */

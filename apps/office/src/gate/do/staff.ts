@@ -26,6 +26,8 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   #published: string | null = null;
   /** ワークスペースへの頼み (起こす、止める、書き残させる、作り直す) を順に流す鎖。書き残させる前に止めない */
   #workspaceChain: Promise<unknown> = Promise.resolve();
+  /** 止めさせていて、まだ止め終えていない頼みの数。止め終えるまでワークスペースは次の runs を断るので、この間は次のタスクを取らず、止め終えた後の pull に任せる */
+  #aborting = 0;
 
   /**
    * 次の出来事を処理し、次の alarm を掛ける。alarm は本物の時刻で鳴る
@@ -112,6 +114,8 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns 取ったか。nodeId は取ったか、もう持っていたタスク
    */
   async pull(now: number, traceId?: string): Promise<Pulled> {
+    // 止めている間に取ると、呼び出しが断られて (busy) タスクを持ったまま誰も始めない。止め終えた後の pull が取って始める
+    if (this.#aborting > 0) return { taken: false, nodeId: (await this.status(now)).nodeId };
     const { carried, ...pulled } = await this.#serial((book) => pullNext(this.env, book, now), now);
     // 呼び出しは鎖の外で始める。作業トークンの発行がこの DO の鎖を通るので、鎖の中で待つと止まる。前の勤務で続きにしたタスクは、最後の会話の記録から続ける
     if (pulled.taken) this.#begin(carried ? "continue" : "start", now, traceId);
@@ -517,10 +521,13 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
       // 止め終えるまでワークスペースは次の runs を断るので、止め終えた後に次のタスクを取る。時刻は離れた時刻に待った長さを足す
       abort: (now) => {
         const began = systemClock.now();
+        // 頼んだ時から数え、ほかの知らせ (notifyStaff) の pull を止め終えるまで待たせる
+        this.#aborting += 1;
         return request("abort", async (stub) => {
           try {
             await stub.abort("task_left");
           } finally {
+            this.#aborting -= 1;
             await this.pull(now + Math.max(0, systemClock.now() - began));
           }
           return null;
