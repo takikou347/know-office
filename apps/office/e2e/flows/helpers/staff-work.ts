@@ -4,7 +4,7 @@ import { z } from "zod";
 import { expect } from "../../helpers/test.ts";
 import { seedMain } from "./seed.ts";
 import { part, post } from "./screen.ts";
-import { resumeStaff, scriptReply } from "./staff.ts";
+import { resumeStaff, scriptReply, staffNow } from "./staff.ts";
 import { FAKES } from "../../helpers/fakes.ts";
 
 /** 通しの置き場の木。目的と組織図の画面の見本の木と分け、見本の進み具合を変えない */
@@ -86,12 +86,13 @@ export async function addTask(page: Page, title: string, assignee: string): Prom
  * 社員がタスクを取り、開発のコンテナの代わりがタスクの開始を受け、終えた知らせでタスクが done になるのを待つ。社員は終えて離れるので、通しの後に片付けない
  * @param page 画面を開いたページ
  * @param nodeId タスク ID
+ * @param staffId タスクを取る社員
  */
-export async function finishedBy(page: Page, nodeId: string): Promise<void> {
+export async function finishedBy(page: Page, nodeId: string, staffId = "reviewer"): Promise<void> {
   // 社員 DO は取った後に鎖の外で呼び出しを始め、開発のコンテナの代わりが /v1/runs を受ける。すぐ終えるので doing の間は待たない
   await expect
     .poll(async () => Runs.parse(await (await page.request.get(`${FAKES}/workspace/__fake/runs`)).json()), { timeout: 30_000 })
-    .toContainEqual({ staffId: "reviewer", nodeId });
+    .toContainEqual({ staffId, nodeId });
   // SDK が終えると、代わりのワークスペースがゲートウェイの開発の道に終わりを送り、タスクが done になって社員が離れる
   await expect.poll(async () => NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status, { timeout: 60_000 }).toBe("done");
 }
@@ -114,10 +115,58 @@ export async function scriptWork(page: Page, said: string): Promise<void> {
  * @returns 送った発言の吹き出し
  */
 export async function sayToReviewer(page: Page, said: string): Promise<Locator> {
-  await page.goto("/staff/reviewer?tab=talk");
-  await page.getByRole("textbox", { name: "レビュー担当への言葉" }).fill(said);
+  return sayTo(page, "reviewer", "レビュー担当", said);
+}
+
+/**
+ * 社員と仕事の画面の会話から社員に話しかけ、送った発言の吹き出しを返す
+ * @param page 画面を開いたページ
+ * @param staffId 社員 ID
+ * @param role 役職。会話の欄の名前に使う
+ * @param said 発言の本文
+ * @returns 送った発言の吹き出し
+ */
+export async function sayTo(page: Page, staffId: string, role: string, said: string): Promise<Locator> {
+  await page.goto(`/staff/${staffId}?tab=talk`);
+  await page.getByRole("textbox", { name: `${role}への言葉` }).fill(said);
   await page.getByRole("button", { name: "送る" }).click();
-  return page.getByRole("log", { name: "レビュー担当との会話" }).getByRole("listitem").filter({ hasText: said });
+  return page.getByRole("log", { name: `${role}との会話` }).getByRole("listitem").filter({ hasText: said });
+}
+
+/**
+ * 社員が持ったままのタスクを止めて見送りにし、社員を離れさせてから止めを解く。前の通しの後に山が空の部下が足した分けるタスクを、積んだ返事の無いまま持っている社員を空ける
+ * @param page 画面を開いたページ
+ * @param staffId 社員 ID
+ */
+export async function releaseHeld(page: Page, staffId: string): Promise<void> {
+  const held = (await staffNow(page, staffId)).nodeId;
+  if (held === null) return;
+  const origin = new URL(page.url()).origin;
+  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: origin }, data: { scope: "task", target: held, reason: "通しの前に空ける" } });
+  expect(stopped.status()).toBe(201);
+  const { stopId } = z.object({ data: z.object({ stopId: z.string() }) }).parse(await stopped.json()).data;
+  const { status, version } = NodeDetail.parse(await (await page.request.get(`/api/v1/nodes/${held}`)).json()).data;
+  if (status !== "done" && status !== "dropped") expect((await page.request.patch(`/api/v1/nodes/${held}`, { headers: { Origin: origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+  expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
+  await expect.poll(async () => (await staffNow(page, staffId)).nodeId, { timeout: 30_000 }).not.toBe(held);
+}
+
+/** 社員のタスクの一覧の返事 */
+const Assigned = z.object({ data: z.array(z.object({ id: z.string(), status: z.string(), version: z.number() }).loose()) });
+
+/**
+ * 社員の山に残った todo を見送りにする。前の通しが残した物や、山が空の部下が足した分けるタスクに、積んだ返事を取られないようにする
+ * @param page 画面を開いたページ
+ * @param staffId 社員 ID
+ */
+export async function dropTodos(page: Page, staffId: string): Promise<void> {
+  const res = await page.request.get(`/api/v1/nodes?assignee=${staffId}&status=todo&limit=100`);
+  expect(res.status()).toBe(200);
+  for (const n of Assigned.parse(await res.json()).data) {
+    const patched = await page.request.patch(`/api/v1/nodes/${n.id}`, { headers: { Origin: new URL(page.url()).origin }, data: { version: n.version, status: "dropped" } });
+    // 読んだ後に社員が取った物は 409 になり、そのまま残す
+    expect([200, 409]).toContain(patched.status());
+  }
 }
 
 /**

@@ -165,7 +165,7 @@ describe("オーナーの発言を渡す", () => {
     expect(gate.workspaces.builder.messages).toEqual([{ body: "テストも足して", at: new Date(clock.now()).toISOString() }]);
     expect(await marks()).toEqual([{ message_id: sent.data.id, node_id: TASK, via: "run" }]);
     expect((await listed())[0]).toMatchObject({ id: sent.data.id, delivery: "run", deliveredAt: new Date(clock.now()).toISOString() });
-    expect(gate.live.published).toContainEqual({ type: "message_delivered", delivery: { id: sent.data.id, via: "run", at: new Date(clock.now()).toISOString() } });
+    expect(gate.live.published).toContainEqual({ type: "message_delivered", delivery: { id: sent.data.id, via: "run", at: new Date(clock.now()).toISOString(), taskId: null } });
   });
 
   it("タスクの外で話しかけて次のタスクで渡す", async () => {
@@ -184,7 +184,7 @@ describe("オーナーの発言を渡す", () => {
     expect(prompt.indexOf("勤怠の表を作る")).toBeLessThan(prompt.indexOf("次は記録の画面を先に"));
     expect(await marks()).toEqual([{ message_id: sent.data.id, node_id: TASK, via: "next_task" }]);
     expect((await listed())[0]).toMatchObject({ delivery: "next_task", deliveredAt: new Date(clock.now()).toISOString() });
-    expect(gate.live.published).toContainEqual({ type: "message_delivered", delivery: { id: sent.data.id, via: "next_task", at: new Date(clock.now()).toISOString() } });
+    expect(gate.live.published).toContainEqual({ type: "message_delivered", delivery: { id: sent.data.id, via: "next_task", at: new Date(clock.now()).toISOString(), taskId: null } });
   });
 
   it("渡す途中でワークスペースが断る", async () => {

@@ -30,8 +30,8 @@ export function headChars(text: string, max: number): string {
   return Array.from(text).slice(0, max).join("");
 }
 
-/** オーナーの発言を社員に渡した道。run は今の呼び出し、next_task は次の呼び出しの頭、skipped は渡す枠の外で渡していない */
-export const MessageDelivery = z.enum(["run", "next_task", "skipped"]);
+/** オーナーの発言を社員に渡した道。run は今の呼び出し、next_task は次の呼び出しの頭、task は社長が分けるタスクにした、skipped は渡す枠の外で渡していない */
+export const MessageDelivery = z.enum(["run", "next_task", "task", "skipped"]);
 
 /** オーナーの発言を社員に渡した道の型 */
 export type MessageDelivery = z.infer<typeof MessageDelivery>;
@@ -77,6 +77,7 @@ export const Message = z
     deliveredAt: z.iso.datetime().nullable().openapi({ description: "社員のワークスペースが発言を受けた時刻。まだ渡していないか、社員の発言なら null" }),
     delivery: MessageDelivery.nullable().openapi({ description: "渡した道。まだ渡していないオーナーの発言と社員の発言は null" }),
     orders: z.array(z.union([MessageOrder, SkippedOrder])).openapi({ description: "オーナーの発言から足した勤務の指示。足さなかった延長は発言を送った返事にだけ出る。社員の発言は空" }),
+    taskId: z.uuid().nullable().openapi({ description: "社長への発言から足した、社長が分けるタスクの ID。道が task の時だけ持ち、ほかは null" }),
   })
   .strict()
   .meta({ id: "Message" });
@@ -124,7 +125,7 @@ export const OfficeWork = z
 export type OfficeWork = z.infer<typeof OfficeWork>;
 
 /**
- * LiveDO が画面に流す出来事。社員の状態が変わった、通知が足された、タスクの木の 1 件が変わった (この 2 つは印だけで、画面が GET で読む)、発言が足された、オーナーの発言を社員に渡した (ID と道と時刻だけ)、
+ * LiveDO が画面に流す出来事。社員の状態が変わった、通知が足された、タスクの木の 1 件が変わった (この 2 つは印だけで、画面が GET で読む)、発言が足された、オーナーの発言を社員に渡した (ID と道と時刻と、タスクにした時の足したタスク ID だけ)、
  * オフィスで見せる仕事の出来事 (渡した、レビューを頼んだ、承認した、差し戻した) が起きた。
  * 発言の本文は頭の 2,000 字までで、切った時は truncated にし、画面が GET で読み直す。仕事の出来事はタスクの題と誰から誰へだけを持つ。オーナーの情報、鍵、作業トークンは載せない
  */
@@ -136,7 +137,7 @@ export const LiveEvent = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("message_delivered"),
-      delivery: z.object({ id: z.uuid(), via: MessageDelivery, at: z.iso.datetime() }).strict(),
+      delivery: z.object({ id: z.uuid(), via: MessageDelivery, at: z.iso.datetime(), taskId: z.uuid().nullable() }).strict(),
     })
     .strict(),
   z

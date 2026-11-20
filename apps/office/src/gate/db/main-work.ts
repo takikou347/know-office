@@ -170,12 +170,12 @@ export const transcriptParts = sqliteTable("transcript_parts", {
   createdAt: time("created_at").notNull(),
 });
 
-/** オーナーの発言を社員に渡した印。発言 1 件に 1 行で、二重に足さない。via は run (今の呼び出し)、next_task (次の呼び出しの頭)、skipped (枠の外で渡していない)。追記専用 */
+/** オーナーの発言を社員に渡した印。発言 1 件に 1 行で、二重に足さない。via は run (今の呼び出し)、next_task (次の呼び出しの頭)、task (社長が分けるタスクにした。node_id は足したタスク)、skipped (枠の外で渡していない)。追記専用 */
 export const messageDeliveries = sqliteTable("message_deliveries", {
   messageId: text("message_id").primaryKey(),
   staffId: text("staff_id").notNull(),
   nodeId: text("node_id"),
-  via: text("via", { enum: ["run", "next_task", "skipped"] }).notNull(),
+  via: text("via", { enum: ["run", "next_task", "task", "skipped"] }).notNull(),
   deliveredAt: time("delivered_at").notNull(),
 });
 

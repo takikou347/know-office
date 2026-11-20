@@ -118,20 +118,17 @@ describe("目的からタスクまでの木", () => {
   });
 
   it("途中からタスクを足す", async () => {
-    // オーナーの発言と GitHub の Issue は、受け付けのプロジェクトの下に社長が分けるタスクとして入る
-    const said = await intakeTask(world.gate.env, { scope: "office", title: "勤怠を週ごとにも見たい", body: "週の合計が欲しい", source: "chat" }, at(10));
+    // 走っていない社長への発言と GitHub の Issue は、受け付けのプロジェクトの下に社長が分けるタスクとして入る。発言のタスクは山の先頭に置く
+    const sent = z.object({ id: z.string(), taskId: z.string() }).loose().parse(await api(world, "POST", "/api/v1/staff/president/messages", { body: "勤怠を週ごとにも見たい\n週の合計が欲しい" }, 201));
     const issue = await intakeTask(world.gate.env, { scope: "office", title: "ログインが遅い", body: "", source: "issue", issueNumber: 31 }, at(10, 5));
     const trees = z.array(TreeSchema).parse(await api(world, "GET", "/api/v1/nodes?scope=office"));
-    const intake = trees.find((t) => t.kind === "project");
-    expect(intake?.children.map((t) => [t.id, t.title, t.status])).toEqual([
-      [said, "勤怠を週ごとにも見たい", "todo"],
+    expect(trees.find((t) => t.kind === "project")?.children.map((t) => [t.id, t.title, t.status])).toEqual([
+      [sent.taskId, "勤怠を週ごとにも見たい", "todo"],
       [issue, "ログインが遅い", "todo"],
     ]);
-    expect(await tasksOf(world, "president")).toEqual([
-      { title: "勤怠を週ごとにも見たい", task_kind: "plan", status: "todo" },
-      { title: "ログインが遅い", task_kind: "plan", status: "todo" },
-    ]);
-    expect(await rows(world.d1.DB, "SELECT source, issue_number FROM nodes WHERE id = ?", issue)).toEqual([{ source: "issue", issue_number: 31 }]);
+    expect((await tasksOf(world, "president")).map((t) => [t["title"], t["task_kind"], t["status"]])).toEqual([["勤怠を週ごとにも見たい", "plan", "todo"], ["ログインが遅い", "plan", "todo"]]);
+    const sources = await rows(world.d1.DB, "SELECT source, priority FROM nodes WHERE id IN (?, ?) ORDER BY priority", sent.taskId, issue);
+    expect(sources).toEqual([{ source: `chat:${sent.id}`, priority: 0 }, { source: "issue", priority: 100 }]);
   });
 });
 

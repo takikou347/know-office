@@ -22,11 +22,22 @@ const IN_CHUNK = 90;
 /** 今の呼び出しに発言を足せる社員の状態。waiting はワークスペースを作り直す間で、続き (resumeRun) の頭で渡す */
 const IN_RUN = new Set<StaffState>(["working", "wrapping", "called"]);
 
+/**
+ * 社員の呼び出しが走っていて、発言を足せるか
+ * @param who 社員の状態と持っているタスク
+ * @param who.state 状態
+ * @param who.nodeId 持っているタスク
+ * @returns タスクを持ち、working、wrapping、called なら true
+ */
+export function inRun(who: { state: StaffState; nodeId: string | null }): boolean {
+  return who.nodeId !== null && IN_RUN.has(who.state);
+}
+
 /** まだ渡していないオーナーの発言 1 件 */
 export type PendingMessage = OwnerMessage & { id: string };
 
-/** 渡した印 1 件 */
-export type DeliveryMark = { via: MessageDelivery; at: number };
+/** 渡した印 1 件。nodeId は渡した時のタスクか、タスクにした時は足したタスク */
+export type DeliveryMark = { via: MessageDelivery; at: number; nodeId: string | null };
 
 /** D1 の messages の行のうち渡すのに使う所 */
 type PendingRow = { id: string; at: number; body: string; body_key: string | null };
@@ -42,10 +53,10 @@ export async function deliveriesOf(db: D1Database, ids: readonly string[]): Prom
   for (let i = 0; i < ids.length; i += IN_CHUNK) {
     const chunk = ids.slice(i, i + IN_CHUNK);
     const rows = await db
-      .prepare(`SELECT message_id, via, delivered_at FROM message_deliveries WHERE message_id IN (${chunk.map(() => "?").join(", ")})`)
+      .prepare(`SELECT message_id, via, delivered_at, node_id FROM message_deliveries WHERE message_id IN (${chunk.map(() => "?").join(", ")})`)
       .bind(...chunk)
-      .all<{ message_id: string; via: MessageDelivery; delivered_at: number }>();
-    for (const row of rows.results) found.set(row.message_id, { via: row.via, at: row.delivered_at });
+      .all<{ message_id: string; via: MessageDelivery; delivered_at: number; node_id: string | null }>();
+    for (const row of rows.results) found.set(row.message_id, { via: row.via, at: row.delivered_at, nodeId: row.node_id });
   }
   return found;
 }
@@ -88,12 +99,12 @@ export async function undelivered(env: Bindings, staffId: StaffId, now: number):
  * @param now 今の時刻
  * @returns 新しく足した発言 ID
  */
-export async function markDelivered(env: Bindings, target: { staffId: StaffId; nodeId: string | null }, marks: readonly { id: string; via: MessageDelivery }[], now: number): Promise<string[]> {
+export async function markDelivered(env: Bindings, target: { staffId: StaffId; nodeId: string | null }, marks: readonly { id: string; via: Exclude<MessageDelivery, "task"> }[], now: number): Promise<string[]> {
   if (marks.length === 0) return [];
   const insert = env.DB.prepare("INSERT INTO message_deliveries (message_id, staff_id, node_id, via, delivered_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(message_id) DO NOTHING");
   const results = await env.DB.batch(marks.map((m) => insert.bind(m.id, target.staffId, target.nodeId, m.via, now)));
   const added = marks.filter((_, i) => results[i]?.meta.changes === 1);
-  for (const m of added) await announce(env, { type: "message_delivered", delivery: { id: m.id, via: m.via, at: new Date(now).toISOString() } }, clockAt(now));
+  for (const m of added) await announce(env, { type: "message_delivered", delivery: { id: m.id, via: m.via, at: new Date(now).toISOString(), taskId: null } }, clockAt(now));
   return added.map((m) => m.id);
 }
 
@@ -121,7 +132,7 @@ export function withOwnerMessages(prompt: string, picked: readonly PendingMessag
  * @returns 印を付けた時刻。渡していなければ null
  */
 export async function deliverToRun(env: Bindings, who: { staffId: StaffId; state: StaffState; nodeId: string | null }, message: PendingMessage, now: number): Promise<number | null> {
-  if (who.nodeId === null || !IN_RUN.has(who.state)) return null;
+  if (!inRun(who)) return null;
   try {
     const accepted = await env.WORKSPACE.get(env.WORKSPACE.idFromName(who.staffId)).message({ body: message.body, at: new Date(message.at).toISOString() });
     if (!accepted) return null;

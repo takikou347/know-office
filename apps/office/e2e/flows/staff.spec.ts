@@ -48,17 +48,17 @@ test.describe("オーナーの指示に合わせる", () => {
 test.describe("社員との会話", () => {
   test("言葉を送ると会話に残り、社員に渡ったかが分かる", async ({ page }) => {
     const body = `勤怠の表を見た ${String(Date.now())}`;
-    await page.goto("/staff/president");
+    await page.goto("/staff/reviewer");
     await expect(page.getByText("タスク中なら今の作業に渡します。タスクの外なら次のタスクの頭で渡します")).toBeVisible();
-    await page.getByLabel("社長への言葉").fill(body);
+    await page.getByLabel("レビュー担当への言葉").fill(body);
     await page.getByRole("button", { name: "送る" }).click();
-    const bubble = page.getByRole("log", { name: "社長との会話" }).getByRole("listitem").filter({ hasText: body });
+    const bubble = page.getByRole("log", { name: "レビュー担当との会話" }).getByRole("listitem").filter({ hasText: body });
     await expect(bubble).toBeVisible();
-    // 社長がタスク中かは前の通しで変わるので、どちらの印でもよい
-    await expect(bubble.getByText(/^(社員に渡しました|次のタスクで渡します)$/)).toBeVisible();
+    // 社長への発言は分けるタスクになるので、タスクを残さないレビュー担当に話しかける。レビュー担当がタスク中かは前の通しで変わるので、どの印でもよい
+    await expect(bubble.getByText(/^(社員に渡しました|次のタスクで渡します|次のタスクの頭で渡しました|渡していません)$/)).toBeVisible();
     // 読み込み直しても、入口の記録から同じ言葉を読む
     await page.reload();
-    await expect(page.getByRole("log", { name: "社長との会話" }).getByText(body)).toBeVisible();
+    await expect(page.getByRole("log", { name: "レビュー担当との会話" }).getByText(body)).toBeVisible();
   });
 });
 
