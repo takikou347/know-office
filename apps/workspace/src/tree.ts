@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, utimesSync } from "node:fs";
 import { join } from "node:path";
+import type { Writable } from "node:stream";
 import { createGunzip } from "node:zlib";
 import { AppError, type Clock, LSP_TREE_BYTES, type LspTreeParams } from "@know-office/core";
 
@@ -118,6 +119,36 @@ function normalizeModes(dir: string): void {
     else if (entry.isFile()) chmodSync(path, 0o644);
   }
   chmodSync(dir, 0o755);
+}
+
+/**
+ * 子の入力が閉じたかを返す。誤りで閉じた時のほか、子が先に終えて Node が誤り無しに閉じた時も閉じたとみる
+ * @param stdin 子の入力
+ * @returns 閉じていれば true
+ */
+function closed(stdin: Writable): boolean {
+  return stdin.destroyed || stdin.writableEnded;
+}
+
+/**
+ * 子の入力に 1 つの塊を書き、詰まったら空くか閉じるまで待つ。閉じた入力には書かずに戻る
+ * @param stdin 子の入力
+ * @param chunk 塊
+ */
+export async function feed(stdin: Writable, chunk: Buffer): Promise<void> {
+  // 子が終えると Node は入力を誤り無しに閉じ、その後の write は drain も error も close も出さないので、閉じたかを先と後で確かめる
+  if (closed(stdin) || stdin.write(chunk) || closed(stdin)) return;
+  await new Promise<void>((resolve) => {
+    const done = (): void => {
+      stdin.off("drain", done);
+      stdin.off("error", done);
+      stdin.off("close", done);
+      resolve();
+    };
+    stdin.on("drain", done);
+    stdin.on("error", done);
+    stdin.on("close", done);
+  });
 }
 
 /** ワークスペースが置くレビューの木。広げるのはワークスペースの中で 1 本ずつ */
@@ -337,10 +368,8 @@ export class TreeStore {
       if (outputBytes > this.limits.entries * 1024 + 1024) child.kill("SIGKILL");
       else output += chunk.toString("utf8");
     });
-    let stdinOpen = true;
-    child.stdin.on("error", () => {
-      stdinOpen = false;
-    });
+    // 子が先に終えた後の EPIPE は、入力が閉じたとみるだけにする
+    child.stdin.on("error", () => undefined);
     const gunzip = createGunzip();
     const source = createReadStream(archive).pipe(gunzip);
     let timedOut = false;
@@ -360,15 +389,9 @@ export class TreeStore {
           child.kill("SIGKILL");
           throw refused("木を広げた大きさが上限を超える");
         }
-        if (stdinOpen && !child.stdin.write(chunk)) {
-          await new Promise<void>((resolve) => {
-            child.stdin.once("drain", resolve);
-            child.stdin.once("error", resolve);
-            child.stdin.once("close", resolve);
-          });
-        }
+        await feed(child.stdin, chunk);
       }
-      if (stdinOpen) child.stdin.end();
+      if (!closed(child.stdin)) child.stdin.end();
       const code = await exited;
       if (timedOut) throw refused("木を広げるのに時間が掛かりすぎた");
       if (code !== 0) throw refused("木を広げられない");

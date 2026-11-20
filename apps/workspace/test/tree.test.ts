@@ -1,10 +1,11 @@
 // エディタの補完に使うレビューの木を、確かめてから広げ、断った時は前の木を残し、古い物から消す事を確かめる (仕事とレビューの 3.6)
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppError, type Clock } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TREE_LIMITS, type TreeLimits, TreeStore } from "../src/tree.ts";
+import { feed, TREE_LIMITS, type TreeLimits, TreeStore } from "../src/tree.ts";
 import { type TarEntry, tarGz } from "./helpers/tar.ts";
 
 const NODE = "0190f4a8-0000-7000-8000-000000000101";
@@ -164,6 +165,16 @@ describe("レビューの木", () => {
   it("宣言より大きく広がる gzip 爆弾は、広げながら 300MiB を数えて止め、前の木を残す", async () => {
     // 宣言は小さいまま、終わりの印の後ろに 0 を続けて、広げた流れだけを大きくする
     expect(await rejectedKeepingPrevious(GOOD, { streamBytes: 64 * 1024 }, 1024 * 1024)).toBe("validation_failed");
+  });
+
+  it("tar が入力を読み切らずに終え、入力が誤り無しに閉じた後も、流し込みは待ち続けない", async () => {
+    // tar は終わりの印を読むと残りを読まずに終える。終わりを先に受けると Node は入力を誤り無しに閉じ、後の書き込みは drain も error も close も出さない
+    const child = spawn("/bin/true", [], { stdio: ["pipe", "ignore", "ignore"] });
+    child.stdin.on("error", () => undefined);
+    // 終わりを受けた後、入力の close まで出し終えてから書く
+    await Promise.all([new Promise((resolve) => child.once("close", resolve)), new Promise((resolve) => child.stdin.once("close", resolve))]);
+    expect({ destroyed: child.stdin.destroyed, closed: child.stdin.closed, errored: child.stdin.errored }).toEqual({ destroyed: true, closed: true, errored: null });
+    await feed(child.stdin, Buffer.alloc(16 * 1024));
   });
 
   it("広げるのが 60 秒を超えたら kill し、前の木を残す", async () => {
