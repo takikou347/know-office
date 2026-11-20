@@ -5,41 +5,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { bash, blocks, inOrder, jobs, secretSteps, step } from "./workflow-text.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const deploy = readFileSync(join(root, ".github", "workflows", "deploy.yml"), "utf8");
 const check = readFileSync(join(root, ".github", "workflows", "check.yml"), "utf8");
 const rollbackPath = join(root, ".github", "workflows", "rollback.yml");
 const rollback = existsSync(rollbackPath) ? readFileSync(rollbackPath, "utf8") : "";
-
-/**
- * ワークフローの jobs の下を、ジョブの名前ごとの文に分ける
- * @param text ワークフローの中身
- * @returns ジョブの名前から、そのジョブの文への対応
- */
-function jobs(text: string): Map<string, string> {
-  const body = text.slice(text.indexOf("\njobs:\n"));
-  const out = new Map<string, string>();
-  for (const part of body.split(/\n(?= {2}[\w-]+:\n)/).slice(1)) {
-    const name = /^ {2}([\w-]+):/.exec(part)?.[1];
-    if (name) out.set(name, part);
-  }
-  return out;
-}
-
-/**
- * 文の中で、並べた印がこの順に出るかを確かめる
- * @param text 探す文
- * @param marks 印の並び
- */
-function inOrder(text: string, marks: readonly string[]): void {
-  let from = 0;
-  for (const mark of marks) {
-    const at = text.indexOf(mark, from);
-    assert.ok(at >= 0, `${mark} が ${marks.join(" → ")} の順に無い`);
-    from = at + mark.length;
-  }
-}
 
 /**
  * JSONC のコメントを外して読む。文字列の中に // を含まない wrangler.jsonc を前提にする
@@ -194,7 +166,7 @@ void describe("前のバージョンに戻す workflow", () => {
 
   void it("know-office が理由を入れて手で動かし、本番と同じ鍵で wrangler rollback を回す", () => {
     assert.match(rollback, /^on:\n {2}workflow_dispatch:\n {4}inputs:\n {6}reason:\n/m);
-    assert.match(job, /^ {6}CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}$/m);
+    assert.equal(step(job, "前のバージョンに戻す").env["CLOUDFLARE_API_TOKEN"], "${{ secrets.CLOUDFLARE_API_TOKEN }}");
     assert.match(job, /wrangler rollback --name know-office --yes/);
     // 本番のデプロイと重ねない
     assert.match(job, /^ {6}group: deploy-production\n {6}cancel-in-progress: false$/m);
@@ -214,5 +186,24 @@ void describe("前のバージョンに戻す workflow", () => {
       assert.match(line, /^ +[A-Z_]+: \$\{\{ (inputs\.reason|secrets\.[A-Z_]+) \}\}$/, line);
     }
     for (const uses of rollback.matchAll(/uses: (\S+)/g)) assert.match(uses[1] ?? "", /^actions\/[\w-]+@v\d+$/, uses[0]);
+  });
+
+  void it("既定のブランチのほかから動かした時は、依存を入れる前に落とす", () => {
+    const ref = step(job, "既定のブランチを確かめる");
+    assert.ok(ref.run, "rollback に、既定のブランチを確かめるステップが無い");
+    // ほかのブランチの依存と命令に鍵を渡さないため、checkout より前に確かめる
+    assert.match(job, /^ {4}steps:\n(?: {6}#.*\n)* {6}- name: 既定のブランチを確かめる\n/m);
+    assert.deepEqual(ref.env, { REF: "${{ github.ref }}", DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}" });
+    const run = (env: Record<string, string>) => bash(ref.run, { REF: "refs/heads/main", DEFAULT_BRANCH: "main", ...env }).status;
+    assert.equal(run({}), 0);
+    assert.notEqual(run({ REF: "refs/heads/feature" }), 0);
+    assert.notEqual(run({ REF: "refs/tags/main" }), 0);
+    assert.notEqual(run({ DEFAULT_BRANCH: "" }), 0);
+  });
+
+  void it("Cloudflare の鍵は確かめるステップと戻すステップにだけ渡し、複数行の命令は set -eu で始める", () => {
+    assert.doesNotMatch(job, /^ {4}env:/m);
+    assert.deepEqual(secretSteps(job), ["鍵がそろっているか", "前のバージョンに戻す"]);
+    assert.deepEqual(blocks(rollback).filter((b) => !b.startsWith("set -eu\n")), []);
   });
 });
