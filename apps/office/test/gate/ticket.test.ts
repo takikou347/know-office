@@ -4,11 +4,17 @@ import { SignJWT } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";
 import { rotateVaultKeys, vaultKey } from "../../src/gate/auth/vault.ts";
 import { routeEgress, type Caller } from "../../src/gate/egress.ts";
+import { reachCheckpoint } from "../../src/gate/work/progress.ts";
 import { authenticateTicket, issueTicket, TICKET_TYP, workspaceIdOf } from "../../src/gate/work/ticket.ts";
 import { resetLedger } from "../helpers/d1.ts";
 import { jst, MINUTE, NODE, NODE2, rows, startWork, useGuardWorld } from "../helpers/guard.ts";
 
 const w = useGuardWorld();
+// テストの時刻は 2030 年なので、チェックポイントの出来事と記録の置き場に手元の 1 つを当てる
+beforeEach(async () => {
+  await resetLedger(w.d1.REC_2026);
+  w.gate.env.REC_2030 = w.d1.REC_2026;
+});
 
 /**
  * 開発担当のワークスペースを返す。発行した先として作業トークンに入る
@@ -112,10 +118,19 @@ describe("作業トークンの署名", () => {
     await expect(authenticateTicket(w.gate.env, token, builder(), jst(9, 2), w.gate.deps)).rejects.toMatchObject({ code: "unauthenticated" });
   });
 
-  it("作業トークンの無い要求を断り、ハートビートとチェックポイントだけは通す", async () => {
+  it("作業トークンの無い要求を断り、ハートビートだけは通す", async () => {
     await startWork(w, "builder");
     expect((await fromWorkspace("/ws/v1/decisions", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(401);
     expect((await fromWorkspace("/ws/v1/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: new Date(jst(9)).toISOString() }) })).status).toBe(204);
+  });
+
+  it("チェックポイントの口は無く、作業トークンが無ければ 401、あれば 404 で断る", async () => {
+    // チェックポイントは社員のツールの道 (work/progress.ts) だけで届く
+    await startWork(w, "builder");
+    const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9));
+    const body = JSON.stringify({ kind: "commit", nodeId: NODE });
+    expect((await fromWorkspace("/ws/v1/checkpoints", { method: "POST", headers: { "content-type": "application/json" }, body })).status).toBe(401);
+    expect((await fromWorkspace("/ws/v1/checkpoints", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body })).status).toBe(404);
   });
 
 });
@@ -130,11 +145,12 @@ function beat(caller?: Caller): Promise<Response> {
 }
 
 /**
- * チェックポイントを送る
- * @returns 受け手の返事
+ * 社員のツールの checkpoint と同じ道で、今のタスクのチェックポイントに届かせる
+ * @param nodeId 届いたタスク
+ * @returns 作業トークンを差し替えたか
  */
-function checkpoint(): Promise<Response> {
-  return fromWorkspace("/ws/v1/checkpoints", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "commit", nodeId: NODE }) });
+function checkpoint(nodeId: string = NODE): Promise<boolean> {
+  return reachCheckpoint(w.gate.env, "builder", { kind: "commit", nodeId }, w.clock.now());
 }
 
 describe("1 時間を超えるタスク", () => {
@@ -142,10 +158,10 @@ describe("1 時間を超えるタスク", () => {
     await startWork(w, "builder");
     const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9));
     w.clock.advance(jst(9, 30) - w.clock.now());
-    expect((await checkpoint()).status).toBe(204);
+    expect(await checkpoint()).toBe(false);
     expect(w.gate.workspaces.builder.tickets).toEqual([]);
     w.clock.advance(jst(9, 51) - w.clock.now());
-    expect((await checkpoint()).status).toBe(204);
+    expect(await checkpoint()).toBe(true);
     const [renewed] = w.gate.workspaces.builder.tickets;
     if (renewed === undefined) throw new Error("新しい作業トークンが届かない");
     expect(await authenticateTicket(w.gate.env, renewed, builder(), jst(10, 30), w.gate.deps)).toMatchObject({ nodeId: NODE, expiresAt: jst(9, 51) + 60 * MINUTE });
@@ -157,7 +173,7 @@ describe("1 時間を超えるタスク", () => {
     const { token } = await issueTicket(w.gate.env, "builder", NODE, jst(9));
     w.gate.workspaces.builder.down = true;
     w.clock.advance(jst(9, 51) - w.clock.now());
-    expect((await checkpoint()).status).toBe(204);
+    expect(await checkpoint()).toBe(false);
     expect(await authenticateTicket(w.gate.env, token, builder(), jst(9, 52), w.gate.deps)).toMatchObject({ nodeId: NODE });
   });
 });
@@ -167,9 +183,7 @@ describe("チェックポイントの受け方", () => {
     await startWork(w, "builder");
     await issueTicket(w.gate.env, "builder", NODE, jst(9));
     w.clock.advance(jst(9, 51) - w.clock.now());
-    const res = await fromWorkspace("/ws/v1/checkpoints", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "commit", nodeId: NODE2 }) });
-    expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ code: "conflict" });
+    await expect(checkpoint(NODE2)).rejects.toMatchObject({ code: "conflict" });
     expect(w.gate.workspaces.builder.tickets).toEqual([]);
   });
 });
@@ -184,11 +198,6 @@ async function tracesOfDecisions(): Promise<unknown[]> {
 
 describe("1 本の流れで追う", () => {
   const TRACE = "c".repeat(32);
-  // テストの時刻は 2030 年なので、その年の記録の置き場に手元の 1 つを当てる
-  beforeEach(async () => {
-    await resetLedger(w.d1.REC_2026);
-    w.gate.env.REC_2030 = w.d1.REC_2026;
-  });
 
   it("ワークスペースからの要求は、呼び出しを始めた要求の traceId で記録に残り、差し替えた作業トークンも同じ traceId を持つ", async () => {
     await startWork(w, "builder");
@@ -204,7 +213,7 @@ describe("1 本の流れで追う", () => {
     expect(await tracesOfDecisions()).toEqual([TRACE]);
     expect(w.gate.audits.find((a) => a.action === "ticket.issue" && a.target === jti)?.traceId).toBe(TRACE);
     w.clock.advance(jst(9, 51) - w.clock.now());
-    expect((await checkpoint()).status).toBe(204);
+    expect(await checkpoint()).toBe(true);
     const [renewed] = w.gate.workspaces.builder.tickets;
     if (renewed === undefined) throw new Error("新しい作業トークンが届かない");
     expect((await decide(renewed)).status).toBe(200);
@@ -237,17 +246,15 @@ describe("作業トークンの監査ログ", () => {
 
 describe("ワークスペースを分ける", () => {
   it("ハートビートを叩き続ける", async () => {
-    // 作業トークンの要らないハートビートとチェックポイントは、ワークスペースごとに合わせて 1 分 60 回まで
+    // 作業トークンの要らないハートビートは、ワークスペースごとに 1 分 60 回まで
     await startWork(w, "builder");
     await startWork(w, "reviewer");
     w.clock.advance(jst(9, 1) - w.clock.now());
-    for (let i = 0; i < 30; i += 1) expect((await beat()).status).toBe(204);
-    for (let i = 0; i < 30; i += 1) expect((await checkpoint()).status).not.toBe(429);
+    for (let i = 0; i < 60; i += 1) expect((await beat()).status).toBe(204);
     const over = await beat();
     expect(over.status).toBe(429);
     expect(await over.json()).toMatchObject({ code: "rate_limited" });
     expect(over.headers.get("Retry-After")).toBe("60");
-    expect((await checkpoint()).status).toBe(429);
     // ほかのワークスペースの数には入らない
     expect((await beat({ staffId: "reviewer", workspaceId: workspaceIdOf(w.gate.env, "reviewer") })).status).toBe(204);
     // 次の分には戻る

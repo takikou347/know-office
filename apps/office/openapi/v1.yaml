@@ -2924,26 +2924,6 @@ components:
       required:
         - at
       additionalProperties: false
-    CheckpointInput:
-      type: object
-      properties:
-        kind:
-          type: string
-          enum:
-            - test_pass
-            - commit
-            - pr
-            - note
-        nodeId:
-          type: string
-          format: uuid
-          description: UUID v7
-        note:
-          type: string
-      required:
-        - kind
-        - nodeId
-      additionalProperties: false
     TranscriptPartInput:
       type: object
       properties:
@@ -9566,60 +9546,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "415":
-          $ref: "#/components/responses/UnsupportedMediaType"
-        "422":
-          $ref: "#/components/responses/UnprocessableContent"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /ws/v1/checkpoints:
-    servers:
-      - *a2
-    post:
-      operationId: sendCheckpoint
-      tags:
-        - workspace-gate
-      summary: チェックポイントへの到達を通知する
-      description: |-
-        nodeId が社員 DO の担当中のタスクと一致する場合のみ受け付ける。
-
-        処理の流れ:
-
-        1. `nodeId` が社員 DO の担当中のタスクと一致することを確認する
-        2. `StaffDO.checkpoint(c)` を呼ぶ
-        3. `node_events` に追加する
-
-        このルート固有のエラー:
-
-        - 409 `conflict`: 担当中のタスクと異なる
-      x-steps:
-        - "`nodeId` が社員 DO の担当中のタスクと一致することを確認する"
-        - "`StaffDO.checkpoint(c)` を呼ぶ"
-        - "`node_events` に追加する"
-      x-errors:
-        - "409 `conflict`: 担当中のタスクと異なる"
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CheckpointInput"
-      responses:
-        "204":
-          description: 成功。レスポンス本文なし
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":

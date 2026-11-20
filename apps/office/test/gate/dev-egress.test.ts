@@ -70,7 +70,7 @@ describe("開発の代わりのワークスペースの出来事", () => {
     expect(await rows(world.gate.env.DB, "SELECT status FROM nodes WHERE id = ?", nodeId)).toEqual([{ status: "doing" }]);
   });
 
-  it("作業トークンの要らないチェックポイントと、知らない社員は 404 で断る", async () => {
+  it("チェックポイントの道と、知らない社員は 404 で断る", async () => {
     const { token } = await builderAtWork(world);
     for (const path of ["/__dev/workspace/builder/ws/v1/checkpoints", "/__dev/workspace/nobody/ws/v1/events", "/__dev/workspace/nobody/ws/v1/heartbeat"]) {
       expect((await send(world.gate.env, path, token, []))?.status).toBe(404);

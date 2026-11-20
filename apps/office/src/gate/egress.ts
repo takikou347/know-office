@@ -1,6 +1,6 @@
 // ワークスペースの外向きの通信の受け手。コンテナから出る要求は宛先ごとにここへ回り、ゲートウェイが作業トークンを確かめる (社員が考えるの 2 章、3.2)
 import { createRoute } from "@hono/zod-openapi";
-import { AppError, CheckpointInput, type Clock, type Fetcher, fromBase64, HeartbeatInput, systemClock, TranscriptPartInput } from "@know-office/core";
+import { AppError, type Clock, type Fetcher, fromBase64, HeartbeatInput, systemClock, TranscriptPartInput } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import { createApp } from "./app.ts";
 import { bodyShape } from "./body.ts";
@@ -26,7 +26,7 @@ export type { Caller } from "./work/ticket.ts";
 export const WORKSPACE_EGRESS = { http: ["gate.internal"], https: ["api.anthropic.com", "api.github.com", "github.com"] } as const;
 
 /** 作業トークンを要らないルート。プロキシが送ったコンテナから社員を決める (API の workspace-gate) */
-export const OPEN_PATHS = new Set(["/ws/v1/heartbeat", "/ws/v1/checkpoints"]);
+const OPEN_PATHS = new Set(["/ws/v1/heartbeat"]);
 
 /** 受け手の依り所 */
 export type EgressOptions = {
@@ -59,20 +59,6 @@ const heartbeatRoute = createRoute({
   security: [],
   request: { body: { content: { "application/json": { schema: HeartbeatInput } }, required: true } },
   responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(400, 401, 403, 413, 415, 422, 429, 500) },
-});
-
-const checkpointRoute = createRoute({
-  method: "post",
-  path: "/ws/v1/checkpoints",
-  operationId: "sendCheckpoint",
-  tags: ["workspace-gate"],
-  summary: "チェックポイントへの到達を通知する",
-  description: "nodeId が社員 DO の担当中のタスクと一致する場合のみ受け付ける。",
-  "x-steps": ["`nodeId` が社員 DO の担当中のタスクと一致することを確認する", "`StaffDO.checkpoint(c)` を呼ぶ", "`node_events` に追加する"],
-  "x-errors": ["409 `conflict`: 担当中のタスクと異なる"],
-  security: [],
-  request: { body: { content: { "application/json": { schema: CheckpointInput } }, required: true } },
-  responses: { 204: { description: "成功。レスポンス本文なし" }, ...problems(400, 401, 403, 409, 413, 415, 422, 429, 500) },
 });
 
 const transcriptRoute = createRoute({
@@ -159,14 +145,6 @@ function createWorkspaceGate(caller: Caller, options: EgressOptions) {
     // チェックポイントの無い長い呼び出しでも作業トークンが切れないよう、残りが 10 分を切ったらここでも差し替えて PUT /v1/ticket で渡す
     const { nodeId } = await staff.status(now);
     if (nodeId !== null) await renewTicket(c.env, caller.staffId, nodeId, now);
-    return noContent(c);
-  });
-  app.openapi(checkpointRoute, async (c) => {
-    const input = c.req.valid("json");
-    const now = c.var.clock.now();
-    // DO の RPC を越えると AppError のクラスが消えるので、断った code を戻す
-    await staffOf(c.env, caller.staffId).checkpoint(input, now).catch(rethrowRpc);
-    await renewTicket(c.env, caller.staffId, input.nodeId, now);
     return noContent(c);
   });
   app.openapi(transcriptRoute, async (c) => {

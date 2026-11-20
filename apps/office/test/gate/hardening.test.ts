@@ -49,7 +49,6 @@ const codeRoutes = [
 const WITHOUT_LOGIN = new Map([
   ["POST /hooks/v1/github", "Access を外す唯一のパス。X-Hub-Signature-256 で確かめる"],
   ["POST /ws/v1/heartbeat", "ワークスペースの出口のプロキシだけが届け、送信元の社員をプロキシが決める"],
-  ["POST /ws/v1/checkpoints", "ワークスペースの出口のプロキシだけが届け、送信元の社員をプロキシが決める"],
   ["GET /v1/health", "ワークスペースの中のサーバー。社員 DO からしか届かない"],
 ]);
 

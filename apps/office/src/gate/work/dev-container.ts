@@ -1,7 +1,7 @@
 // 開発環境のワークスペースのコンテナの代わり。手元に Containers が無い時、代わりの物の置き場に立てた Node のワークスペースへ要求を回す (ログインと記録の 3.9、社員が考えるの 3.2)
 import { AppError, StaffId, WORKSPACE_KEY_ENV } from "@know-office/core";
 import { devWorkspaceBase, type EndpointEnv } from "../endpoints.ts";
-import { type EgressOptions, OPEN_PATHS, routeEgress } from "../egress.ts";
+import { type EgressOptions, routeEgress } from "../egress.ts";
 import type { Bindings } from "../env.ts";
 import { workspaceIdOf } from "./ticket.ts";
 import type { ContainerLike } from "./workspace-box.ts";
@@ -173,7 +173,6 @@ export function devWorkspaceEgress(request: Request, env: Bindings, options: Egr
   const forwarded = new Request(`${claude ? "https://api.anthropic.com" : "http://gate.internal"}${path}${url.search}`, request);
   const caller = { staffId: staffId.data, workspaceId: workspaceIdOf(env, staffId.data) };
   if (path === HEARTBEAT_PATH) return devHeartbeat(forwarded, env, caller, options);
-  if (OPEN_PATHS.has(path)) return Promise.resolve(new Response(null, { status: 404 }));
   return routeEgress(forwarded, env, caller, options);
 }
 

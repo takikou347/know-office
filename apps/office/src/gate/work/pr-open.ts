@@ -106,7 +106,6 @@ export async function openPr(env: Bindings, forge: Forge, call: PrCall, task: No
   const again = before === undefined ? {} : { again: true };
   await appendNodeEvent(env, { nodeId: task.id, staffId: call.staffId, kind: "pr_opened", detail: { prNumber: pull.number, branch, ...again, ...(docs === null ? {} : { docsPr: docs.link.prNumber }) } }, { by: call.staffId, now: call.now, traceId: call.traceId });
   await auditFrom(env, { at: call.now, actor: call.staffId, action: "pull_request.open", target: task.id, scope: task.scope, detail: { repo: task.repo, prNumber: pull.number, ...again }, traceId: call.traceId });
-  // TODO(#54): プルリクエストを出した事を guard.observe に渡す
   await reviewAsked(env, asked, results[2], actor);
   await leaveTask(env, call.staffId, "done", call.now);
   return { number: pull.number, branch };

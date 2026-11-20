@@ -10,7 +10,7 @@ tools: Read, Grep, Glob, Bash
 2. シナリオごとに、入口 (画面の操作、Cron、通知、社員のツール) からゲートウェイのルート、DO とテーブル、画面に出るまでをコードで追う。ルートは `apps/office/openapi/v1.yaml`、テーブルは `apps/office/src/gate/db/` を grep で引く
 3. 次を挙げる
    - つながりが切れている所 (呼び手の無いルート、ツール、ジョブ。画面が呼ばない API)
-   - 仮のデータ (`mock.ts` を読む画面、固定の文、`STILL_MOCK` と `PLANNED_ROUTES` と `UNBUILT` に残る物)
+   - 仮のデータ (固定の文、`PLANNED_ROUTES` (`src/gate/routes/planned.ts`) に残る物)
    - `apps/office/e2e/flows/` の通しが無いシナリオ、`page.route` などで返事を差し替えている通し
    - 詳細設計とコードの食い違い (どちらを直すべきかも)
    - 閉じた Issue のうち、残りが別の Issue に無い物
