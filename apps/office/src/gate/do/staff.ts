@@ -504,10 +504,17 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @returns StaffBook に渡す口
    */
   #workspace(staffId: StaffId): Workspace {
-    const request = (name: string, step: (stub: DurableObjectStub<WorkspaceContainer>) => Promise<null>): Promise<void> => {
+    const request = (name: string, step: (stub: DurableObjectStub<WorkspaceContainer>) => Promise<null>, settled?: () => Promise<void>): Promise<void> => {
       // 待たずに頼む。DO は呼び出しの後も動いているので、頼んだ物は最後まで走る。頼んだ順に流し、書き残させ終える前に止めない
+      // settled は、口を作る所で投げた時も含め、頼みが終わった後に必ず走らせる
       this.#workspaceChain = this.#workspaceChain
-        .then(() => step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId))))
+        .then(async () => {
+          try {
+            await step(this.env.WORKSPACE.get(this.env.WORKSPACE.idFromName(staffId)));
+          } finally {
+            if (settled) await settled();
+          }
+        })
         .catch((error: unknown) => {
           // 起きなかった時の通知は WorkspaceBox が出す。ここは呼び出しの失敗を残すだけ
           log("error", "workspace_call_failed", { staffId, call: name, error: error instanceof Error ? error.message : "unknown" });
@@ -523,15 +530,17 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
         const began = systemClock.now();
         // 頼んだ時から数え、ほかの知らせ (notifyStaff) の pull を止め終えるまで待たせる
         this.#aborting += 1;
-        return request("abort", async (stub) => {
-          try {
+        return request(
+          "abort",
+          async (stub) => {
             await stub.abort("task_left");
-          } finally {
+            return null;
+          },
+          async () => {
             this.#aborting -= 1;
             await this.pull(now + Math.max(0, systemClock.now() - began));
-          }
-          return null;
-        });
+          },
+        );
       },
       // 作り直した後は、持っているタスクの会話の記録を戻して続きを呼び、記録が無ければ最初から呼ぶ。止めている間は呼ばない
       restart: (now) =>

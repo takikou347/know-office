@@ -161,6 +161,8 @@ describe("社員が自分で働き始める", () => {
     await worker.workspaceMode("builder", "abort_hold");
     await worker.query("DB", `UPDATE nodes SET status = 'stopped' WHERE id = '${TASK.nodeId}'`);
     await worker.staff("builder", "dropTask", TASK.nodeId, jst(9, 2));
+    // ワークスペースが止め待ちに入ってから、次の知らせを送る
+    await until(async () => (await worker.workspace("builder")).some((c) => c.method === "abort"));
     // 止めている間に足されたタスクの知らせ (notifyStaff) が、手の空いた社員に取らせる
     await worker.query(
       "DB",
