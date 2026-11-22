@@ -1,10 +1,11 @@
-// 目的と組織図の画面。目的からタスクまでの木と進み具合、組織図、役目の説明文を入口から読み、説明文を直し、タスクを足して頼む (タスクとレビューの 3.1)
+// 目的と組織図の画面。目的からタスクまでの木と進み具合、組織図、役目の説明文を入口から読み、説明文を直し、目的、目標、プロジェクトを置き、タスクを足して頼む (タスクとレビューの 3.1)
 import type { NodeStatus, NodeTree, OrgStaff } from "@know-office/core";
 import { StaffId } from "@know-office/core";
 import { Alert, Badge, Button, Card, Field, Progress, Stack, Textarea } from "knowidea-ui";
 import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { z } from "zod";
 import { ApiContext } from "../../api.ts";
+import { AddNode } from "./NodeDialogs.tsx";
 import { AddTask, ChangeTask, roleOf } from "./TaskDialogs.tsx";
 
 const Failure = z.object({ code: z.string(), traceId: z.string() }).loose();
@@ -152,6 +153,11 @@ function Root({ root, edit }: { root: NodeTree; edit: Edit }) {
   return (
     <Part title={`${KIND_LABEL[root.kind]}: ${root.title}`}>
       <Progress label={`${root.title}の進み具合`} value={Math.round(root.progress * 100)} max={100} />
+      {root.kind === "purpose" ? (
+        <div>
+          <AddNode parent={root} onDone={edit.reload} />
+        </div>
+      ) : null}
       {goals.length === 0 ? <p>目標はまだ無い</p> : null}
       {goals.map((g) => (
         <Card key={g.id} title={`${KIND_LABEL[g.kind]}: ${g.title}`}>
@@ -160,6 +166,11 @@ function Root({ root, edit }: { root: NodeTree; edit: Edit }) {
             {g.kind === "project" ? (
               <div>
                 <AddTask project={g} staff={edit.staff} onDone={edit.reload} />
+              </div>
+            ) : null}
+            {g.kind === "goal" ? (
+              <div>
+                <AddNode parent={g} onDone={edit.reload} />
               </div>
             ) : null}
             <Branches parent={g} items={g.children} edit={edit} />
@@ -299,6 +310,11 @@ export function GoalsPage() {
       {trees.state === "loading" ? <p>目的からタスクまでを読んでいます</p> : null}
       {trees.state === "failed" ? <LoadFailed what="目的からタスクまで" failed={trees} /> : null}
       {trees.state === "ok" && trees.data.length === 0 ? <p>目的はまだ無い</p> : null}
+      {trees.state === "ok" ? (
+        <div>
+          <AddNode onDone={edit.reload} />
+        </div>
+      ) : null}
       {trees.state === "ok" ? trees.data.map((root) => <Root key={root.id} root={root} edit={edit} />) : null}
       <Part title="組織図と役目">
         {org.state === "loading" ? <p>組織図を読んでいます</p> : null}

@@ -5,7 +5,7 @@ import { cancelLeftOrders } from "./helpers/seed.ts";
 import { part, post } from "./helpers/screen.ts";
 import { FAKES } from "../helpers/fakes.ts";
 import { clockIn, ownerPasskey, scriptReply, staffState } from "./helpers/staff.ts";
-import { CARRY_TITLE, claudeReceived, dropLeftovers, NodeStatus, NodeVersion, PROJECT, Runs, addTask, finishedBy, openTree, sayToReviewer, scriptFinish, scriptWork } from "./helpers/staff-work.ts";
+import { CARRY_TITLE, claudeReceived, dropLeftovers, NodeStatus, NodeVersion, PROJECT, Runs, Trees, addTask, finishedBy, openTree, sayToReviewer, scriptFinish, scriptWork } from "./helpers/staff-work.ts";
 
 test.describe("タスクの繰り返し", () => {
   test("タスクの流れ", async ({ page }) => {
@@ -159,6 +159,50 @@ test.describe("目的からタスクまでの木", () => {
     await expect(dialog).toBeHidden();
     await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${later}` }).last().getByText("頼む先: レビュー担当")).toBeVisible();
     await finishedBy(page, nodeId);
+  });
+
+  test("オーナーが画面で目的、目標、プロジェクトを置き、その下にタスクを足す", async ({ page }) => {
+    // データの無い所から、オーナーが画面だけで木を作り始められる。通しごとに違う題にし、前の通しの木と混ぜない
+    const mark = String(Date.now());
+    const purpose = `目的を置く ${mark}`;
+    const goal = `目標を置く ${mark}`;
+    const project = `プロジェクトを置く ${mark}`;
+    const task = `置いた木のタスク ${mark}`;
+    await page.goto("/goals");
+    const main = page.getByRole("main");
+    const fill = async (button: string, title: string, submit: string) => {
+      await main.getByRole("button", { name: button }).click();
+      const dialog = page.getByRole("dialog", { name: button });
+      await dialog.getByRole("textbox", { name: "題" }).fill(title);
+      await dialog.getByRole("button", { name: submit }).click();
+      await expect(dialog).toBeHidden();
+    };
+    await fill("目的を足す", purpose, "目的を足す");
+    await expect(main.getByRole("heading", { level: 2, name: `目的: ${purpose}` })).toBeVisible();
+    await fill(`「${purpose}」に目標を足す`, goal, "目標を足す");
+    await expect(main.getByText(`目標: ${goal}`)).toBeVisible();
+    await fill(`「${goal}」にプロジェクトを足す`, project, "プロジェクトを足す");
+    await expect(main.getByText(`プロジェクト: ${project}`)).toBeVisible();
+
+    // 置いたプロジェクトの下に、頼む先の無いタスクを足す
+    await main.getByRole("button", { name: `「${goal}」の「${project}」にタスクを足す` }).click();
+    const dialog = page.getByRole("dialog", { name: `「${goal}」の「${project}」にタスクを足す` });
+    await dialog.getByRole("textbox", { name: "題" }).fill(task);
+    await dialog.getByRole("button", { name: "タスクを足す" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${task}` }).last().getByText("頼む先: まだ頼まない")).toBeVisible();
+
+    // 木は目的、目標、プロジェクト、タスクの順に親をたどれる
+    const trees = Trees.parse(await (await page.request.get("/api/v1/nodes?scope=office")).json()).data;
+    const root = trees.find((t) => t.title === purpose);
+    expect(root?.children.map((g) => g.title)).toEqual([goal]);
+    expect(root?.children[0]?.children.map((p) => p.title)).toEqual([project]);
+    expect(root?.children[0]?.children[0]?.children.map((t) => t.title)).toEqual([task]);
+
+    // 後の通しの社員が取らないよう、足したタスクを取り消す
+    await main.getByRole("button", { name: `${task}を変える` }).click();
+    await page.getByRole("dialog", { name: `${task}を変える` }).getByRole("button", { name: "タスクを取り消す" }).click();
+    await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${task}` }).last().getByText("見送り")).toBeVisible();
   });
 
   test("ほかで先に頼む先が変わっていたら、木の上に知らせて今の頼む先を出す", async ({ page }) => {
