@@ -58,7 +58,7 @@ export function reviewerApproved(repo: string, head: string): SQL {
  * @param target.head 既定のブランチの先のコミット
  * @param approvals オーナーの承認があるか。無ければ頼む操作そのもの (true)
  * @param approvals.owner オーナーの承認があるか
- * @throws conflict 条件がそろっていない時 (足りない条件を detail に並べる)
+ * @throws refused 条件がそろっていない時 (足りない条件を detail に並べる)
  * @throws upstream_failed チェックを GitHub から読めない時
  */
 export async function requireDeployWhenAt(env: Bindings, forge: Forge, deployWhen: readonly ReleaseCondition[], target: { repo: string; head: string }, approvals: { owner: boolean } = { owner: true }): Promise<void> {
@@ -70,7 +70,7 @@ export async function requireDeployWhenAt(env: Bindings, forge: Forge, deployWhe
   const met = await checkConditions(forge, deployWhen, { repo: target.repo, sha: target.head }, { reviewer: approved !== undefined, owner: approvals.owner }, { all: true });
   if (met.kind === "met") return;
   const lacking = [...(met.kind === "failed" ? ["checks (既定のブランチの先のチェックが落ちている)"] : []), ...met.missing.map((c) => MISSING[c])];
-  throw new AppError("conflict", `デプロイの条件を満たしていない。足りない条件: ${lacking.join("、")}`);
+  throw new AppError("refused", `デプロイの条件を満たしていない。足りない条件: ${lacking.join("、")}`);
 }
 
 /**
@@ -82,15 +82,15 @@ export async function requireDeployWhenAt(env: Bindings, forge: Forge, deployWhe
  * @param service サービス ID とリポジトリ
  * @param service.id サービス ID
  * @param service.repo リポジトリ。まだ決めていなければ null
- * @throws conflict 条件がそろっていない時 (足りない条件を detail に並べる)、確かめられない時 (GitHub とつないでいない、リポジトリが無い)
+ * @throws refused 条件がそろっていない時 (足りない条件を detail に並べる)、確かめられない時 (GitHub とつないでいない、リポジトリが無い)
  * @returns 段階を書く時に重ねる条件
  * @throws upstream_failed 先のコミットかチェックを GitHub から読めない時
  */
 export async function requireDeployConditions(env: Bindings, forge: Forge, service: { id: string; repo: string | null }): Promise<SQL> {
   const { deployWhen, still } = await readDeployRules(env.DB, service.id);
   if (!deployWhen.includes("checks") && !deployWhen.includes("reviewer")) return still;
-  if (service.repo === null) throw new AppError("conflict", "リポジトリが無いので、デプロイの条件を確かめられない");
-  if (!(await forge.connected())) throw new AppError("conflict", `GitHub と連携していないので、デプロイの条件 (${deployWhen.join(", ")}) を確かめられない`);
+  if (service.repo === null) throw new AppError("refused", "リポジトリが無いので、デプロイの条件を確かめられない");
+  if (!(await forge.connected())) throw new AppError("refused", `GitHub と連携していないので、デプロイの条件 (${deployWhen.join(", ")}) を確かめられない`);
   const head = await forge.defaultHead(service.repo);
   await requireDeployWhenAt(env, forge, deployWhen, { repo: service.repo, head });
   return deployWhen.includes("reviewer") ? sql`${still} AND ${reviewerApproved(service.repo, head)}` : still;

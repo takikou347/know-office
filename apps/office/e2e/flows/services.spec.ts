@@ -9,7 +9,7 @@ import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { freeRepoNames, restoreSeedServices, runLocalWrangler, seedMain } from "./helpers/seed.ts";
-import { addIdea, choose, chooseDocsRepo, move } from "./helpers/services.ts";
+import { addIdea, choose, chooseDocsRepo, move, prototypeService, settingCard } from "./helpers/services.ts";
 
 /** 代わりの GitHub がインストールで選ぶリポジトリ */
 const REPO = "example/know-office";
@@ -123,36 +123,6 @@ function seedStudy(serviceId: string, body: string): void {
   runLocalWrangler(["exec", "wrangler", "r2", "object", "put", `know-office-files/${key}`, "--local", `--file=${file}`]);
   seedMain(`UPDATE services SET study_key = '${key}' WHERE id = '${serviceId}'`);
 }
-
-/**
- * 画面で案を足し、検討を経てリポジトリを選び、試作に進める
- * @param page 開いているページ。useOwnerPasskey を付けておく
- * @param title 案の名前
- * @returns 試作に進めたサービスの ID
- */
-async function prototypeService(page: Page, title: string): Promise<string> {
-  freeRepoNames();
-  await page.goto("/services");
-  await connectGitHub(page);
-  await chooseDocsRepo(page);
-  const id = await addIdea(page, title);
-  const main = page.getByRole("main");
-  await move(page, "検討に進める", "調べる");
-  await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
-  await choose(page, "移す先", "作ると決める");
-  await choose(page, "リポジトリ", REPO);
-  await move(page, "作ると決める", "作る");
-  await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
-  return id;
-}
-
-/**
- * 設定のタブの、見出しで探した 1 項目のカード
- * @param page 開いているページ
- * @param heading カードの見出し
- * @returns カード
- */
-const settingCard = (page: Page, heading: string) => page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: heading, exact: true }) });
 
 test.afterEach(() => {
   // デプロイの条件の通しが置いた、レビュー担当の承認の行
@@ -328,7 +298,7 @@ test.describe("段階ごとのオーナーの判断", () => {
 test.describe("サービスごとの設定", () => {
   test("断られた後も今の値を出す", async ({ page }) => {
     await useOwnerPasskey(page);
-    const id = await prototypeService(page, `断られる設定の案 ${crypto.randomUUID().slice(0, 8)}`);
+    const id = await prototypeService(page, REPO, `断られる設定の案 ${crypto.randomUUID().slice(0, 8)}`);
     const main = page.getByRole("main");
     await main.getByRole("tab", { name: "設定" }).click();
     const deployWhen = settingCard(page, "本番にデプロイする条件");
@@ -376,5 +346,39 @@ test.describe("サービスごとの設定", () => {
     } finally {
       expect((await page.request.delete(`${FAKE_GITHUB}/__fake/failures`)).status()).toBe(204);
     }
+  });
+});
+
+test.describe("アイデアから運用までの流れ", () => {
+  test("同じ名前のリポジトリを持つサービスがある", async ({ page }) => {
+    await useOwnerPasskey(page);
+    const first = await prototypeService(page, REPO, `先に作る案 ${crypto.randomUUID().slice(0, 8)}`);
+    const docs = z.object({ data: z.object({ repo: z.string().nullable() }) }).parse(await (await page.request.get("/api/v1/devloop/docs-repo")).json()).data.repo;
+    await addIdea(page, `後から作る案 ${crypto.randomUUID().slice(0, 8)}`);
+    const main = page.getByRole("main");
+    await move(page, "検討に進める", "調べる");
+    await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
+    await choose(page, "移す先", "作ると決める");
+    // 選び欄には、先の案が持つリポジトリと設計書のリポジトリを並べない
+    await main.getByRole("combobox", { name: "リポジトリ" }).click();
+    await expect(page.getByRole("option", { name: OTHER_REPO, exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: REPO, exact: true })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: docs ?? "設計書のリポジトリ", exact: true })).toHaveCount(0);
+    await page.getByRole("option", { name: OTHER_REPO, exact: true }).click();
+
+    // 選んだ後に、先の案が同じリポジトリに移る。作ると決めると、ほかで変わったとは言わずに重なる名前を出す
+    seedMain(`UPDATE services SET repo = '${OTHER_REPO}' WHERE id = '${first}'`);
+    await move(page, "作ると決める", "作る");
+    const refused = main.getByRole("alert").filter({ hasText: "段階を移せませんでした" });
+    await expect(refused).toContainText("同じ名前 (knowidea-ui) のリポジトリを持つサービス");
+    await expect(refused).toContainText("名前の違うリポジトリを選ぶ");
+    await expect(refused).not.toContainText("ほかの所で先に変わりました");
+    await expect(refused).toContainText("問い合わせの番号");
+    // 段階は検討のまま。読み直した選び欄には、移った先のリポジトリが並ばない
+    await page.reload();
+    await choose(page, "移す先", "作ると決める");
+    await main.getByRole("combobox", { name: "リポジトリ" }).click();
+    await expect(page.getByRole("option", { name: REPO, exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: OTHER_REPO, exact: true })).toHaveCount(0);
   });
 });

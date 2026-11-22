@@ -1,6 +1,8 @@
-// サービスのリポジトリを、GitHub App で触れるリポジトリから選ぶ確かめ。試作に進める時と設定で変える時が同じ確かめを通す (サービスと拡張の 3.1、3.3)
-import { AppError, DOCS_REPO_KEY } from "@know-office/core";
-import { type SQL, sql } from "drizzle-orm";
+// サービスのリポジトリを、GitHub App で触れるリポジトリから選ぶ確かめ。試作に進める時と設定で変える時が同じ確かめを通し、作ると決める時の選び欄は選べない物を並べない (サービスと拡張の 3.1、3.3)
+import { AppError, DOCS_REPO_KEY, type Repo } from "@know-office/core";
+import { and, isNotNull, ne, type SQL, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { services } from "../db/main.ts";
 import { loadDocsRepo } from "../devloop/docs-setting.ts";
 import type { Bindings } from "../env.ts";
 import { loadLink, type TokenDeps } from "../github/app.ts";
@@ -29,4 +31,31 @@ export async function chooseRepo(env: Bindings, deps: TokenDeps, repo: string, p
   // 確かめた後に設計書のリポジトリへ選ばれた時も書かない
   const notDocs = sql`NOT EXISTS (SELECT 1 FROM settings WHERE key = ${DOCS_REPO_KEY} AND scope = 'office' AND version = (SELECT MAX(version) FROM settings WHERE key = ${DOCS_REPO_KEY} AND scope = 'office') AND lower(json_extract(value, '$.repo')) = ${repo.toLowerCase()})`;
   return sql`${installedAs(link.installation.version)} AND ${notDocs}`;
+}
+
+/**
+ * リポジトリの設計書の置き場の名前を返す。`owner/name` の name を小文字にした物で、`services/<名前>/` に使う
+ * @param repo リポジトリ
+ * @returns 置き場の名前
+ */
+export function repoDirName(repo: string): string {
+  return (repo.split("/")[1] ?? repo).toLowerCase();
+}
+
+/**
+ * 作ると決める時に選べるリポジトリだけを残す。同じ名前のリポジトリを持つ別のサービスがある物と、設計書のリポジトリを除く。
+ * 選んだ後に変わった時は、試作に進める文が同じ条件で断る
+ * @param db 今の状態の D1
+ * @param serviceId 選ぶサービス
+ * @param repos 触れるリポジトリ
+ * @returns 選べるリポジトリ
+ */
+export async function choosableRepos(db: Bindings["DB"], serviceId: string, repos: readonly Repo[]): Promise<Repo[]> {
+  const others = await drizzle(db)
+    .select({ repo: services.repo })
+    .from(services)
+    .where(and(ne(services.id, serviceId), isNotNull(services.repo)));
+  const taken = new Set(others.flatMap((s) => (s.repo === null ? [] : [repoDirName(s.repo)])));
+  const docs = (await loadDocsRepo(db))?.repo.toLowerCase();
+  return repos.filter((r) => !taken.has(repoDirName(r.fullName)) && r.fullName.toLowerCase() !== docs);
 }

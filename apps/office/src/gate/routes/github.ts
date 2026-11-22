@@ -9,6 +9,7 @@ import { appExists, appManifest, checkInstallation, consumeState, DROP_GONE_APP,
 import { guardDo } from "../guard/actions.ts";
 import { receiveHook } from "../github/hooks.ts";
 import { installationRepos } from "../github/repos.ts";
+import { choosableRepos } from "../services/repo.ts";
 import { claimLock, releaseLock } from "../db/locks.ts";
 import { loadGitHubRules, protectRepos, RULES_KEY, updateGitHubRules } from "../github/rules.ts";
 import { audit } from "../ledger/record.ts";
@@ -111,9 +112,13 @@ const listGitHubReposRoute = createRoute({
   operationId: "listGitHubRepos",
   tags: ["github"],
   summary: "連携したリポジトリ",
-  "x-steps": ["インストールで選んだすべてのリポジトリに届く、メタデータを読むだけの 1 時間の鍵を作る", "インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号"],
-  "x-errors": ["422 `validation_failed`: `cursor` の形が違う", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した"],
-  request: { query: listQuery(router) },
+  "x-steps": [
+    "インストールで選んだすべてのリポジトリに届く、メタデータを読むだけの 1 時間の鍵を作る",
+    "インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号",
+    "`serviceId` があれば、そのサービスを作ると決める時に選べない物 (同じ名前のリポジトリを持つ別のサービスがある物と、設計書のリポジトリ) を除く。除いた分だけページは短くなる",
+  ],
+  "x-errors": ["422 `validation_failed`: `cursor` か `serviceId` の形が違う", "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける", "502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した"],
+  request: { query: listQuery(router).extend({ serviceId: z.uuid().optional().openapi({ param: { name: "serviceId", in: "query" }, description: "作ると決めるサービスの ID (UUID v7)。あれば、そのサービスに選べるリポジトリだけを返す" }) }) },
   responses: { 200: listResponse(Repo), ...problems(400, 401, 403, 422, 429, 500, 502) },
 });
 
@@ -268,12 +273,13 @@ export const githubRoutes = router
     return ok(c, { state: link.app ? ("app_created" as const) : ("none" as const) });
   })
   .openapi(listGitHubReposRoute, async (c) => {
-    const { cursor, limit } = c.req.valid("query");
+    const { cursor, limit, serviceId } = c.req.valid("query");
     const parsed = PageCursor.safeParse(cursor ?? "1");
     if (!parsed.success) throw new AppError("validation_failed", "cursor の形が違う", { errors: [{ pointer: "#/query/cursor", detail: "前の返事の meta.next を送る" }] });
     const page = Number(parsed.data);
     const found = await installationRepos(c.env, c.var.github, page, limit);
-    return list(c, found.repos, page * limit < found.total ? String(page + 1) : null);
+    const repos = serviceId === undefined ? found.repos : await choosableRepos(c.env.DB, serviceId, found.repos);
+    return list(c, repos, page * limit < found.total ? String(page + 1) : null);
   })
   .openapi(getGitHubRulesRoute, async (c) => ok(c, await loadGitHubRules(c.env.DB)))
   .openapi(updateGitHubRulesRoute, async (c) => {

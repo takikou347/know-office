@@ -158,7 +158,7 @@ describe("段階ごとのオーナーの判断", () => {
     // チェックが終わっておらず、レビュー担当の承認も無ければ、足りない条件を並べて断り、何も動かさない
     checks(world, "pending");
     const lacking = Problem.parse(await deploy(world, id, 409));
-    expect(lacking.code).toBe("conflict");
+    expect(lacking.code).toBe("refused");
     expect(lacking.detail).toMatch(/足りない条件: checks .*、reviewer /);
     expect(dispatched(world)).toEqual([]);
     expect(await deployLock(world, id)).toEqual([]);
@@ -332,7 +332,7 @@ describe("段階ごとのオーナーの判断", () => {
     it("GitHub とつないでいなければ、外へ何も送らずに 409", async () => {
       const id = await liveService(world);
       const forge = { ...world.gate.forge, connected: () => Promise.resolve(false) };
-      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("GitHub と連携していない") as unknown });
+      await expect(deployService(world.gate.env, forge, { serviceId: id, now: world.clock.now(), by: "owner" })).rejects.toMatchObject({ code: "refused", message: expect.stringContaining("GitHub と連携していない") as unknown });
       expect(dispatched(world)).toEqual([]);
     });
 

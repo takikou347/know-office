@@ -14,21 +14,23 @@ function toMinutes(hhmm: string): number {
 }
 
 /**
- * 指示の終わりの時刻を確かめる。日も時刻も今より後、延長は所定の終わりより後、早退は所定の終わりより前
+ * 指示の終わりの時刻を確かめる。日も時刻も今より後、延長は所定の終わりより後、早退は所定の終わりより前。
+ * 断る時は、ほかで変わったのでなく決まりで断るので refused にし、何を直せばよいかを detail に書く。終わりの時刻との比べを、過ぎた時刻より先に確かめ、終わりより前の延長には終わりの時刻を伝える
  * @param db D1 の DB
  * @param input 指示
  * @param now 今の時刻
  * @returns 終わりの時刻。休みは null
- * @throws conflict 日か時刻を過ぎている、延長が終わりより前、早退が終わりより後の時
+ * @throws refused 日か時刻を過ぎている、延長が終わりより前、早退が終わりより後の時
  */
 export async function untilOf(db: Bindings["DB"], input: CreateOrderInput, now: number): Promise<number | null> {
-  if (input.day < jstDay(now)) throw new AppError("conflict", "過ぎた日の指示は出せない");
+  if (input.day < jstDay(now)) throw new AppError("refused", `過ぎた日 (${input.day}) の指示は出せない`);
   if (input.until === undefined) return null;
   const until = jstDayStart(input.day) + toMinutes(input.until) * 60_000;
-  if (until <= now) throw new AppError("conflict", "指定の時刻を過ぎている");
-  const end = jstDayStart(input.day) + toMinutes((await loadSchedule(db)).end) * 60_000;
-  if (input.kind === "extend" && until <= end) throw new AppError("conflict", "延長は終わりの時刻より後にする");
-  if (input.kind === "leave_early" && until >= end) throw new AppError("conflict", "早退は終わりの時刻より前にする");
+  const endAt = (await loadSchedule(db)).end;
+  const end = jstDayStart(input.day) + toMinutes(endAt) * 60_000;
+  if (input.kind === "extend" && until <= end) throw new AppError("refused", `延長は終わりの時刻 ${endAt} より後の時刻にする`);
+  if (input.kind === "leave_early" && until >= end) throw new AppError("refused", `早退は終わりの時刻 ${endAt} より前の時刻にする`);
+  if (until <= now) throw new AppError("refused", `${input.until} はもう過ぎている。今より後の時刻にする`);
   return until;
 }
 
@@ -42,7 +44,8 @@ export async function untilOf(db: Bindings["DB"], input: CreateOrderInput, now: 
  * @param input.messageId 会話の言葉から足した時の元の発言 ID
  * @param now 今の時刻
  * @returns 足した行
- * @throws conflict 日か時刻を過ぎている、延長と早退の時刻が終わりの時刻と合わない、同じ日に同じ指示がある時
+ * @throws refused 日か時刻を過ぎている、延長と早退の時刻が終わりの時刻と合わない時
+ * @throws conflict 同じ日に同じ指示がある時
  */
 export async function addOrder(
   env: Bindings,

@@ -13,11 +13,13 @@ interface RepoPickerProps {
   value: string | null;
   /** 選び直した時に呼ぶ */
   onChange: (repo: string) => void;
+  /** 作ると決めるサービスの ID。あれば、入口がそのサービスに選べない物 (同じ名前のリポジトリを持つ別のサービスがある物と、設計書のリポジトリ) を除く */
+  serviceId?: string;
 }
 
 /** GitHub の触れるリポジトリから 1 つ選ぶ。つないでいなければ、つなぐよう伝える */
-export function RepoPicker({ value, onChange }: RepoPickerProps) {
-  const repos = useLoad(z.array(Repo), (a) => a.api.v1.github.repos.$get({ query: { limit: "100" } }));
+export function RepoPicker({ value, onChange, serviceId }: RepoPickerProps) {
+  const repos = useLoad(z.array(Repo), (a) => a.api.v1.github.repos.$get({ query: { limit: "100", ...(serviceId === undefined ? {} : { serviceId }) } }));
   if (repos.state === "failed") {
     return (
       <Alert tone="warn" title="リポジトリを選べません">
@@ -103,7 +105,7 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
               }}
             />
           </Field>
-          <RepoPicker value={repo} onChange={setRepo} />
+          <RepoPicker value={repo} onChange={setRepo} serviceId={service.id} />
         </>
       ) : null}
       <TextField label="移す理由" value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} />
@@ -122,7 +124,7 @@ interface MoveFailureProps {
   failure: Failed;
 }
 
-/** 段階を移せなかった事を出す。デプロイの条件が足りない時など、入口が返した説明 (足りない条件) も同じ Alert に添える */
+/** 段階を移せなかった事を出す。決まりで断った refused は入口が返した説明 (足りない条件、重なる名前) を出し、ほかで変わった conflict にも説明を添える */
 export function MoveFailure({ failure }: MoveFailureProps) {
   return <FailedAlert title="段階を移せませんでした" failure={failure} withDetail={failure.code === "conflict"} />;
 }

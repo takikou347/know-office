@@ -91,7 +91,8 @@ const advanceServiceRoute = createRoute({
   ],
   "x-errors": [
     "404 `not_found`: サービスが存在しない",
-    "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、`service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、または確かめた後に `deployWhen` の版かレビューの承認が変わった",
+    "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、または確かめた後に `deployWhen` の版かレビューの承認が変わった",
+    "409 `refused`: `service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も。足りない条件を `detail` に並べる)、または `repo` と同じ名前のリポジトリを持つ別のサービスがある (重なる名前と設計書の置き場を `detail` に書く)",
     "422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い",
     "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない時も)",
@@ -145,7 +146,8 @@ const deployServiceRoute = createRoute({
   ],
   "x-errors": [
     "404 `not_found`: サービスが存在しない",
-    "409 `conflict`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、`deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった",
+    "409 `conflict`: 直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった",
+    "409 `refused`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、または `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も。足りない条件を `detail` に並べる)",
     "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
     "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない、`deploy.yml` を動かせない時も)",
   ],

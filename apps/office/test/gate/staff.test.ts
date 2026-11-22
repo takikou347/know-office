@@ -143,7 +143,8 @@ describe("オーナーの指示に合わせる", () => {
     // ログインセッションは操作が 2 時間無いと切れるので、進めた後に作り直す
     headers = await gate.signIn();
     await stepUp();
-    expect(Problem.parse(await (await order({ day: DAY, kind: "extend", until: "15:59" })).json()).code).toBe("conflict");
+    // 終わりより前の延長は、過ぎた時刻でも、終わりの時刻を伝える断りを先に返す
+    expect(Problem.parse(await (await order({ day: DAY, kind: "extend", until: "15:59" })).json()).code).toBe("refused");
     expect((await order({ day: DAY, kind: "leave_early", until: "16:00" })).status).toBe(409);
     expect((await order({ day: "2026-11-15", kind: "off" })).status).toBe(409);
     expect((await order({ day: DAY, kind: "leave_early", until: "16:01" })).status).toBe(201);
@@ -168,6 +169,24 @@ describe("オーナーの指示に合わせる", () => {
     expect((await order({ day: DAY, kind: "extend", until: "00:30" })).status).toBe(409);
     expect((await order({ day: DAY, kind: "extend", until: "17:01" })).status).toBe(201);
     expect((await order({ day: DAY, kind: "leave_early", until: "16:59" })).status).toBe(201);
+  });
+
+  it("終わりより前への延長を断る", async () => {
+    await stepUp();
+    // 初期の終わりの時刻は 17 時。ほかで変わったのでなく決まりで断るので refused で、足りない事 (終わりの時刻より後にする) を detail に書く
+    for (const until of ["16:00", "17:00", "00:01"]) {
+      const refused = Problem.parse(await (await order({ day: DAY, kind: "extend", until })).json());
+      expect(refused).toMatchObject({ status: 409, code: "refused" });
+      expect(refused.detail).toBe("延長は終わりの時刻 17:00 より後の時刻にする");
+    }
+    const late = Problem.parse(await (await order({ day: DAY, kind: "leave_early", until: "17:30" })).json());
+    expect(late).toMatchObject({ code: "refused", detail: "早退は終わりの時刻 17:00 より前の時刻にする" });
+    const past = Problem.parse(await (await order({ day: DAY, kind: "leave_early", until: "09:30" })).json());
+    expect(past).toMatchObject({ code: "refused", detail: "09:30 はもう過ぎている。今より後の時刻にする" });
+    expect(await d1.DB.prepare("SELECT count(*) AS n FROM day_orders").first("n")).toBe(0);
+    // 同じ日の同じ指示は、ほかで先に出た物と重なるので conflict のまま
+    expect((await order({ day: DAY, kind: "off" })).status).toBe(201);
+    expect(Problem.parse(await (await order({ day: DAY, kind: "off" })).json()).code).toBe("conflict");
   });
 
   it("取り消した後に同じ種類を出し直せ、直列の 2 回目の取り消しは 409、取り消しの行は取り消せない", async () => {

@@ -216,7 +216,7 @@ async function addChatOrder(c: Context<GateEnv>, staffId: StaffId, messageId: st
   try {
     row = await addOrder(c.env, { staffId, order, source: "chat", messageId }, now);
   } catch (error) {
-    if (error instanceof AppError && error.code === "conflict") {
+    if (error instanceof AppError && (error.code === "conflict" || error.code === "refused")) {
       log("info", "chat_order_skipped", { staffId, kind: order.kind, traceId: c.var.traceId });
       return null;
     }

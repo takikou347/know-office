@@ -1,8 +1,10 @@
 // 設計書を書くタスクと設計書の PR の、同時、設定の変わり、置き場の重なり、道と名前の境目 (開発の回し方の 3.2)
+import { Problem } from "@know-office/core";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { wrapDb, stepUp } from "../helpers/github.ts";
 import { api, rows, staffOf, useWork } from "../helpers/work.ts";
-import { DOCS, DOCS2, REPO, BIG_NAME, HIDDEN, HEAD, NEXT, MAIN, README, GOOD, failure, link, putDocs, studied, toPrototype, prototyped, designTasks, docsAt, pullOnGitHub, tool, takeDesign, openedDocsPull, reviewerApproves, events, mainMoves, pullsOpened, synchronize } from "../helpers/docs.ts";
+import { DOCS, DOCS2, REPO, OTHER_APP, BIG_NAME, HIDDEN, HEAD, NEXT, MAIN, README, GOOD, failure, link, putDocs, studied, toPrototype, prototyped, designTasks, docsAt, pullOnGitHub, tool, takeDesign, openedDocsPull, reviewerApproves, events, mainMoves, pullsOpened, synchronize } from "../helpers/docs.ts";
 
 /**
  * 設計書のファイルを n 件 (GOOD の 2 件を含む) にする
@@ -48,8 +50,8 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     const first = await studied(world);
     await toPrototype(world, first);
     const second = await studied(world);
-    // 設計書の置き場 services/video-maker/ が重なる。名前は大文字小文字を分けない
-    expect(await toPrototype(world, second, "example2/video-maker", 409)).toMatchObject({ code: "conflict" });
+    // 設計書の置き場 services/video-maker/ が重なる。名前は大文字小文字を分けない。ほかで変わったのでなく決まりで断るので refused
+    expect(await toPrototype(world, second, "example2/video-maker", 409)).toMatchObject({ code: "refused" });
     expect(await designTasks(world)).toHaveLength(1);
   });
 
@@ -234,5 +236,33 @@ describe("設計書の PR と設計書を書くタスクの境目", () => {
     expect(pullsOpened(world)).toBe(1);
     expect(await rows(world.d1.DB, "SELECT status FROM nodes WHERE id = ?", task)).toEqual([{ status: "doing" }]);
     expect(await rows(world.d1.DB, "SELECT count(*) AS n FROM nodes WHERE task_kind = 'review' AND status = 'todo'")).toEqual([{ n: 0 }]);
+  });
+});
+
+describe("アイデアから運用までの流れ", () => {
+  it("同じ名前のリポジトリを持つサービスがある", async () => {
+    await link(world);
+    await putDocs(world, DOCS, 0);
+    const first = await studied(world);
+    await toPrototype(world, first);
+    const second = await studied(world);
+    // 作ると決める時の選び欄は、同じ名前のリポジトリを持つ別のサービスがある物と、設計書のリポジトリを並べない
+    const choosable = z.array(z.object({ fullName: z.string() }).loose()).parse(await api(world, "GET", `/api/v1/github/repos?limit=100&serviceId=${second}`));
+    const names = choosable.map((r) => r.fullName);
+    expect(names).toContain(OTHER_APP);
+    expect(names).not.toContain(REPO);
+    expect(names).not.toContain("example2/video-maker");
+    expect(names).not.toContain(DOCS);
+    // 自分のリポジトリは自分の選び欄には並ぶ
+    const own = z.array(z.object({ fullName: z.string() }).loose()).parse(await api(world, "GET", `/api/v1/github/repos?limit=100&serviceId=${first}`));
+    expect(own.map((r) => r.fullName)).toContain(REPO);
+    // 選び欄を読んだ後に別のサービスが取った名前は、何が重なるかを detail に書いて refused で断る
+    const refused = Problem.parse(await toPrototype(world, second, "example2/video-maker", 409));
+    expect(refused).toMatchObject({ code: "refused", title: "今の状態か決まりでできない" });
+    expect(refused.detail).toContain("video-maker");
+    expect(refused.detail).toContain("services/video-maker/");
+    expect(refused.detail).toContain("名前の違うリポジトリを選ぶ");
+    // 形の違うサービス ID は 422
+    expect(await api(world, "GET", "/api/v1/github/repos?serviceId=x", undefined, 422)).toMatchObject({ code: "validation_failed" });
   });
 });

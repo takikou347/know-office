@@ -1,7 +1,9 @@
-// アイデアとサービスの画面の通しで使う、画面の操作。案を足し、段階を移し、設計書のリポジトリを選ぶ
+// アイデアとサービスの画面の通しで使う、画面の操作。案を足し、段階を移し、設計書のリポジトリを選び、試作まで進め、設定のカードを探す
 import type { Page } from "@playwright/test";
 import { expect } from "../../helpers/test.ts";
 import { z } from "zod";
+import { connectGitHub } from "./github.ts";
+import { freeRepoNames } from "./seed.ts";
 
 /** 代わりの GitHub が初めから入れる非公開のリポジトリ 2 つ。設計書のリポジトリに交互に選ぶ */
 const DOCS_REPOS = ["example/knowidea-docs", "example/other-docs"] as const;
@@ -67,3 +69,34 @@ export async function chooseDocsRepo(page: Page): Promise<string> {
   await expect(docs.getByText(`${repo} を設計書のリポジトリにしました`)).toBeVisible();
   return repo;
 }
+
+/**
+ * 画面で案を足し、検討を経てリポジトリを選び、試作に進める
+ * @param page 開いているページ。useOwnerPasskey を付けておく
+ * @param repo 代わりの GitHub が触れるリポジトリ
+ * @param title 案の名前
+ * @returns 試作に進めたサービスの ID
+ */
+export async function prototypeService(page: Page, repo: string, title: string): Promise<string> {
+  freeRepoNames();
+  await page.goto("/services");
+  await connectGitHub(page);
+  await chooseDocsRepo(page);
+  const id = await addIdea(page, title);
+  const main = page.getByRole("main");
+  await move(page, "検討に進める", "調べる");
+  await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
+  await choose(page, "移す先", "作ると決める");
+  await choose(page, "リポジトリ", repo);
+  await move(page, "作ると決める", "作る");
+  await expect(main.getByText(`リポジトリ: ${repo}、担当: 開発担当`)).toBeVisible();
+  return id;
+}
+
+/**
+ * 設定のタブの、見出しで探した 1 項目のカード
+ * @param page 開いているページ
+ * @param heading カードの見出し
+ * @returns カード
+ */
+export const settingCard = (page: Page, heading: string) => page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: heading, exact: true }) });

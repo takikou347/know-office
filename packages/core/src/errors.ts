@@ -13,6 +13,7 @@ export const ERROR_CODES = [
   "not_found",
   "method_not_allowed",
   "conflict",
+  "refused",
   "stopped",
   "payload_too_large",
   "unsupported_media_type",
@@ -39,6 +40,8 @@ export const PROBLEMS: Record<ErrorCode, { status: number; title: string }> = {
   not_found: { status: 404, title: "存在しない" },
   method_not_allowed: { status: 405, title: "メソッドが異なる" },
   conflict: { status: 409, title: "現在の状態と競合する" },
+  // ほかの所で先に変わった conflict と分け、画面が「ほかで変わった」と言わずに detail の足りない事を出す
+  refused: { status: 409, title: "今の状態か決まりでできない" },
   stopped: { status: 409, title: "停止中" },
   payload_too_large: { status: 413, title: "リクエスト本文が大きすぎる" },
   unsupported_media_type: { status: 415, title: "Content-Type が application/json ではない" },

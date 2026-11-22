@@ -89,11 +89,12 @@ export async function send<R extends Reply>(api: Api, call: () => Promise<R & Re
   return { ok: true, res: res as R & Response };
 }
 
-/** 失敗の code ごとの、オーナーに出す文。無い code は code をそのまま出す */
+/** 失敗の code ごとの、オーナーに出す文。無い code は code をそのまま出す。refused は説明 (detail) があれば説明だけを出す */
 const REASON: Record<string, string> = {
   network: "入口につながりません。",
   step_up_failed: "パスキーで確かめられませんでした。",
   conflict: "ほかの所で先に変わりました。",
+  refused: "今の状態か決まりでできません。",
   stopped: "社員が止まっています。",
   step_up_required: "パスキーで確かめてから出してください。",
   validation_failed: "入れた値の形が違います。",
@@ -104,16 +105,18 @@ export interface FailedAlertProps {
   title: string;
   /** 理由 */
   failure: Failed;
-  /** 入口が返した説明も出す時に true。足りない条件など、オーナーが次にする事が分かる失敗だけに付ける */
+  /** 入口が返した説明も出す時に true。足りない条件など、オーナーが次にする事が分かる失敗だけに付ける。refused は付けなくても出す */
   withDetail?: boolean;
 }
 
-/** 読めなかった事、送れなかった事を出す */
+/** 読めなかった事、送れなかった事を出す。決まりで断った refused は、何が足りないかを入口の説明で出す */
 export function FailedAlert({ title, failure, withDetail = false }: FailedAlertProps) {
+  // refused の detail は、オーナーが次にする事 (足りない条件、選び直す物) を書いた文
+  const refused = failure.code === "refused" && failure.detail !== undefined;
   return (
     <Alert tone="error" title={title} live>
-      {REASON[failure.code] ?? `理由: ${failure.code}。`}
-      {withDetail && failure.detail ? ` ${failure.detail}。` : null}
+      {refused ? `${failure.detail ?? ""}。` : (REASON[failure.code] ?? `理由: ${failure.code}。`)}
+      {!refused && withDetail && failure.detail ? ` ${failure.detail}。` : null}
       {failure.traceId ? (
         <>
           {` 問い合わせの番号: ${failure.traceId} `}

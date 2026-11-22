@@ -23,7 +23,7 @@ import { clockAt } from "../work/attendance.ts";
 import { type Forge, notifyStaff } from "../work/loop.ts";
 import type { TokenDeps } from "../github/app.ts";
 import { requireDocsRepo } from "../devloop/docs-repo.ts";
-import { chooseRepo } from "./repo.ts";
+import { chooseRepo, repoDirName } from "./repo.ts";
 import { requireDeployConditions } from "./deploy-when.ts";
 import { serviceStatus } from "./status.ts";
 import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated } from "../work/nodes.ts";
@@ -134,18 +134,19 @@ async function studyTask(env: Bindings, row: ServiceRow, actor: Actor): Promise<
 }
 
 /**
- * 同じ名前 (`owner/name` の name。大文字小文字を分けない) のリポジトリを持つ別のサービスが無い事の SQL の条件を作る。設計書の置き場 `services/<名前>/` が重なるので、あれば 409 にする
+ * 同じ名前 (`owner/name` の name。大文字小文字を分けない) のリポジトリを持つ別のサービスが無い事の SQL の条件を作る。設計書の置き場 `services/<名前>/` が重なるので、あれば断る
  * @param db 今の状態の D1
  * @param serviceId 進めるサービス
  * @param repo 選ぶリポジトリ
  * @returns SQL の条件
- * @throws conflict 今あれば
+ * @throws refused 今あれば。重なる名前と置き場と、別のサービスの名前を detail に書く
  */
 async function sameNameCondition(db: D1Database, serviceId: string, repo: string): Promise<SQL> {
-  const name = (repo.split("/")[1] ?? repo).toLowerCase();
+  const name = repoDirName(repo);
   const none = sql`NOT EXISTS (SELECT 1 FROM ${services} WHERE ${services.id} <> ${serviceId} AND lower(substr(${services.repo}, instr(${services.repo}, '/') + 1)) = ${name})`;
-  const [found] = await drizzle(db).select({ id: services.id }).from(services).where(sql`${services.id} <> ${serviceId} AND lower(substr(${services.repo}, instr(${services.repo}, '/') + 1)) = ${name}`).limit(1);
-  if (found !== undefined) throw new AppError("conflict", "同じ名前のリポジトリを持つ別のサービスがある。設計書の置き場が重なる");
+  const [found] = await drizzle(db).select({ name: services.name }).from(services).where(sql`${services.id} <> ${serviceId} AND lower(substr(${services.repo}, instr(${services.repo}, '/') + 1)) = ${name}`).limit(1);
+  // ほかで変わったのでなく決まりで断るので refused。画面は detail をそのまま出すので、何が重なり何を選べばよいかを書く
+  if (found !== undefined) throw new AppError("refused", `同じ名前 (${name}) のリポジトリを持つサービス「${found.name}」があり、設計書の置き場 services/${name}/ が重なる。名前の違うリポジトリを選ぶ`);
   return none;
 }
 
@@ -160,7 +161,7 @@ async function sameNameCondition(db: D1Database, serviceId: string, repo: string
  */
 async function designTask(env: Bindings, row: ServiceRow, repo: string, docsRepo: string, actor: Actor): Promise<NodeRow> {
   const project = await intakeProject(env, row.id, actor);
-  const dir = `services/${(repo.split("/")[1] ?? repo).toLowerCase()}/`;
+  const dir = `services/${repoDirName(repo)}/`;
   const body = [`サービス ID: ${row.id}`, `設計書のリポジトリ: ${docsRepo}`, `書く置き場: ${dir}`, "形はそのリポジトリの services/WRITING.md に従う", "書いたら pr_open で PR を出す。最初の設計書はオーナーが読んで承認した物だけが main に入る"].join("\n");
   return newNodeRow(env, { kind: "task", parentId: project.id, scope: row.id, title: `設計書: ${row.name}`, body, taskKind: "build", assignee: "builder", repo: docsRepo, source: `design:${row.id}` }, actor);
 }
@@ -175,7 +176,8 @@ async function designTask(env: Bindings, row: ServiceRow, repo: string, docsRepo
  * @param forge サービスに進める時に、チェックと先のコミットを読む GitHub の口
  * @returns 移した後の行
  * @throws not_found サービスが無い時
- * @throws conflict 今の段階から移れない時、service に進めるのにデプロイの条件 (deployWhen) がそろっていない時と確かめられない時、読んだ後に段階か GitHub との連携か設計書のリポジトリが変わった時、GitHub とつないでいないのにリポジトリを選んだ時、設計書のリポジトリが無いか使えない時、リポジトリが設計書のリポジトリと同じか、同じ名前のリポジトリを持つ別のサービスがある時
+ * @throws conflict 今の段階から移れない時、読んだ後に段階か GitHub との連携か設計書のリポジトリが変わった時、GitHub とつないでいないのにリポジトリを選んだ時、設計書のリポジトリが無いか使えない時、リポジトリが設計書のリポジトリと同じ時
+ * @throws refused service に進めるのにデプロイの条件 (deployWhen) がそろっていない時と確かめられない時、同じ名前のリポジトリを持つ別のサービスがある時
  * @throws validation_failed prototype に進めるのに担当の社員かリポジトリが無い時、リポジトリの名前が設計書の置き場にできない形の時、ほかの段階にリポジトリを送った時、触れるリポジトリに無い時
  * @throws upstream_failed 触れるリポジトリ、既定のブランチの先、チェックを GitHub から読めない時
  */

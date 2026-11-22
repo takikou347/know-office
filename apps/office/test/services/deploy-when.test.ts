@@ -131,7 +131,8 @@ describe("段階ごとのオーナーの判断", () => {
     // チェックが通っても、レビュー担当の承認が無ければ断る。足りないのは reviewer だけ
     checks(world, "passed");
     const waiting = Problem.parse(await toService(world, id, 409));
-    expect(waiting).toMatchObject({ code: "conflict" });
+    // ほかで変わったのでなく決まりで断るので refused
+    expect(waiting).toMatchObject({ code: "refused" });
     expect(waiting.detail).toContain("reviewer");
     expect(waiting.detail).not.toContain("checks");
     expect((await stateOf(world, id)).stage).toBe("prototype");
@@ -198,7 +199,7 @@ describe("段階ごとのオーナーの判断", () => {
       await expect(requireDeployConditions(world.gate.env, UNCONNECTED_FORGE, service)).resolves.toBeDefined();
       await stepUp(world);
       await api(world, "PUT", `/api/v1/services/${id}/settings/deployWhen`, { version: 0, value: ["checks"], reason: "チェックで出す" });
-      await expect(requireDeployConditions(world.gate.env, UNCONNECTED_FORGE, service)).rejects.toMatchObject({ code: "conflict", message: "GitHub と連携していないので、デプロイの条件 (checks) を確かめられない" });
+      await expect(requireDeployConditions(world.gate.env, UNCONNECTED_FORGE, service)).rejects.toMatchObject({ code: "refused", message: "GitHub と連携していないので、デプロイの条件 (checks) を確かめられない" });
     });
 
     it("受け継いだ初期値を確かめた後に office の初期値が変われば、進めずに 409 を返す", async () => {

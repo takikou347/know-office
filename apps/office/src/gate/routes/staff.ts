@@ -53,14 +53,15 @@ const createOrderRoute = createRoute({
   description: "延長の場合のみ、15 分以内のパスキーの確認が必要。指示は延長、早退、休みで、延長だけが働く時間を増やす。",
   "x-steps": [
     "延長ならパスキーの確認を求める",
-    "日と `until` が過ぎていないこと、延長は終わりの時刻より後、早退は終わりの時刻より前であることを確認する",
+    "日が過ぎていないこと、延長は終わりの時刻より後、早退は終わりの時刻より前、`until` が過ぎていないことを、この順に確認する",
     "同じ日に同じ種類の有効な指示がない時だけ、`day_orders` に `source: \"button\"` で 1 文で追加する",
     "`StaffDO.order(o)` で当日の予定を組み直す。届かなければエラーログに残し、社員 DO が次に起きた時に読み直す",
     "監査ログに `order.create` を記録する",
   ],
   "x-errors": [
     "401 `step_up_required`: 延長で、パスキーの確認がない",
-    "409 `conflict`: 同じ指示がすでにある、日か指定時刻を過ぎている、延長が終わりの時刻より前、または早退が終わりの時刻より後",
+    "409 `conflict`: 同じ日に同じ種類の有効な指示がすでにある (同時に出した片方を含む)",
+    "409 `refused`: 日か指定時刻を過ぎている、延長が終わりの時刻より前、または早退が終わりの時刻より後。直す事 (終わりの時刻など) を `detail` に書く",
   ],
   "x-step-up": "conditional",
   request: { params: z.object({ staffId: StaffParam }).strict(), body: { required: true, content: { "application/json": { schema: CreateOrderInput } } } },

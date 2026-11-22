@@ -41,21 +41,22 @@ export type DeployBy = "owner" | "push";
  * @param input.by 頼んだ者
  * @returns 受け付けと、動かしたコミットと ref
  * @throws not_found サービスが無い時
- * @throws conflict Web アプリでない、サービスか運用の段階でない、リポジトリが無い、GitHub とつないでいない、条件が足りない (push でオーナーの承認を求める時を含む)、直前 10 分に頼んだか戻した、読んだ後に設定が変わった時
+ * @throws refused Web アプリでない、サービスか運用の段階でない、リポジトリが無い、GitHub とつないでいない、条件が足りない (push でオーナーの承認を求める時を含む) 時
+ * @throws conflict 直前 10 分に頼んだか戻した、読んだ後に設定が変わった時
  * @throws rate_limited GitHub の上限に当たった時。錠を外す
  * @throws upstream_failed 先のコミットかチェックを読めない時、workflow を動かせない時。錠を外す
  */
 export async function deployService(env: Bindings, forge: Forge, input: { serviceId: string; now: number; by: DeployBy }): Promise<Deployment & { sha: string; ref: string }> {
   const { serviceId, now, by } = input;
   const row = await findService(env.DB, serviceId);
-  if (row.kind !== "web_app") throw new AppError("conflict", "Web アプリでないので、本番にデプロイできない");
-  if (!(DEPLOY_STAGES as readonly string[]).includes(row.stage)) throw new AppError("conflict", "サービスか運用の段階でないので、本番にデプロイできない");
+  if (row.kind !== "web_app") throw new AppError("refused", "Web アプリでないので、本番にデプロイできない");
+  if (!(DEPLOY_STAGES as readonly string[]).includes(row.stage)) throw new AppError("refused", "サービスか運用の段階でないので、本番にデプロイできない");
   const repo = row.repo;
-  if (repo === null) throw new AppError("conflict", "リポジトリが無いので、本番にデプロイできない");
+  if (repo === null) throw new AppError("refused", "リポジトリが無いので、本番にデプロイできない");
   const rules = await readDeployRules(env.DB, serviceId);
   // push はオーナーの承認にならないので、求める時は GitHub を読まずに断る。オーナーはボタンで頼む
-  if (by === "push" && rules.deployWhen.includes("owner")) throw new AppError("conflict", "デプロイの条件を満たしていない。足りない条件: owner");
-  if (!(await forge.connected())) throw new AppError("conflict", "GitHub と連携していないので、本番にデプロイできない");
+  if (by === "push" && rules.deployWhen.includes("owner")) throw new AppError("refused", "デプロイの条件を満たしていない。足りない条件: owner");
+  if (!(await forge.connected())) throw new AppError("refused", "GitHub と連携していないので、本番にデプロイできない");
   const head = await forge.defaultHead(repo);
   await requireDeployWhenAt(env, forge, rules.deployWhen, { repo, head }, { owner: by === "owner" });
   const id = newId(clockAt(now));

@@ -43,6 +43,20 @@ test.describe("オーナーの指示に合わせる", () => {
     await active.getByRole("button", { name: "延長の指示を取り消す" }).click();
     await expect(active).toHaveCount(0);
   });
+
+  test("終わりより前への延長を断る", async ({ page }) => {
+    cancelLeftOrders("president");
+    await page.goto("/staff/president");
+    await useOwnerPasskey(page);
+    await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "延長" }).click();
+    // 0 時 1 分はどの日も終わりの時刻より前。ほかで変わったとは言わずに、終わりの時刻より後にする事を出す
+    await page.getByLabel("終わりの時刻").fill("00:01");
+    await page.getByRole("button", { name: "指示を出す" }).click();
+    const refused = page.getByRole("alert").filter({ hasText: "指示を出せませんでした" });
+    await expect(refused).toContainText(/延長は終わりの時刻 \d{2}:\d{2} より後の時刻にする/);
+    await expect(refused).not.toContainText("ほかの所で先に変わりました");
+    await expect(page.getByRole("list", { name: "社長への今日の指示" }).getByRole("listitem").filter({ hasText: "に出した" })).toHaveCount(0);
+  });
 });
 
 test.describe("社員との会話", () => {

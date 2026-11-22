@@ -186,6 +186,7 @@ components:
         - not_found
         - method_not_allowed
         - conflict
+        - refused
         - stopped
         - payload_too_large
         - unsupported_media_type
@@ -7114,7 +7115,8 @@ paths:
         - 監査ログに `service.advance` を記録する
       x-errors:
         - "404 `not_found`: サービスが存在しない"
-        - "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、`service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、または確かめた後に `deployWhen` の版かレビューの承認が変わった"
+        - "409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、または確かめた後に `deployWhen` の版かレビューの承認が変わった"
+        - "409 `refused`: `service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も。足りない条件を `detail` に並べる)、または `repo` と同じ名前のリポジトリを持つ別のサービスがある (重なる名前と設計書の置き場を `detail` に書く)"
         - "422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない時も)"
@@ -7185,7 +7187,8 @@ paths:
         このルート固有のエラー:
 
         - 404 `not_found`: サービスが存在しない
-        - 409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、`service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、または確かめた後に `deployWhen` の版かレビューの承認が変わった
+        - 409 `conflict`: 移れない段階、読んだ後に段階が変わった、GitHub と連携していないのに `repo` を決めた、確かめた後に連携が変わった、または確かめた後に `deployWhen` の版かレビューの承認が変わった
+        - 409 `refused`: `service` に進めるのに `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も。足りない条件を `detail` に並べる)、または `repo` と同じ名前のリポジトリを持つ別のサービスがある (重なる名前と設計書の置き場を `detail` に書く)
         - 422 `validation_failed`: `prototype` に進めるのに `staffId` か `repo` が無い、`prototype` でない段階に `repo` を送った、または `repo` が触れるリポジトリに無い
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない時も)
@@ -7301,7 +7304,8 @@ paths:
         このルート固有のエラー:
 
         - 404 `not_found`: サービスが存在しない
-        - 409 `conflict`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、`deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった
+        - 409 `conflict`: 直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった
+        - 409 `refused`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、または `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も。足りない条件を `detail` に並べる)
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない、`deploy.yml` を動かせない時も)
       x-steps:
@@ -7314,7 +7318,8 @@ paths:
         - 監査ログに `service.deploy` を記録する。デプロイの記録 (`service_events` の `deploy`) は、本番のデプロイの通知が残す
       x-errors:
         - "404 `not_found`: サービスが存在しない"
-        - "409 `conflict`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、`deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も)、直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった"
+        - "409 `conflict`: 直前 10 分にデプロイを頼んだか戻した、または読んだ後に `deployWhen` の版かリポジトリか段階かレビューの承認が変わった"
+        - "409 `refused`: Web アプリでない、`service` か `operation` の段階でない、リポジトリが無い、または `deployWhen` がそろっていない (GitHub とつないでいなくて確かめられない時も。足りない条件を `detail` に並べる)"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: GitHub がエラーを返した (先のコミットかチェックを読めない、`deploy.yml` を動かせない時も)"
       x-step-up: true
@@ -7885,7 +7890,7 @@ paths:
         処理の流れ:
 
         1. 延長ならパスキーの確認を求める
-        2. 日と `until` が過ぎていないこと、延長は終わりの時刻より後、早退は終わりの時刻より前であることを確認する
+        2. 日が過ぎていないこと、延長は終わりの時刻より後、早退は終わりの時刻より前、`until` が過ぎていないことを、この順に確認する
         3. 同じ日に同じ種類の有効な指示がない時だけ、`day_orders` に `source: "button"` で 1 文で追加する
         4. `StaffDO.order(o)` で当日の予定を組み直す。届かなければエラーログに残し、社員 DO が次に起きた時に読み直す
         5. 監査ログに `order.create` を記録する
@@ -7893,16 +7898,18 @@ paths:
         このルート固有のエラー:
 
         - 401 `step_up_required`: 延長で、パスキーの確認がない
-        - 409 `conflict`: 同じ指示がすでにある、日か指定時刻を過ぎている、延長が終わりの時刻より前、または早退が終わりの時刻より後
+        - 409 `conflict`: 同じ日に同じ種類の有効な指示がすでにある (同時に出した片方を含む)
+        - 409 `refused`: 日か指定時刻を過ぎている、延長が終わりの時刻より前、または早退が終わりの時刻より後。直す事 (終わりの時刻など) を `detail` に書く
       x-steps:
         - 延長ならパスキーの確認を求める
-        - 日と `until` が過ぎていないこと、延長は終わりの時刻より後、早退は終わりの時刻より前であることを確認する
+        - 日が過ぎていないこと、延長は終わりの時刻より後、早退は終わりの時刻より前、`until` が過ぎていないことを、この順に確認する
         - '同じ日に同じ種類の有効な指示がない時だけ、`day_orders` に `source: "button"` で 1 文で追加する'
         - "`StaffDO.order(o)` で当日の予定を組み直す。届かなければエラーログに残し、社員 DO が次に起きた時に読み直す"
         - 監査ログに `order.create` を記録する
       x-errors:
         - "401 `step_up_required`: 延長で、パスキーの確認がない"
-        - "409 `conflict`: 同じ指示がすでにある、日か指定時刻を過ぎている、延長が終わりの時刻より前、または早退が終わりの時刻より後"
+        - "409 `conflict`: 同じ日に同じ種類の有効な指示がすでにある (同時に出した片方を含む)"
+        - "409 `refused`: 日か指定時刻を過ぎている、延長が終わりの時刻より前、または早退が終わりの時刻より後。直す事 (終わりの時刻など) を `detail` に書く"
       x-step-up: conditional
       parameters:
         - schema:
@@ -9070,13 +9077,22 @@ paths:
       x-steps:
         - インストールで選んだすべてのリポジトリに届く、メタデータを読むだけの 1 時間の鍵を作る
         - インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号
+        - "`serviceId` があれば、そのサービスを作ると決める時に選べない物 (同じ名前のリポジトリを持つ別のサービスがある物と、設計書のリポジトリ) を除く。除いた分だけページは短くなる"
       x-errors:
-        - "422 `validation_failed`: `cursor` の形が違う"
+        - "422 `validation_failed`: `cursor` か `serviceId` の形が違う"
         - "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける"
         - "502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した"
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
+        - schema:
+            type: string
+            format: uuid
+            description: 作ると決めるサービスの ID (UUID v7)。あれば、そのサービスに選べるリポジトリだけを返す
+          required: false
+          description: 作ると決めるサービスの ID (UUID v7)。あれば、そのサービスに選べるリポジトリだけを返す
+          name: serviceId
+          in: query
       responses:
         "200":
           description: 成功
@@ -9114,10 +9130,11 @@ paths:
 
         1. インストールで選んだすべてのリポジトリに届く、メタデータを読むだけの 1 時間の鍵を作る
         2. インストール先のリポジトリ一覧を GitHub から取得する。`cursor` は GitHub のページの番号
+        3. `serviceId` があれば、そのサービスを作ると決める時に選べない物 (同じ名前のリポジトリを持つ別のサービスがある物と、設計書のリポジトリ) を除く。除いた分だけページは短くなる
 
         このルート固有のエラー:
 
-        - 422 `validation_failed`: `cursor` の形が違う
+        - 422 `validation_failed`: `cursor` か `serviceId` の形が違う
         - 429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける
         - 502 `upstream_failed`: 連携していない、App が外された、または GitHub がエラーを返した
       security: *a1
