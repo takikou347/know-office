@@ -11,6 +11,14 @@ export interface OfficeTheme {
   floorB: string;
   /** タイルの目地 */
   grout: string;
+  /** 廊下の床の 2 色 */
+  hallA: string;
+  hallB: string;
+  /** 敷き詰めの床 (社長室) */
+  carpet: string;
+  /** 部屋の名前の札と、札の文字 */
+  sign: string;
+  signText: string;
   /** 奥と左の壁 */
   wall: string;
   /** 手前と右の低い壁と、壁の縁 */
@@ -70,6 +78,11 @@ export const officeThemes = {
     floorA: "#e8d6bb",
     floorB: "#dfc9a8",
     grout: "#cdb592",
+    hallA: "#efe4d2",
+    hallB: "#e9dcc6",
+    carpet: "#dcc9ab",
+    sign: "#fffaf2",
+    signText: "#6b4a35",
     wall: "#fbf7f0",
     trim: "#c9a77f",
     window: "#d7ebf2",
@@ -102,6 +115,11 @@ export const officeThemes = {
     floorA: "var(--color-surface-2)",
     floorB: "var(--color-surface)",
     grout: "var(--color-line)",
+    hallA: "var(--color-bg)",
+    hallB: "var(--color-surface)",
+    carpet: "var(--color-surface-2)",
+    sign: "var(--color-surface)",
+    signText: "var(--color-text)",
     wall: "var(--color-surface)",
     trim: "var(--color-line-strong)",
     window: "var(--color-info-soft)",
@@ -134,6 +152,11 @@ export const officeThemes = {
     floorA: "#2a3150",
     floorB: "#242b47",
     grout: "#1b2138",
+    hallA: "#202741",
+    hallB: "#1c2239",
+    carpet: "#2e2a4a",
+    sign: "#2a3150",
+    signText: "#e6e8f5",
     wall: "#1a2240",
     trim: "#3b4570",
     window: "#3b4f8a",

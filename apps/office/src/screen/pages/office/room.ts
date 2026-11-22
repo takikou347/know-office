@@ -5,7 +5,7 @@ import { disposeScene } from "./cleanup.ts";
 import { type ActorState, createDirector } from "./director.ts";
 import { CLOTHES, DOLL_SCALE, type Doll, PROPS, applyDollPose, buildDoll, dollScaleFor } from "./figure.ts";
 import { type DeskParts, SEAT_HEIGHT, buildRoomShell, stackPaper } from "./furniture.ts";
-import { type Point, seatOf, stationOf, type RoomState } from "./layout.ts";
+import { FLOOR, type Point, seatOf, stationOf, type RoomState } from "./layout.ts";
 import { buildMarks, type Marks, showMark } from "./marks.ts";
 import { activityOf, poseOf } from "./motion.ts";
 import type { Actors, Step } from "./plan.ts";
@@ -101,8 +101,8 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     }
     return m;
   };
-  const { renderer, scene, camera, sun, fit } = buildStage(canvas, color(theme.background), theme);
-  const desks: Record<string, DeskParts> = buildRoomShell(scene, mat, resolve, theme);
+  const { renderer, scene, camera, sun, fit } = buildStage(canvas, color(theme.background), theme, FLOOR);
+  const desks: Record<string, DeskParts> = buildRoomShell(scene, FLOOR, mat, resolve, theme);
   const paperMat = mat("paper");
   let disposed = false;
   const figures = new Map<string, Figure>();

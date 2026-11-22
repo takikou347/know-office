@@ -6,8 +6,8 @@ import { withoutWebgl } from "./helpers/webgl.ts";
 // オフィスの 3D の部屋。社員を押すと会話に移り、ほかの画面では 3D を読まず、3D を出せない時は 2D の一覧に代える。
 // 社員の動きと出来事は、社員を出勤させられる利用場面の通し (flows/office.spec.ts) で見る。画面の全体の 3.2
 
-/** 3D のコード (three.js と部屋の作り) とエディタのコードの要求か。開発の入口は 1 つずつ、作った物は分けた塊で出す */
-const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|marks|plan|vrm|gltf|themes)|codemirror|knowidea-ui_editor|editor-/i;
+/** 3D のコード (three.js と部屋の作り) とエディタのコードの要求か。開発の入口は 1 つずつ、作った物は分けた塊で出す。部屋の定義 (rooms) と配置 (layout) は three.js を使わないので含めない */
+const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|walls|marks|plan|vrm|gltf|themes)\b|codemirror|knowidea-ui_editor|editor-/i;
 
 /**
  * 開いたページで出た要求の URL を貯める
