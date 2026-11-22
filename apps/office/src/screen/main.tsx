@@ -6,12 +6,17 @@ import "./app.css";
 import { Extension, type Health } from "@know-office/core";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { BuildingsIcon, ChartBarIcon, FlagIcon, HomeIcon, LightbulbIcon, MoreIcon, SettingsIcon, StopIcon, UsersIcon } from "knowidea-icons/react";
+import { registerIcons } from "knowidea-ui";
 import { App } from "./App.tsx";
 import { ApiContext, createApi, isVisit, sessionFetch } from "./api.ts";
 import { ExtensionFetchContext, withScreens } from "./extensions.ts";
 import { send } from "./parts/load.tsx";
 import { routeOfClick } from "./link.ts";
 import { titleOf } from "./routes.ts";
+
+// ナビゲーションとダッシュボードが名前で描くアイコンは、読み込みを待たずに描く。ほかの名前は使う時に読む
+registerIcons({ buildings: BuildingsIcon, "chart-bar": ChartBarIcon, flag: FlagIcon, home: HomeIcon, lightbulb: LightbulbIcon, more: MoreIcon, settings: SettingsIcon, stop: StopIcon, users: UsersIcon });
 
 // 入口がダッシュボードの HTML に置いた API の先読み (src/gate/screen-html.ts)。最初の呼び出しはその返事を使う
 const preloaded = [...document.querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="fetch"]')].map((link) => link.href);
