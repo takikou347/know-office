@@ -1,4 +1,4 @@
-// ダッシュボード: 社員、承認待ち、今日のタスク、今月の費用、未読の通知を 1 回で返す (API の records)
+// ダッシュボード: 社員、承認待ち、オーナーの判断を待つレビュー、今日のタスク、今月の費用、未読の通知を 1 回で返す (API の records)
 import { createRoute, z } from "@hono/zod-openapi";
 import { type Approval, ApprovalStatus, Dashboard, jstDay, jstDayStart, jstYear } from "@know-office/core";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
@@ -10,6 +10,7 @@ import { toNotice } from "../ledger/notices.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
 import { toNode } from "../work/node-view.ts";
+import { ownerWaitingReviews } from "../work/owner-reviews.ts";
 import { loadStaff } from "./staff.ts";
 
 const router = createRouter();
@@ -30,10 +31,11 @@ const getDashboardRoute = createRoute({
   operationId: "getDashboard",
   tags: ["records"],
   summary: "ダッシュボード",
-  description: "今日のタスクは、担当の社員が手を付けている (`doing`)、レビューを待つ (`review`)、オーナーを待つ (`waiting_owner`) タスクを優先度と ID の順に 50 件まで。今月は日本時間の月の 1 日 0 時から。未読の通知は新しい順に 20 件まで。",
+  description: "今日のタスクは、担当の社員が手を付けている (`doing`)、レビューを待つ (`review`)、オーナーを待つ (`waiting_owner`) タスクを優先度と ID の順に 50 件まで。今月は日本時間の月の 1 日 0 時から。未読の通知は新しい順に 20 件まで。オーナーの判断を待つレビューは、main に入れる条件にオーナーの承認があるリポジトリで、レビュー担当が承認し、オーナーがまだ決めていない物を、タスクを変えた時刻の古い順に 100 件まで。",
   "x-steps": [
     "3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする",
     "`pending` の承認、今日のタスク、未読の通知を `DB` から読む",
+    "`reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む",
     "今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足す",
   ],
   responses: { 200: okResponse(Dashboard), ...problems(401, 403, 429, 500) },
@@ -58,9 +60,10 @@ export async function monthCost(env: Bindings, now: number): Promise<number> {
 export const dashboardRoutes = router.openapi(getDashboardRoute, async (c) => {
   const now = c.var.clock.now();
   const orm = drizzle(c.env.DB);
-  const [staff, waiting, today, unread, cost] = await Promise.all([
+  const [staff, waiting, ownerReviews, today, unread, cost] = await Promise.all([
     loadStaff(c.env, now),
     orm.select().from(approvals).where(eq(approvals.status, "pending")).orderBy(asc(approvals.id)),
+    ownerWaitingReviews(c.env.DB),
     orm
       .select()
       .from(nodes)
@@ -85,5 +88,5 @@ export const dashboardRoutes = router.openapi(getDashboardRoute, async (c) => {
       reason: row.reason,
     };
   };
-  return ok(c, { staff, approvals: waiting.map(toApproval), todayTasks: today.map((r) => toNode(r, r.status === "done" ? 1 : 0)), monthCostMicroUsd: cost, notices: unread.map(toNotice) });
+  return ok(c, { staff, approvals: waiting.map(toApproval), ownerReviews, todayTasks: today.map((r) => toNode(r, r.status === "done" ? 1 : 0)), monthCostMicroUsd: cost, notices: unread.map(toNotice) });
 });

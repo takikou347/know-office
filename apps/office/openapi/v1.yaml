@@ -2615,6 +2615,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Approval"
+        ownerReviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnerReview"
+          description: オーナーの判断を待つレビューを古い順に 100 件まで
         todayTasks:
           type: array
           items:
@@ -2628,9 +2633,46 @@ components:
       required:
         - staff
         - approvals
+        - ownerReviews
         - todayTasks
         - monthCostMicroUsd
         - notices
+      additionalProperties: false
+    OwnerReview:
+      type: object
+      properties:
+        nodeId:
+          type: string
+          format: uuid
+          description: 作った社員のタスク ID。レビューはこのタスクの画面で開く
+        title:
+          type: string
+        assignee:
+          type:
+            - string
+            - "null"
+          enum:
+            - president
+            - builder
+            - reviewer
+            - null
+          description: 作った社員
+        repo:
+          type: string
+        prNumber:
+          type: integer
+          exclusiveMinimum: 0
+        requestedAt:
+          type: string
+          format: date-time
+          description: タスクを最後に変えた時刻。レビューを頼んだ時に変わる
+      required:
+        - nodeId
+        - title
+        - assignee
+        - repo
+        - prNumber
+        - requestedAt
       additionalProperties: false
     Extension:
       type: object
@@ -8323,16 +8365,18 @@ paths:
         - records
       summary: ダッシュボード
       description: |-
-        今日のタスクは、担当の社員が手を付けている (`doing`)、レビューを待つ (`review`)、オーナーを待つ (`waiting_owner`) タスクを優先度と ID の順に 50 件まで。今月は日本時間の月の 1 日 0 時から。未読の通知は新しい順に 20 件まで。
+        今日のタスクは、担当の社員が手を付けている (`doing`)、レビューを待つ (`review`)、オーナーを待つ (`waiting_owner`) タスクを優先度と ID の順に 50 件まで。今月は日本時間の月の 1 日 0 時から。未読の通知は新しい順に 20 件まで。オーナーの判断を待つレビューは、main に入れる条件にオーナーの承認があるリポジトリで、レビュー担当が承認し、オーナーがまだ決めていない物を、タスクを変えた時刻の古い順に 100 件まで。
 
         処理の流れ:
 
         1. 3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする
         2. `pending` の承認、今日のタスク、未読の通知を `DB` から読む
-        3. 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足す
+        3. `reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む
+        4. 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足す
       x-steps:
         - 3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする
         - "`pending` の承認、今日のタスク、未読の通知を `DB` から読む"
+        - "`reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む"
         - 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足す
       responses:
         "200":

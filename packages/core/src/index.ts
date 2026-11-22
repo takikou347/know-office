@@ -18,7 +18,7 @@ export { Notice, NoticeLevel, NoticeLink } from "./schemas/notices.ts";
 export { AnalyticsEngineTables, AnalyticsEngineVisits, VISIT_HEADER, VisitHeader, WorkersInvocationsResponse } from "./schemas/analytics.ts";
 export { codePoints, CreateMessageInput, headChars, LiveEvent, LiveTicket, Message, MessageDelivery, MessageOrder, MESSAGE_INLINE_CHARS, MESSAGE_MAX_CHARS, OFFICE_WORK_ACTIONS, OfficeWork, type OwnerMessage, ownerMessagesPrompt, SkippedOrder } from "./schemas/conversation.ts";
 export { StorageUse } from "./schemas/storage.ts";
-export { AttendanceQuery, Dashboard, Month, RecordGroup, RecordSummary, RecordTotals, Uptime, UptimeQuery } from "./schemas/records.ts";
+export { AttendanceQuery, Dashboard, Month, OwnerReview, RecordGroup, RecordSummary, RecordTotals, Uptime, UptimeQuery } from "./schemas/records.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";

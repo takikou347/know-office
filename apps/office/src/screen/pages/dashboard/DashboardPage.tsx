@@ -1,8 +1,8 @@
-// ダッシュボード。社員の様子、今日のタスク、今月の費用を入口の /dashboard から 1 回で読み、配信の印で読み直す。承認を待つ物は承認の一覧から読み、お知らせと並べる (API の settings)
-import { Dashboard, type Health } from "@know-office/core";
+// ダッシュボード。社員の様子、今日のタスク、今月の費用を入口の /dashboard から 1 回で読み、配信の印で読み直す。承認を待つ物は承認の一覧と、入口が返すオーナーの判断を待つレビューから読み、お知らせと並べる (API の settings)
+import { Dashboard, type Health, type OwnerReview } from "@know-office/core";
 import { Card, Grid, List, Stat } from "knowidea-ui";
 import { useLiveTick } from "../../parts/live.tsx";
-import { FailedAlert, useLoad } from "../../parts/load.tsx";
+import { FailedAlert, type Loaded, useLoad } from "../../parts/load.tsx";
 import { LiveNoticeList } from "../../parts/notices.tsx";
 import { Part, Section } from "../../parts/section.tsx";
 import { AT_WORK, StaffStatus } from "../../parts/staff-status.tsx";
@@ -34,6 +34,8 @@ export function DashboardPage({ health }: DashboardPageProps) {
   const loaded = useLoad(Dashboard, (a) => a.api.v1.dashboard.$get(), tick);
   const data = loaded.state === "ok" ? loaded.data : null;
   const pending = usePendingApprovals();
+  // オーナーの判断を待つレビューは入口の 1 回の返事に入っているので、配信の印で一緒に読み直る
+  const reviews: Loaded<OwnerReview[]> = loaded.state === "ok" ? { state: "ok", data: loaded.data.ownerReviews } : loaded;
   const roleOf = (id: string | null) => data?.staff.find((s) => s.id === id)?.role ?? id ?? "";
   return (
     <Section>
@@ -44,7 +46,7 @@ export function DashboardPage({ health }: DashboardPageProps) {
         <>
           <Grid minItemWidth={200}>
             <Stat label="働いている社員" icon="users" value={data.staff.filter((s) => AT_WORK.includes(s.state)).length} unit="人" sub={`全体 ${String(data.staff.length)}`} />
-            <WaitingStat pending={pending} />
+            <WaitingStat pending={pending} reviews={reviews} />
             <Stat label="今月の費用" icon="chart-bar" value={dollars(data.monthCostMicroUsd)} unit="ドル" />
           </Grid>
           <Part title="社員の様子">
@@ -59,7 +61,7 @@ export function DashboardPage({ health }: DashboardPageProps) {
         </>
       ) : null}
       <Part title="承認を待つ物">
-        <WaitingList pending={pending} />
+        <WaitingList pending={pending} reviews={reviews} />
       </Part>
       {data ? (
         <Part title="今日の仕事">

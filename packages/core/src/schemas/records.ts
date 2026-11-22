@@ -55,11 +55,28 @@ export const AttendanceQuery = z
   })
   .strict();
 
-/** ダッシュボード。社員、承認待ち、今日のタスク、日本時間の今月の費用、未読の通知 */
+/** オーナーの判断を待つレビュー 1 件。main に入れる条件にオーナーの承認があり、レビュー担当が承認し、オーナーがまだ決めていない物 */
+export const OwnerReview = z
+  .object({
+    nodeId: z.uuid().openapi({ description: "作った社員のタスク ID。レビューはこのタスクの画面で開く" }),
+    title: z.string(),
+    assignee: StaffId.nullable().openapi({ description: "作った社員" }),
+    repo: z.string(),
+    prNumber: z.number().int().positive(),
+    requestedAt: z.iso.datetime().openapi({ description: "タスクを最後に変えた時刻。レビューを頼んだ時に変わる" }),
+  })
+  .strict()
+  .meta({ id: "OwnerReview" });
+
+/** オーナーの判断を待つレビュー 1 件の型 */
+export type OwnerReview = z.infer<typeof OwnerReview>;
+
+/** ダッシュボード。社員、承認待ち、オーナーの判断を待つレビュー、今日のタスク、日本時間の今月の費用、未読の通知 */
 export const Dashboard = z
   .object({
     staff: z.array(StaffOverview),
     approvals: z.array(Approval),
+    ownerReviews: z.array(OwnerReview).openapi({ description: "オーナーの判断を待つレビューを古い順に 100 件まで" }),
     todayTasks: z.array(Node),
     monthCostMicroUsd: z.number().int(),
     notices: z.array(Notice),
