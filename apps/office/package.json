@@ -9,6 +9,7 @@
     "test": "vitest run",
     "e2e": "playwright test && playwright test -c playwright.speed.config.ts",
     "db:local": "for db in DB REC_2026 REC_2027 REC_2028 REC_2029 REC_2030 REC_2031; do wrangler d1 migrations apply $db --local --persist-to \"${KO_PERSIST_DIR:-.wrangler/state}\" || exit 1; done",
+    "db:demo": "for f in e2e/seed.sql dev/demo.sql; do wrangler d1 execute DB --local --persist-to \"${KO_PERSIST_DIR:-.wrangler/state}\" --file=$f || exit 1; done",
     "openapi": "vitest run test/gate/openapi.test.ts --update"
   },
   "dependencies": {

@@ -10,6 +10,9 @@
     "lint": "oxlint --type-aware --deny-warnings",
     "verify": "node scripts/verify.ts",
     "dev": "pnpm --filter @know-office/office dev",
+    "local": "pnpm --filter @know-office/office db:local && pnpm dev",
+    "local:demo": "pnpm --filter @know-office/office db:local && pnpm --filter @know-office/office db:demo && pnpm dev",
+    "local:reset": "rm -rf apps/office/.wrangler/state",
     "e2e": "pnpm --filter @know-office/office e2e",
     "clean": "rm -rf apps/*/dist apps/*/.wrangler apps/*/test-results apps/*/playwright-report",
     "prepare": "git config core.hooksPath .githooks || true"
