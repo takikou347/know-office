@@ -1,4 +1,5 @@
 // 代わりの物を 1 つの Node のサーバーにまとめて立てる。ログインと記録の 3.9
+import { createServer } from "node:net";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { createFakeAccess, type FakeAccess, type FakeAccessOptions } from "./access.ts";
@@ -24,11 +25,30 @@ export type RunningFakes = {
 };
 
 /**
+ * 待ち受けの番号が空いている事を確かめる。前に立てた開発のサーバーが残っていると、Node の EADDRINUSE だけでは何をすればよいか分からないので、止め方を書いた誤りにする
+ * @param port 待ち受けの番号
+ */
+export async function assertPortFree(port: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", (error: NodeJS.ErrnoException) => {
+      reject(
+        error.code === "EADDRINUSE"
+          ? new Error(`${String(port)} 番を別のプロセスが使っている。前に立てた pnpm dev か pnpm local が残っていれば止めてから起こし直す: lsof -ti tcp:${String(port)} | xargs kill`)
+          : error,
+      );
+    });
+    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve()));
+  });
+}
+
+/**
  * 代わりの物を /access、/anthropic、/github、/codeload、/cloudflare、/workspace の下に、見本の Web アプリのサービスを /sample-app の下に立てる
  * @param options 待ち受けの番号、手元のゲートウェイの宛先を返す関数、代わりの Access の設定、通す Claude の鍵
  * @returns 立てた代わりの物
  */
 export async function startFakes(options: FakeAccessOptions & { port: number; gateBase: () => string; claudeKey: string }): Promise<RunningFakes> {
+  await assertPortFree(options.port);
   const access = await createFakeAccess(options);
   // ゲートウェイの鍵だけを通す。ワークスペースの Claude の呼び出しもゲートウェイのプロキシが鍵を付け替えて届く
   const claude = createFakeClaude({ keys: [options.claudeKey] });
