@@ -124,6 +124,36 @@ function seedStudy(serviceId: string, body: string): void {
   seedMain(`UPDATE services SET study_key = '${key}' WHERE id = '${serviceId}'`);
 }
 
+/**
+ * 画面で案を足し、検討を経てリポジトリを選び、試作に進める
+ * @param page 開いているページ。useOwnerPasskey を付けておく
+ * @param title 案の名前
+ * @returns 試作に進めたサービスの ID
+ */
+async function prototypeService(page: Page, title: string): Promise<string> {
+  freeRepoNames();
+  await page.goto("/services");
+  await connectGitHub(page);
+  await chooseDocsRepo(page);
+  const id = await addIdea(page, title);
+  const main = page.getByRole("main");
+  await move(page, "検討に進める", "調べる");
+  await expect(main.getByRole("combobox", { name: "移す先" })).toHaveText(/作ると決める/);
+  await choose(page, "移す先", "作ると決める");
+  await choose(page, "リポジトリ", REPO);
+  await move(page, "作ると決める", "作る");
+  await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
+  return id;
+}
+
+/**
+ * 設定のタブの、見出しで探した 1 項目のカード
+ * @param page 開いているページ
+ * @param heading カードの見出し
+ * @returns カード
+ */
+const settingCard = (page: Page, heading: string) => page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: heading, exact: true }) });
+
 test.afterEach(() => {
   // デプロイの条件の通しが置いた、レビュー担当の承認の行
   seedMain(`DELETE FROM reviews WHERE head_sha IN ('${"d".repeat(40)}', '${DEPLOY_HEAD}')`);
@@ -292,5 +322,59 @@ test.describe("段階ごとのオーナーの判断", () => {
     const sent = await dispatchBodies(page, "deploy.yml");
     expect(sent).toHaveLength(before + 1);
     expect(sent.at(-1)).toEqual({ ref: "main", inputs: { sha: DEPLOY_HEAD } });
+  });
+});
+
+test.describe("サービスごとの設定", () => {
+  test("断られた後も今の値を出す", async ({ page }) => {
+    await useOwnerPasskey(page);
+    const id = await prototypeService(page, `断られる設定の案 ${crypto.randomUUID().slice(0, 8)}`);
+    const main = page.getByRole("main");
+    await main.getByRole("tab", { name: "設定" }).click();
+    const deployWhen = settingCard(page, "本番にデプロイする条件");
+    await expect(deployWhen.getByRole("checkbox", { name: "オーナーの承認" })).toBeChecked();
+
+    // 同じ設定を読んだ別の画面で、先にチェックの合格を足す
+    const other = await page.context().newPage();
+    try {
+      await other.goto(`/services/${id}`);
+      await other.getByRole("main").getByRole("tab", { name: "設定" }).click();
+      const elsewhere = settingCard(other, "本番にデプロイする条件");
+      await elsewhere.getByRole("checkbox", { name: "チェックの合格" }).check();
+      await elsewhere.getByLabel("本番にデプロイする条件を変える理由").fill("別の画面で足す");
+      await elsewhere.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
+      await expect(elsewhere.getByText(/本番にデプロイする条件を変えました/)).toBeVisible();
+    } finally {
+      await other.close();
+    }
+
+    // 前の版のままレビュー担当の承認を足すと 409 で断られ、知らせが残り、選び欄は別の画面で変えた今の値になる
+    await deployWhen.getByRole("checkbox", { name: "レビュー担当の承認" }).check();
+    await deployWhen.getByLabel("本番にデプロイする条件を変える理由").fill("前の版から足す");
+    await deployWhen.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
+    await expect(deployWhen.getByRole("checkbox", { name: "チェックの合格" })).toBeChecked();
+    await expect(deployWhen.getByRole("checkbox", { name: "レビュー担当の承認" })).not.toBeChecked();
+    const refused = deployWhen.getByRole("alert").filter({ hasText: "本番にデプロイする条件を変えられませんでした" });
+    await expect(refused).toContainText("ほかの所で先に変わりました");
+    await expect(refused).toContainText("問い合わせの番号");
+
+    // main にマージする条件は書けたが、GitHub にルールセットを掛けられず 502 になる。知らせが残り、選び欄は書けた値になる
+    await fakeGitHubRoute(page, `GET /repos/${REPO}/commits/main/check-runs`, { total_count: 0, check_runs: [] });
+    const rulesets = `GET ${new URL(FAKE_GITHUB).pathname}/repos/${REPO}/rulesets`;
+    try {
+      expect((await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: rulesets, status: 500, times: 5 } })).status()).toBe(204);
+      const mergeWhen = settingCard(page, "main にマージする条件");
+      await mergeWhen.getByRole("checkbox", { name: "オーナーの承認" }).check();
+      await mergeWhen.getByLabel("main にマージする条件を変える理由").fill("オーナーも見る");
+      await mergeWhen.getByRole("button", { name: "main にマージする条件を変える" }).click();
+      const unapplied = mergeWhen.getByRole("alert").filter({ hasText: "main にマージする条件は変えましたが、GitHub に掛けられませんでした" });
+      await expect(unapplied).toContainText("問い合わせの番号");
+      await expect(mergeWhen.getByText("初期値から変えている")).toBeVisible();
+      await expect(mergeWhen.getByRole("checkbox", { name: "オーナーの承認" })).toBeChecked();
+      // 読み直した後も、前に断られた本番にデプロイする条件の知らせは残る
+      await expect(refused).toBeVisible();
+    } finally {
+      expect((await page.request.delete(`${FAKE_GITHUB}/__fake/failures`)).status()).toBe(204);
+    }
   });
 });

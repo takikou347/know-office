@@ -4,7 +4,7 @@ import { Alert, Button, Card, Checkbox, Stack, Switch, TextField } from "knowide
 import { type ReactNode, useContext, useState } from "react";
 import { z } from "zod";
 import { type Api, ApiContext } from "../api.ts";
-import { type Failed, FailedAlert, type Reply, send } from "./load.tsx";
+import { type Failed, FailedAlert, type Loaded, type Reply, send, useLoad } from "./load.tsx";
 
 const ACTION_LABEL: Record<RepoAction, string> = { read: "読む", branch: "ブランチを作る", push: "push", pull_request: "プルリクエスト", merge: "main へのマージ", issue: "Issue" };
 const CONDITION_LABEL: Record<ReleaseCondition, string> = { checks: "チェックの合格", reviewer: "レビュー担当の承認", owner: "オーナーの承認" };
@@ -35,17 +35,29 @@ interface SaveBarProps {
   value: unknown;
   /** 変えた後に呼ぶ */
   onSaved: Saved;
-  /** 断られた時に呼ぶ。今の値を読み直すのに使う */
-  onRefused: () => void;
+  /** 断られた時に呼ぶ。断られた理由を渡し、今の値を読み直すのに使う */
+  onRefused: (failure: Failed) => void;
+  /** 作り直す前のカードで断られた理由。読み直してカードを作り直した後も出し続ける */
+  refusal?: Failed | undefined;
+}
+
+/**
+ * 断られた知らせの題。502 は設定を書けた後に GitHub へ掛けられなかった時なので、変えた事も伝える
+ * @param label 項目の名前
+ * @param failure 断られた理由
+ * @returns 題
+ */
+export function refusalTitle(label: string, failure: Failed): string {
+  return failure.code === "upstream_failed" ? `${label}は変えましたが、GitHub に掛けられませんでした` : `${label}を変えられませんでした`;
 }
 
 /** 変える理由の欄と、変えるボタン。守りを弱める変更と勤務を延ばす変更は、ゲートウェイがパスキーの確認を求める */
-export function SaveBar({ label, put, version, value, onSaved, onRefused }: SaveBarProps) {
+export function SaveBar({ label, put, version, value, onSaved, onRefused, refusal }: SaveBarProps) {
   const api = useContext(ApiContext);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string>();
-  const [failure, setFailure] = useState<Failed>();
+  const [failure, setFailure] = useState<Failed | undefined>(refusal);
 
   const save = async () => {
     if (!api || value === null) return;
@@ -56,7 +68,7 @@ export function SaveBar({ label, put, version, value, onSaved, onRefused }: Save
     setBusy(false);
     if (!sent.ok) {
       setFailure(sent.failure);
-      onRefused();
+      onRefused(sent.failure);
       return;
     }
     const next = z.object({ data: Setting }).loose().parse(await sent.res.json()).data;
@@ -78,7 +90,7 @@ export function SaveBar({ label, put, version, value, onSaved, onRefused }: Save
           {done}
         </Alert>
       ) : null}
-      {failure ? <FailedAlert title={`${label}を変えられませんでした`} failure={failure} /> : null}
+      {failure ? <FailedAlert title={refusalTitle(label, failure)} failure={failure} /> : null}
     </Stack>
   );
 }
@@ -125,8 +137,10 @@ export interface CardProps {
   setting: Setting;
   /** 変えた後に呼ぶ */
   onSaved: Saved;
-  /** 断られた時に呼ぶ */
-  onRefused: () => void;
+  /** 断られた時に呼ぶ。断られた理由を渡す */
+  onRefused: (failure: Failed) => void;
+  /** 作り直す前のカードで断られた理由 */
+  refusal?: Failed | undefined;
 }
 
 /**
@@ -152,7 +166,7 @@ export interface RuleCardProps extends CardProps {
 }
 
 /** 受け継ぐ項目の 1 つ。選び直して、理由を書いて変える。office の初期値とサービスごとの設定が使う */
-export function RuleCard({ setting, name, put, badge, onSaved, onRefused }: RuleCardProps) {
+export function RuleCard({ setting, name, put, badge, onSaved, onRefused, refusal }: RuleCardProps) {
   const [draft, setDraft] = useState<unknown>(setting.value);
   const label = RULE_LABEL[name];
   const valid = INHERITED_SETTINGS[name].safeParse(draft).success;
@@ -191,8 +205,56 @@ export function RuleCard({ setting, name, put, badge, onSaved, onRefused }: Rule
             onSaved(next);
           }}
           onRefused={onRefused}
+          refusal={refusal}
         />
       </Stack>
     </Card>
   );
+}
+
+/** 設定のカードを並べる画面が持つ物。読んだ設定、カードを作り直す番号、項目ごとの今の値と断られた理由、変えた時と断られた時の口 */
+export interface SettingCards {
+  /** 読んだ設定 */
+  loaded: Loaded<Setting[]>;
+  /** 読み直した設定が届くたびに増える番号。カードの key に入れ、読み直した今の値で選び欄を作り直す */
+  round: number;
+  /** 項目の今の値。変えた後は変えた値 */
+  find: (key: string) => Setting | undefined;
+  /** 項目の断られた理由。作り直したカードに渡す */
+  refusalOf: (key: string) => Failed | undefined;
+  /** 変えた時に呼ぶ */
+  keep: Saved;
+  /** 断られた時に呼ぶ口を作る。理由を残して読み直す */
+  refuse: (key: string) => (failure: Failed) => void;
+}
+
+/**
+ * 設定を読み、断られた時は理由を残したまま読み直し、届いた今の値でカードを作り直す。
+ * 読み直す間は前の値のカードを残し、届いてから作り直すので、選び欄は入口の今の値になる (サービスと拡張の 3.3)
+ * @param read 設定の一覧を読む
+ * @returns 読んだ設定と、カードに渡す物
+ */
+export function useSettingCards(read: (api: Api) => Promise<Reply>): SettingCards {
+  const [tick, setTick] = useState(0);
+  const loaded = useLoad(z.array(Setting), read, tick);
+  const [saved, setSaved] = useState<Record<string, Setting>>({});
+  const [refusals, setRefusals] = useState<Record<string, Failed>>({});
+  const [shown, setShown] = useState<{ data: Setting[]; round: number }>();
+  // 読み直した値は useLoad が新しい並びで返す。届いた時だけ番号を進め、描く途中で直す (React の props から状態を直す形)
+  if (loaded.state === "ok" && loaded.data !== shown?.data) setShown({ data: loaded.data, round: (shown?.round ?? 0) + 1 });
+  return {
+    loaded,
+    round: shown?.round ?? 0,
+    find: (key) => saved[key] ?? (loaded.state === "ok" ? loaded.data.find((s) => s.key === key) : undefined),
+    refusalOf: (key) => refusals[key],
+    keep: (next) => {
+      setSaved((s) => ({ ...s, [next.key]: next }));
+      setRefusals((r) => Object.fromEntries(Object.entries(r).filter(([key]) => key !== next.key)));
+    },
+    refuse: (key) => (failure) => {
+      setSaved({});
+      setRefusals((r) => ({ ...r, [key]: failure }));
+      setTick((t) => t + 1);
+    },
+  };
 }

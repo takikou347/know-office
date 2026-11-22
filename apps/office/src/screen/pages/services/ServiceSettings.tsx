@@ -1,10 +1,9 @@
 // サービスごとの設定。リポジトリと担当の社員と、office の初期値から受け継ぐ 5 項目を読み、1 項目ずつ変える (サービスと拡張の 3.3)
-import { INHERITED_KEYS, Setting, StaffId } from "@know-office/core";
+import { INHERITED_KEYS, type Setting, StaffId } from "@know-office/core";
 import { Card, Field, Select, Stack, Status } from "knowidea-ui";
 import { useState } from "react";
-import { z } from "zod";
-import { FailedAlert, useLoad } from "../../parts/load.tsx";
-import { type CardProps, type PutSetting, RuleCard, type Saved, SaveBar } from "../../parts/rule-card.tsx";
+import { FailedAlert } from "../../parts/load.tsx";
+import { type CardProps, type PutSetting, RuleCard, SaveBar, useSettingCards } from "../../parts/rule-card.tsx";
 import { STAFF_LABEL } from "../guard/labels.ts";
 import { RepoPicker } from "./StageActions.tsx";
 
@@ -23,21 +22,21 @@ const servicePut =
 const inheritBadge = (s: Setting) => <Status kind={s.inherited ? "neutral" : "info"} label={s.inherited ? "office の初期値と同じ" : "初期値から変えている"} />;
 
 /** リポジトリ。GitHub の触れるリポジトリから選び直す */
-function RepoCard({ setting, put, onSaved, onRefused }: CardProps & { put: PutSetting }) {
+function RepoCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { put: PutSetting }) {
   const now = typeof setting.value === "string" ? setting.value : null;
   const [draft, setDraft] = useState<string | null>(now);
   return (
     <Card title="リポジトリ" headingLevel={3} badge={<Status kind="info" label={now ?? "まだ無い"} />}>
       <Stack gap={3}>
         <RepoPicker value={draft} onChange={setDraft} />
-        <SaveBar label="リポジトリ" put={put} version={setting.version} value={draft !== null && draft !== now ? draft : null} onSaved={onSaved} onRefused={onRefused} />
+        <SaveBar label="リポジトリ" put={put} version={setting.version} value={draft !== null && draft !== now ? draft : null} onSaved={onSaved} onRefused={onRefused} refusal={refusal} />
       </Stack>
     </Card>
   );
 }
 
 /** 担当の社員 */
-function StaffCard({ setting, put, onSaved, onRefused }: CardProps & { put: PutSetting }) {
+function StaffCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { put: PutSetting }) {
   const now = StaffId.safeParse(setting.value);
   const [draft, setDraft] = useState<StaffId | null>(now.success ? now.data : null);
   return (
@@ -55,7 +54,7 @@ function StaffCard({ setting, put, onSaved, onRefused }: CardProps & { put: PutS
             }}
           />
         </Field>
-        <SaveBar label="担当の社員" put={put} version={setting.version} value={draft !== null && draft !== setting.value ? draft : null} onSaved={onSaved} onRefused={onRefused} />
+        <SaveBar label="担当の社員" put={put} version={setting.version} value={draft !== null && draft !== setting.value ? draft : null} onSaved={onSaved} onRefused={onRefused} refusal={refusal} />
       </Stack>
     </Card>
   );
@@ -72,33 +71,33 @@ export interface ServiceSettingsProps {
 
 /** サービスごとの設定 */
 export function ServiceSettings({ serviceId, name, onChanged }: ServiceSettingsProps) {
-  const [tick, setTick] = useState(0);
-  const loaded = useLoad(z.array(Setting), (a) => a.api.v1.services[":serviceId"].settings.$get({ param: { serviceId }, query: { limit: "100" } }), tick);
-  const [saved, setSaved] = useState<Record<string, Setting>>({});
+  const cards = useSettingCards((a) => a.api.v1.services[":serviceId"].settings.$get({ param: { serviceId }, query: { limit: "100" } }));
+  const { loaded, round } = cards;
   if (loaded.state === "loading") return <p role="status">{name} の設定を読んでいます</p>;
   if (loaded.state === "failed") return <FailedAlert title={`${name} の設定を読めませんでした`} failure={loaded} />;
 
-  // 断られた時は読み直し、ほかの所で変わった今の値から選び直す
-  const refused = () => {
-    setSaved({});
-    setTick((t) => t + 1);
-  };
-  const keep: Saved = (next) => {
-    setSaved((s) => ({ ...s, [next.key]: next }));
-    if (next.key === "repo" || next.key === "staffId") onChanged();
-  };
-  const find = (key: string) => saved[key] ?? loaded.data.find((s) => s.key === key);
-  const repo = find("repo");
-  const staff = find("staffId");
+  // 断られた時は理由を残したまま読み直し、届いた今の値でカードを作り直す
+  const props = (setting: Setting) => ({
+    setting,
+    put: servicePut(serviceId, setting.key),
+    refusal: cards.refusalOf(setting.key),
+    onRefused: cards.refuse(setting.key),
+    onSaved: (next: Setting) => {
+      cards.keep(next);
+      if (next.key === "repo" || next.key === "staffId") onChanged();
+    },
+  });
+  const repo = cards.find("repo");
+  const staff = cards.find("staffId");
   return (
     <Stack gap={3}>
       <p>変えていない項目には、設定の画面のサービスの初期値が効きます。守りを弱める変更はパスキーで確かめます</p>
-      {repo ? <RepoCard key={`repo:${String(tick)}`} setting={repo} put={servicePut(serviceId, "repo")} onSaved={keep} onRefused={refused} /> : null}
-      {staff ? <StaffCard key={`staff:${String(tick)}`} setting={staff} put={servicePut(serviceId, "staffId")} onSaved={keep} onRefused={refused} /> : null}
+      {repo ? <RepoCard key={`repo:${String(round)}`} {...props(repo)} /> : null}
+      {staff ? <StaffCard key={`staff:${String(round)}`} {...props(staff)} /> : null}
       {INHERITED_KEYS.map((key) => {
-        const setting = find(key);
+        const setting = cards.find(key);
         if (!setting) return null;
-        return <RuleCard key={`${key}:${String(tick)}`} name={key} setting={setting} put={servicePut(serviceId, key)} badge={inheritBadge(setting)} onSaved={keep} onRefused={refused} />;
+        return <RuleCard key={`${key}:${String(round)}`} name={key} badge={inheritBadge(setting)} {...props(setting)} />;
       })}
     </Stack>
   );

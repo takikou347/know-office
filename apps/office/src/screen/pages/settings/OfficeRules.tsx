@@ -1,10 +1,10 @@
 // 設定の画面の、全体のルールとサービスの初期値。勤務の時刻、時間外の呼び出し、会話の言葉の指示と、サービスが受け継ぐ 5 項目を読み、1 項目ずつ変える (サービスと拡張の 3.3、社員と勤怠の 2 章)
-import { INHERITED_KEYS, Setting, WorkSchedule } from "@know-office/core";
+import { INHERITED_KEYS, type Setting, WorkSchedule } from "@know-office/core";
 import { Card, Checkbox, Stack, Status, TextField } from "knowidea-ui";
 import { useState } from "react";
 import { z } from "zod";
-import { FailedAlert, useLoad } from "../../parts/load.tsx";
-import { type CardProps, type PutSetting, RuleCard, same, type Saved, SaveBar } from "../../parts/rule-card.tsx";
+import { FailedAlert } from "../../parts/load.tsx";
+import { type CardProps, type PutSetting, RuleCard, same, SaveBar, useSettingCards } from "../../parts/rule-card.tsx";
 import { Part } from "../../parts/section.tsx";
 
 const SCHEDULE_KEY = "workday.schedule";
@@ -23,7 +23,7 @@ const officePut =
     api.api.v1.settings[":key"].$put({ param: { key }, json });
 
 /** 勤務の時刻。始まり、終わり、曜日を変える。延ばす変更はパスキーで確かめる */
-function ScheduleCard({ setting, onSaved, onRefused }: CardProps) {
+function ScheduleCard({ setting, onSaved, onRefused, refusal }: CardProps) {
   const read = WorkSchedule.safeParse(setting.value);
   const [draft, setDraft] = useState<WorkSchedule>(read.success ? read.data : { start: "09:00", end: "17:00", days: [] });
   const valid = WorkSchedule.safeParse(draft).success && draft.start !== draft.end && draft.days.length > 0;
@@ -61,6 +61,7 @@ function ScheduleCard({ setting, onSaved, onRefused }: CardProps) {
             onSaved(next);
           }}
           onRefused={onRefused}
+          refusal={refusal}
         />
       </Stack>
     </Card>
@@ -116,7 +117,7 @@ const SwitchValue = z.object({ enabled: z.boolean(), perDay: z.number().int().mi
 type SwitchValue = z.infer<typeof SwitchValue>;
 
 /** 費用の出る口のカード。開くと Claude の費用が出るので、開く変更と回数を増やす変更はパスキーで確かめる */
-function SwitchCard({ text, setting, onSaved, onRefused }: CardProps & { text: SwitchText }) {
+function SwitchCard({ text, setting, onSaved, onRefused, refusal }: CardProps & { text: SwitchText }) {
   const read = SwitchValue.safeParse(setting.value);
   const [draft, setDraft] = useState<SwitchValue>(read.success ? read.data : { enabled: false, perDay: 1 });
   const [perDay, setPerDay] = useState(String(draft.perDay));
@@ -144,6 +145,7 @@ function SwitchCard({ text, setting, onSaved, onRefused }: CardProps & { text: S
             onSaved(saved);
           }}
           onRefused={onRefused}
+          refusal={refusal}
         />
       </Stack>
     </Card>
@@ -152,36 +154,30 @@ function SwitchCard({ text, setting, onSaved, onRefused }: CardProps & { text: S
 
 /** 全体のルール (勤務の時刻、時間外の呼び出し、会話の言葉の指示) とサービスの初期値 */
 export function OfficeRules() {
-  const [tick, setTick] = useState(0);
-  const loaded = useLoad(z.array(Setting), (a) => a.api.v1.settings.$get({ query: { limit: "100" } }), tick);
-  const [saved, setSaved] = useState<Record<string, Setting>>({});
+  const cards = useSettingCards((a) => a.api.v1.settings.$get({ query: { limit: "100" } }));
+  const { loaded, round } = cards;
   if (loaded.state === "loading") return <p role="status">全体のルールを読んでいます</p>;
   if (loaded.state === "failed") return <FailedAlert title="全体のルールを読めませんでした" failure={loaded} />;
 
-  // 断られた時は読み直し、カードを作り直して、ほかの所で変わった今の値から選び直す。変えられた時はカードを残し、変えた事を出したままにする
-  const refused = () => {
-    setSaved({});
-    setTick((t) => t + 1);
-  };
-  const keep: Saved = (next) => setSaved((s) => ({ ...s, [next.key]: next }));
-  const find = (key: string) => saved[key] ?? loaded.data.find((s) => s.key === key);
-  const schedule = find(SCHEDULE_KEY);
+  // 断られた時は理由を残したまま読み直し、届いた今の値でカードを作り直す。変えられた時はカードを残し、変えた事を出したままにする
+  const props = (setting: Setting) => ({ setting, onSaved: cards.keep, onRefused: cards.refuse(setting.key), refusal: cards.refusalOf(setting.key) });
+  const schedule = cards.find(SCHEDULE_KEY);
   return (
     <>
       <Part title="全体のルール">
-        {schedule ? <ScheduleCard key={tick} setting={schedule} onSaved={keep} onRefused={refused} /> : null}
+        {schedule ? <ScheduleCard key={round} {...props(schedule)} /> : null}
         {SWITCHES.map((text) => {
-          const setting = find(text.key);
-          return setting ? <SwitchCard key={`${text.key}:${String(tick)}`} text={text} setting={setting} onSaved={keep} onRefused={refused} /> : null;
+          const setting = cards.find(text.key);
+          return setting ? <SwitchCard key={`${text.key}:${String(round)}`} text={text} {...props(setting)} /> : null;
         })}
       </Part>
       <Part title="サービスの初期値">
         <p>サービスごとの設定で変えていない項目に、この値が効きます。守りを弱める変更はパスキーで確かめます</p>
         {INHERITED_KEYS.map((name) => {
-          const setting = find(`${DEFAULT_PREFIX}${name}`);
+          const setting = cards.find(`${DEFAULT_PREFIX}${name}`);
           if (!setting) return null;
           const badge = <Status kind={setting.inherited ? "neutral" : "info"} label={setting.inherited ? "組み込みの初期値" : `バージョン ${String(setting.version)}`} />;
-          return <RuleCard key={`${name}:${String(tick)}`} name={name} setting={setting} put={officePut(setting.key)} badge={badge} onSaved={keep} onRefused={refused} />;
+          return <RuleCard key={`${name}:${String(round)}`} name={name} put={officePut(setting.key)} badge={badge} {...props(setting)} />;
         })}
       </Part>
     </>
