@@ -1,79 +1,8 @@
 // オフィスの部屋の定義。部屋は 1 つずつの部品 (id、名前、広さ、家具、席、出入り口) で、並びに足すとフロアに部屋が増える
+import type { Furniture, RoomDef } from "@know-office/core";
 
-/** 床の上の点 (タイルの単位)。x は右、z は手前が正 */
-export interface Point {
-  x: number;
-  z: number;
-}
-
-/** 社員が立つか座る所 */
-export interface Spot extends Point {
-  /** 向き (y 軸の回りのラジアン)。0 で手前を向く */
-  face: number;
-}
-
-/** 家具の種類 */
-export type FurnitureKind =
-  | "desk-president"
-  | "desk"
-  | "meeting-table"
-  | "meeting-chair"
-  | "shelf"
-  | "bookcase"
-  | "window"
-  | "sofa"
-  | "coffee-table"
-  | "rug"
-  | "plant";
-
-/** 1 つの家具。x と z は左奥の角のタイル、w と d は幅と奥行きのタイルの数 */
-export interface Furniture {
-  kind: FurnitureKind;
-  x: number;
-  z: number;
-  w: number;
-  d: number;
-  /** 歩く道を塞ぐか */
-  blocks: boolean;
-  /** 向き (y 軸の回りのラジアン) */
-  rot?: number;
-  /** 机の持ち主の社員の id。渡した書類と画面をこの社員の机に出す */
-  owner?: string;
-}
-
-/** 社員の机の席と、机の手前の書類を渡す所 */
-export interface DeskSeat {
-  seat: Spot;
-  handoff: Spot;
-}
-
-/** 部屋の床の張り方 */
-export type FloorKind = "tile" | "carpet";
-
-/**
- * 1 つの部屋の定義。中の位置は部屋の左奥の角からのタイルの数で書く。
- * 拡張 (サービスと拡張の 3.8) が部屋を足す時も、この形の定義を並びに足す
- */
-export interface RoomDef {
-  /** フロアの中で 1 つだけの名前 */
-  id: string;
-  /** 壁の札に出す名前 */
-  name: string;
-  /** 廊下の奥の列に置くか、手前の列に置くか */
-  side: "back" | "front";
-  /** 広さ (タイルの数) */
-  size: { w: number; d: number };
-  /** 床の張り方 */
-  floor: FloorKind;
-  /** 家具 */
-  furniture: readonly Furniture[];
-  /** 社員の id ごとの机の席 */
-  seats?: Readonly<Record<string, DeskSeat>>;
-  /** 社員の id ごとの、待つ時に座る所 */
-  rest?: Readonly<Record<string, Spot>>;
-  /** 廊下の側の壁の出入り口。部屋の左の端からの列の番号 */
-  doors: readonly number[];
-}
+// 部屋の形は core のスキーマにあり、拡張の部屋は ExtensionRoomDef で確かめてから並べる (layout の arrangeFloor)
+export type { DeskSeat, FloorKind, Furniture, FurnitureKind, Point, RoomDef, Spot } from "@know-office/core";
 
 /** 社長室: 奥の窓の前に社長の机、左に本棚、隅に鉢植え */
 const PRESIDENT_ROOM: RoomDef = {
@@ -185,7 +114,6 @@ function checkRoom(def: RoomDef): void {
  * @throws Error id が重なる時、同じ社員の席か待つ所が 2 つの部屋にある時、checkRoom が断る時
  */
 export function checkRooms(defs: readonly RoomDef[], reserved: string): void {
-  // TODO(#97): 拡張が部屋を足す時は、定義を Zod のスキーマで確かめてから渡す
   const ids = new Set<string>([reserved]);
   const seated = new Set<string>();
   const resting = new Set<string>();

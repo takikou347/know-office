@@ -251,6 +251,7 @@ export {
   ServiceStatus,
 } from "./schemas/services.ts";
 export { EXTENSION_ID, EXTENSION_TOOL, Extension, ToggleExtensionInput } from "./schemas/extensions.ts";
+export { DeskSeat, ExtensionRoomDef, FLOOR_KINDS, type FloorKind, Furniture, FURNITURE_KINDS, type FurnitureKind, type Point, ROOM_FURNITURE_MAX, ROOM_NAME_MAX, ROOM_SIZE_MAX, RoomDef, RoomPoint, RoomSpot, type Spot } from "./schemas/office-rooms.ts";
 export { AskBossTool } from "./schemas/tools/ask-boss.ts";
 export { AskOwnerTool } from "./schemas/tools/ask-owner.ts";
 export { IdeaAddTool } from "./schemas/tools/idea-add.ts";

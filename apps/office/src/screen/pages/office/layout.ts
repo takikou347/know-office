@@ -1,5 +1,5 @@
 // オフィスのフロアの配置。部屋の定義を廊下の奥と手前の 2 列に並べ、席と待つ所を決め、壁と家具を避けて部屋と廊下をまたぐ道を決める
-import type { StaffState } from "@know-office/core";
+import { ExtensionRoomDef, type StaffState } from "@know-office/core";
 import { type DeskSeat, type Furniture, OFFICE_ROOMS, checkRooms, type Point, type RoomDef, type Spot } from "./rooms.ts";
 
 export type { DeskSeat, Furniture, FurnitureKind, Point, Spot } from "./rooms.ts";
@@ -84,11 +84,18 @@ export function tileOf(p: Point): Point {
 
 /**
  * 部屋の定義をフロアに並べる。奥の列は廊下の奥の端にそろえ、手前の列は廊下の手前に置き、どちらも左から定義の順に詰める
- * @param defs 部屋の定義の並び
+ * @param builtIn 中で書いた部屋の定義の並び
+ * @param extensions 拡張が足す部屋の定義。外から来る物なので ExtensionRoomDef で確かめてから、中の部屋の後ろに並べる
  * @returns 並べたフロア
- * @throws Error 部屋の定義が並べられない形の時 (checkRooms)
+ * @throws Error 拡張の部屋の形が違う時、部屋の定義が並べられない形の時 (checkRooms)
  */
-export function arrangeFloor(defs: readonly RoomDef[]): Floor {
+export function arrangeFloor(builtIn: readonly RoomDef[], extensions: readonly unknown[] = []): Floor {
+  const added = extensions.map((value, i) => {
+    const parsed = ExtensionRoomDef.safeParse(value);
+    if (!parsed.success) throw new Error(`拡張の部屋の形が違う: ${i} 番目 (${parsed.error.issues.map((e) => e.path.join(".")).join(", ")})`);
+    return parsed.data;
+  });
+  const defs: readonly RoomDef[] = [...builtIn, ...added];
   checkRooms(defs, HALL);
   const back = defs.filter((d) => d.side === "back");
   const front = defs.filter((d) => d.side === "front");

@@ -218,6 +218,21 @@ describe("オフィスの部屋", () => {
     expect(() => arrangeFloor([...OFFICE_ROOMS, outside])).toThrow(/study.*はみ出す/);
   });
 
+  it("拡張の部屋は形を確かめてから並べる", () => {
+    const floor = arrangeFloor(OFFICE_ROOMS, [STUDY]);
+    expect(floor.rooms.map((r) => r.def.id)).toContain("study");
+    // 形の違う物、社員の席か机の持ち主を持つ物は、並べる前に断る
+    const bad: unknown[] = [
+      { ...STUDY, size: { w: "3", d: 3 } },
+      { ...STUDY, furniture: [{ kind: "bed", x: 0, z: 0, w: 1, d: 1, blocks: true }] },
+      { ...STUDY, seats: { builder: SEATS.builder } },
+      { ...STUDY, furniture: [{ kind: "desk", x: 1, z: 1, w: 1, d: 1, blocks: true, owner: "builder" }] },
+    ];
+    for (const def of bad) expect(() => arrangeFloor(OFFICE_ROOMS, [def])).toThrow(/拡張の部屋の形が違う/);
+    // 形が合っても、元の部屋と同じ id は並べない
+    expect(() => arrangeFloor(OFFICE_ROOMS, [{ ...STUDY, id: "lounge" }])).toThrow(/lounge/);
+  });
+
   it("同じ社員の席を 2 つの部屋に置けない", () => {
     const twice = { ...STUDY, seats: { builder: { seat: { x: 1.5, z: 0.6, face: 0 }, handoff: { x: 1.5, z: 2.5, face: Math.PI } } } };
     expect(() => arrangeFloor([...OFFICE_ROOMS, twice])).toThrow(/builder.*席/);
