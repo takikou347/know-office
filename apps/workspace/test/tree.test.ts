@@ -168,8 +168,8 @@ describe("レビューの木", () => {
   });
 
   it("tar が入力を読み切らずに終え、入力が誤り無しに閉じた後も、流し込みは待ち続けない", async () => {
-    // tar は終わりの印を読むと残りを読まずに終える。終わりを先に受けると Node は入力を誤り無しに閉じ、後の書き込みは drain も error も close も出さない
-    const child = spawn("/bin/true", [], { stdio: ["pipe", "ignore", "ignore"] });
+    // tar の代わりに、入力を読まずにすぐ終える node を使う (Mac に /bin/true は無い)。tar は終わりの印を読むと残りを読まずに終える。終わりを先に受けると Node は入力を誤り無しに閉じ、後の書き込みは drain も error も close も出さない
+    const child = spawn(process.execPath, ["-e", ""], { stdio: ["pipe", "ignore", "ignore"] });
     child.stdin.on("error", () => undefined);
     // 終わりを受けた後、入力の close まで出し終えてから書く
     await Promise.all([new Promise((resolve) => child.once("close", resolve)), new Promise((resolve) => child.stdin.once("close", resolve))]);
