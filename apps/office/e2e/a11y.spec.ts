@@ -52,7 +52,7 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   // 木と組織図は records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
   // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
   { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },
-  { name: "目的と組織図の木", path: "/goals", heading: "目的と組織図", ready: "目標: know-office を動かし始める" },
+  { name: "目的と組織図の木", path: "/goals", heading: "目標", ready: "目標: know-office を動かし始める" },
   // 守りの効き目と蒸留した学びは、表を読み終えてから掛ける
   { name: "守りの効き目と蒸留した学び", path: "/guard", heading: "ハーネス", ready: "入れる前の 7 日", mock: (page) => withGuardLearning(page) },
   // 入れた拡張の画面は、メモを読み終えてから掛ける
