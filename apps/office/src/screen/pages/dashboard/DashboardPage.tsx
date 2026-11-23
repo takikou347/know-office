@@ -10,7 +10,9 @@ import { NODE_STATUSES, taskHref } from "../../parts/tasks.ts";
 import { ApprovalCard } from "../approvals/ApprovalsPage.tsx";
 import { usePendingApprovals } from "../approvals/pending.ts";
 import { WaitingStat } from "../approvals/Waiting.tsx";
-import { dollars, STAGE_LABEL } from "../services/labels.ts";
+import { labelOf } from "@know-office/core/master/master";
+import { SERVICE_STAGES } from "@know-office/core/master/service-stages";
+import { dollars } from "../services/labels.ts";
 import { OwnerReviewCard } from "./OwnerReviewCard.tsx";
 
 /** ホームでその場で決められる件数。残りは承認の一覧で決める */
@@ -150,7 +152,7 @@ export function DashboardPage() {
             <Table
               label="サービスの数値"
               rowKey={(r) => r.id}
-              rows={data.services.map((s) => ({ id: s.id, name: s.name, stage: STAGE_LABEL[s.stage], figures: serviceFigures(s) }))}
+              rows={data.services.map((s) => ({ id: s.id, name: s.name, stage: labelOf(SERVICE_STAGES, s.stage), figures: serviceFigures(s) }))}
               columns={[
                 { key: "name", header: "サービス", render: (r) => <a href={`/services/${r.id}`}>{r.name}</a> },
                 { key: "stage", header: "段階" },

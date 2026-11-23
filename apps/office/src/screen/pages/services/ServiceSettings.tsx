@@ -5,6 +5,7 @@ import { useState } from "react";
 import { FailedAlert } from "../../parts/load.tsx";
 import { type CardProps, type PutSetting, RuleCard, SaveBar, useSettingCards } from "../../parts/rule-card.tsx";
 import { STAFF_LABEL } from "../guard/labels.ts";
+import { UNSET } from "./labels.ts";
 import { RepoPicker } from "./StageActions.tsx";
 
 /**
@@ -26,7 +27,7 @@ function RepoCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { p
   const now = typeof setting.value === "string" ? setting.value : null;
   const [draft, setDraft] = useState<string | null>(now);
   return (
-    <Card title="リポジトリ" headingLevel={3} badge={<Status kind="info" label={now ?? "まだ無い"} />}>
+    <Card title="リポジトリ" headingLevel={3} badge={<Status kind="info" label={now ?? UNSET} />}>
       <Stack gap={3}>
         <RepoPicker value={draft} onChange={setDraft} />
         <SaveBar label="リポジトリ" put={put} version={setting.version} value={draft !== null && draft !== now ? draft : null} onSaved={onSaved} onRefused={onRefused} refusal={refusal} />
@@ -40,7 +41,7 @@ function StaffCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { 
   const now = StaffId.safeParse(setting.value);
   const [draft, setDraft] = useState<StaffId | null>(now.success ? now.data : null);
   return (
-    <Card title="担当の社員" headingLevel={3} badge={<Status kind="info" label={now.success ? STAFF_LABEL[now.data] : "まだ無い"} />}>
+    <Card title="担当の社員" headingLevel={3} badge={<Status kind="info" label={now.success ? STAFF_LABEL[now.data] : UNSET} />}>
       <Stack gap={3}>
         <Field label="担当の社員">
           <Select

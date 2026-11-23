@@ -1,4 +1,6 @@
-// サービスの段階を移す欄。移れる先を選び、理由を書いて送る。作ると決める時は担当の社員と、GitHub の触れるリポジトリを選ぶ (サービスと拡張の 3.1)
+// サービスの段階を移す欄。移れる先と理由を選んで送る。選び肢に無い理由だけを書く。作ると決める時は担当の社員と、GitHub の触れるリポジトリを選ぶ (サービスと拡張の 3.1)
+import { optionsOf } from "@know-office/core/master/master";
+import { SERVICE_MOVE_REASONS } from "@know-office/core/master/service-move-reasons";
 import { AdvanceInput, NEXT_STAGES, Repo, type ServiceCard, ServiceStage, StaffId } from "@know-office/core";
 import { Alert, Button, Field, Select, Stack, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";
@@ -6,7 +8,7 @@ import { z } from "zod";
 import { ApiContext } from "../../api.ts";
 import { type Failed, FailedAlert, send, useLoad } from "../../parts/load.tsx";
 import { STAFF_LABEL } from "../guard/labels.ts";
-import { MOVE_LABEL } from "./labels.ts";
+import { MOVE_LABEL, OTHER_REASON } from "./labels.ts";
 
 interface RepoPickerProps {
   /** 選んでいるリポジトリ */
@@ -55,7 +57,8 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
   const api = useContext(ApiContext);
   const next = NEXT_STAGES[service.stage];
   const [to, setTo] = useState<ServiceStage | null>(next[0] ?? null);
-  const [reason, setReason] = useState("");
+  const [choice, setChoice] = useState<string | null>(null);
+  const [written, setWritten] = useState("");
   const [staffId, setStaffId] = useState<StaffId>("builder");
   const [repo, setRepo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,6 +66,10 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
   if (next.length === 0) return null;
 
   const prototype = to === "prototype";
+  const reasons: string[] = to === null ? [] : SERVICE_MOVE_REASONS[to].map((r) => r.value);
+  // 移す先を変えると、前の先の理由は合わないので選び直す
+  const picked = choice !== null && (choice === OTHER_REASON || reasons.includes(choice)) ? choice : (reasons[0] ?? OTHER_REASON);
+  const reason = picked === OTHER_REASON ? written : picked;
   const input = AdvanceInput.safeParse({ to, reason: reason.trim(), ...(prototype ? { staffId, repo: repo ?? undefined } : {}) });
 
   const move = async () => {
@@ -75,7 +82,8 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
       setFailure(sent.failure);
       return;
     }
-    setReason("");
+    setChoice(null);
+    setWritten("");
     onMoved();
   };
 
@@ -108,7 +116,10 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
           <RepoPicker value={repo} onChange={setRepo} serviceId={service.id} />
         </>
       ) : null}
-      <TextField label="移す理由" value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} />
+      <Field label="移す理由">
+        <Select aria-label="移す理由" value={picked} options={[...(to === null ? [] : optionsOf(SERVICE_MOVE_REASONS[to])), { value: OTHER_REASON, label: "その他" }]} onValueChange={(v) => setChoice(v)} />
+      </Field>
+      {picked === OTHER_REASON ? <TextField label="理由を書く" value={written} maxLength={2000} onChange={(e) => setWritten(e.target.value)} /> : null}
       <Stack direction="row" gap={2}>
         <Button variant={to === "dropped" || to === "closed" ? "danger" : "primary"} loading={busy} disabled={!input.success} onClick={() => void move()}>
           {to ? MOVE_LABEL[to] : "移す"}

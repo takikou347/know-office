@@ -153,7 +153,7 @@ test("案を足し、検討して元の案をたどり、リポジトリを選�
   await main.getByRole("tab", { name: "元の案" }).click();
   await expect(main.getByText("市場は小さいが、手元の作業が減る")).toBeVisible();
   await expect(main.getByText("通しで確かめる案")).toBeVisible();
-  await expect(main.getByText("3.50 ドル")).toBeVisible();
+  await expect(main.getByText("0.00 ドル")).toHaveCount(2);
 
   // 作ると決める時は、代わりの GitHub の触れるリポジトリから選ぶ
   await choose(page, "移す先", "作ると決める");

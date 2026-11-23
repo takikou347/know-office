@@ -11,6 +11,7 @@ import {
   type ServiceCard,
   type ServiceDetail,
   type ServiceStage,
+  type UpdateServiceInput,
 } from "@know-office/core";
 import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -118,6 +119,56 @@ export async function createIdea(env: Bindings, input: CreateIdeaInput, actor: A
   const orm = drizzle(env.DB);
   await orm.batch([orm.insert(services).values(row), orm.insert(serviceEvents).values(stageEvent({ serviceId: row.id, to: "idea", by: actor.by, detail: {} }, actor.now))]);
   return row;
+}
+
+/** 種類を直せる段階。作ると決めた後は、種類ごとの様子とデプロイの口が種類に頼るので直さない */
+const KIND_EDITABLE: readonly ServiceStage[] = ["idea", "study"];
+
+/** 元の案の項目と、書くカラム */
+const IDEA_COLUMNS = {
+  title: "name",
+  kind: "kind",
+  aim: "aim",
+  users: "users",
+  costEstimateMicroUsd: "cost_estimate",
+  revenueEstimateMicroUsd: "revenue_estimate",
+} as const satisfies Record<keyof UpdateServiceInput, string>;
+
+/** 元の案の項目の並び。文の SET はこの順に並べる */
+const IDEA_KEYS = ["title", "kind", "aim", "users", "costEstimateMicroUsd", "revenueEstimateMicroUsd"] as const satisfies readonly (keyof UpdateServiceInput)[];
+
+/** 書いた行の数を読むための、D1 の書きの答えの形 */
+const Written = z.object({ meta: z.object({ changes: z.number() }).loose() }).loose();
+
+/**
+ * 作ると決めた後に種類を直そうとした時の断りを作る
+ * @returns 断り
+ */
+const kindRefused = () => new AppError("refused", "種類は作ると決める前だけ変えられます。作ると決めた後は、新しい案として足してください");
+
+/**
+ * 元の案を直す。送った項目だけを 1 つの文で書くので、同じ時に別の項目を直しても互いに消さない。種類を直す時は、段階が種類を直せる段階のままの事を同じ文の条件にする
+ * @param env バインディング
+ * @param serviceId サービス ID
+ * @param input 直す項目
+ * @returns 直した後のサービスの行
+ * @throws not_found サービスが無い時
+ * @throws refused 作ると決めた後に種類を直そうとした時
+ */
+export async function updateService(env: Bindings, serviceId: string, input: UpdateServiceInput): Promise<ServiceRow> {
+  const row = await findService(env.DB, serviceId);
+  if (input.kind !== undefined && !KIND_EDITABLE.includes(row.stage)) throw kindRefused();
+  const keys = IDEA_KEYS.filter((k) => input[k] !== undefined);
+  const stageGuard = input.kind === undefined ? "" : ` AND stage IN (${KIND_EDITABLE.map(() => "?").join(", ")})`;
+  const statement = env.DB.prepare(`UPDATE services SET ${keys.map((k) => `${IDEA_COLUMNS[k]} = ?`).join(", ")} WHERE id = ?${stageGuard}`).bind(
+    ...keys.map((k) => input[k] ?? null),
+    serviceId,
+    ...(input.kind === undefined ? [] : KIND_EDITABLE),
+  );
+  const [written] = await env.DB.batch([statement]);
+  // 読んだ後に作ると決めた時は、条件に合わず 0 行になる
+  if (Written.parse(written).meta.changes === 0) throw input.kind === undefined ? new AppError("not_found", "サービスが無い") : kindRefused();
+  return findService(env.DB, serviceId);
 }
 
 /**

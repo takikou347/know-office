@@ -1,11 +1,15 @@
 // 1 つのサービスの詳細。段階を移す欄と、様子、元の案、記録、設定のタブ (サービスと拡張の 3.1 から 3.3)
+import { labelOf } from "@know-office/core/master/master";
+import { SERVICE_KINDS } from "@know-office/core/master/service-kinds";
+import { SERVICE_STAGES } from "@know-office/core/master/service-stages";
 import { NEXT_STAGES, ServiceDetail, ServiceStage, StaffId } from "@know-office/core";
-import { Badge, List, Stack, Tabs, Timeline } from "knowidea-ui";
+import { Badge, Stack, Tabs, Timeline } from "knowidea-ui";
 import { jstDateTime } from "../../format.ts";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part } from "../../parts/section.tsx";
 import { STAFF_LABEL } from "../guard/labels.ts";
-import { dollars, EVENT_LABEL, KIND_LABEL, STAGE_LABEL } from "./labels.ts";
+import { EVENT_LABEL, UNSET } from "./labels.ts";
+import { IdeaEditor } from "./IdeaEditor.tsx";
 import { ServiceIssuesView } from "./ServiceIssuesView.tsx";
 import { ServiceSettings } from "./ServiceSettings.tsx";
 import { ServiceStatusView } from "./ServiceStatusView.tsx";
@@ -21,7 +25,7 @@ function eventText(event: ServiceDetail["events"][number]): string {
   const text = (key: string) => (typeof d[key] === "string" ? d[key] : null);
   if (event.kind === "stage") {
     const to = ServiceStage.safeParse(d["to"]);
-    return [to.success ? `${STAGE_LABEL[to.data]}に移した` : "段階を移した", text("reason")].filter(Boolean).join("。");
+    return [to.success ? `${labelOf(SERVICE_STAGES, to.data)}に移した` : "段階を移した", text("reason")].filter(Boolean).join("。");
   }
   if (event.kind === "rollback") return text("reason") ?? "";
   if (event.kind === "deploy" && typeof d["passed"] === "boolean") return d["passed"] ? "npm に公開できた" : "npm に公開できなかった";
@@ -54,23 +58,15 @@ export function ServiceView({ serviceId, tick, onChanged }: ServiceViewProps) {
   if (loaded.state === "loading") return <p role="status">サービスを読んでいます</p>;
   if (loaded.state === "failed") return <FailedAlert title="サービスを読めませんでした" failure={loaded} />;
   const s = loaded.data;
-  const idea = [
-    { id: "aim", title: "狙い", meta: s.aim },
-    { id: "users", title: "使う人", meta: s.users },
-    { id: "cost", title: "月の費用の見込み", meta: dollars(s.costEstimateMicroUsd) },
-    { id: "revenue", title: "月の売り上げの見込み", meta: dollars(s.revenueEstimateMicroUsd) },
-    { id: "study", title: "検討の材料", meta: s.study ?? "まだ無い" },
-    ...(s.droppedReason === null ? [] : [{ id: "dropped", title: "見送った理由", meta: s.droppedReason }]),
-  ];
   return (
     <Stack gap={4}>
       <Stack direction="row" gap={2} align="center" wrap>
         <h2>{s.name}</h2>
-        <Badge>{STAGE_LABEL[s.stage]}</Badge>
-        <Badge>{KIND_LABEL[s.kind]}</Badge>
+        <Badge>{labelOf(SERVICE_STAGES, s.stage)}</Badge>
+        <Badge>{labelOf(SERVICE_KINDS, s.kind)}</Badge>
       </Stack>
       <p>
-        リポジトリ: {s.repo ?? "まだ無い"}、担当: {s.staffId === null ? "まだ無い" : byLabel(s.staffId)}
+        リポジトリ: {s.repo ?? UNSET}、担当: {s.staffId === null ? UNSET : byLabel(s.staffId)}
       </p>
       {NEXT_STAGES[s.stage].length > 0 ? (
         <Part title="段階を移す">
@@ -83,14 +79,14 @@ export function ServiceView({ serviceId, tick, onChanged }: ServiceViewProps) {
         items={[
           { value: "state", label: "様子", content: <ServiceStatusView service={s} onChanged={onChanged} /> },
           { value: "issues", label: "Issue", content: <ServiceIssuesView serviceId={s.id} stage={s.stage} name={s.name} tick={tick} /> },
-          { value: "idea", label: "元の案", content: <List label={`${s.name}の元の案`} items={idea} /> },
+          { value: "idea", label: "元の案", content: <IdeaEditor service={s} onSaved={onChanged} /> },
           {
             value: "log",
             label: "記録",
             content: (
               <Timeline
                 items={s.events.map((e, n) => ({ id: String(n), time: jstDateTime(e.at), title: EVENT_LABEL[e.kind] ?? e.kind, text: eventText(e), meta: byLabel(e.by), tone: e.kind === "rollback" ? "warn" : undefined }))}
-                emptyText="記録はまだ無い"
+                emptyText="データがありません"
               />
             ),
           },

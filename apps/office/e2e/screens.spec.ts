@@ -213,7 +213,7 @@ test.describe("設定と記録の置き場を分ける", () => {
     await expect(page.getByText("初期値から変えている")).toBeVisible();
     // 設計書から作った Issue がまだ無いサービスの Issue のタブ
     await page.getByRole("tab", { name: "Issue" }).click();
-    await expect(page.getByText("Issue はまだ無い")).toBeVisible();
+    await expect(page.getByText("Issue がありません")).toBeVisible();
   });
 });
 

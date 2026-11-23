@@ -35,7 +35,7 @@ function tree(change: Partial<ServiceIssues> = {}): ServiceIssues {
 describe("リリースと運用につなぐ", () => {
   it("木が空なら、設計書から Issue をまだ作っていない事を出す", () => {
     const html = renderToString(<ServiceIssuesList issues={tree({ parents: [] })} stage="prototype" name="動画" />);
-    expect(html).toContain("Issue はまだ無い");
+    expect(html).toContain("Issue がありません");
   });
 
   it("親ごとに、子の要件と済みの数を出す。運用の親は運用と書く", () => {
@@ -64,6 +64,6 @@ describe("リリースと運用につなぐ", () => {
     const html = renderToString(<ServiceIssuesBody loaded={{ state: "failed", code: "network", traceId: "a".repeat(32) }} stage="prototype" name="動画" />);
     expect(html).toContain("Issue を読めませんでした");
     expect(html).toContain("a".repeat(32));
-    expect(html).not.toContain("Issue はまだ無い");
+    expect(html).not.toContain("Issue がありません");
   });
 });

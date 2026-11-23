@@ -1949,31 +1949,33 @@ components:
             - library
             - web_app
             - content
+          default: web_app
+          description: 無ければ `web_app`。作ると決める前なら後から直せる
         aim:
           type: string
           minLength: 1
           maxLength: 2000
+          description: 狙いの一言
         users:
           type: string
-          minLength: 1
           maxLength: 500
+          default: ""
+          description: 使う人。無ければ空
         costEstimateMicroUsd:
           type: integer
           minimum: 0
           maximum: 9007199254740991
-          description: 月の費用の見込み
+          default: 0
+          description: 月の費用の見込み。無ければ 0
         revenueEstimateMicroUsd:
           type: integer
           minimum: 0
           maximum: 9007199254740991
-          description: 月の売り上げの見込み
+          default: 0
+          description: 月の売り上げの見込み。無ければ 0
       required:
         - title
-        - kind
         - aim
-        - users
-        - costEstimateMicroUsd
-        - revenueEstimateMicroUsd
       additionalProperties: false
     ServiceDetail:
       allOf:
@@ -2193,6 +2195,39 @@ components:
             - published
             - reads
           additionalProperties: false
+    UpdateServiceInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+        kind:
+          type: string
+          enum:
+            - library
+            - web_app
+            - content
+          description: "`idea` と `study` の段階の時だけ直せる"
+        aim:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 狙いの一言
+        users:
+          type: string
+          maxLength: 500
+        costEstimateMicroUsd:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: 月の費用の見込み
+        revenueEstimateMicroUsd:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: 月の売り上げの見込み
+      additionalProperties: false
     AdvanceInput:
       type: object
       properties:
@@ -7005,6 +7040,79 @@ paths:
         このルート固有のエラー:
 
         - 404 `not_found`: サービスが存在しない
+      security: *a1
+    patch:
+      operationId: updateService
+      tags:
+        - services
+      summary: 元の案を直す
+      x-steps:
+        - 送った項目だけを `services` に書く。種類を直す時は、段階が `idea` か `study` のままの事を同じ文の条件にする
+        - 監査ログに `service.update` を記録する
+      x-errors:
+        - "404 `not_found`: サービスが存在しない"
+        - "409 `refused`: 作ると決めた後に種類を直そうとした"
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            description: UUID v7
+          required: true
+          description: UUID v7
+          name: serviceId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateServiceInput"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ServiceCard"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      description: |-
+        処理の流れ:
+
+        1. 送った項目だけを `services` に書く。種類を直す時は、段階が `idea` か `study` のままの事を同じ文の条件にする
+        2. 監査ログに `service.update` を記録する
+
+        このルート固有のエラー:
+
+        - 404 `not_found`: サービスが存在しない
+        - 409 `refused`: 作ると決めた後に種類を直そうとした
       security: *a1
   /api/v1/services/{serviceId}/issues:
     get:

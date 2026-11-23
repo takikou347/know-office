@@ -44,7 +44,7 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
     name: "サービスの Issue のタブ",
     path: "/services/00000000-0000-7000-8000-000000000101",
     heading: "アイデアとサービス",
-    ready: "Issue はまだ無い",
+    ready: "Issue がありません",
     open: async (page) => {
       await page.getByRole("tab", { name: "Issue" }).click();
     },

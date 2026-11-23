@@ -20,7 +20,7 @@ export async function choose(page: Page, label: string, option: string): Promise
 }
 
 /**
- * 画面の案を足す欄で案を足し、足した案の詳細を開く
+ * 一覧の上の追加から、名前と一言だけで案を足し、足した案の詳細を開く
  * @param page 開いているページ
  * @param title 案の名前
  * @returns 足した案のサービス ID
@@ -28,12 +28,11 @@ export async function choose(page: Page, label: string, option: string): Promise
 export async function addIdea(page: Page, title: string): Promise<string> {
   await page.goto("/services");
   const main = page.getByRole("main");
-  await main.getByLabel("案の名前").fill(title);
-  await choose(page, "種類", "Web アプリ");
-  await main.getByLabel("狙い").fill("通しで確かめる案");
-  await main.getByLabel("使う人").fill("オーナー");
-  await main.getByLabel("月の費用の見込み (ドル)").fill("3.5");
-  await main.getByRole("button", { name: "案を足す" }).click();
+  await main.getByRole("button", { name: "追加", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("名前").fill(title);
+  await dialog.getByLabel("一言").fill("通しで確かめる案");
+  await dialog.getByRole("button", { name: "追加する" }).click();
   await expect(main.getByRole("heading", { level: 2, name: title })).toBeVisible();
   const id = /\/services\/([0-9a-f-]{36})$/.exec(page.url())?.[1];
   if (id === undefined) throw new Error("足した案を開けない");
@@ -41,14 +40,21 @@ export async function addIdea(page: Page, title: string): Promise<string> {
 }
 
 /**
- * 段階を移す欄で、理由を書いて移す
+ * 段階を移す欄で、理由を選んで移す。選び欄に無い理由は「その他」を選んで書く
  * @param page 開いているページ
  * @param button 移すボタンの文
  * @param reason 理由
  */
 export async function move(page: Page, button: string, reason: string): Promise<void> {
   const main = page.getByRole("main");
-  await main.getByLabel("移す理由").fill(reason);
+  await main.getByRole("combobox", { name: "移す理由" }).click();
+  const preset = page.getByRole("option", { name: reason, exact: true });
+  if ((await preset.count()) > 0) {
+    await preset.click();
+  } else {
+    await page.getByRole("option", { name: "その他", exact: true }).click();
+    await main.getByLabel("理由を書く").fill(reason);
+  }
   await main.getByRole("button", { name: button }).click();
 }
 

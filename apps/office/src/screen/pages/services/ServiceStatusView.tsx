@@ -155,9 +155,9 @@ function RollbackButton({ service, onDone }: RollbackProps) {
 /**
  * 時刻があれば日本時間の文にする
  * @param iso RFC 3339 の時刻
- * @returns 文。無ければ「まだ無い」
+ * @returns 文。無ければ「データがありません」
  */
-const when = (iso: string | null) => (iso === null ? "まだ無い" : jstDateTime(iso));
+const when = (iso: string | null) => (iso === null ? "データがありません" : jstDateTime(iso));
 
 /**
  * npm への公開の結果の文
@@ -165,7 +165,7 @@ const when = (iso: string | null) => (iso === null ? "まだ無い" : jstDateTim
  * @returns 文
  */
 function publishText(publish: { passed: boolean } | null): string {
-  if (publish === null) return "まだ無い";
+  if (publish === null) return "データがありません";
   return publish.passed ? "できた" : "失敗した";
 }
 
@@ -174,7 +174,7 @@ function LibraryView({ status, name }: { status: Extract<ServiceStatus, { kind: 
   return (
     <Stack gap={3}>
       <Stack direction="row" gap={3} wrap>
-        <Stat label="公開した版" value={status.version ?? "まだ無い"} sub={`公開 ${when(status.releasedAt)}`} />
+        <Stat label="公開した版" value={status.version ?? "データがありません"} sub={`公開 ${when(status.releasedAt)}`} />
         <Stat label="npm への公開" value={publishText(status.publish)} sub={status.publish ? jstDateTime(status.publish.at) : undefined} />
       </Stack>
       {status.aligned ? null : (
@@ -192,7 +192,7 @@ function LibraryView({ status, name }: { status: Extract<ServiceStatus, { kind: 
           meta: u.version,
           side: <Status kind={u.behind ? "warn" : "success"} label={u.behind ? "古い版" : "最新"} />,
         }))}
-        emptyText="使っているサービスはまだ無い"
+        emptyText="データがありません"
       />
     </Stack>
   );
@@ -212,17 +212,17 @@ export function ServiceStatusView({ service, onChanged }: ServiceStatusViewProps
   if (status.kind === "content") {
     return (
       <Stack gap={3}>
-        <Stat label="直前 24 時間に読まれた数" value={status.reads ?? "まだ無い"} />
-        <List label={`${service.name} で公開した物`} items={status.published.map((p, n) => ({ id: String(n), title: p.title, meta: jstDateTime(p.at) }))} emptyText="公開した物はまだ無い" />
+        <Stat label="直前 24 時間に読まれた数" value={status.reads ?? "データがありません"} />
+        <List label={`${service.name} で公開した物`} items={status.published.map((p, n) => ({ id: String(n), title: p.title, meta: jstDateTime(p.at) }))} emptyText="データがありません" />
       </Stack>
     );
   }
   return (
     <Stack gap={3}>
       <Stack direction="row" gap={3} wrap>
-        <Stat label="版" value={status.version ?? "まだ無い"} sub={`デプロイ ${when(status.deployedAt)}`} />
-        <Stat label="利用者数" value={status.users ?? "まだ無い"} sub="直前 24 時間の訪問" />
-        <Stat label="直前 24 時間の失敗率" value={status.errorRate === null ? "まだ無い" : `${(status.errorRate * 100).toFixed(1)}%`} />
+        <Stat label="版" value={status.version ?? "データがありません"} sub={`デプロイ ${when(status.deployedAt)}`} />
+        <Stat label="利用者数" value={status.users ?? "データがありません"} sub="直前 24 時間の訪問" />
+        <Stat label="直前 24 時間の失敗率" value={status.errorRate === null ? "データがありません" : `${(status.errorRate * 100).toFixed(1)}%`} />
         <Stat label="今月の費用" value={dollars(status.costMicroUsd)} />
       </Stack>
       {status.rolledBackAt ? <p>最後に戻した時刻: {jstDateTime(status.rolledBackAt)}</p> : null}

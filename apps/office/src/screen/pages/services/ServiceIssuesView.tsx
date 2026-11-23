@@ -25,7 +25,7 @@ export function ServiceIssuesList({ issues, stage, name }: ServiceIssuesListProp
         </Alert>
       ) : null}
       {issues.parents.length === 0 ? (
-        <p>Issue はまだ無い</p>
+        <p>Issue がありません</p>
       ) : (
         <Accordion
           multiple
@@ -42,7 +42,7 @@ export function ServiceIssuesList({ issues, stage, name }: ServiceIssuesListProp
               content: (
                 <List
                   label={`${p.operations ? "運用" : p.feature}の子 Issue`}
-                  emptyText="子の Issue はまだ無い"
+                  emptyText="子の Issue がありません"
                   items={p.children.map((c) => ({
                     id: String(c.number),
                     title: `#${String(c.number)} ${c.requirement ?? ""}`,

@@ -1,6 +1,6 @@
 // サービス: アイデアから運用まで。案を足し、一覧と詳細を読み、オーナーが段階を移す (API の services、サービスと拡張の 3.1)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AdvanceInput, AppError, CreateIdeaInput, Deployment, RollbackInput, ServiceCard, ServiceDetail, ServiceIssues, ServiceStage } from "@know-office/core";
+import { AdvanceInput, AppError, CreateIdeaInput, Deployment, RollbackInput, ServiceCard, ServiceDetail, ServiceIssues, ServiceStage, UpdateServiceInput } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { audit } from "../ledger/record.ts";
 import { createdResponse, listQuery, listResponse, okResponse, problems } from "../openapi.ts";
@@ -9,7 +9,7 @@ import { accepted, created, list, ok } from "../respond.ts";
 import { deployService } from "../services/deploy.ts";
 import { rollbackService } from "../services/rollback.ts";
 import { loadServiceIssues } from "../services/issues.ts";
-import { advanceService, createIdea, listServices, loadService, toCard } from "../services/flow.ts";
+import { advanceService, createIdea, listServices, loadService, toCard, updateService } from "../services/flow.ts";
 
 const router = createRouter();
 
@@ -54,6 +54,18 @@ const getServiceRoute = createRoute({
   "x-errors": ["404 `not_found`: サービスが存在しない"],
   request: { params: ServiceParam },
   responses: { 200: okResponse(ServiceDetail), ...problems(401, 403, 404, 429, 500) },
+});
+
+const updateServiceRoute = createRoute({
+  method: "patch",
+  path: "/api/v1/services/{serviceId}",
+  operationId: "updateService",
+  tags: ["services"],
+  summary: "元の案を直す",
+  "x-steps": ["送った項目だけを `services` に書く。種類を直す時は、段階が `idea` か `study` のままの事を同じ文の条件にする", "監査ログに `service.update` を記録する"],
+  "x-errors": ["404 `not_found`: サービスが存在しない", "409 `refused`: 作ると決めた後に種類を直そうとした"],
+  request: { params: ServiceParam, body: jsonBody(UpdateServiceInput) },
+  responses: { 200: okResponse(ServiceCard), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
 
 const getServiceIssuesRoute = createRoute({
@@ -170,6 +182,13 @@ export const serviceRoutes = router
   })
   .openapi(getServiceRoute, async (c) => {
     return ok(c, await loadService(c.env, c.req.valid("param").serviceId, c.var.clock.now()));
+  })
+  .openapi(updateServiceRoute, async (c) => {
+    const { serviceId } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const row = await updateService(c.env, serviceId, input);
+    await audit(c, "service.update", serviceId, { keys: Object.keys(input) });
+    return ok(c, toCard(row));
   })
   .openapi(getServiceIssuesRoute, async (c) => {
     return ok(c, await loadServiceIssues(c.env, c.req.valid("param").serviceId));

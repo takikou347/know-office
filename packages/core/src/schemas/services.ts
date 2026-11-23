@@ -2,16 +2,19 @@
 import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";
 import { NodeStatus } from "./work.ts";
+import { masterSchema } from "../master/master.ts";
+import { SERVICE_KINDS } from "../master/service-kinds.ts";
+import { SERVICE_STAGES } from "../master/service-stages.ts";
 import { z } from "./zod.ts";
 
 /** サービスの種類。ライブラリ、Web アプリ、コンテンツ */
-export const ServiceKind = z.enum(["library", "web_app", "content"]);
+export const ServiceKind = masterSchema(SERVICE_KINDS);
 
 /** サービスの種類の型 */
 export type ServiceKind = z.infer<typeof ServiceKind>;
 
 /** サービスの段階。アイデア、検討、試作、サービス、運用と、見送った、閉じた */
-export const ServiceStage = z.enum(["idea", "study", "prototype", "service", "operation", "dropped", "closed"]);
+export const ServiceStage = masterSchema(SERVICE_STAGES);
 
 /** サービスの段階の型 */
 export type ServiceStage = z.infer<typeof ServiceStage>;
@@ -164,15 +167,15 @@ export type ServiceDetail = z.infer<typeof ServiceDetail>;
 // お金は月の見込みのマイクロドル。JSON で崩れない整数の範囲にする
 const MicroUsd = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
-/** 案を足す入力。オーナーの API と社員の idea_add が同じ形を使う */
+/** 案を足す入力。オーナーの API と社員の idea_add が同じ形を使う。要るのは名前と一言 (狙い) だけで、ほかは後から直す */
 export const CreateIdeaInput = z
   .object({
     title: z.string().min(1).max(100),
-    kind: ServiceKind,
-    aim: z.string().min(1).max(2000),
-    users: z.string().min(1).max(500),
-    costEstimateMicroUsd: MicroUsd.openapi({ description: "月の費用の見込み" }),
-    revenueEstimateMicroUsd: MicroUsd.openapi({ description: "月の売り上げの見込み" }),
+    kind: ServiceKind.default("web_app").openapi({ description: "無ければ `web_app`。作ると決める前なら後から直せる" }),
+    aim: z.string().min(1).max(2000).openapi({ description: "狙いの一言" }),
+    users: z.string().max(500).default("").openapi({ description: "使う人。無ければ空" }),
+    costEstimateMicroUsd: MicroUsd.default(0).openapi({ description: "月の費用の見込み。無ければ 0" }),
+    revenueEstimateMicroUsd: MicroUsd.default(0).openapi({ description: "月の売り上げの見込み。無ければ 0" }),
   })
   .strict()
   .meta({ id: "CreateIdeaInput" });
@@ -180,8 +183,27 @@ export const CreateIdeaInput = z
 /** 案を足す入力の型 */
 export type CreateIdeaInput = z.infer<typeof CreateIdeaInput>;
 
-/** アイデア出しのバッチ処理で社長のモデルが返す 1 件の案。足す時の上限は案を足す入力と同じ */
-export const IdeaProposal = CreateIdeaInput.pick({ title: true, kind: true, aim: true, users: true }).strict();
+/** アイデア出しのバッチ処理で社長のモデルが返す 1 件の案。足す時の上限は案を足す入力と同じで、種類と使う人も要る */
+export const IdeaProposal = z
+  .object({ title: CreateIdeaInput.shape.title, kind: ServiceKind, aim: CreateIdeaInput.shape.aim, users: z.string().min(1).max(500) })
+  .strict();
+
+/** 元の案を直す入力。送った項目だけを書く。種類は作ると決める前だけ直せる */
+export const UpdateServiceInput = z
+  .object({
+    title: CreateIdeaInput.shape.title.optional(),
+    kind: ServiceKind.optional().openapi({ description: "`idea` と `study` の段階の時だけ直せる" }),
+    aim: CreateIdeaInput.shape.aim.optional(),
+    users: z.string().max(500).optional(),
+    costEstimateMicroUsd: MicroUsd.optional().openapi({ description: "月の費用の見込み" }),
+    revenueEstimateMicroUsd: MicroUsd.optional().openapi({ description: "月の売り上げの見込み" }),
+  })
+  .strict()
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "直す項目を 1 つ以上送る" })
+  .meta({ id: "UpdateServiceInput" });
+
+/** 元の案を直す入力の型 */
+export type UpdateServiceInput = z.infer<typeof UpdateServiceInput>;
 
 /** アイデア出しの答え。案は 1 件ずつ確かめ、形の違う物だけを捨てる */
 export const IdeasAnswer = z.object({ ideas: z.array(z.unknown()).max(20) }).loose();

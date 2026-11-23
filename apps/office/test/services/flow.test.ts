@@ -148,7 +148,7 @@ async function studied(w: WorkWorld, serviceId: string): Promise<void> {
 }
 
 describe("アイデアから運用までの流れ", () => {
-  it("案を足す", async () => {
+  it("案を足して直す", async () => {
     const owner = await ownerIdea(world);
     world.clock.advance(MINUTE);
     // 社員も案を足せる。足した社員が出来事に残る
@@ -167,6 +167,46 @@ describe("アイデアから運用までの流れ", () => {
     expect(detail.events.map((e) => [e.kind, e.by, e.detail["to"]])).toEqual([["stage", "owner", "idea"]]);
     expect((await detailOf(world, staff)).events.map((e) => e.by)).toEqual(["builder"]);
     expect(world.gate.audits.map((a) => a.action)).toContain("service.create");
+
+    // オーナーは名前と一言だけで足せ、ほかは後から選ぶ。種類は Web アプリ、使う人は空、見込みは 0 で始まる
+    const short = idOf(await api(world, "POST", "/api/v1/services", { title: "家計簿", aim: "レシートを撮るだけで付く" }, 201));
+    expect(await detailOf(world, short)).toMatchObject({ name: "家計簿", kind: "web_app", aim: "レシートを撮るだけで付く", users: "", costEstimateMicroUsd: 0, revenueEstimateMicroUsd: 0 });
+    // 名前か一言が無ければ足さない
+    expect(await api(world, "POST", "/api/v1/services", { title: "名前だけ" }, 422)).toMatchObject({ code: "validation_failed" });
+    expect(await api(world, "POST", "/api/v1/services", { title: "", aim: "一言" }, 422)).toMatchObject({ code: "validation_failed" });
+
+    // 足した後に、元の案を選んだ項目だけ直す
+    const id = owner;
+    const patch = (body: Record<string, unknown>, status = 200) => api(world, "PATCH", `/api/v1/services/${id}`, body, status);
+    expect(Card.parse(await patch({ kind: "content", users: "個人の利用者", costEstimateMicroUsd: 5_000_000 }))).toMatchObject({ id, kind: "content" });
+    expect(await detailOf(world, id)).toMatchObject({ kind: "content", users: "個人の利用者", costEstimateMicroUsd: 5_000_000, aim: VIDEO.aim, revenueEstimateMicroUsd: 120_000_000 });
+    expect(world.gate.audits.filter((a) => a.action === "service.update").map((a) => a.target)).toEqual([id]);
+
+    // 同じ時に別の項目を直しても、どちらも残る (読んでから書かず、送った項目だけを書く)
+    await Promise.all([patch({ title: "動画を作る" }), patch({ revenueEstimateMicroUsd: 50_000_000 })]);
+    expect(await detailOf(world, id)).toMatchObject({ name: "動画を作る", kind: "content", revenueEstimateMicroUsd: 50_000_000 });
+
+    // 何も直さない、形の違う値は 422。上限ちょうどは通る
+    expect(await patch({}, 422)).toMatchObject({ code: "validation_failed" });
+    expect(await patch({ costEstimateMicroUsd: -1 }, 422)).toMatchObject({ code: "validation_failed" });
+    expect(await patch({ title: "x".repeat(101) }, 422)).toMatchObject({ code: "validation_failed" });
+    await patch({ title: "x".repeat(100) });
+
+    // 種類は作ると決める前だけ。作ると決めた後は断り、ほかの項目も書かない
+    await studied(world, id);
+    await toPrototype(world, id);
+    expect(await patch({ kind: "web_app", users: "企業" }, 409)).toMatchObject({ code: "refused" });
+    expect(await detailOf(world, id)).toMatchObject({ kind: "content", users: "個人の利用者" });
+    await patch({ users: "企業" });
+    expect((await detailOf(world, id)).users).toBe("企業");
+
+    // 種類を直す文の後に段階が進んでも、種類は変わらない (段階を条件に持つ 1 つの文で書く)
+    const other = await ownerIdea(world);
+    beforeNextBatch(world, () => setStage(world, other, "prototype"));
+    expect(await api(world, "PATCH", `/api/v1/services/${other}`, { kind: "library" }, 409)).toMatchObject({ code: "refused" });
+    expect((await detailOf(world, other)).kind).toBe("web_app");
+
+    expect(await api(world, "PATCH", "/api/v1/services/0192f5c0-0000-7000-8000-000000000000", { users: "企業" }, 404)).toMatchObject({ code: "not_found" });
   });
 
   it("検討の材料", async () => {

@@ -1,13 +1,14 @@
-// アイデアとサービスの画面。段階ごとの一覧と案を足す欄、選んだサービスの詳細 (サービスと拡張の 3.1 から 3.3)
+// アイデアとサービスの画面。左に段階のフィルターと追加と一覧、右に選んだサービスの詳細 (サービスと拡張の 3.1 から 3.3)
+import { labelOf, optionsOf } from "@know-office/core/master/master";
+import { SERVICE_KINDS } from "@know-office/core/master/service-kinds";
+import { SERVICE_STAGES } from "@know-office/core/master/service-stages";
 import { ServiceCard, ServiceStage } from "@know-office/core";
-import { EmptyState, List, ListDetail, Stack } from "knowidea-ui";
+import { EmptyState, Field, List, ListDetail, Select, Stack } from "knowidea-ui";
 import { useState } from "react";
 import { z } from "zod";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import type { Navigate } from "../../parts/navigate.ts";
-import { Part } from "../../parts/section.tsx";
 import { IdeaForm } from "./IdeaForm.tsx";
-import { KIND_LABEL, STAGE_LABEL } from "./labels.ts";
 import { ServiceView } from "./ServiceView.tsx";
 
 export interface ServicesPageProps {
@@ -17,41 +18,53 @@ export interface ServicesPageProps {
   navigate: Navigate;
 }
 
+/** 段階のフィルターの、すべてを出す値 */
+const ALL = "all";
+
 /** アイデアとサービスの画面 */
 export function ServicesPage({ pathname, navigate }: ServicesPageProps) {
   const id = z.uuid().safeParse(pathname.split("/")[2]);
   const [tick, setTick] = useState(0);
+  const [stage, setStage] = useState<ServiceStage | typeof ALL>(ALL);
   const loaded = useLoad(z.array(ServiceCard), (a) => a.api.v1.services.$get({ query: { limit: "100" } }), tick);
   const reload = () => setTick((t) => t + 1);
+  const all = loaded.state === "ok" ? loaded.data : [];
+  const shown = stage === ALL ? all : all.filter((c) => c.stage === stage);
 
-  let lists = <p role="status">サービスを読んでいます</p>;
-  if (loaded.state === "failed") lists = <FailedAlert title="サービスを読めませんでした" failure={loaded} />;
-  if (loaded.state === "ok") {
-    lists = (
-      <>
-        {ServiceStage.options.map((stage) => (
-          <Part key={stage} title={STAGE_LABEL[stage]}>
-            <List
-              label={STAGE_LABEL[stage]}
-              items={loaded.data.filter((s) => s.stage === stage).map((s) => ({ id: s.id, title: s.name, href: `/services/${s.id}`, meta: [KIND_LABEL[s.kind], s.repo].filter(Boolean).join("、") }))}
-              emptyText="まだ無い"
-            />
-          </Part>
-        ))}
-      </>
-    );
-  }
   const list = (
-    <Stack gap={4}>
-      <Part title="案を足す">
+    <Stack gap={3}>
+      <Stack direction="row" gap={2} align="end" justify="between" wrap>
+        <Field label="段階">
+          <Select
+            aria-label="段階"
+            value={stage}
+            options={[{ value: ALL, label: "すべて" }, ...optionsOf(SERVICE_STAGES)]}
+            onValueChange={(v) => {
+              const next = ServiceStage.safeParse(v);
+              setStage(next.success ? next.data : ALL);
+            }}
+          />
+        </Field>
         <IdeaForm
           onAdded={(card) => {
+            setStage(ALL);
             reload();
             navigate(`/services/${card.id}`);
           }}
         />
-      </Part>
-      {lists}
+      </Stack>
+      {loaded.state === "failed" ? (
+        <FailedAlert title="サービスを読めませんでした" failure={loaded} />
+      ) : (
+        <List
+          label="アイデアとサービス"
+          state={loaded.state === "loading" ? "loading" : "ready"}
+          loadingText="サービスを読んでいます"
+          summary={loaded.state === "ok" ? `${String(shown.length)} 件` : undefined}
+          items={shown.map((s) => ({ id: s.id, title: s.name, href: `/services/${s.id}`, meta: [labelOf(SERVICE_STAGES, s.stage), labelOf(SERVICE_KINDS, s.kind), s.repo].filter(Boolean).join("、") }))}
+          emptyText="データがありません"
+        />
+      )}
     </Stack>
   );
   return (
