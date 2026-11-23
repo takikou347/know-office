@@ -4,7 +4,7 @@ import { z } from "zod";
 import { expect } from "../../helpers/test.ts";
 import { seedMain } from "./seed.ts";
 import { part, post } from "./screen.ts";
-import { resumeStaff, scriptReply, staffNow } from "./staff.ts";
+import { resumeStaff, scriptReply } from "./staff.ts";
 import { FAKES } from "../../helpers/fakes.ts";
 
 /** 通しの置き場の木。目標の画面の見本の木と分け、見本の進み具合を変えない */
@@ -169,24 +169,6 @@ export async function sayTo(page: Page, staffId: string, role: string, said: str
   await page.getByRole("textbox", { name: `${role}への言葉` }).fill(said);
   await page.getByRole("button", { name: "送る" }).click();
   return page.getByRole("log", { name: `${role}との会話` }).getByRole("listitem").filter({ hasText: said });
-}
-
-/**
- * 社員が持ったままのタスクを止めて見送りにし、社員を離れさせてから止めを解く。前の通しの後に山が空の部下が足した分けるタスクを、積んだ返事の無いまま持っている社員を空ける
- * @param page 画面を開いたページ
- * @param staffId 社員 ID
- */
-export async function releaseHeld(page: Page, staffId: string): Promise<void> {
-  const held = (await staffNow(page, staffId)).nodeId;
-  if (held === null) return;
-  const origin = new URL(page.url()).origin;
-  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: origin }, data: { scope: "task", target: held, reason: "通しの前に空ける" } });
-  expect(stopped.status()).toBe(201);
-  const { stopId } = z.object({ data: z.object({ stopId: z.string() }) }).parse(await stopped.json()).data;
-  const { status, version } = NodeDetail.parse(await (await page.request.get(`/api/v1/nodes/${held}`)).json()).data;
-  if (status !== "done" && status !== "dropped") expect((await page.request.patch(`/api/v1/nodes/${held}`, { headers: { Origin: origin }, data: { version, status: "dropped" } })).status()).toBe(200);
-  expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
-  await expect.poll(async () => (await staffNow(page, staffId)).nodeId, { timeout: 30_000 }).not.toBe(held);
 }
 
 /** 社員のタスクの一覧の返事 */

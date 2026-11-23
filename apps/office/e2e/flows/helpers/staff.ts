@@ -31,6 +31,8 @@ export async function resumeStaff(page: Page): Promise<void> {
   for (const s of state.data.stopped.filter((x) => x.scope === "staff")) expect(await post(page, `/api/v1/guard/stops/${s.stopId}/resume`)).toBe(200);
 }
 
+const Node = z.object({ data: z.object({ status: z.string(), version: z.number() }).loose() });
+
 const Settings = z.object({ data: z.array(z.object({ key: z.string(), value: z.unknown() }).loose()) });
 const Schedule = z.object({ start: z.string(), end: z.string() }).loose();
 
@@ -171,8 +173,14 @@ export async function unstick(page: Page, staffId: string): Promise<void> {
  */
 export async function clockIn(page: Page, staffId: string, allDay = false): Promise<() => Promise<void>> {
   await unstick(page, staffId);
+  const state = await staffState(page, staffId);
   // 時間外の呼び出し (called) の間も、勤務の中と同じにタスクを進める
-  if (!allDay && /^(working|called)$/.test((await staffState(page, staffId)) ?? "")) return () => Promise.resolve();
+  if (!allDay && /^(working|called)$/.test(state ?? "")) return () => Promise.resolve();
+  // 前の通しが勤務の時刻を戻した時にタスクを持っていた社員は、終わりを過ぎて片付けの間 (wrapping) に残り、出勤し直さない。持っているタスクを空けて退勤を待つ
+  if (state === "wrapping") {
+    await releaseHeld(page, staffId);
+    await expect.poll(() => staffState(page, staffId), { timeout: 30_000 }).toBe("off");
+  }
   await ownerPasskey(page);
   const read = await readSchedule(page);
   // 前の通しが落ちて一日に広げたまま残していれば、それを元にせず、勤務の時刻の初期値 (DEFAULT_SCHEDULE) に戻す
@@ -243,4 +251,22 @@ export async function chooseTime(page: Page, label: string, hhmm: string): Promi
     await expect(box).toHaveText(value);
     await expect(page.getByRole("listbox")).toHaveCount(0);
   }
+}
+
+/**
+ * 社員が持ったままのタスクを止めて見送りにし、社員を離れさせてから止めを解く。前の通しの後に山が空の部下が足した分けるタスクを、積んだ返事の無いまま持っている社員を空ける
+ * @param page 画面を開いたページ
+ * @param staffId 社員 ID
+ */
+export async function releaseHeld(page: Page, staffId: string): Promise<void> {
+  const held = (await staffNow(page, staffId)).nodeId;
+  if (held === null) return;
+  const origin = new URL(page.url()).origin;
+  const stopped = await page.request.post("/api/v1/guard/stops", { headers: { Origin: origin }, data: { scope: "task", target: held, reason: "通しの前に空ける" } });
+  expect(stopped.status()).toBe(201);
+  const { stopId } = z.object({ data: z.object({ stopId: z.string() }) }).parse(await stopped.json()).data;
+  const { status, version } = Node.parse(await (await page.request.get(`/api/v1/nodes/${held}`)).json()).data;
+  if (status !== "done" && status !== "dropped") expect((await page.request.patch(`/api/v1/nodes/${held}`, { headers: { Origin: origin }, data: { version, status: "dropped" } })).status()).toBe(200);
+  expect(await post(page, `/api/v1/guard/stops/${stopId}/resume`)).toBe(200);
+  await expect.poll(async () => (await staffNow(page, staffId)).nodeId, { timeout: 30_000 }).not.toBe(held);
 }
