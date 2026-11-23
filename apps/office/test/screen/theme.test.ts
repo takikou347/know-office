@@ -20,7 +20,7 @@ describe("画面の明るさ", () => {
   });
 
   it("選んだ明るさを html の data-theme に付け、選ばない時は外す", () => {
-    const root = document.createElement("html");
+    const root = { dataset: {} satisfies DOMStringMap };
     applyTheme(root, "dark");
     expect(root.dataset.theme).toBe("dark");
     applyTheme(root, null);

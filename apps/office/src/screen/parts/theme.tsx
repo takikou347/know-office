@@ -27,7 +27,7 @@ export function storedTheme(storage: Pick<Storage, "getItem"> | undefined): Them
  * @param root 付ける要素
  * @param mode 明るさ。null の時は外して端末の設定に合わせる
  */
-export function applyTheme(root: HTMLElement, mode: ThemeMode | null): void {
+export function applyTheme(root: Pick<HTMLElement, "dataset">, mode: ThemeMode | null): void {
   if (mode) root.dataset.theme = mode;
   else delete root.dataset.theme;
 }
