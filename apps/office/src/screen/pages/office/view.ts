@@ -1,5 +1,5 @@
 // 部屋の視点。ドラッグ、ホイール、ピンチは OrbitControls で受け、矢印と + と - でも回して寄せ引きし、元の視点へ戻す。回す角と寄せ引きには限りを付ける
-import { MathUtils, type OrthographicCamera, Spherical, Vector3 } from "three";
+import { MathUtils, type OrthographicCamera, Spherical, TOUCH, Vector3 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 /** 視点の限り。横に回すのは元の向きから左右へ、縦は真上の近くから、壁越しに床を見下ろせる低さまで */
@@ -83,6 +83,9 @@ export function createView(camera: OrthographicCamera, canvas: HTMLCanvasElement
   controls.update();
   // 横に動かすと部屋が画面の外へ出るので、回すのと寄せ引きだけにする
   controls.enablePan = false;
+  // スマートフォンでは 1 本指を画面の縦の送りに残し、回すのと寄せ引きは 2 本指で受ける。部屋の上でも画面を送れなくならないように
+  controls.touches = { ONE: null, TWO: TOUCH.DOLLY_ROTATE };
+  canvas.style.touchAction = "pan-y";
   const home = new Spherical().setFromVector3(camera.position.clone().sub(target));
   controls.minAzimuthAngle = home.theta - VIEW_LIMITS.turn;
   controls.maxAzimuthAngle = home.theta + VIEW_LIMITS.turn;
