@@ -33,10 +33,10 @@ describe("画面", () => {
     expect(staffTabOf(null)).toBe("talk");
   });
 
-  it("記録の内訳は、入口を呼ぶ口が無ければ、読んでいるままにせず読めなかった事を出す", async () => {
+  it("記録の勤怠は、入口を呼ぶ口が無ければ、読んでいるままにせず読めなかった事を出す", async () => {
     const html = await renderAll(<App url="/records" />);
-    expect(html).toContain("記録を読めませんでした");
-    expect(html).not.toContain("記録を読んでいます");
+    expect(html).toContain("勤怠を読めませんでした");
+    expect(html).not.toContain("読んでいます");
   });
 
   it("セキュリティと設定は、入口を呼ぶ口が無ければ、仮のデータを出さず読めなかった事を出す", async () => {
@@ -55,7 +55,7 @@ describe("画面", () => {
     const api = createApi("http://gate.invalid", () => new Promise<Response>(() => undefined));
     const html = renderToString(
       <ApiContext value={api}>
-        <RecordBreakdown />
+        <RecordBreakdown metric="tasks" month="2026-11" />
       </ApiContext>,
     );
     expect(html).toMatch(/<p role="status"[^>]*>サービスごとの記録を読んでいます/);

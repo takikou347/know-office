@@ -69,7 +69,7 @@ const minutes = (ms: number) => Math.floor(ms / MINUTE);
  * @param day YYYY-MM-DD
  * @returns 月、日、曜日
  */
-function dayLabel(day: string): string {
+export function dayLabel(day: string): string {
   const date = new Date(`${day}T00:00:00Z`);
   return `${date.getUTCMonth() + 1}/${date.getUTCDate()} (${WEEKDAYS[date.getUTCDay()] ?? ""})`;
 }

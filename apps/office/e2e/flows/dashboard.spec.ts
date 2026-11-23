@@ -4,7 +4,7 @@ import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { runLocalWrangler, seedMain } from "./helpers/seed.ts";
 import { settle } from "./helpers/settle.ts";
 
-// ホームと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。承認待ちとタスクは種に置き、応答を差し替えない (API の records と settings)
+// ホームと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。記録は勤怠を月の表で、稼働率とエラーログをエラーのタブで見る。承認待ちとタスクは種に置き、応答を差し替えない (API の records と settings)
 
 const NODE = "019a7b00-0000-7000-8000-0000000000ea";
 const APPROVAL = "019a7b00-0000-7000-8000-0000000000eb";
@@ -72,28 +72,26 @@ test.describe("ホーム", () => {
 });
 
 test.describe("記録", () => {
-  test("office 全体の勤怠を、社員の役の名前で新しい日から出す", async ({
-    page,
-  }) => {
-    const day = new Intl.DateTimeFormat("sv-SE", {
-      timeZone: "Asia/Tokyo",
-    }).format(new Date());
+  test("勤怠を月で見る", async ({ page }) => {
+    const day = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+    const [year = "", month = "", date = ""] = day.split("-");
     seedMain(
       `INSERT OR REPLACE INTO daily_totals (staff_id, day, clock_in, clock_out, worked_ms, extension_ms, call_ms, stopped_ms, waiting_ms, reasons) VALUES ('reviewer', '${day}', NULL, NULL, 5400000, 0, 0, 0, 0, '[]')`,
     );
     await page.goto("/records");
-    const table = page
-      .getByRole("region", { name: "office 全体の勤怠" })
-      .getByRole("table");
-    const row = table.getByRole("row", {
-      name: new RegExp(`${day}.*レビュー担当`),
-    });
-    await expect(row).toBeVisible();
+    // 開いた時は勤怠のタブで、今月を選んでいる
+    await expect(page.getByRole("tab", { name: "勤怠" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("combobox", { name: "見る月" })).toContainText(`${year}年${String(Number(month))}月`);
+    const table = page.getByRole("region", { name: "office 全体の勤怠" }).getByRole("table");
+    // 列は社員の役の名前、行は日。今日の行のレビュー担当の列に働いた時間を出し、最後の行に月の合計を置く
+    await expect(table.getByRole("columnheader", { name: "レビュー担当" })).toBeVisible();
+    const row = table.getByRole("row", { name: new RegExp(`^${String(Number(month))}/${String(Number(date))} `) });
     await expect(row.getByText("1 時間 30 分")).toBeVisible();
+    await expect(table.getByRole("row").last()).toContainText("合計");
   });
 
   test("5 分ごとの確かめから出した今月の稼働率を出す", async ({ page }) => {
-    await page.goto("/records");
+    await page.goto("/records?tab=errors");
     const uptime = part(page, "稼働率");
     // 確かめの行は追記だけで消せないので、前の通しが残した件数を読み、Cron の 1 回で 6 つの部分の分が増える事を確かめる
     const counted = uptime.getByText(/確かめた \d+ 件/);
@@ -138,7 +136,7 @@ test.describe("記録", () => {
       "--local",
       `--command=INSERT INTO error_events (id, at, source, level, code, message, route, status, fingerprint, trace_id) VALUES ('${id}', ${String(now)}, 'job', 'error', 'storage_check_failed', '通しで置いたエラー', NULL, NULL, '${"e".repeat(64)}', '${traceId}')`,
     ]);
-    await page.goto("/records");
+    await page.goto("/records?tab=errors");
     const log = part(page, "エラーログ");
     await log
       .getByRole("row", { name: /通しで置いたエラー/ })

@@ -140,8 +140,8 @@ test("勤怠の上の 1 行は、出勤から止められていた時間まで�
 test("記録の画面で、サービスごとの内訳の最後に全体を出し、CSV で出せる", async ({ page }) => {
   test.skip(narrow(page), WIDE_ONLY);
   // records.setup.ts が手元の D1 に置いた work_entries を、期間を決めずに入口から集める
-  await page.goto("/records");
-  const table = page.getByRole("region", { name: "サービスごとの記録" }).getByRole("table");
+  await page.goto("/records?tab=tasks");
+  const table = page.getByRole("region", { name: "サービスごとの掛けた時間" }).getByRole("table");
   await expect(table.getByRole("row", { name: /knowidea-ui/ })).toBeVisible();
   await expect(table.getByRole("row").last()).toContainText("全体");
   const link = page.getByRole("link", { name: "CSV で出す" });
@@ -152,13 +152,32 @@ test("記録の画面で、サービスごとの内訳の最後に全体を出�
 
 test("記録の画面で社員ごとに切り替えると、社員ごとの内訳の最後に全体を出す", async ({ page }) => {
   test.skip(narrow(page), WIDE_ONLY);
-  await page.goto("/records");
+  await page.goto("/records?tab=tasks");
   await page.getByRole("radio", { name: "社員ごと" }).check();
-  const table = page.getByRole("region", { name: "社員ごとの記録" }).getByRole("table");
+  const table = page.getByRole("region", { name: "社員ごとの掛けた時間" }).getByRole("table");
   await expect(table.getByRole("row", { name: /開発担当/ })).toBeVisible();
   await expect(table.getByRole("row", { name: /社長/ })).toBeVisible();
   await expect(table.getByRole("row").last()).toContainText("全体");
   await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", /group=staff/);
+});
+
+test("記録を種類ごとに見る", async ({ page }) => {
+  test.skip(narrow(page), WIDE_ONLY);
+  // records.setup.ts が手元の D1 に置いた記録を、タブごとに選んだ月の値で入口から集める
+  await page.goto("/records");
+  const tabs = page.getByRole("tablist", { name: "記録の種類" });
+  for (const [tab, region] of [
+    ["タスク", "サービスごとの掛けた時間"],
+    ["費用", "サービスごとの費用"],
+    ["トークン", "サービスごとのトークン"],
+  ] as const) {
+    await tabs.getByRole("tab", { name: tab }).click();
+    await expect(page.getByRole("region", { name: region }).getByRole("row").last()).toContainText("全体");
+    await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", /&from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}$/);
+  }
+  await tabs.getByRole("tab", { name: "エラー" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "稼働率" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "エラーログ" })).toBeVisible();
 });
 
 test("記録の内訳を読めない時は、理由と問い合わせの番号を出す", async ({ page }) => {
@@ -166,7 +185,7 @@ test("記録の内訳を読めない時は、理由と問い合わせの番号�
   await page.route("**/api/v1/records/summary?*", (route) =>
     route.fulfill({ status: 500, contentType: "application/problem+json", body: JSON.stringify({ code: "internal", traceId: "0af7651916cd43dd8448eb211c80319c" }) }),
   );
-  await page.goto("/records");
+  await page.goto("/records?tab=tasks");
   const alert = page.getByRole("alert").filter({ hasText: "記録を読めませんでした" });
   await expect(alert).toContainText("理由: internal");
   await expect(alert).toContainText("0af7651916cd43dd8448eb211c80319c");
@@ -256,7 +275,7 @@ test("ハッシュだけが違う同じ道へ移っても中身に移り、そ�
 
 test("画面を移ると、中身の先頭に戻り、中身に Tab で入れるままである", async ({ page }) => {
   // 記録も守りも長いので、移った先でも送った分が残りうる。送られるのは中身の main だけ
-  await page.goto("/records");
+  await page.goto("/records?tab=tasks");
   // サービスごとの内訳を読み終えるまでは、記録の画面は送るほど長くない
   await expect(page.getByRole("link", { name: "CSV で出す" })).toBeVisible();
   const main = page.getByRole("main");

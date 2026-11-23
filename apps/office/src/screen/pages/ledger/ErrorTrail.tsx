@@ -56,7 +56,8 @@ export function ErrorLog() {
           render: (r) => (r.traceId === null ? "なし" : <Link href={tracePath(r.traceId)}>{`${r.code} の要求をたどる`}</Link>),
         },
       ]}
-      emptyText="エラーログは無い"
+      emptyTitle="データがありません"
+      emptyText="エラーはまだ起きていません"
     />
   );
 }
@@ -103,7 +104,8 @@ export function TraceView({ traceId }: TraceViewProps) {
             { key: "kind", header: "種類", render: (r) => KIND_LABEL[r.kind] },
             { key: "summary", header: "中身" },
           ]}
-          emptyText="記録は無い"
+          emptyTitle="データがありません"
+          emptyText="この要求の記録はありません"
         />
       ) : null}
     </Stack>

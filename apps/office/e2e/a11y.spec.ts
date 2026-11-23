@@ -54,7 +54,7 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   },
   // 目標とタスクは records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
   // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
-  { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },
+  { name: "記録のサービスごとの内訳", path: "/records?tab=tasks", heading: "記録", ready: "CSV で出す" },
   { name: "目標の一覧", path: "/goals", heading: GOALS_HEADING, ready: "タスク 2 件のうち 1 件が完了" },
   { name: "目標のタスクの 4 列", path: "/goals/019a7b00-0000-7000-8000-0000000000d2", heading: GOALS_HEADING, ready: "勤怠の訂正を出す" },
   // 守りの効き目と蒸留した学びは、表を読み終えてから掛ける
