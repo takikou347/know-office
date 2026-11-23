@@ -164,18 +164,29 @@ export async function unstick(page: Page, staffId: string): Promise<void> {
 }
 
 /**
+ * 広げなかった時の戻し。何もしない
+ * @returns すぐ解ける約束
+ */
+function noRestore(): Promise<void> {
+  return Promise.resolve();
+}
+
+/** 勤務の時刻を広げて、まだ戻していない通しのページ */
+const widenedBy = new WeakSet<Page>();
+
+/**
  * 社員を勤務の中にする。時間外の呼び出しはチェックポイントで退勤し、タスクを翌日へ続けるため
  * 前に流した時のワークスペースが落ちて待っていれば、止めて再開して作り直させる。勤務の中でなければ、勤務の時刻を一日に広げて出勤させる
  * @param page 画面を開いたページ
  * @param staffId 社員
  * @param allDay 勤務の中でも勤務の時刻を一日に広げるか。通しの中で退勤させて出勤し直す時は、前の通しが戻した時刻のまま勤務の中に残っていても広げる
- * @returns 元の勤務の時刻に戻す関数。広げなかった時は何もしない
+ * @returns 元の勤務の時刻に戻す関数。広げなかった時と、同じ通しで先に広げていた時は何もしない
  */
 export async function clockIn(page: Page, staffId: string, allDay = false): Promise<() => Promise<void>> {
   await unstick(page, staffId);
   const state = await staffState(page, staffId);
   // 時間外の呼び出し (called) の間も、勤務の中と同じにタスクを進める
-  if (!allDay && /^(working|called)$/.test(state ?? "")) return () => Promise.resolve();
+  if (!allDay && /^(working|called)$/.test(state ?? "")) return noRestore;
   // 前の通しが勤務の時刻を戻した時にタスクを持っていた社員は、終わりを過ぎて片付けの間 (wrapping) に残り、出勤し直さない。持っているタスクを空けて退勤を待つ
   if (state === "wrapping") {
     await releaseHeld(page, staffId);
@@ -183,11 +194,19 @@ export async function clockIn(page: Page, staffId: string, allDay = false): Prom
   }
   await ownerPasskey(page);
   const read = await readSchedule(page);
-  // 前の通しが落ちて一日に広げたまま残していれば、それを元にせず、勤務の時刻の初期値 (DEFAULT_SCHEDULE) に戻す
-  const was = widened(read) ? { start: "09:00", end: "17:00" } : read;
-  const restore = () => setSchedule(page, was.start, was.end);
-  const wide = wideSchedule(Date.now());
-  await setSchedule(page, wide.start, wide.end);
+  let restore = noRestore;
+  // 同じ通しで先に出勤させた社員が広げていれば、広げ直さず、戻しもその社員の戻しに任せる。後の社員が戻すと、広げる前の時刻でなく初期値に戻してしまう
+  if (!(widenedBy.has(page) && widened(read))) {
+    // 前の通しが落ちて一日に広げたまま残していれば、それを元にせず、勤務の時刻の初期値 (DEFAULT_SCHEDULE) に戻す
+    const was = widened(read) ? { start: "09:00", end: "17:00" } : read;
+    restore = async () => {
+      widenedBy.delete(page);
+      await setSchedule(page, was.start, was.end);
+    };
+    const wide = wideSchedule(Date.now());
+    await setSchedule(page, wide.start, wide.end);
+    widenedBy.add(page);
+  }
   try {
     // 同じ日に一度退勤した社員はその日にもう出勤しないので、手元の DO を使い回して流し直す時は、開発の道で退勤した日の印を消して出勤させる
     expect((await page.request.post(`/__dev/staff/${staffId}/forget-day`)).status()).toBe(204);
