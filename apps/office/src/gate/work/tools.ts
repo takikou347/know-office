@@ -116,7 +116,7 @@ const Moved = z.array(z.object({ id: z.string() }));
 const AskedReason = z.object({ reason: z.string() }).loose();
 
 /** 種類ごとの、承認した後に起きる事。社員の追加は承認しても増えない */
-const ASK_NOTE: Partial<Record<string, string>> = { staff_add: "社員は 3 人に決まっていて、承認しても増えない" };
+const ASK_NOTE: Partial<Record<string, string>> = { staff_add: "承認しても社員は増えない。足すのはオーナーが社員の画面で行う" };
 
 /**
  * オーナーの承認を求め、今のタスクを waiting_owner にして離れる。同じタスク、種類、対象の承認がもうあれば、新しく立てずにその答えを返す

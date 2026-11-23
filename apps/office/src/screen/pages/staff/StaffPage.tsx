@@ -1,4 +1,4 @@
-// 社員と仕事の画面。社員の一覧を入口から読み、社員を足し、会話とタスクと勤怠と設定のタブ、今日だけの指示、タスクの詳細とレビューを 1 つの一覧と詳細に並べる (社員と勤怠の 3.4、社員と自動の 3.7)
+// 社員と仕事の画面。社員の一覧を入口から読み、社員を足し、組織図を出し、会話とタスクと勤怠と設定のタブ、今日だけの指示、タスクの詳細とレビューを 1 つの一覧と詳細に並べる (社員と勤怠の 3.4、社員と自動の 3.7)
 import { jstDay, Order, StaffOverview, systemClock } from "@know-office/core";
 import { EmptyState, List, ListDetail, Stack, Tabs } from "knowidea-ui";
 import { useState } from "react";
@@ -7,6 +7,7 @@ import { labelOf } from "@know-office/core/master/master";
 import { MODELS } from "@know-office/core/master/models";
 import { useLiveTick } from "../../parts/live.tsx";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
+import { OrgChart } from "../../parts/org-chart.tsx";
 import type { Navigate } from "../../parts/navigate.ts";
 import { Part } from "../../parts/section.tsx";
 import { StaffStatus } from "../../parts/staff-status.tsx";
@@ -150,6 +151,9 @@ export function StaffPage({ pathname, query, navigate }: StaffPageProps) {
               }))}
               emptyText="データがありません"
             />
+            <Part title="組織図">
+              <OrgChart key={changed} />
+            </Part>
           </Stack>
         )
       }

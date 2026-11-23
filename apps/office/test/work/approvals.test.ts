@@ -73,7 +73,7 @@ describe("社員の追加", () => {
     // 戻ったタスクで同じ事を求めても、新しい承認は立たず承認済みを返す
     expect(await statusOf(world, "nodes", String(plan?.["id"]))).toBe("doing");
     const again = await tool(world, "president", "staff_request", { kind: "staff_add", role: "デザイン担当", bossId: "president", reason: "画面の直しが溜まっている" });
-    expect(Answer.parse(JSON.parse(again.content))).toEqual({ approvalId: String(approval?.id), status: "approved", reason: "足してよい", note: "社員は 3 人に決まっていて、承認しても増えない" });
+    expect(Answer.parse(JSON.parse(again.content))).toEqual({ approvalId: String(approval?.id), status: "approved", reason: "足してよい", note: "承認しても社員は増えない。足すのはオーナーが社員の画面で行う" });
     expect(await rows(world.d1.DB, "SELECT COUNT(*) AS n FROM approvals")).toEqual([{ n: 1 }]);
   });
 });

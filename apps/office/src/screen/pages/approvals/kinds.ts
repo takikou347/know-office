@@ -5,7 +5,7 @@ import { staffLabel } from "../guard/labels.ts";
 
 /** 承認の種類ごとの、オーナーに出す説明。承認すると何が起きるかを書く */
 export const KIND_NOTE: Record<ApprovalKind, string> = {
-  staff_add: "社員は 3 人に決まっていて、承認しても増えません。承認した事は記録に残り、社員に返ります。",
+  staff_add: "承認しても社員は増えません。足す時は社員の画面の「社員を追加」から足します。承認した事は記録に残り、社員に返ります。",
   role_change: "承認すると、その社員の役と上司が変わります。",
   prompt_rule: "説明文の決まりは、守りの画面の蒸留した学びで決めます。",
   external_integration: "承認する前にパスキーで確かめます。承認しても know-office は外へ送らず、承認した事を社員に返します。",

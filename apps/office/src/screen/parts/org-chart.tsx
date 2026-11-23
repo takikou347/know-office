@@ -1,5 +1,7 @@
 // 組織図と役目の説明文。上司から部下へ入れ子で並べ、説明文を直す (タスクとレビューの 3.1、API の org)。社員の画面が置く
 import { OrgStaff } from "@know-office/core";
+import { labelOf } from "@know-office/core/master/master";
+import { MODELS } from "@know-office/core/master/models";
 import { Button, Field, Stack, Textarea } from "knowidea-ui";
 import { useContext, useState } from "react";
 import { z } from "zod";
@@ -66,7 +68,7 @@ function Person({ person, people, reload }: { person: OrgStaff; people: OrgStaff
     <li>
       <Stack gap={2}>
         <p>
-          <strong>{person.role}</strong> ({person.model}、説明文の版 {person.promptVersion})
+          <strong>{person.role}</strong> ({labelOf(MODELS, person.model)}、説明文の版 {person.promptVersion})
         </p>
         <p>{person.prompt}</p>
         {editing ? (
@@ -105,7 +107,7 @@ export function OrgChart() {
   const ids = new Set<string>(org.data.map((p) => p.id));
   const top = org.data.filter((p) => p.bossId === null || !ids.has(p.bossId));
   return (
-    <ul>
+    <ul aria-label="組織図">
       {top.map((p) => (
         <Person key={p.id} person={p} people={org.data} reload={() => setTick((t) => t + 1)} />
       ))}

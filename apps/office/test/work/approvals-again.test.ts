@@ -59,7 +59,7 @@ describe("組織図", () => {
     await staffOf(world, "builder").pull(world.clock.now());
     await staffOf(world, "president").pull(world.clock.now());
     const res = await tool(world, "president", "staff_request", { kind: "staff_add", role: "デザイン担当", bossId: "president", reason: "画面の直しが溜まっている" });
-    expect(JSON.parse(res.content)).toMatchObject({ status: "pending", note: "社員は 3 人に決まっていて、承認しても増えない" });
+    expect(JSON.parse(res.content)).toMatchObject({ status: "pending", note: "承認しても社員は増えない。足すのはオーナーが社員の画面で行う" });
   });
 });
 

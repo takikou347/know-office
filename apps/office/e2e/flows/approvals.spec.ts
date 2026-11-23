@@ -7,9 +7,6 @@ import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { seedMain } from "./helpers/seed.ts";
 import { part } from "./helpers/screen.ts";
 
-/** 組織図の役職。組織図は社員の画面に移すので、移るまでは入口の返事で確かめる */
-const OrgRoles = z.object({ data: z.array(z.object({ role: z.string() }).loose()) });
-
 const Approvals = z.object({ data: z.array(z.object({ id: z.string(), kind: z.string(), target: z.string(), reason: z.string().nullable() })) });
 
 /**
@@ -83,17 +80,21 @@ test.describe("組織図", () => {
     await expect(part(page, "承認を待つ物").getByText("「役の変更: 開発担当」を承認しました")).toBeVisible();
     await expect(part(page, "承認を待つ物").getByText("承認を待つ物は無い")).toBeVisible();
 
-    expect(OrgRoles.parse(await (await page.request.get("/api/v1/org")).json()).data.map((s) => s.role)).toContain("開発と運用の担当");
+    // 社員の画面の組織図に、変わった役が出る
+    await page.goto("/staff");
+    await expect(page.getByRole("list", { name: "組織図" }).getByText("開発と運用の担当", { exact: true })).toBeVisible();
   });
 
   test("社員の追加は、承認しても社員が増えない事を出す", async ({ page }) => {
     request("staff_add", "デザイン担当", { role: "デザイン担当", bossId: "president", reason: "画面の直しが溜まっている" });
     const item = await approvalItem(page, "社員の追加: デザイン担当");
-    await expect(item).toContainText("社員は 3 人に決まっていて、承認しても増えません");
+    await expect(item).toContainText("承認しても社員は増えません。足す時は社員の画面の「社員を追加」から足します");
     await decide(page, item, "承認する", "記録として認める");
     await expect(part(page, "承認を待つ物").getByText("承認を待つ物は無い")).toBeVisible();
 
-    expect(OrgRoles.parse(await (await page.request.get("/api/v1/org")).json()).data.map((s) => s.role)).not.toContain("デザイン担当");
+    await page.goto("/staff");
+    await expect(page.getByRole("list", { name: "組織図" }).getByText("社長", { exact: true })).toBeVisible();
+    await expect(page.getByRole("list", { name: "組織図" }).getByText("デザイン担当", { exact: true })).toHaveCount(0);
   });
 });
 

@@ -26,6 +26,8 @@ test("一覧の追加から社員を足し、設定を直し、削除する", as
     // 足すと一覧に出て、その社員の設定のタブが開く
     await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
     await expect(page.getByRole("region", { name: `${name}の設定` })).toContainText("Haiku 5.5");
+    // 組織図にも、社長の下に足した社員が出る
+    await expect(page.getByRole("list", { name: "組織図" }).getByText(name, { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "編集" }).click();
     await page.getByRole("main").getByLabel("名前").fill(`${name} 直した`);
