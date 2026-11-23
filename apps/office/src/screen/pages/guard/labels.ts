@@ -1,12 +1,11 @@
 // ハーネスの画面に出す名前。範囲、社員、シグナル、判定、基準の項目と、基準の値の単位、空の時の文
-import { GuardSignal, type GuardScope, StaffId, StaffJob, type StopVerdict, type Thresholds } from "@know-office/core";
+import { GuardSignal, type GuardScope, StaffId, type StopVerdict, type Thresholds } from "@know-office/core";
+import { JOBS } from "@know-office/core/master/jobs";
+import { labelOf } from "@know-office/core/master/master";
 import type { z } from "zod";
 
 /** 範囲の名前 */
 export const SCOPE_LABEL: Record<GuardScope, string> = { task: "タスク", staff: "社員", service: "サービス", office: "全体" };
-
-/** 職種の名前 */
-export const JOB_LABEL: Record<StaffJob, string> = { president: "社長", builder: "開発担当", reviewer: "レビュー担当" };
 
 /**
  * 社員 ID から名前を出す。最初の 3 人は職種の名前、足した社員は職種の名前に ID の末尾を添える。社員の一覧を読む画面は一覧の役の名前を使う
@@ -18,7 +17,7 @@ export function staffLabel(id: string): string {
   if (!staff.success) return id;
   // 形を確かめた ID なので、頭は必ず職種の名前
   const [job, suffix] = staff.data.split("-");
-  const label = JOB_LABEL[StaffJob.parse(job)];
+  const label = labelOf(JOBS, job ?? "");
   return suffix === undefined ? label : `${label} ${suffix}`;
 }
 
