@@ -137,6 +137,9 @@ const RESTING = [
   ["reviewer", "レビュー担当"],
 ] as const;
 
+/** 木の 1 件の状態 */
+const Finished = z.object({ status: z.string() }).loose();
+
 /** 止めた時の返事 */
 const Stopped = z.object({ data: z.object({ stopId: z.string() }).loose() });
 
@@ -173,7 +176,9 @@ async function leaveRest(page: Page): Promise<void> {
     .data.flatMap(function walk(n: Tree): Tree[] {
       return [n, ...n.children.flatMap(walk)];
     })
-    .filter((n) => n.title.startsWith(`${REST_TASK} `));
+    .filter((n) => n.title.startsWith(`${REST_TASK} `))
+    // 済んだ物と見送った物は読み直さない。前の通しの分も木に残り続け、1 件ずつ読むと送信元の 1 分の数 (300) に届く
+    .filter((n) => !["done", "dropped"].includes(Finished.parse(n).status));
   const statusOf = async (id: string) => NodeDetail.parse(await (await page.request.get(`/api/v1/nodes/${id}`)).json()).data.status;
   for (const n of left) {
     // SDK が上限の返事で終えるとタスクは待ちに戻る。前の通しが途中で落ちて作業中に残した物は、見送りにできないので終わりの返事で終えさせる
