@@ -11,7 +11,7 @@ import { verifyAccess } from "./access.ts";
 import type { RateBucket } from "./guard-book.ts";
 import { readSession, SESSION_COOKIE, signingKey } from "./session.ts";
 import { vaultKey } from "./vault.ts";
-import { WITHOUT_SESSION } from "./without-session.ts";
+import { MCP_PATH, WITHOUT_SESSION } from "./without-session.ts";
 
 /** ログインセッションの開始とパスキーのパス。1 分 10 回に絞る (API の決まりの 4.5 の 2) */
 const AUTH_PATHS = /^\/api\/v1\/(sessions$|me\/step-up$|passkeys(\/options)?$)/;
@@ -82,6 +82,19 @@ export const hookAdmission = createMiddleware<GateEnv>(async (c, next) => {
 });
 
 /**
+ * Access の作業用の鍵の証明を通してよいルートなら、その鍵の Client ID を返す
+ * @param c 要求の文脈
+ * @returns 稼働確認は ACCESS_SMOKE_CLIENT_ID、MCP の入口は ACCESS_MCP_CLIENT_ID。ほかは無し
+ */
+function serviceClientOf(c: Context<GateEnv>): string | undefined {
+  // デプロイの後の確かめ (scripts/smoke.ts) は作業用の鍵で稼働確認だけを聞く
+  if (c.req.method === "GET" && c.req.path === "/api/v1/health") return c.env.ACCESS_SMOKE_CLIENT_ID;
+  // 外の AI は MCP の入口だけを作業用の鍵で通り、その先は MCP の連携の鍵で確かめる (ログインと記録の 3.10)
+  if (c.req.method === "POST" && c.req.path === MCP_PATH) return c.env.ACCESS_MCP_CLIENT_ID;
+  return undefined;
+}
+
+/**
  * Access の証明を確かめ、メールアドレスを置く。失敗はロックアウトの数に足す
  * @throws unauthenticated 証明が無いか合わない時
  * @throws forbidden オーナーでない時
@@ -92,8 +105,7 @@ export const accessProof = createMiddleware<GateEnv>(async (c, next) => {
     team: c.env.ACCESS_TEAM,
     aud: c.env.ACCESS_AUD,
     ownerEmail: c.env.OWNER_EMAIL,
-    // デプロイの後の確かめ (scripts/smoke.ts) は作業用の鍵で稼働確認だけを聞く。ほかのルートには鍵の証明を通さない
-    serviceClientId: c.req.method === "GET" && c.req.path === "/api/v1/health" ? c.env.ACCESS_SMOKE_CLIENT_ID : undefined,
+    serviceClientId: serviceClientOf(c),
   };
   try {
     c.set("email", await verifyAccess(c.req.header("Cf-Access-Jwt-Assertion"), config, c.var.fetch, c.var.clock));
@@ -128,7 +140,8 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * @throws origin_mismatch Origin が無いか、自分と違う時
  */
 export const sameOrigin = createMiddleware<GateEnv>(async (c, next) => {
-  if (SAFE_METHODS.has(c.req.method)) {
+  // MCP の入口はクッキーを使わず、MCP の連携の鍵を毎回確かめるので、ほかのサイトから書き換えられない
+  if (SAFE_METHODS.has(c.req.method) || (c.req.method === "POST" && c.req.path === MCP_PATH)) {
     await next();
     return;
   }

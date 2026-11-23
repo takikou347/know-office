@@ -6,7 +6,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { Problem } from "@know-office/core";
 import { stepUpGate } from "../../src/gate/auth/passkey.ts";
-import { WITHOUT_SESSION } from "../../src/gate/auth/without-session.ts";
+import { MCP_PATH, WITHOUT_SESSION } from "../../src/gate/auth/without-session.ts";
 import { MAX_BODY_BYTES } from "../../src/gate/body.ts";
 import gate from "../../src/gate/index.ts";
 import { fixedClock } from "../helpers/clock.ts";
@@ -166,14 +166,18 @@ describe("WAF が無い時の守り", () => {
   });
 
   it("書き込みのルートはどれも、Origin が違うか無ければ 403 で断る", async () => {
-    const other = await statuses(writeRoutes, () => ({ headers: { ...signedIn, Origin: "https://evil.example" } }));
-    expect(other).toEqual(every(writeRoutes, 403));
+    // MCP の入口はクッキーを使わず MCP の連携の鍵で確かめるので、Origin でなく鍵の無さで 401 にする (ログインと記録の 3.10)
+    const originRoutes = writeRoutes.filter((r) => r.key !== `POST ${MCP_PATH}`);
+    const other = await statuses(originRoutes, () => ({ headers: { ...signedIn, Origin: "https://evil.example" } }));
+    expect(other).toEqual(every(originRoutes, 403));
+    const mcp = await test.request(MCP_PATH, { method: "POST", headers: { ...signedIn, Origin: "https://evil.example", "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) });
+    expect(mcp.status).toBe(401);
     // 1 度目と同じ送信元だと、1 分 1 回のルートが Origin を見る前に 429 になるので、送信元を変える
-    const none = await statuses(writeRoutes, () => {
+    const none = await statuses(originRoutes, () => {
       const { Origin: _, ...headers } = signedIn;
       return { headers };
     }, "203.0.113");
-    expect(none).toEqual(every(writeRoutes, 403));
+    expect(none).toEqual(every(originRoutes, 403));
   });
 
   it("書き込みのルートはどれも、送信元の 1 分の数を超えると 429 で断る", async () => {
@@ -225,7 +229,8 @@ describe("WAF が無い時の守り", () => {
       headers: { ...signedIn, "Content-Type": "application/json" },
       ...(takesBody(r.key) ? { body: "{\"unknown\":" } : {}),
     }));
-    const bad = Object.entries(result).filter(([, status]) => ![400, 404, 409, 422].includes(status));
+    // MCP の入口は本文を確かめる前に連携の鍵で断る (ログインと記録の 3.10)
+    const bad = Object.entries(result).filter(([key, status]) => ![400, 404, 409, 422].includes(status) && !(key === `POST ${MCP_PATH}` && status === 401));
     expect(bad).toEqual([]);
   });
 });

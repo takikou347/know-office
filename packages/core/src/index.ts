@@ -20,6 +20,7 @@ export { codePoints, CreateMessageInput, headChars, LiveEvent, LiveTicket, Messa
 export { StorageUse } from "./schemas/storage.ts";
 export { AttendanceQuery, DailyCost, Dashboard, HomeService, Month, OwnerReview, RecordGroup, RecordSummary, RecordTotals, Uptime, UptimeQuery } from "./schemas/records.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
+export { CreatedMcpClient, CreateMcpClientInput, McpClient, McpDecideArgs, McpMessageArgs, McpNoArgs, McpRequest, McpResponse, McpScope, McpTaskArgs } from "./schemas/mcp.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";
 export { DecideAnswer, DecideInput, Decision, PreToolUseInput } from "./schemas/decision.ts";
 export {

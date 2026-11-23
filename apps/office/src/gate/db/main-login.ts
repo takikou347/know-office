@@ -84,3 +84,14 @@ export const healthChecks = sqliteTable(
   // 行は消さずに年 60 万行ほど増えるので、月の稼働率はその月の行だけを読む
   (t) => [index("health_checks_at").on(t.at)],
 );
+
+/** 外の AI が MCP でつなぐ鍵。鍵は SHA-256 だけを持ち、切った鍵は revoked_at を残して通さない */
+export const mcpClients = sqliteTable("mcp_clients", {
+  id: id(),
+  name: text("name").notNull(),
+  scope: text("scope", { enum: ["read", "write"] }).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: time("created_at").notNull(),
+  lastUsedAt: time("last_used_at"),
+  revokedAt: time("revoked_at"),
+});

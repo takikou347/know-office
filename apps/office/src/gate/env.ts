@@ -215,6 +215,8 @@ export type Bindings = {
   OWNER_EMAIL: string;
   /** デプロイの後の確かめに使う Access の作業用の鍵の Client ID。稼働確認のルートだけ、この鍵の証明を通す */
   ACCESS_SMOKE_CLIENT_ID?: string;
+  /** 外の AI が MCP の入口を通るのに使う Access の作業用の鍵の Client ID。MCP の入口だけ、この鍵の証明を通す。無い間は MCP を誰も通さない */
+  ACCESS_MCP_CLIENT_ID?: string;
   /** vault の鍵を暗号にする主の鍵。32 バイトを base64 で */
   MASTER_KEY: string;
   /** 会話の記録、社員が作ったファイル、D1 の毎日の写しを置く R2 */
@@ -267,6 +269,8 @@ export type GateEnv = {
     github: TokenDeps;
     /** リポジトリのコミットの tarball を開く。エディタの補完の木に使う */
     archive: (repo: string, sha: string) => Promise<ReadableStream<Uint8Array>>;
+    /** MCP の入口で確かめた連携。ほかのルートでは無い */
+    mcpClient?: { id: string; scope: "read" | "write" };
     /** 断った返事を、入口で 401、403、429 の数に入れたか。入れていればもう数えない */
     deniedCounted: boolean;
   };

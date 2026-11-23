@@ -7,6 +7,7 @@ import { Part, Section } from "../../parts/section.tsx";
 import { DocsRepo } from "./DocsRepo.tsx";
 import { GitHubCard } from "./GitHubCard.tsx";
 import { KeyReentry } from "./KeyReentry.tsx";
+import { McpClients } from "./McpClients.tsx";
 import { OfficeRules } from "./OfficeRules.tsx";
 import { Passkey } from "./Passkey.tsx";
 import { Sessions } from "./Sessions.tsx";
@@ -31,6 +32,7 @@ export function SettingsPage({ extensions, toggleExtension }: SettingsPageProps)
         <Passkey />
         <p>鍵は入口だけが持ち、画面には出しません</p>
       </Part>
+      <McpClients />
       <Part title="拡張">
         {extensions.length === 0 ? (
           <p>拡張はありません</p>

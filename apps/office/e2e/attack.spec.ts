@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type APIRequestContext, expect, test } from "@playwright/test";
 import { parse } from "yaml";
 import { z } from "zod";
-import { WITHOUT_SESSION } from "../src/gate/auth/without-session.ts";
+import { MCP_PATH, WITHOUT_SESSION } from "../src/gate/auth/without-session.ts";
 import { STEP_UP_NOT_BUILT } from "../test/helpers/step-up.ts";
 
 // ブラウザーを使わないので、playwright.config.ts の attack のプロジェクトで 1 度だけ流す
@@ -28,7 +28,7 @@ const writes = routes.filter((r) => r.method !== "GET");
 type Route = (typeof routes)[number];
 /** 1 つの要求の答え。状態コードと、problem+json の code (無ければ空) */
 type Answer = { status: number; code: string };
-type Attack = { name: string; ip: string; routes: Route[]; allowed: (answer: Answer) => boolean; send: (api: APIRequestContext, route: Route, origin: string) => Promise<Answer> };
+type Attack = { name: string; ip: string; routes: Route[]; allowed: (answer: Answer, route: Route) => boolean; send: (api: APIRequestContext, route: Route, origin: string) => Promise<Answer> };
 
 /**
  * パスの変数を埋める
@@ -83,8 +83,9 @@ const ATTACKS: Attack[] = [
   {
     name: "ほかのサイトからの書き込み",
     ip: "198.18.0.3",
+    // MCP の入口はクッキーを使わず MCP の連携の鍵で確かめるので、Origin でなく鍵の無さで断る (ログインと記録の 3.10)
     routes: writes,
-    allowed: statusIn(403),
+    allowed: (answer, route) => (route.key === `POST ${MCP_PATH}` ? answer.status === 401 : answer.status === 403),
     send: (api, route) => send(api, route, { headers: { Origin: "https://evil.example" } }),
   },
   {
@@ -126,7 +127,7 @@ test.describe("弱点のチェック", () => {
       const bad: string[] = [];
       for (const route of attack.routes) {
         const answer = await attack.send(api, route, origin);
-        if (!attack.allowed(answer)) bad.push(`${route.key}: ${String(answer.status)} ${answer.code}`);
+        if (!attack.allowed(answer, route)) bad.push(`${route.key}: ${String(answer.status)} ${answer.code}`);
       }
       await api.dispose();
       expect(bad).toEqual([]);

@@ -35,6 +35,7 @@ const TAGS = [
   ["settings", "設定: office とサービス"],
   ["notices", "通知"],
   ["extensions", "拡張機能"],
+  ["mcp", "MCP: 外の AI からの読みと操作"],
   ["workspace-gate", "内部 API: ワークスペースからゲートウェイへ"],
   ["workspace", "内部 API: 社員 DO からワークスペースへ"],
 ] as const;
@@ -53,6 +54,7 @@ const SECURITY_SCHEMES = {
     scheme: "bearer",
     description: "ワークスペースの DO がコンテナを起こすたびに作り、環境変数で渡す鍵。社員 DO の呼び出しだけが持つ",
   },
+  mcpToken: { type: "http", scheme: "bearer", description: "設定の画面で作る MCP の連携の鍵。Access の作業用の鍵 (ACCESS_MCP_CLIENT_ID) の証明と一緒に使う" },
 } as const;
 
 const METHODS = ["get", "put", "post", "delete", "patch"] as const;

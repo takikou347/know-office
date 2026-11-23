@@ -11,6 +11,8 @@ import { attendanceRoutes } from "./routes/attendance.ts";
 import { dashboardRoutes } from "./routes/dashboard.ts";
 import { devloopRoutes } from "./routes/devloop.ts";
 import { liveRoutes } from "./routes/live.ts";
+import { mcpRoutes } from "./routes/mcp.ts";
+import { mcpClientRoutes } from "./routes/mcp-clients.ts";
 import { messageRoutes } from "./routes/messages.ts";
 import { staffRoutes } from "./routes/staff.ts";
 import { extensionRoutes } from "./routes/extensions.ts";
@@ -62,7 +64,9 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
     .route("/", githubRoutes)
     .route("/", devloopRoutes)
     .route("/", hookRoutes)
-    .route("/", findingRoutes);
+    .route("/", findingRoutes)
+    .route("/", mcpClientRoutes)
+    .route("/", mcpRoutes);
   registerComponents(app);
   return app;
 }
