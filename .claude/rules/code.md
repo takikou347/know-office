@@ -20,6 +20,7 @@ paths:
 - 外から来る物 (画面の入力、GitHub の通知、ワークスペースからの要求、Claude のツールの入力、D1 の JSON のカラム、R2 から読んだ物) は `unknown` で受け、`packages/core/src/schemas/<物>.ts` の Zod スキーマで確かめてから使う
 - 行の型は Drizzle の `$inferSelect` と `$inferInsert`、入力の型は `z.infer` から取り、手で書き写さない
 - 種類は文字列の合わせと `as const` の並びで書き、`enum` を使わない
+- 画面で選ぶ選択肢 (モデル、職種、状態、段階、種類など) はマスタデータにし、`packages/core/src/master/<物>.ts` に 1 つの物ごとに 1 ファイルで `defineMaster` で置く。画面は `@know-office/core/master/<物>` から `optionsOf` と `labelOf` で選択肢と名前を作り、ゲートウェイは `masterSchema` で確かめる。画面に名前の表を別に書かない
 - 秘密と鍵は `Secret` で持ち、記録と返事に出さない
 - ID は `core` の `newId()` (UUID v7)、日本時間への直しは `jstDay(at)` と `jstClock(at)` だけ
 
