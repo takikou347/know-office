@@ -1,6 +1,6 @@
 // GitHub の連携のテストの手伝い。代わりの GitHub の画面で App を作って入れ、通知を送り、ワークスペースから git を呼ぶ (GitHub の連携の 3.1 から 3.4)
 import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
-import type { StaffId } from "@know-office/core";
+import type { StaffJob } from "@know-office/core";
 import { expect } from "vitest";
 import { z } from "zod";
 import { deliveryId, sendWebhook } from "../../dev/github-hooks.ts";
@@ -171,7 +171,7 @@ export function hook(w: WorkWorld, sent: Hook): Promise<Response> {
 /** 作業中のタスクと作業トークン */
 export type Work = {
   /** 社員 ID */
-  staffId: StaffId;
+  staffId: StaffJob;
   /** タスク ID */
   nodeId: string;
   /** 作業トークン */
@@ -191,7 +191,7 @@ export const WORK_BRANCH = "ko/x";
  * @param options タスクのブランチ (無ければ WORK_BRANCH、null はブランチの無いタスク) と種類
  * @returns 社員、タスク、作業トークン
  */
-export async function startTask(w: WorkWorld, repo: string, staffId: StaffId = "builder", options: { branch?: string | null; taskKind?: "build" | "review" } = {}): Promise<Work> {
+export async function startTask(w: WorkWorld, repo: string, staffId: StaffJob = "builder", options: { branch?: string | null; taskKind?: "build" | "review" } = {}): Promise<Work> {
   const nodeId = crypto.randomUUID();
   const { book } = w.gate.staff[staffId];
   const now = w.clock.now();

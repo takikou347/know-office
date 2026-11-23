@@ -195,7 +195,7 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
   const base = await runBase(env, staffId, nodeId, promptVersion);
   // 落ちる前に受けて記録に入らなかった発言は戻らない。まだ渡していない発言だけを頭に足す
   const head = await headMessages(env, staffId, now);
-  const { token, jti } = await issueTicket(env, staffId, nodeId, now);
+  const { token, jti } = await issueTicket(env, staffId, nodeId, now, undefined, base.model);
   try {
     await workspace.run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: withOwnerMessages(RESUME_PROMPT, head.picked), resume: saved.sessionId }));
   } catch (error) {

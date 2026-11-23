@@ -1,5 +1,5 @@
 // 毎日 0 時 5 分の定期ジョブ。前の日の日ごとの集計を、社員 DO を通して作り直し、全部の年の監査ログのつなぎを確かめ、直した Issue の効き目を確かめる (社員と勤怠の 3.6、ログインと記録の 3.4、サービスと拡張の 3.7)
-import { type Clock, jstDay, jstDayStart, jstYear, newId, StaffId } from "@know-office/core";
+import { type Clock, jstDay, jstDayStart, jstYear, newId } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { checkEffects } from "../findings/effect.ts";
 import { fingerprintMark, type IssueTracker, publicTracker, REPO_PATTERN } from "../findings/tracker.ts";
@@ -8,6 +8,7 @@ import { type GuardDeps, UNCONNECTED_DEPS } from "../guard/deps.ts";
 import { observe } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import type { WeeklyDeps } from "./weekly.ts";
+import { allStaff } from "../work/roster.ts";
 
 /** 日本時間の 0 時 5 分。Cron は協定世界時で書くので 15 時 5 分になる。wrangler.jsonc の triggers.crons に同じ文字列を置く */
 export const DAILY_CRON = "5 15 * * *";
@@ -21,7 +22,10 @@ export const DAILY_CRON = "5 15 * * *";
 export async function rebuildYesterday(env: Bindings, clock: Clock): Promise<void> {
   const now = clock.now();
   const yesterday = jstDay(jstDayStart(jstDay(now)) - 1);
-  await Promise.all(StaffId.options.map((id) => env.STAFF.get(env.STAFF.idFromName(id)).rebuildDay(yesterday, now)));
+  const from = jstDayStart(yesterday);
+  // 昨日のうちに削除した社員も、削除の前に働いた分を組み直す
+  const people = (await allStaff(env.DB)).filter((p) => p.retiredAt === null || p.retiredAt >= from);
+  await Promise.all(people.map((p) => env.STAFF.get(env.STAFF.idFromName(p.id)).rebuildDay(yesterday, now)));
 }
 
 /**

@@ -1,5 +1,5 @@
 // テストのゲートウェイの社員 DO とワークスペースの DO の代わりのうち、呼び出しの始め方 (arm、runState、markRun、run) と、開発の通しの forgetDay と鍵の確かめを持つ所 (社員が考えるの 3.3)
-import { AppError, type StaffId } from "@know-office/core";
+import { AppError, type StaffId, StaffJob } from "@know-office/core";
 import type { Bindings } from "../../src/gate/env.ts";
 import type { StaffBook } from "../../src/gate/work/staff-book.ts";
 import { continueRun } from "../../src/gate/work/transcript.ts";
@@ -90,3 +90,17 @@ export function workspaceFake(seen: WorkspaceSeen) {
     },
   };
 }
+
+/**
+ * テストの最初の 3 人の表から、社員 ID の物を引く
+ * @param table 職種ごとの表
+ * @param id 社員 ID
+ * @returns その社員の物
+ * @throws Error 最初の 3 人でない時
+ */
+export function named<T>(table: Record<StaffJob, T>, id: string): T {
+  const job = StaffJob.safeParse(id);
+  if (!job.success) throw new Error(`テストの社員に ${id} は無い`);
+  return table[job.data];
+}
+

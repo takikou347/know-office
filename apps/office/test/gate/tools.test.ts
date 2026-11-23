@@ -1,6 +1,6 @@
 // 社員のツールを呼ぶ口 (POST /ws/v1/tools/{toolName}) を、作業トークンから承認とタスクの移りまで確かめる (社員が考えるの 3.6、タスクとレビューの 2 章)
 import type { D1Database } from "@cloudflare/workers-types";
-import type { StaffId } from "@know-office/core";
+import type { StaffJob } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
@@ -19,7 +19,7 @@ const world = useWork();
 const Answer = z.object({ data: z.object({ content: z.string(), isError: z.boolean() }).strict(), meta: z.object({ traceId: z.string() }).strict() }).strict();
 
 /** 1 つのテストの社員、タスク、作業トークン */
-type Work = { staffId: StaffId; nodeId: string; token: string };
+type Work = { staffId: StaffJob; nodeId: string; token: string };
 
 /**
  * 目標の下に、開発担当のタスクを 2 つ置く
@@ -40,7 +40,7 @@ async function twoTasks(w: WorkWorld): Promise<[string, string]> {
  * @param staffId 社員 ID
  * @returns 社員、タスク、作業トークン
  */
-async function startWork(w: WorkWorld, staffId: StaffId): Promise<Work> {
+async function startWork(w: WorkWorld, staffId: StaffJob): Promise<Work> {
   await staffOf(w, staffId).pull(w.clock.now());
   const { nodeId } = await w.gate.staff[staffId].book.status(w.clock.now());
   if (nodeId === null) throw new Error("タスクを取れなかった");

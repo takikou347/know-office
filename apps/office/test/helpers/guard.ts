@@ -1,5 +1,5 @@
 // 自動停止のテストの手伝い。D1 とゲートウェイを起こし、社員を出勤させ、タスクとサービスの行を置く
-import type { StaffId } from "@know-office/core";
+import type { StaffJob } from "@know-office/core";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import { fixedClock } from "./clock.ts";
 import { createTestD1, resetMain, type TestD1 } from "./d1.ts";
@@ -43,13 +43,13 @@ export function useGuardWorld(): GuardWorld {
     world.clock = fixedClock(jst(8));
     world.gate = await createTestGate({ clock: world.clock, d1: world.d1 });
     const staff = [
-      ["president", null],
-      ["builder", "president"],
-      ["reviewer", "president"],
+      ["president", null, "claude-opus-5-5"],
+      ["builder", "president", "claude-sonnet-5-5"],
+      ["reviewer", "president", "claude-opus-5-5"],
     ] as const;
     await world.d1.DB.batch(
-      staff.map(([id, boss]) =>
-        world.d1.DB.prepare("INSERT OR REPLACE INTO staff (id, role, boss_id, model, effort, prompt_version, created_at) VALUES (?, ?, ?, 'claude-opus-5-5', 'high', 1, 0)").bind(id, id, boss),
+      staff.map(([id, boss, model]) =>
+        world.d1.DB.prepare("INSERT OR REPLACE INTO staff (id, job, role, boss_id, model, effort, prompt_version, created_at) VALUES (?, ?, ?, ?, ?, 'high', 1, 0)").bind(id, id, id, boss, model),
       ),
     );
   }, 30_000);
@@ -62,7 +62,7 @@ export function useGuardWorld(): GuardWorld {
  * @param staffId 社員 ID
  * @param nodeId 持たせるタスク。null なら持たせない
  */
-export async function startWork(world: GuardWorld, staffId: StaffId, nodeId: string | null = NODE): Promise<void> {
+export async function startWork(world: GuardWorld, staffId: StaffJob, nodeId: string | null = NODE): Promise<void> {
   const { book } = world.gate.staff[staffId];
   await book.wake(jst(8));
   await book.wake(jst(9));
@@ -78,7 +78,7 @@ export async function startWork(world: GuardWorld, staffId: StaffId, nodeId: str
  * @param assignee 持つ社員
  * @param scope office かサービスの ID
  */
-export async function addNode(world: GuardWorld, nodeId: string, assignee: StaffId, scope = "office"): Promise<void> {
+export async function addNode(world: GuardWorld, nodeId: string, assignee: StaffJob, scope = "office"): Promise<void> {
   await world.d1.DB.prepare(
     "INSERT OR IGNORE INTO nodes (id, kind, parent_id, scope, title, status, priority, assignee, created_by, created_at, updated_at) VALUES (?, 'task', NULL, ?, ?, 'doing', 1, ?, 'president', 0, 0)",
   )
@@ -113,6 +113,6 @@ export async function rows(world: GuardWorld, sql: string): Promise<Record<strin
  * @param staffId 社員 ID
  * @returns rule_denied の出来事
  */
-export function denied(nodeId = NODE, target = "/etc/passwd", staffId: StaffId = "builder") {
+export function denied(nodeId = NODE, target = "/etc/passwd", staffId: StaffJob = "builder") {
   return { type: "rule_denied", staffId, nodeId, operation: "file.read", target } as const;
 }

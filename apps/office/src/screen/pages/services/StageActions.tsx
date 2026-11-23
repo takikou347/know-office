@@ -7,7 +7,7 @@ import { useContext, useState } from "react";
 import { z } from "zod";
 import { ApiContext } from "../../api.ts";
 import { type Failed, FailedAlert, send, useLoad } from "../../parts/load.tsx";
-import { STAFF_LABEL } from "../guard/labels.ts";
+import { useStaffOptions } from "../../parts/staff-list.ts";
 import { MOVE_LABEL, OTHER_REASON } from "./labels.ts";
 
 interface RepoPickerProps {
@@ -59,7 +59,10 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
   const [to, setTo] = useState<ServiceStage | null>(next[0] ?? null);
   const [choice, setChoice] = useState<string | null>(null);
   const [written, setWritten] = useState("");
-  const [staffId, setStaffId] = useState<StaffId>("builder");
+  const people = useStaffOptions();
+  const [chosenStaff, setStaffId] = useState<StaffId | null>(null);
+  // 選ぶまでは最初の開発担当を選んでおく
+  const staffId = chosenStaff ?? people.find((p) => p.value.startsWith("builder"))?.value ?? "builder";
   const [repo, setRepo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failed>();
@@ -106,7 +109,7 @@ export function StageActions({ service, onMoved }: StageActionsProps) {
             <Select
               aria-label="担当の社員"
               value={staffId}
-              options={StaffId.options.map((s) => ({ value: s, label: STAFF_LABEL[s] }))}
+              options={people}
               onValueChange={(v) => {
                 const staff = StaffId.safeParse(v);
                 if (staff.success) setStaffId(staff.data);

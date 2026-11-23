@@ -1,6 +1,6 @@
 // 設定: office の設定とサービスの初期値、サービスごとの設定 (API の settings、サービスと拡張の 3.3)
 import { createRoute, z } from "@hono/zod-openapi";
-import { INHERITED_KEYS, Setting, StaffId, UpdateSettingInput } from "@know-office/core";
+import { INHERITED_KEYS, Setting, UpdateSettingInput } from "@know-office/core";
 import { createRouter } from "../app.ts";
 import { requireStepUp } from "../auth/passkey.ts";
 import { MERGE_WHEN_KEY, protectRepos } from "../github/rules.ts";
@@ -22,6 +22,7 @@ import {
 import { chooseRepo } from "../services/repo.ts";
 import { COST_SWITCHES, loadSwitch, updateSwitch } from "../services/switches.ts";
 import { staffDo } from "../work/loop.ts";
+import { activeStaff } from "../work/roster.ts";
 
 const router = createRouter();
 
@@ -168,12 +169,13 @@ export const settingRoutes = router
     if (key === SCHEDULE_KEY) {
       const schedule = await updateSchedule(c.env.DB, { value, version, reason, now }, () => requireStepUp(c));
       await audit(c, "setting.update", key, { value: schedule.value, version: schedule.version, reason });
-      // 3 人の alarm を新しい時刻で掛け直す。失敗した社員は、次の alarm まで新しい時刻が効かない。変えた設定は残し、失敗した社員をエラーログに残す
-      const woken = await Promise.allSettled(StaffId.options.map((id) => staffDo(c.env, id).wake(now)));
+      // 全体の勤務の時刻で働く在籍の社員の alarm を新しい時刻で掛け直す。失敗した社員は、次の alarm まで新しい時刻が効かない。変えた設定は残し、失敗した社員をエラーログに残す
+      const people = (await activeStaff(c.env.DB)).filter((p) => p.schedule === null).map((p) => p.id);
+      const woken = await Promise.allSettled(people.map((id) => staffDo(c.env, id).wake(now)));
       for (const [i, result] of woken.entries()) {
         if (result.status === "rejected") {
           const cause: unknown = result.reason;
-          const error = new Error(`${StaffId.options[i] ?? ""} の予定を組み直せなかった: ${cause instanceof Error ? cause.message : "非 Error の値"}`, { cause });
+          const error = new Error(`${people[i] ?? ""} の予定を組み直せなかった: ${cause instanceof Error ? cause.message : "非 Error の値"}`, { cause });
           await recordError(c.env, { source: "gate", level: "warn", code: "schedule_rearm_failed", error, route: c.req.routePath, traceId: c.var.traceId }, c.var.clock);
         }
       }

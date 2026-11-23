@@ -8,6 +8,7 @@ import type { Bindings } from "../env.ts";
 import { intakeProject, newNodeRow, recordCreated } from "../work/nodes.ts";
 import { type Forge, notifyStaff } from "../work/loop.ts";
 import { OPERATIONS } from "./release.ts";
+import { pickStaff } from "../work/roster.ts";
 
 /** Issue を合わせるのは、この段階のサービスだけ */
 const STAGES = ["prototype", "service", "operation"] as const;
@@ -128,7 +129,7 @@ export async function receiveDocsPush(env: Bindings, forge: Forge, payload: unkn
           "この一覧は参考で、issue_plan が今のコミットで確かめる。詳細設計の機能のファイルごとに、親と子の組を issue_plan で送る",
         ].join("\n"),
         taskKind: "plan",
-        assignee: "president",
+        assignee: await pickStaff(env.DB, "president"),
         source,
       },
       actor,
@@ -137,7 +138,7 @@ export async function receiveDocsPush(env: Bindings, forge: Forge, payload: unkn
     const none = sql`NOT EXISTS (SELECT 1 FROM ${nodes} WHERE ${nodes.source} = ${source} AND ${nodes.status} = 'todo')`;
     if (await insertedWhen(env.DB, nodes, task, none)) {
       await recordCreated(env, task, actor);
-      await notifyStaff(env, "president", now, false);
+      if (task.assignee !== null) await notifyStaff(env, task.assignee, now, false);
     }
   }
 }

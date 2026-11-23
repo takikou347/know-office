@@ -12,9 +12,9 @@ import { repoScope } from "../github/rules.ts";
 import { auditFrom } from "../ledger/record.ts";
 import { clockAt } from "./attendance.ts";
 import { type Forge, leaveTask } from "./loop.ts";
-import { type Actor, appendNodeEvent, checkPair, findNode, type NodeRow } from "./nodes.ts";
+import { type Actor, appendNodeEvent, findNode, type NodeRow } from "./nodes.ts";
 import { guardDocsBranch } from "./docs-pr-open.ts";
-import { askReview, REVIEWER, repoRefusal, reviewAsked } from "./review.ts";
+import { askReview, repoRefusal, reviewAsked, reviewerFor } from "./review.ts";
 import { denyByRule, type PrCall } from "./rule-denied.ts";
 
 /**
@@ -75,7 +75,7 @@ async function guardPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow 
 export async function openPr(env: Bindings, forge: Forge, call: PrCall, task: NodeRow, input: PrOpenTool): Promise<{ number: number; branch: string }> {
   if (task.repo === null) throw new AppError("conflict", "タスクに直すリポジトリが無い");
   // レビューを割り振れないなら、GitHub に出す前に断る
-  await checkPair(env.DB, call.staffId, REVIEWER);
+  await reviewerFor(env.DB, call.staffId);
   const [before] = await drizzle(env.DB).select().from(reviews).where(eq(reviews.nodeId, task.id)).limit(1);
   // ブランチはタスクを取った時に決めた名前だけを使う。出し直しは前に出したレビューの行のブランチ
   const branch = before?.branch ?? task.branch;

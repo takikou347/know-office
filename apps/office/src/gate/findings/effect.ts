@@ -12,6 +12,7 @@ import { intakeProject, newNodeRow, recordCreated } from "../work/nodes.ts";
 import { recordDbs } from "./records.ts";
 import { countSignal } from "./slow-cost.ts";
 import { type IssueTracker, publicTracker } from "./tracker.ts";
+import { pickStaff } from "../work/roster.ts";
 
 /** 比べる間 */
 const WEEK_MS = 7 * 24 * 60 * 60_000;
@@ -169,7 +170,7 @@ async function checkOne(env: Bindings, tracker: IssueTracker, row: z.infer<typeo
           title: `戻す: #${String(row.issue_number)} の直し`,
           body: `直した後の 7 日の回数が ${String(effect.after)} 回で、直す前の ${String(effect.before)} 回から減らなかった。直した PR を戻す。`,
           taskKind: "fix",
-          assignee: "builder",
+          assignee: await pickStaff(env.DB, "builder"),
           repo: row.repo,
           issueNumber: row.issue_number,
           source: `finding:${row.id}`,
@@ -188,7 +189,7 @@ async function checkOne(env: Bindings, tracker: IssueTracker, row: z.infer<typeo
   if (z.array(z.unknown()).parse(results.at(-1)).length === 0) return;
   if (task) {
     await recordCreated(env, task, actor);
-    await notifyStaff(env, "builder", now, false);
+    if (task.assignee !== null) await notifyStaff(env, task.assignee, now, false);
   }
   await note(env, tracker, { id: row.id, repo: row.repo, issueNumber: row.issue_number, worked, effect }, now);
 }

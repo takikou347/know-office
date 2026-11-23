@@ -1,12 +1,26 @@
 // ハーネスの画面に出す名前。範囲、社員、シグナル、判定、基準の項目と、基準の値の単位、空の時の文
-import { GuardSignal, type GuardScope, StaffId, type StopVerdict, type Thresholds } from "@know-office/core";
+import { GuardSignal, type GuardScope, StaffId, StaffJob, type StopVerdict, type Thresholds } from "@know-office/core";
 import type { z } from "zod";
 
 /** 範囲の名前 */
 export const SCOPE_LABEL: Record<GuardScope, string> = { task: "タスク", staff: "社員", service: "サービス", office: "全体" };
 
-/** 社員の名前 */
-export const STAFF_LABEL: Record<StaffId, string> = { president: "社長", builder: "開発担当", reviewer: "レビュー担当" };
+/** 職種の名前 */
+export const JOB_LABEL: Record<StaffJob, string> = { president: "社長", builder: "開発担当", reviewer: "レビュー担当" };
+
+/**
+ * 社員 ID から名前を出す。最初の 3 人は職種の名前、足した社員は職種の名前に ID の末尾を添える。社員の一覧を読む画面は一覧の役の名前を使う
+ * @param id 社員 ID
+ * @returns 名前。社員 ID でなければそのまま
+ */
+export function staffLabel(id: string): string {
+  const staff = StaffId.safeParse(id);
+  if (!staff.success) return id;
+  // 形を確かめた ID なので、頭は必ず職種の名前
+  const [job, suffix] = staff.data.split("-");
+  const label = JOB_LABEL[StaffJob.parse(job)];
+  return suffix === undefined ? label : `${label} ${suffix}`;
+}
 
 /** 判定の名前 */
 export const VERDICT_LABEL: Record<z.infer<typeof StopVerdict>, string> = { correct: "正しく止めた", false: "誤って止めた", unknown: "分からない" };
@@ -58,8 +72,7 @@ export function signalLabel(signal: string): string {
  */
 export function targetLabel(scope: GuardScope, target: string, services: ReadonlyMap<string, string> = new Map()): string {
   if (scope === "office") return "すべての社員";
-  const staff = StaffId.safeParse(target);
-  if (scope === "staff" && staff.success) return STAFF_LABEL[staff.data];
+  if (scope === "staff" && StaffId.safeParse(target).success) return staffLabel(target);
   if (scope === "service") return services.get(target) ?? `サービス ${target}`;
   return `${SCOPE_LABEL[scope]} ${target}`;
 }

@@ -7,7 +7,7 @@ import { Badge, Stack, Tabs, Timeline } from "knowidea-ui";
 import { jstDateTime } from "../../format.ts";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part } from "../../parts/section.tsx";
-import { STAFF_LABEL } from "../guard/labels.ts";
+import { staffLabel } from "../guard/labels.ts";
 import { EVENT_LABEL, UNSET } from "./labels.ts";
 import { IdeaEditor } from "./IdeaEditor.tsx";
 import { ServiceIssuesView } from "./ServiceIssuesView.tsx";
@@ -39,7 +39,7 @@ function eventText(event: ServiceDetail["events"][number]): string {
  */
 function byLabel(by: string): string {
   const staff = StaffId.safeParse(by);
-  if (staff.success) return STAFF_LABEL[staff.data];
+  if (staff.success) return staffLabel(staff.data);
   return by === "owner" ? "オーナー" : "自動";
 }
 

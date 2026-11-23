@@ -110,7 +110,7 @@ export interface Staff extends Rpc.DurableObjectBranded {
   /** タスクが読んだ外部の文章の出所 */
   externalSources(nodeId: string): Promise<string[]>;
   /** タスクの作業トークンを発行する */
-  issueToken(nodeId: string, workspaceId: string, now: number, traceId?: string | null): Promise<IssuedTicket>;
+  issueToken(nodeId: string, workspaceId: string, now: number, traceId?: string | null, model?: string | null): Promise<IssuedTicket>;
   /** 残りが 10 分を切った作業トークンを発行し直す */
   renewToken(nodeId: string, workspaceId: string, now: number): Promise<RenewedTicket | null>;
   /** 作業トークンを ID で失効させる */

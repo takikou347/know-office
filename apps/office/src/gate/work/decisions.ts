@@ -30,6 +30,7 @@ import { ok } from "../respond.ts";
 import { loadOfficeDefaults, serviceRules } from "../services/settings.ts";
 import { clockAt } from "./attendance.ts";
 import { findNode, recordsOf } from "./nodes.ts";
+import { jobOf } from "./roster.ts";
 import { bearer, type Caller, ticketTask } from "./ticket.ts";
 
 const decideRoute = createRoute({
@@ -66,6 +67,17 @@ async function protectedPathsOf(env: Bindings, scope: string): Promise<string[]>
 }
 
 /**
+ * 在籍の社員の職種で使える社員のツールを返す。削除した社員は何も使えない
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @returns ツールの名前
+ */
+async function toolsOf(env: Bindings, staffId: StaffId): Promise<readonly string[]> {
+  const job = await jobOf(env.DB, staffId);
+  return job === null ? [] : ROLE_TOOLS[job];
+}
+
+/**
  * ルールの判断の前提を作る。触れない所、外部の文章の印、入れている拡張のツール、社員の役で使える社員のツールを判断のたびに読む
  * @param env バインディング
  * @param who 社員とタスク
@@ -79,7 +91,7 @@ async function protectedPathsOf(env: Bindings, scope: string): Promise<string[]>
 export async function ruleContext(env: Bindings, who: { staffId: StaffId; nodeId: string; scope: string }, op: Operation, extensions: readonly ExtensionDefinition[]): Promise<RuleContext> {
   return {
     ...DEFAULT_RULES,
-    officeTools: ROLE_TOOLS[who.staffId],
+    officeTools: await toolsOf(env, who.staffId),
     protectedPaths: await protectedPathsOf(env, who.scope),
     // 外部の文章の印はオーナーの情報の判断だけが見るので、その時だけ社員 DO に聞く
     external: op.kind === "owner_info.read" && (await staffOf(env, who.staffId).externalSources(who.nodeId)).length > 0,

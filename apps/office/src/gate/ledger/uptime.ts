@@ -1,8 +1,9 @@
 // 稼働の確かめ。5 分ごとの定期ジョブが部分ごとに通るかを health_checks に残し、故障と遅れを通知にし、記録の画面が読む月の稼働率をそこから出す (サービスと拡張の 3 章)
-import { type Clock, jstDayStart, newId, StaffId, type Uptime } from "@know-office/core";
+import { type Clock, jstDayStart, newId, type Uptime } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { announceNotice } from "../live/publish.ts";
 import { recordError } from "./errors.ts";
+import { activeStaff } from "../work/roster.ts";
 
 /** 1 つの部分の答えを待つ長さの初期値。外を呼ぶ時の初期値と同じ 10 秒 */
 const PROBE_TIMEOUT_MS = 10_000;
@@ -36,18 +37,19 @@ async function within(work: () => Promise<unknown>, timeoutMs: number): Promise<
 }
 
 /**
- * 確かめる部分を並べる。ゲートウェイ (このジョブが動いている事)、主の D1、記録 DO と年ごとの D1、3 つの社員 DO。
+ * 確かめる部分を並べる。ゲートウェイ (このジョブが動いている事)、主の D1、記録 DO と年ごとの D1、在籍の社員の社員 DO。
  * ワークスペースは起こすと費用が出るので起こさず、社員 DO がハートビートで見る
  * @param env バインディング
  * @param now 今の時刻
+ * @param people 在籍の社員
  * @returns 部分の並び
  */
-function probes(env: Bindings, now: number): Probe[] {
+function probes(env: Bindings, now: number, people: readonly { id: string }[]): Probe[] {
   return [
     { part: "gate", run: () => Promise.resolve() },
     { part: "d1", run: () => env.DB.prepare("SELECT 1").first() },
     { part: "recorder", run: () => env.RECORDER.get(env.RECORDER.idFromName("recorder")).size() },
-    ...StaffId.options.map((id) => ({ part: `staff:${id}`, run: () => env.STAFF.get(env.STAFF.idFromName(id)).status(now) })),
+    ...people.map(({ id }) => ({ part: `staff:${id}`, run: () => env.STAFF.get(env.STAFF.idFromName(id)).status(now) })),
   ];
 }
 
@@ -76,7 +78,7 @@ export async function checkHealth(env: Bindings, clock: Clock, options: { timeou
   const { timeoutMs = PROBE_TIMEOUT_MS, stopwatch = clockStopwatch(clock) } = options;
   const now = clock.now();
   const results = await Promise.all(
-    probes(env, now).map(async (probe) => {
+    probes(env, now, await activeStaff(env.DB).catch(() => [])).map(async (probe) => {
       const elapsed = stopwatch(probe.part);
       const ok = await within(probe.run, timeoutMs);
       return { part: probe.part, ok, ms: Math.max(0, elapsed()) };

@@ -5,6 +5,7 @@ import { recordError } from "../ledger/errors.ts";
 import { GUARD_REVIEW, loadSwitch } from "../services/switches.ts";
 import { callTool, type ForcedTool, recordGateUsage } from "../work/claude-tool.ts";
 import type { GuardDeps, StopRecord } from "./deps.ts";
+import { pickStaff } from "../work/roster.ts";
 
 /** 待つ上限。返事の後の waitUntil は 30 秒で切られるので、その内に収める */
 const REVIEW_TIMEOUT_MS = 20_000;
@@ -85,7 +86,9 @@ export function connectReview(env: Bindings, fetch: Fetcher, clock: Clock): Guar
       return failed(error);
     }
     try {
-      await recordGateUsage(env, { staffId: "reviewer", nodeId: record.scope === "task" ? record.target : null, model: OPUS, usage: reply.usage, requestId: `guard_review:${record.stopId}`, traceId: null }, now);
+      // 判断はゲートウェイがレビュー担当の役で呼ぶので、在籍のレビュー担当の分にする。居なければ最初のレビュー担当の ID に付ける
+      const staffId = await pickStaff(env.DB, "reviewer").catch(() => "reviewer");
+      await recordGateUsage(env, { staffId, nodeId: record.scope === "task" ? record.target : null, model: OPUS, usage: reply.usage, requestId: `guard_review:${record.stopId}`, traceId: null }, now);
     } catch (error) {
       await failed(error);
     }

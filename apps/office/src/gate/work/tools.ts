@@ -50,6 +50,7 @@ import { readOwnerData } from "./owner-data.ts";
 import { addStaffMessage, reachCheckpoint } from "./progress.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, type NodeRow, updateNode } from "./nodes.ts";
 import { backToTodo, findReview, madeTaskOf, mergeIfReady } from "./review.ts";
+import { jobOf } from "./roster.ts";
 
 /** 呼び出し 1 回 */
 export type ToolCall = {
@@ -72,8 +73,16 @@ type Run = (env: Bindings, forge: Forge, call: ToolCall, input: never) => Promis
 /** ツールの入力の形と中身 */
 type Tool = { schema: ZodType; run: Run };
 
-/** 役ごとに使えるツール。正本は core の ROLE_TOOLS で、ルールの判断と同じ一覧を使う。ここに無いツールは not_found で断る */
-const ROLE_TOOL_NAMES: Record<StaffId, readonly string[]> = ROLE_TOOLS;
+/**
+ * 在籍の社員の職種で使えるツールの名前。正本は core の ROLE_TOOLS で、ルールの判断と同じ一覧を使う。ここに無いツールは not_found で断る。削除した社員は何も使えない
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @returns ツールの名前
+ */
+async function roleToolNames(env: Bindings, staffId: StaffId): Promise<readonly string[]> {
+  const job = await jobOf(env.DB, staffId);
+  return job === null ? [] : ROLE_TOOLS[job];
+}
 
 /**
  * ツールの呼び出しから、誰がいつを作る
@@ -475,7 +484,7 @@ export async function extensionToolSpecs(env: Bindings, extensions: readonly Ext
  * @returns ゲートウェイでのツールの名前
  */
 export async function staffTools(env: Bindings, staffId: StaffId, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<string[]> {
-  return [...ROLE_TOOL_NAMES[staffId], ...(await extensionTools(env, extensions)).keys()];
+  return [...(await roleToolNames(env, staffId)), ...(await extensionTools(env, extensions)).keys()];
 }
 
 /**
@@ -505,7 +514,7 @@ export async function runTool(env: Bindings, forge: Forge, call: ToolCall, exten
  */
 export async function prepareTool(env: Bindings, forge: Forge, call: ToolCall, extensions: readonly ExtensionDefinition[] = INSTALLED): Promise<() => Promise<ToolResult>> {
   if (EXT_TOOL_NAME.test(call.tool)) return prepareExtensionTool(env, call, extensions);
-  const tool = ROLE_TOOL_NAMES[call.staffId].includes(call.tool) ? TOOLS[call.tool] : undefined;
+  const tool = (await roleToolNames(env, call.staffId)).includes(call.tool) ? TOOLS[call.tool] : undefined;
   if (!tool) throw new AppError("not_found", "この社員の役では使えないツール");
   const input = tool.schema.safeParse(call.input);
   if (!input.success) throw new AppError("validation_failed", "ツールの入力の形が違う");

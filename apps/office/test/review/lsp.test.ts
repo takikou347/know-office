@@ -1,6 +1,6 @@
 // エディタの補完の切り替え GET /api/v1/reviews/{nodeId}/lsp。Origin、ログインセッション、配信の作業トークン、nodeId、レビュー、ルールの順に確かめ、勤務の外は EDITOR_WAKE で起こすかを決め、木が無い時だけ tarball を流す (タスクとレビューの 3.2)
 import { gzipSync } from "node:zlib";
-import { LSP_TREE_BYTES, newId, Problem, type StaffId } from "@know-office/core";
+import { LSP_TREE_BYTES, newId, Problem, type StaffJob } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -24,7 +24,7 @@ type LspWorld = { box: FakeBox; editor: EditorLsp; timers: ManualTimers; screens
 /** 開いたレビュー */
 let task = "";
 /** 社員ごとの補完の DO の中身 */
-let lsp: Record<StaffId, LspWorld>;
+let lsp: Record<StaffJob, LspWorld>;
 /** 社員の勤務の状態を差し替える。null なら本物の状態 */
 let shiftState: string | null = null;
 
@@ -49,8 +49,8 @@ function wire(w: WorkWorld): void {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const env = w.gate.env as unknown as Record<string, unknown>;
   env["WORKSPACE"] = {
-    idFromName: (name: StaffId) => ({ toString: () => `ws-${name}`, name }),
-    get: (id: { name: StaffId }) => {
+    idFromName: (name: StaffJob) => ({ toString: () => `ws-${name}`, name }),
+    get: (id: { name: StaffJob }) => {
       const l = lsp[id.name];
       return {
         ...workspaceFake(w.gate.workspaces[id.name]),
@@ -77,10 +77,10 @@ function wire(w: WorkWorld): void {
     },
   };
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  const staffNs = env["STAFF"] as { idFromName(name: StaffId): StaffId; get(id: StaffId): { status(now: number): Promise<{ state: string }> } };
+  const staffNs = env["STAFF"] as { idFromName(name: StaffJob): StaffJob; get(id: StaffJob): { status(now: number): Promise<{ state: string }> } };
   env["STAFF"] = {
-    idFromName: (name: StaffId) => staffNs.idFromName(name),
-    get: (id: StaffId) => {
+    idFromName: (name: StaffJob) => staffNs.idFromName(name),
+    get: (id: StaffJob) => {
       const real = staffNs.get(id);
       return { ...real, status: async (now: number) => ({ ...(await real.status(now)), ...(shiftState === null ? {} : { state: shiftState }) }) };
     },

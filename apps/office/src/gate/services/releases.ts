@@ -11,6 +11,7 @@ import { clockAt } from "../work/attendance.ts";
 import { type Forge, notifyStaff } from "../work/loop.ts";
 import { type Actor, intakeProject, newNodeRow, recordCreated } from "../work/nodes.ts";
 import { latestRelease, usersOf } from "./status.ts";
+import { activeStaffRow, pickStaff } from "../work/roster.ts";
 
 /** ライブラリの公開で読む package.json。knowidea-ui の 4 つのパッケージと説明のサイト。無い道は読まない */
 export const LIBRARY_MANIFESTS = ["packages/tokens/package.json", "packages/css/package.json", "packages/icons/package.json", "packages/ui/package.json", "apps/docs/package.json"] as const;
@@ -180,7 +181,8 @@ async function bumpTask(env: Bindings, library: ServiceRow, user: { serviceId: s
   const source = `${BUMP_SOURCE}:${user.serviceId}:${version}`;
   const [owner] = await drizzle(env.DB).select({ repo: services.repo }).from(services).where(eq(services.id, user.serviceId)).limit(1);
   const project = await intakeProject(env, user.serviceId, actor);
-  const assignee = user.staffId === "president" || user.staffId === "reviewer" ? user.staffId : "builder";
+  // サービスの担当が在籍ならその社員に、居なければ手の空いた開発担当に頼む
+  const assignee = user.staffId !== null && (await activeStaffRow(env.DB, user.staffId)) ? user.staffId : await pickStaff(env.DB, "builder");
   const task = await newNodeRow(
     env,
     {

@@ -7,11 +7,18 @@ import { flag, id, json, time } from "./columns.ts";
 /** 社員 */
 export const staff = sqliteTable("staff", {
   id: id(),
+  job: text("job", { enum: ["president", "builder", "reviewer"] }).notNull(),
   role: text("role").notNull(),
   bossId: text("boss_id"),
   model: text("model").notNull(),
   effort: text("effort").notNull(),
   promptVersion: integer("prompt_version").notNull(),
+  /** この社員だけの勤務の時刻。null は全体の勤務の時刻 */
+  schedule: json("schedule"),
+  /** 設定の版。設定を直すたびに 1 足す */
+  version: integer("version").notNull().default(1),
+  /** 削除した時刻。null は在籍 */
+  retiredAt: time("retired_at"),
   createdAt: time("created_at").notNull(),
 });
 

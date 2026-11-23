@@ -129,6 +129,8 @@ export const WorkTicketClaims = z
     exp: z.number().int().positive(),
     // 呼び出しを始めた要求の traceId。ゲートウェイはワークスペースからの要求をこの traceId で記録する
     trc: z.string().regex(/^[0-9a-f]{32}$/).optional(),
+    // 作業を始めた時の社員のモデル。Claude のプロキシはこのモデルと軽いモデルだけを通す。前の版で発行した物には無い
+    mdl: z.string().max(64).optional(),
   })
   .strict();
 

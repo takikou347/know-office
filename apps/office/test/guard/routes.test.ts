@@ -178,7 +178,7 @@ describe("止めた記録", () => {
     expect(verdict.status).toBe(201);
     expect(await data(verdict)).toMatchObject({ stopId: id, kind: "verdict", by: "owner" });
     const detail = await data(await call("GET", `/api/v1/guard/stops/${id}`, headers));
-    expect(detail).toMatchObject({ id, verdict: "false", rulesVersion: 0, model: "claude-opus-5-5", externalSources: [] });
+    expect(detail).toMatchObject({ id, verdict: "false", rulesVersion: 0, model: "claude-sonnet-5-5", externalSources: [] });
     expect(z.object({ recentOps: z.array(z.object({ type: z.string() }).loose()) }).loose().parse(detail).recentOps.map((op) => op.type)).toEqual(["tool_call", "rule_denied"]);
     expect((await call("GET", "/api/v1/guard/stops/0190f4a8-0000-7000-8000-00000000ffff", headers)).status).toBe(404);
     // 社員にひもづかない止めた記録はモデルを持たない

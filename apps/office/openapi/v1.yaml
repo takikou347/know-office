@@ -876,10 +876,7 @@ components:
           type: array
           items:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
             description: 社員 ID。役割ごとに固定
         nodes:
           type: integer
@@ -1006,11 +1003,7 @@ components:
           type:
             - string
             - "null"
-          enum:
-            - president
-            - builder
-            - reviewer
-            - null
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
           description: 説明文に決まりを足す社員。説明文の案だけが持つ
         stopIds:
           type: array
@@ -1100,10 +1093,7 @@ components:
       properties:
         staffId:
           type: string
-          enum:
-            - president
-            - builder
-            - reviewer
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
           description: 社員 ID。役割ごとに固定
         day:
           type: string
@@ -1208,10 +1198,7 @@ components:
           description: UUID v7
         staffId:
           type: string
-          enum:
-            - president
-            - builder
-            - reviewer
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
           description: 社員 ID。役割ごとに固定
         day:
           type: string
@@ -1439,11 +1426,8 @@ components:
           description: タスクだけが持ち、タスクには要る
         assignee:
           type: string
-          enum:
-            - president
-            - builder
-            - reviewer
-          description: 社員 ID。役割ごとに固定
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+          description: 社員 ID
         priority:
           type: integer
           minimum: 0
@@ -1518,11 +1502,8 @@ components:
           maxLength: 20000
         assignee:
           type: string
-          enum:
-            - president
-            - builder
-            - reviewer
-          description: 社員 ID。役割ごとに固定
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+          description: 社員 ID
         priority:
           type: integer
           minimum: 0
@@ -1815,11 +1796,14 @@ components:
       properties:
         id:
           type: string
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+          description: 社員 ID
+        job:
+          type: string
           enum:
             - president
             - builder
             - reviewer
-          description: 社員 ID。役割ごとに固定
         role:
           type: string
         bossId:
@@ -1835,6 +1819,7 @@ components:
           type: integer
       required:
         - id
+        - job
         - role
         - bossId
         - model
@@ -2269,10 +2254,7 @@ components:
           maxLength: 2000
         staffId:
           type: string
-          enum:
-            - president
-            - builder
-            - reviewer
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
           description: "`prototype` に進める時に決める担当の社員"
         repo:
           type: string
@@ -2400,15 +2382,49 @@ components:
       properties:
         id:
           type: string
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+          description: 社員 ID
+        job:
+          type: string
           enum:
             - president
             - builder
             - reviewer
-          description: 社員 ID。役割ごとに固定
         role:
           type: string
+        bossId:
+          type:
+            - string
+            - "null"
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
         model:
           type: string
+        schedule:
+          type:
+            - object
+            - "null"
+          properties:
+            start:
+              type: string
+              pattern: ^([01]\d|2[0-3]):[0-5]\d$
+            end:
+              type: string
+              pattern: ^([01]\d|2[0-3]):[0-5]\d$
+            days:
+              type: array
+              items:
+                type: integer
+                minimum: 0
+                maximum: 6
+          required:
+            - start
+            - end
+            - days
+          additionalProperties: false
+          description: この社員だけの勤務の時刻。null は全体の勤務の時刻
+        version:
+          type: integer
+          description: 設定の版。設定を直す時に送る
         state:
           type: string
           enum:
@@ -2430,8 +2446,12 @@ components:
           type: integer
       required:
         - id
+        - job
         - role
+        - bossId
         - model
+        - schedule
+        - version
         - state
         - nodeId
         - nodeTitle
@@ -2447,10 +2467,7 @@ components:
           description: UUID v7
         staffId:
           type: string
-          enum:
-            - president
-            - builder
-            - reviewer
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
           description: 社員 ID。役割ごとに固定
         day:
           type: string
@@ -2522,10 +2539,7 @@ components:
           format: date-time
         staffId:
           type: string
-          enum:
-            - president
-            - builder
-            - reviewer
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
           description: 社員 ID。役割ごとに固定
         nodeId:
           type:
@@ -2721,11 +2735,7 @@ components:
           type:
             - string
             - "null"
-          enum:
-            - president
-            - builder
-            - reviewer
-            - null
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
           description: 作った社員
         repo:
           type: string
@@ -5551,10 +5561,7 @@ paths:
           in: query
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
             description: 社員 ID。役割ごとに固定
           required: false
           description: 社員 ID。役割ごとに固定
@@ -5612,10 +5619,7 @@ paths:
       parameters:
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
             description: 社員 ID。役割ごとに固定
           required: true
           description: 社員 ID。役割ごとに固定
@@ -5790,10 +5794,7 @@ paths:
           in: query
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
             description: 社員 ID。付けた時は、その社員のタスクだけを木にせず ID の順に並べる (children は空)
           required: false
           description: 社員 ID。付けた時は、その社員のタスクだけを木にせず ID の順に並べる (children は空)
@@ -6740,10 +6741,10 @@ paths:
         - org
       summary: 組織図
       x-steps:
-        - "`cursor` を社員 ID として読む"
-        - "`staff` と最新の `staff_prompts` を取得し、上の役から下の役の順に並べ、`cursor` の後から `limit` 件を返す"
+        - "`cursor` を社員 ID として読み、削除した社員も含めて並びの鍵 (社長、作った時刻、ID) を引く"
+        - 在籍の `staff` と最新の `staff_prompts` を取得し、社長、作った順、ID の順に並べ、`cursor` の鍵より後から `limit` 件を返す
       x-errors:
-        - "400 `malformed_request`: `cursor` が社員 ID でない"
+        - "400 `malformed_request`: `cursor` が社員 ID でないか、居ない社員"
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -6780,12 +6781,12 @@ paths:
       description: |-
         処理の流れ:
 
-        1. `cursor` を社員 ID として読む
-        2. `staff` と最新の `staff_prompts` を取得し、上の役から下の役の順に並べ、`cursor` の後から `limit` 件を返す
+        1. `cursor` を社員 ID として読み、削除した社員も含めて並びの鍵 (社長、作った時刻、ID) を引く
+        2. 在籍の `staff` と最新の `staff_prompts` を取得し、社長、作った順、ID の順に並べ、`cursor` の鍵より後から `limit` 件を返す
 
         このルート固有のエラー:
 
-        - 400 `malformed_request`: `cursor` が社員 ID でない
+        - 400 `malformed_request`: `cursor` が社員 ID でないか、居ない社員
       security: *a1
   /api/v1/staff/{staffId}/prompt:
     put:
@@ -6804,23 +6805,22 @@ paths:
 
         このルート固有のエラー:
 
+        - 404 `not_found`: 在籍の社員でない (削除した社員を含む)
         - 409 `conflict`: バージョンが異なる
       x-steps:
         - "`version` が現在と一致することを確認する"
         - "`staff_prompts` への追加と `staff.prompt_version` の更新を 1 回のバッチで行う。どちらも `version` が現在のままの時だけ書く"
         - 監査ログに `staff.prompt` を記録する。次のタスクから反映される
       x-errors:
+        - "404 `not_found`: 在籍の社員でない (削除した社員を含む)"
         - "409 `conflict`: バージョンが異なる"
       parameters:
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
-            description: 社員 ID。役割ごとに固定
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+            description: 社員 ID
           required: true
-          description: 社員 ID。役割ごとに固定
+          description: 社員 ID
           name: staffId
           in: path
       requestBody:
@@ -6934,8 +6934,8 @@ paths:
 
         1. 承認の項目を取得し、未決定であることを確認する
         2. 承認の時、読んだ行の種類が `external_integration` か `cost_increase` ならパスキーの確認を求める。差し戻しは求めない
-        3. 承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は増えず、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る
-        4. `approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら `staff` を、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す
+        3. 承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は承認では増えず (オーナーが社員の画面で足す)、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る
+        4. `approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら在籍の社員の時だけ `staff` を書いて設定の版を 1 上げ、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す
         5. タスクに `approval_decided` の出来事を残し、担当の社員に知らせる。ここが失敗しても決定は残り、エラーログに残す
         6. 監査ログに `approval.decide` を記録する
 
@@ -6948,8 +6948,8 @@ paths:
       x-steps:
         - 承認の項目を取得し、未決定であることを確認する
         - 承認の時、読んだ行の種類が `external_integration` か `cost_increase` ならパスキーの確認を求める。差し戻しは求めない
-        - 承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は増えず、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る
-        - "`approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら `staff` を、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す"
+        - 承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は承認では増えず (オーナーが社員の画面で足す)、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る
+        - "`approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら在籍の社員の時だけ `staff` を書いて設定の版を 1 上げ、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す"
         - タスクに `approval_decided` の出来事を残し、担当の社員に知らせる。ここが失敗しても決定は残り、エラーログに残す
         - 監査ログに `approval.decide` を記録する
       x-errors:
@@ -8121,15 +8121,15 @@ paths:
         - staff
       summary: 社員の現在の状態
       description: |-
-        3 人の状態、担当中のタスク、今日の勤務時間に、組織図の役の名前とモデルを足す。
+        在籍の社員の状態、担当中のタスク、今日の勤務時間に、職種、組織図の役の名前と上司、モデル、勤務の時刻、設定の版を足す。
 
         処理の流れ:
 
-        1. 3 人分の `StaffDO.status()` を並行して呼ぶ。1 人でも答えなければ 500 にする
-        2. `staff` の役の名前とモデルを足す
+        1. `staff` から在籍の社員を社長、作った順、ID の順に読む
+        2. 社員ごとの `StaffDO.status()` を並行して呼ぶ。1 人でも答えなければ 500 にする
       x-steps:
-        - 3 人分の `StaffDO.status()` を並行して呼ぶ。1 人でも答えなければ 500 にする
-        - "`staff` の役の名前とモデルを足す"
+        - "`staff` から在籍の社員を社長、作った順、ID の順に読む"
+        - 社員ごとの `StaffDO.status()` を並行して呼ぶ。1 人でも答えなければ 500 にする
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -8183,13 +8183,10 @@ paths:
       parameters:
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
-            description: 社員 ID。役割ごとに固定
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+            description: 社員 ID
           required: true
-          description: 社員 ID。役割ごとに固定
+          description: 社員 ID
           name: staffId
           in: path
         - schema:
@@ -8266,13 +8263,10 @@ paths:
       parameters:
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
-            description: 社員 ID。役割ごとに固定
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+            description: 社員 ID
           required: true
-          description: 社員 ID。役割ごとに固定
+          description: 社員 ID
           name: staffId
           in: path
       requestBody:
@@ -8354,13 +8348,10 @@ paths:
       parameters:
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
-            description: 社員 ID。役割ごとに固定
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+            description: 社員 ID
           required: true
-          description: 社員 ID。役割ごとに固定
+          description: 社員 ID
           name: staffId
           in: path
         - schema:
@@ -8431,10 +8422,7 @@ paths:
       parameters:
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
             description: 社員 ID。役割ごとに固定
           required: true
           description: 社員 ID。役割ごとに固定
@@ -8507,10 +8495,7 @@ paths:
       parameters:
         - schema:
             type: string
-            enum:
-              - president
-              - builder
-              - reviewer
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
             description: 社員 ID。役割ごとに固定
           required: true
           description: 社員 ID。役割ごとに固定

@@ -1,5 +1,5 @@
 // ゲートウェイをテストで起こす。D1 は手元の本物、Access と Claude API は代わりの物、DO はゲートウェイから見た境目の代わりを渡す
-import { AppError, type AuditInput, type Clock, type Fetcher, type StaffId } from "@know-office/core";
+import { AppError, type AuditInput, type Clock, type Fetcher, type StaffId, type StaffJob } from "@know-office/core";
 import { createFakeAccess, type FakeAccess } from "../../dev/access.ts";
 import { createFakeClaude, type FakeClaude } from "../../dev/claude.ts";
 import { createFakeGitHub, type FakeGitHub } from "../../dev/github.ts";
@@ -22,7 +22,7 @@ import type { TestD1 } from "./d1.ts";
 import { accessKeyPair, githubAppKey } from "./keys.ts";
 import { fakeLive, type TestLive } from "./live.ts";
 import { overRpc } from "./rpc.ts";
-import { type RunMarks, staffRunFakes, workspaceFake, type WorkspaceSeen } from "./staff-runs.ts";
+import { named, type RunMarks, staffRunFakes, workspaceFake, type WorkspaceSeen } from "./staff-runs.ts";
 
 const FAKES = "http://localhost:5199";
 /** テストのゲートウェイの origin。app.request は http://localhost に要求を出す */
@@ -36,7 +36,6 @@ export const OWNER = "owner@example.com";
 
 /** 代わりの GitHub の compare が返すファイルの上限。GitHub と同じ */
 const COMPARE_LIMIT = 300;
-
 /** 代わりの GitHub の compare が返す 1 ファイル。GitHub の形 */
 export type CompareFile = { filename: string; previous_filename?: string; status?: string; patch?: string };
 
@@ -71,9 +70,9 @@ export type TestGate = {
   /** 全体とサービスの数え方。GuardDO と同じ物 */
   office: OfficeGuard;
   /** 社員ごとの、勤務と数え方の代わり。StaffDO と同じ物 */
-  staff: Record<StaffId, TestStaff>;
+  staff: Record<StaffJob, TestStaff>;
   /** 社員ごとのワークスペースの代わり。差し替えた作業トークンを並べ、down なら届かない */
-  workspaces: Record<StaffId, TestWorkspace>;
+  workspaces: Record<StaffJob, TestWorkspace>;
   /** 配信 DO の代わり。配った出来事と、出した作業トークン */
   live: TestLive;
   /** 自動停止が外へ頼む口の代わり。戻したサービスと、レビュー担当の答え */
@@ -231,7 +230,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
   const storage: Record<string, number> = { DB: 1024, REC_2026: 2048, REC_2027: 1024 };
   const guard = new GuardBook(memoryStorage(), () => Promise.resolve(), (at, count) => noticeDenied(env, at, count, options.clock));
   const office = new OfficeGuard(memoryStorage());
-  const staff: Record<StaffId, TestStaff> = { president: testStaff("president", options.d1), builder: testStaff("builder", options.d1), reviewer: testStaff("reviewer", options.d1) };
+  const staff: Record<StaffJob, TestStaff> = { president: testStaff("president", options.d1), builder: testStaff("builder", options.d1), reviewer: testStaff("reviewer", options.d1) };
   const deps: TestGate["deps"] = {
     rollbacks: [],
     answer: null,
@@ -255,12 +254,12 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     releaseStop: office.releaseStop.bind(office), dropClaim: office.dropClaim.bind(office),
     restoreStop: office.restoreStop.bind(office),
   };
-  const workspaces: Record<StaffId, TestWorkspace> = { president: { tickets: [], runs: [], down: false }, builder: { tickets: [], runs: [], down: false }, reviewer: { tickets: [], runs: [], down: false } };
-  const workspaceDo = (id: StaffId) => workspaceFake(workspaces[id]);
+  const workspaces: Record<StaffJob, TestWorkspace> = { president: { tickets: [], runs: [], down: false }, builder: { tickets: [], runs: [], down: false }, reviewer: { tickets: [], runs: [], down: false } };
+  const workspaceDo = (id: StaffId) => workspaceFake(named(workspaces, id));
   const runMarks: RunMarks = new Map();
   // StaffDO は勤務の本と数え方の本を持つ。名前ごとに別の代わりを返す
   const staffDo = (id: StaffId) => {
-    const { book, guard: g } = staff[id];
+    const { book, guard: g } = named(staff, id);
     return {
       status: book.status.bind(book),
       wake: async (now: number) => {

@@ -1,5 +1,5 @@
 // 5 分ごとの定期ジョブ。部分ごとの稼働を残し、社員 DO の alarm を掛けて持っているタスクの呼び出しを始めさせ、D1 の使った量を見て上限に近い置き場を知らせ、サービスの様子を読み、最長時間を過ぎたタスクを止め、手順を通らずに変わった基準で全体を止め、送ったバッチ処理の結果を入れ、GitHub に写せなかったレビューを写し直し、レビューのタスクの取りこぼしを立て直し、done のまま残った main への入れ漏れを拾う (社員と勤怠の 3.2、ログインと記録の 3.5、自動停止の 3.1、サービスと拡張の 3.6、タスクとレビューの 3.2)
-import { type Clock, newId, StaffId } from "@know-office/core";
+import { type Clock, newId } from "@know-office/core";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { notices } from "../db/main.ts";
@@ -20,6 +20,7 @@ import { announceNotice } from "../live/publish.ts";
 import { STORAGE_LIMIT_BYTES, storageUses } from "../ledger/storage.ts";
 import { checkHealth } from "../ledger/uptime.ts";
 import { pollBatches, type WeeklyDeps } from "./weekly.ts";
+import { activeStaff } from "../work/roster.ts";
 
 /** 上限に対してこの割合に届いたら通知を出す */
 const WARN_RATIO = 0.8;
@@ -78,10 +79,14 @@ export function runScheduled(env: Bindings, ctx: { waitUntil(promise: Promise<un
   const reviewed: GuardDeps = { ...UNCONNECTED_DEPS, review: connectReview(env, weekly?.fetch ?? ((input, init) => fetch(input, init)), clock) };
   // 新しい社員 DO は誰かが呼ぶまで alarm を持たず、9 時に出勤しない。プレビューは社員を働かせない (Claude を呼ばない)
   if (env.ENVIRONMENT !== "preview") {
-    for (const staffId of StaffId.options) {
-      const target = env.STAFF.get(env.STAFF.idFromName(staffId));
-      ctx.waitUntil(target.arm(clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "staff_arm_failed", error }, clock)));
-    }
+    const arm = async () => {
+      for (const { id } of await activeStaff(env.DB)) {
+        await env.STAFF.get(env.STAFF.idFromName(id))
+          .arm(clock.now())
+          .catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "staff_arm_failed", error }, clock));
+      }
+    };
+    ctx.waitUntil(arm().catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "staff_arm_failed", error }, clock)));
   }
   if (weekly) {
     const forge = vaultForge(env, { fetcher: weekly.fetch, clock, cache: SHARED_TOKENS });

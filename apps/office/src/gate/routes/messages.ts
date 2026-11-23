@@ -15,6 +15,7 @@ import { readOrders } from "../work/chat-orders.ts";
 import { callForMessage, intakeMessage } from "../work/loop.ts";
 import { ordersOfMessages } from "../work/orders.ts";
 import { recordsOf } from "../work/nodes.ts";
+import { jobOf } from "../work/roster.ts";
 
 const router = createRouter();
 
@@ -287,12 +288,15 @@ export const messageRoutes = router
   .openapi(createMessageRoute, async (c) => {
     const { staffId } = c.req.valid("param");
     const input = c.req.valid("json");
+    // 削除した社員には話しかけない
+    const job = await jobOf(c.env.DB, staffId);
+    if (job === null) throw new AppError("not_found", "在籍の社員でない");
     const status = await c.env.STAFF.get(c.env.STAFF.idFromName(staffId)).status(c.var.clock.now());
     if (status.state === "stopped") throw new AppError("stopped", "社員が止まっている");
     const message = await appendMessage(c.env, { staffId, sender: "owner", body: input.body, nodeId: input.nodeId ?? null, traceId: c.var.traceId }, c.var.clock);
     const pending = { id: message.id, at: Date.parse(message.at), body: input.body };
     // 走っていない社長への発言は、社長が分けるタスクにする。走っている社長には今の呼び出しに渡し、操縦を残す (社長は自分でタスクを足せる)
-    const intake = staffId === "president" && !inRun(status);
+    const intake = job === "president" && !inRun(status);
     // 発言は足した後に渡す。渡せなくても発言は残り、次の呼び出しの頭で渡す
     const delivered: Message = intake ? await intakeOf(c.env, message, pending, c.var.traceId, c.var.clock) : await runOf(c.env, message, { staffId, ...status }, pending, c.var.clock.now());
     // 抜き出しを呼び出しより先にし、今日を休みにと言った発言では社員を呼び出さない。もう休みで足さなかった時も同じ。指示と頼みが混ざった発言の頼みを落とさないよう、指示を抜き出してもタスクにはする

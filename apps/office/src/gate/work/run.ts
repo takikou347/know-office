@@ -1,6 +1,6 @@
 // 社員が取ったタスクの SDK の呼び出しを始める。最初の runs、作り直しと再開の後の続き、失敗の数え方と鍵の失敗の間の止め方を持つ (社員が考えるの 3.3、タスクとレビューの 3.1)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, log, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, type WorkResult } from "@know-office/core";
+import { AppError, log, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, StaffJob, type WorkResult } from "@know-office/core";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, notices, staff, staffPrompts } from "../db/main.ts";
@@ -67,8 +67,9 @@ export async function claudeBlocked(db: D1Database): Promise<boolean> {
  */
 export async function runBase(env: Bindings, staffId: StaffId, nodeId: string, promptVersion: number | null): Promise<Pick<RunInput, "model" | "effort" | "systemPrompt" | "tools" | "extensionTools">> {
   const orm = drizzle(env.DB);
-  const [who] = await orm.select().from(staff).where(eq(staff.id, staffId)).limit(1);
-  if (!who) throw new AppError("internal", "社員が無い");
+  const [who] = await orm.select().from(staff).where(and(eq(staff.id, staffId), isNull(staff.retiredAt))).limit(1);
+  // 削除した社員は呼び出さない。削除の書き込みと作業トークンの失効の間に来た呼び出しもここで止まる
+  if (!who) throw new AppError("conflict", "在籍の社員でない");
   const [prompt] = await orm
     .select({ body: staffPrompts.body })
     .from(staffPrompts)
@@ -79,7 +80,7 @@ export async function runBase(env: Bindings, staffId: StaffId, nodeId: string, p
   const effort = EFFORT_BY_KIND[node?.taskKind ?? ""] ?? RunInput.shape.effort.parse(who.effort);
   // 組織の決まりを先に、役目の説明文を後に、変わらない順で並べ、読み直しの割引を効かせる
   // 入れている拡張のツールは役によらず渡す。動かす前にゲートウェイがルールで判断する
-  return { model: who.model, effort, systemPrompt: `${ORG_RULES}\n\n${prompt.body}`, tools: [...ROLE_TOOLS[staffId]], extensionTools: await extensionToolSpecs(env) };
+  return { model: who.model, effort, systemPrompt: `${ORG_RULES}\n\n${prompt.body}`, tools: [...ROLE_TOOLS[StaffJob.parse(who.job)]], extensionTools: await extensionToolSpecs(env) };
 }
 
 /**
@@ -150,7 +151,7 @@ export async function startRun(env: Bindings, staffId: StaffId, now: number, tra
   const base = await runBase(env, staffId, nodeId, promptVersion);
   // タスクの外で届いた、まだ渡していないオーナーの発言を指示の後ろに足す
   const head = await headMessages(env, staffId, now);
-  const { token, jti } = await issueTicket(env, staffId, nodeId, now, traceId);
+  const { token, jti } = await issueTicket(env, staffId, nodeId, now, traceId, base.model);
   try {
     await env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId)).run(RunInput.parse({ ...base, nodeId, ticket: token, prompt: withOwnerMessages(taskPrompt(row), head.picked) }));
   } catch (error) {

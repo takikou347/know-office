@@ -1,5 +1,5 @@
 // 社長への発言から社長が分けるタスクを足す。走っている社長には今の呼び出しに渡し、ほかの時は受け付けのプロジェクトの下に足して印 task を付ける (タスクとレビューの 3.1 の 7、社員が考えるの 3.9)
-import type { StaffId } from "@know-office/core";
+import type { StaffJob } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { appendMessage } from "../../src/gate/routes/messages.ts";
@@ -42,7 +42,7 @@ const RunCall = z.object({ prompt: z.string() }).loose();
  * @param staffId 社員 ID
  * @returns 返事のステータスと data
  */
-async function say(body: string, staffId: StaffId = "president"): Promise<{ status: number; data: z.infer<typeof Sent> }> {
+async function say(body: string, staffId: StaffJob = "president"): Promise<{ status: number; data: z.infer<typeof Sent> }> {
   const res = await gate.request(`/api/v1/staff/${staffId}/messages`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ body }) });
   const json: unknown = await res.json();
   return { status: res.status, data: res.ok ? z.object({ data: Sent }).loose().parse(json).data : Sent.parse({ id: "", delivery: null, deliveredAt: null, taskId: null, orders: [] }) };
@@ -70,7 +70,7 @@ function plans(): Promise<Record<string, unknown>[]> {
  * 社員のタスクを todo で置く
  * @param staffId 社員 ID
  */
-async function seedTask(staffId: StaffId): Promise<void> {
+async function seedTask(staffId: StaffJob): Promise<void> {
   await d1.DB.prepare(
     "INSERT INTO nodes (id, kind, parent_id, scope, title, body, status, priority, assignee, task_kind, repo, created_by, created_at, updated_at) VALUES (?, 'task', NULL, 'office', '勤怠の表を作る', '本文', 'todo', 1, ?, 'build', NULL, 'owner', 0, 0)",
   )
@@ -82,7 +82,7 @@ async function seedTask(staffId: StaffId): Promise<void> {
  * 社員を出勤させる
  * @param staffId 社員 ID
  */
-async function clockIn(staffId: StaffId): Promise<void> {
+async function clockIn(staffId: StaffJob): Promise<void> {
   const now = clock.now();
   await gate.staff[staffId].book.wake(now - 2 * 60 * 60 * 1000);
   await gate.staff[staffId].book.wake(now - 60 * 60 * 1000);
@@ -93,7 +93,7 @@ async function clockIn(staffId: StaffId): Promise<void> {
  * 社員にタスクを取らせ、最初の呼び出しを始めさせる
  * @param staffId 社員 ID
  */
-async function takeAndStart(staffId: StaffId): Promise<void> {
+async function takeAndStart(staffId: StaffJob): Promise<void> {
   await seedTask(staffId);
   await clockIn(staffId);
   await gate.env.STAFF.get(gate.env.STAFF.idFromName(staffId)).pull(clock.now());

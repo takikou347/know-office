@@ -2,7 +2,7 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { AppError, Approval, ApprovalStatus, DecisionInput, newId, OrgStaff, PromptVersion, StaffId, UpdatePromptInput } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
-import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, type SQL, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { approvals, nodes, staff, staffPrompts } from "../db/main.ts";
@@ -21,7 +21,7 @@ import { loadOrg } from "../work/org.ts";
 const router = createRouter();
 
 const jsonBody = <T>(schema: T) => ({ content: { "application/json": { schema } }, required: true });
-const StaffParam = z.object({ staffId: StaffId.openapi({ param: { name: "staffId", in: "path" }, description: "社員 ID。役割ごとに固定" }) }).strict();
+const StaffParam = z.object({ staffId: StaffId.openapi({ param: { name: "staffId", in: "path" }, description: "社員 ID" }) }).strict();
 const ApprovalParam = z.object({ approvalId: z.uuid().openapi({ param: { name: "approvalId", in: "path" }, description: "UUID v7" }) }).strict();
 
 const listOrgRoute = createRoute({
@@ -30,8 +30,8 @@ const listOrgRoute = createRoute({
   operationId: "listOrg",
   tags: ["org"],
   summary: "組織図",
-  "x-steps": ["`cursor` を社員 ID として読む", "`staff` と最新の `staff_prompts` を取得し、上の役から下の役の順に並べ、`cursor` の後から `limit` 件を返す"],
-  "x-errors": ["400 `malformed_request`: `cursor` が社員 ID でない"],
+  "x-steps": ["`cursor` を社員 ID として読み、削除した社員も含めて並びの鍵 (社長、作った時刻、ID) を引く", "在籍の `staff` と最新の `staff_prompts` を取得し、社長、作った順、ID の順に並べ、`cursor` の鍵より後から `limit` 件を返す"],
+  "x-errors": ["400 `malformed_request`: `cursor` が社員 ID でないか、居ない社員"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(OrgStaff), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -48,7 +48,7 @@ const updatePromptRoute = createRoute({
     "`staff_prompts` への追加と `staff.prompt_version` の更新を 1 回のバッチで行う。どちらも `version` が現在のままの時だけ書く",
     "監査ログに `staff.prompt` を記録する。次のタスクから反映される",
   ],
-  "x-errors": ["409 `conflict`: バージョンが異なる"],
+  "x-errors": ["404 `not_found`: 在籍の社員でない (削除した社員を含む)", "409 `conflict`: バージョンが異なる"],
   request: { params: StaffParam, body: jsonBody(UpdatePromptInput) },
   responses: { 200: okResponse(PromptVersion), ...problems(400, 401, 403, 404, 409, 413, 415, 422, 429, 500) },
 });
@@ -74,8 +74,8 @@ const decideApprovalRoute = createRoute({
   "x-steps": [
     "承認の項目を取得し、未決定であることを確認する",
     "承認の時、読んだ行の種類が `external_integration` か `cost_increase` ならパスキーの確認を求める。差し戻しは求めない",
-    "承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は増えず、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る",
-    "`approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら `staff` を、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す",
+    "承認の時は種類を確かめる。役割の変更は `payload` を `target`、`role`、`bossId` の形で確かめ、閉じる案は対象のサービスがサービスか運用の段階にある事を確かめる。社員の追加、外部連携、費用の増える事は承認を残すだけで、社員は承認では増えず (オーナーが社員の画面で足す)、外へは送らない。`merge`、`deploy`、`prompt_rule`、`guard_change` はほかの画面で決めるので承認を断る",
+    "`approvals` を未決定の時だけ更新し、同じバッチで、役割の変更なら在籍の社員の時だけ `staff` を書いて設定の版を 1 上げ、閉じる案なら `services.stage` と `service_events` を書き、`payload.nodeId` のタスクが `waiting_owner` のままなら `todo` に戻す",
     "タスクに `approval_decided` の出来事を残し、担当の社員に知らせる。ここが失敗しても決定は残り、エラーログに残す",
     "監査ログに `approval.decide` を記録する",
   ],
@@ -98,7 +98,7 @@ const Waiting = z.object({ nodeId: z.uuid() }).loose();
 
 /** 承認する前にパスキーで確かめる種類。お金が増える事と外とのつながりが増える事 */
 const STEP_UP_KINDS: ReadonlySet<string> = new Set(["external_integration", "cost_increase"]);
-/** 承認を残すだけで、ほかを書かない種類。社員は 3 人に決まっていて、外へは送らない */
+/** 承認を残すだけで、ほかを書かない種類。社員はオーナーが社員の画面で足し、外へは送らない */
 const RECORD_ONLY_KINDS: ReadonlySet<string> = new Set(["staff_add", "external_integration", "cost_increase"]);
 /** ここで承認できる種類。merge、deploy、prompt_rule、guard_change はレビューか守りの画面で決める */
 const DECIDABLE_KINDS: ReadonlySet<string> = new Set(["role_change", "service_close", ...RECORD_ONLY_KINDS]);
@@ -144,8 +144,8 @@ async function approvedEffects(db: D1Database, row: ApprovalRow, now: number): P
     before: [
       drizzle(db)
         .update(staff)
-        .set({ role: change.data.role, bossId: change.data.bossId })
-        .where(and(eq(staff.id, change.data.target), pending)),
+        .set({ role: change.data.role, bossId: change.data.bossId, version: sql`${staff.version} + 1` })
+        .where(and(eq(staff.id, change.data.target), isNull(staff.retiredAt), pending)),
     ],
     after: [],
     guard: undefined,
@@ -184,7 +184,7 @@ export const orgRoutes = router
     const { version, body } = c.req.valid("json");
     const now = c.var.clock.now();
     const orm = drizzle(c.env.DB);
-    const [who] = await orm.select({ promptVersion: staff.promptVersion }).from(staff).where(eq(staff.id, staffId)).limit(1);
+    const [who] = await orm.select({ promptVersion: staff.promptVersion }).from(staff).where(and(eq(staff.id, staffId), isNull(staff.retiredAt))).limit(1);
     if (!who) throw new AppError("not_found", "社員がいない");
     if (who.promptVersion !== version) throw new AppError("conflict", "バージョンが違う");
     const next = version + 1;
@@ -193,12 +193,12 @@ export const orgRoutes = router
       orm
         .insert(staffPrompts)
         .select(
-          sql`SELECT ${newId(clockAt(now))}, ${staffId}, ${next}, ${body}, 'owner', ${now} WHERE EXISTS (SELECT 1 FROM ${staff} WHERE ${staff.id} = ${staffId} AND ${staff.promptVersion} = ${version})`,
+          sql`SELECT ${newId(clockAt(now))}, ${staffId}, ${next}, ${body}, 'owner', ${now} WHERE EXISTS (SELECT 1 FROM ${staff} WHERE ${staff.id} = ${staffId} AND ${staff.promptVersion} = ${version} AND ${staff.retiredAt} IS NULL)`,
         ),
       orm
         .update(staff)
         .set({ promptVersion: next })
-        .where(and(eq(staff.id, staffId), eq(staff.promptVersion, version)))
+        .where(and(eq(staff.id, staffId), eq(staff.promptVersion, version), isNull(staff.retiredAt)))
         .returning({ id: staff.id }),
     ]);
     if (moved.length === 0) throw new AppError("conflict", "バージョンが違う");

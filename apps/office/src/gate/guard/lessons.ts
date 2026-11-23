@@ -12,6 +12,7 @@ import { clockAt } from "../work/attendance.ts";
 import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated } from "../work/nodes.ts";
 import { notifyStaff } from "../work/loop.ts";
 import { loadThresholds, thresholdsHash } from "./thresholds.ts";
+import { pickStaff } from "../work/roster.ts";
 
 const DAY = 24 * 60 * 60_000;
 
@@ -115,7 +116,7 @@ export async function decideLesson(env: Bindings, lessonId: string, decision: "a
     const project = await intakeProject(env, "office", actor);
     task = await newNodeRow(
       env,
-      { kind: "task", parentId: project.id, scope: "office", title: `ルールかツールを直す: ${row.cause}`, body: row.proposal, taskKind: "fix", assignee: "builder", source: `lesson:${row.id}` },
+      { kind: "task", parentId: project.id, scope: "office", title: `ルールかツールを直す: ${row.cause}`, body: row.proposal, taskKind: "fix", assignee: await pickStaff(env.DB, "builder"), source: `lesson:${row.id}` },
       actor,
     );
     before.push(insertWhen(env.DB, nodes, task, proposed));
@@ -131,7 +132,7 @@ export async function decideLesson(env: Bindings, lessonId: string, decision: "a
   if (z.array(z.unknown()).parse(results.at(-1)).length === 0) throw new AppError("conflict", "もう決めたか、説明文が変わった");
   if (task) {
     await recordCreated(env, task, actor);
-    await notifyStaff(env, "builder", now, false);
+    if (task.assignee !== null) await notifyStaff(env, task.assignee, now, false);
   }
   return { lesson: toLesson({ ...row, status, appliedAt: status === "applied" ? now : null }), task };
 }

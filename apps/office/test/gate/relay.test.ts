@@ -205,6 +205,24 @@ describe("Claude のプロキシ", () => {
     expect(await usageOf(work.nodeId)).toEqual([expect.objectContaining({ model: "claude-haiku-5-5", cost_micro_usd: 6 })]);
   });
 
+  it("作業トークンのモデルと Haiku だけを通し、作業中に社員のモデルを変えても同じ作業は通る", async () => {
+    const work = await startTask("builder", 9, "claude-sonnet-5-5");
+    await w.d1.DB.prepare("UPDATE staff SET model = 'claude-opus-5-5' WHERE id = 'builder'").run();
+    w.gate.claude.push({ content: [{ type: "text", text: "続ける" }] });
+    expect((await callClaude(work, messages("続ける", "claude-sonnet-5-5"))).status).toBe(200);
+    expect((await callClaude(work, messages("替える", "claude-opus-5-5"))).status).toBe(403);
+    w.gate.claude.push({ content: [{ type: "text", text: "軽い" }] });
+    expect((await callClaude(work, messages("題を付ける", "claude-haiku-5-5"))).status).toBe(200);
+  });
+
+  it("モデルの無い古い作業トークンは社員の行のモデルで確かめる", async () => {
+    const work = await startTask("builder", 9);
+    await w.d1.DB.prepare("UPDATE staff SET model = 'claude-opus-5-5' WHERE id = 'builder'").run();
+    expect((await callClaude(work, messages("前のモデル", "claude-sonnet-5-5"))).status).toBe(403);
+    w.gate.claude.push({ content: [{ type: "text", text: "今のモデル" }] });
+    expect((await callClaude(work, messages("今のモデル", "claude-opus-5-5"))).status).toBe(200);
+  });
+
   it("数えるだけの呼び出しは送るが、使った量には残さない", async () => {
     const work = await startTask();
     const res = await callClaude(work, { model: "claude-sonnet-5-5", system: SYSTEM, messages: [{ role: "user", content: "数える" }] }, "/v1/messages/count_tokens");

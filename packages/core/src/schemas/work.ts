@@ -4,12 +4,12 @@ import { TASK_KINDS } from "../master/task-kinds.ts";
 import { TASK_STATUSES } from "../master/task-statuses.ts";
 import { Meta } from "./common.ts";
 import { RepoName } from "./github.ts";
-import { StaffId } from "./workday.ts";
+import { StaffId, StaffJob } from "./workday.ts";
 import { z } from "./zod.ts";
 
 const Uuid = z.uuid().openapi({ description: "UUID v7" });
 const Scope = z.string().min(1).openapi({ description: "`office` またはサービスの ID" });
-const StaffParam = StaffId.openapi({ description: "社員 ID。役割ごとに固定" });
+const StaffParam = StaffId.openapi({ description: "社員 ID" });
 /** 期限の日。日本時間の日付 */
 const DueDay = z.iso.date().openapi({ description: "期限の日。日本時間の日付 YYYY-MM-DD" });
 const Entries = z.record(z.string(), z.unknown()).openapi({ additionalProperties: true });
@@ -133,6 +133,7 @@ export type UpdateNodeInput = z.infer<typeof UpdateNodeInput>;
 export const OrgStaff = z
   .object({
     id: StaffParam,
+    job: StaffJob,
     role: z.string(),
     bossId: z.string().nullable(),
     model: z.string(),

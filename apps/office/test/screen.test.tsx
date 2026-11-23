@@ -8,7 +8,7 @@ import { StaffDetail, staffTabOf } from "../src/screen/pages/staff/StaffPage.tsx
 import { renderAll } from "./helpers/render.ts";
 
 /** 社員の様子を描く時の社員 */
-const REVIEWER: StaffOverview = { id: "reviewer", role: "レビュー担当", model: "claude-opus-5-5", state: "working", nodeId: null, nodeTitle: null, workedMsToday: 0 };
+const REVIEWER: StaffOverview = { id: "reviewer", job: "reviewer", role: "レビュー担当", bossId: "president", schedule: null, version: 1, model: "claude-opus-5-5", state: "working", nodeId: null, nodeTitle: null, workedMsToday: 0 };
 
 describe("画面", () => {
   it("ホームは入口の様子の文を出さない", async () => {

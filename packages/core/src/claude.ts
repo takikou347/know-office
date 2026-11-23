@@ -1,6 +1,6 @@
 // Claude のモデルの単価表と、役ごとに使えるモデルと、使用の上限の見分け。費用は百万分の 1 ドルで出す (社員が考えるの 3.4、サービスと拡張の 3.5)
 import { ClaudeErrorBody, type SpendLimitKind } from "./schemas/claude.ts";
-import type { StaffId } from "./schemas/workday.ts";
+import type { StaffJob } from "./schemas/workday.ts";
 
 /** 社長とレビュー担当のモデル */
 export const OPUS = "claude-opus-5-5";
@@ -43,20 +43,28 @@ const PRICES: Record<typeof OPUS | typeof SONNET, Price> = {
   [SONNET]: { input: 2000, output: 10_000, cacheRead: 100, cacheWrite: 2500, cacheWrite1h: 4000 },
 };
 
-/** 役ごとに使えるモデル。先頭がその役のモデル */
-const ROLE_MODELS: Record<StaffId, readonly ClaudeModel[]> = {
-  president: [OPUS, HAIKU],
-  reviewer: [OPUS, HAIKU],
-  builder: [SONNET, HAIKU],
-};
+/** 社員に選べるモデル。画面の選ぶ欄の元 */
+export const SELECTABLE_MODELS: readonly ClaudeModel[] = [OPUS, SONNET, HAIKU];
+
+/** 職種ごとの初期のモデル。社員を足す時の選ぶ欄の初期値 */
+export const JOB_MODEL: Record<StaffJob, ClaudeModel> = { president: OPUS, reviewer: OPUS, builder: SONNET };
 
 /**
- * 社員の役で使えるモデルを返す
- * @param staffId 社員 ID
- * @returns 使えるモデル。先頭がその役のモデル
+ * 選べるモデルかを確かめる
+ * @param model モデルの名前
+ * @returns 選べるモデルなら true
  */
-export function allowedModels(staffId: StaffId): readonly ClaudeModel[] {
-  return ROLE_MODELS[staffId];
+export function isStaffModel(model: string): model is ClaudeModel {
+  return SELECTABLE_MODELS.some((m) => m === model);
+}
+
+/**
+ * 社員が使えるモデルを返す。社員の設定のモデルと、SDK が裏で呼ぶ軽いモデル
+ * @param model 社員の設定のモデル
+ * @returns 使えるモデル。先頭が社員のモデル
+ */
+export function allowedModels(model: ClaudeModel): readonly ClaudeModel[] {
+  return model === HAIKU ? [HAIKU] : [model, HAIKU];
 }
 
 /**

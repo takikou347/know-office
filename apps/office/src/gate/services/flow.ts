@@ -28,6 +28,7 @@ import { chooseRepo, repoDirName } from "./repo.ts";
 import { requireDeployConditions } from "./deploy-when.ts";
 import { serviceStatus } from "./status.ts";
 import { type Actor, intakeProject, newNodeRow, type NodeRow, recordCreated } from "../work/nodes.ts";
+import { pickStaff } from "../work/roster.ts";
 
 /** services の行 */
 export type ServiceRow = typeof services.$inferSelect;
@@ -181,7 +182,7 @@ export async function updateService(env: Bindings, serviceId: string, input: Upd
 async function studyTask(env: Bindings, row: ServiceRow, actor: Actor): Promise<NodeRow> {
   const project = await intakeProject(env, "office", actor);
   const body = [`サービス ID: ${row.id}`, `狙い: ${row.aim ?? ""}`, `使う人: ${row.users ?? ""}`, `調べる事: ${STUDY_POINTS.join("、")}`, "調べた材料は study_submit で出す"].join("\n");
-  return newNodeRow(env, { kind: "task", parentId: project.id, scope: "office", title: `調べる: ${row.name}`, body, taskKind: "plan", assignee: "president", source: `study:${row.id}` }, actor);
+  return newNodeRow(env, { kind: "task", parentId: project.id, scope: "office", title: `調べる: ${row.name}`, body, taskKind: "plan", assignee: await pickStaff(env.DB, "president"), source: `study:${row.id}` }, actor);
 }
 
 /**
@@ -214,7 +215,7 @@ async function designTask(env: Bindings, row: ServiceRow, repo: string, docsRepo
   const project = await intakeProject(env, row.id, actor);
   const dir = `services/${repoDirName(repo)}/`;
   const body = [`サービス ID: ${row.id}`, `設計書のリポジトリ: ${docsRepo}`, `書く置き場: ${dir}`, "形はそのリポジトリの services/WRITING.md に従う", "書いたら pr_open で PR を出す。最初の設計書はオーナーが読んで承認した物だけが main に入る"].join("\n");
-  return newNodeRow(env, { kind: "task", parentId: project.id, scope: row.id, title: `設計書: ${row.name}`, body, taskKind: "build", assignee: "builder", repo: docsRepo, source: `design:${row.id}` }, actor);
+  return newNodeRow(env, { kind: "task", parentId: project.id, scope: row.id, title: `設計書: ${row.name}`, body, taskKind: "build", assignee: await pickStaff(env.DB, "builder"), repo: docsRepo, source: `design:${row.id}` }, actor);
 }
 
 /**
@@ -280,7 +281,7 @@ export async function advanceService(env: Bindings, serviceId: string, input: Ad
   if (task) {
     await recordCreated(env, task, actor);
     // 調べるタスクは社長、設計書を書くタスクは開発担当を呼ぶ
-    await notifyStaff(env, task.assignee ?? "president", actor.now, false);
+    if (task.assignee !== null) await notifyStaff(env, task.assignee, actor.now, false);
   }
   return { ...row, ...change };
 }

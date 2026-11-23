@@ -1,8 +1,14 @@
 // 社員と勤怠の形。社員 DO、ゲートウェイ、画面が共に使う (社員と勤怠の 2 章と 2 章、データの 2 章)
 import { z } from "./zod.ts";
 
-/** 社員 ID。役割ごとに 1 人 */
-export const StaffId = z.enum(["president", "builder", "reviewer"]);
+/** 社員の職種。職種がツール、作業の種類、割り当てを決める。社長はちょうど 1 人 */
+export const StaffJob = z.enum(["president", "builder", "reviewer"]);
+
+/** 社員の職種の型 */
+export type StaffJob = z.infer<typeof StaffJob>;
+
+/** 社員 ID。最初の 3 人は職種と同じ名前で、足した社員はゲートウェイが `<職種>-<小文字と数字の 6 字>` で作る。オーナーやゲートウェイの名前 (owner、system など) とは重ならない */
+export const StaffId = z.string().regex(/^(president|builder|reviewer)(-[a-z0-9]{6})?$/);
 
 /** 社員 ID の型 */
 export type StaffId = z.infer<typeof StaffId>;
@@ -127,9 +133,13 @@ export type StaffStatus = z.infer<typeof StaffStatus>;
 /** 社員の一覧の 1 人。今の状態に、組織図の役の名前とモデルを足した物 */
 export const StaffOverview = z
   .object({
-    id: StaffId.meta({ description: "社員 ID。役割ごとに固定" }),
+    id: StaffId.meta({ description: "社員 ID" }),
+    job: StaffJob,
     role: z.string(),
+    bossId: StaffId.nullable(),
     model: z.string(),
+    schedule: WorkSchedule.nullable().meta({ description: "この社員だけの勤務の時刻。null は全体の勤務の時刻" }),
+    version: z.number().int().meta({ description: "設定の版。設定を直す時に送る" }),
     state: StaffState,
     nodeId: z.string().nullable(),
     nodeTitle: z.string().nullable(),
@@ -140,6 +150,38 @@ export const StaffOverview = z
 
 /** 社員の一覧の 1 人の型 */
 export type StaffOverview = z.infer<typeof StaffOverview>;
+
+const StaffName = z.string().trim().min(1).max(40);
+const StaffModel = z.enum(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
+
+/** 社員を足す入力。社長は足せない */
+export const CreateStaffInput = z
+  .object({
+    job: z.enum(["builder", "reviewer"]),
+    role: StaffName.meta({ description: "画面に出す名前" }),
+    bossId: StaffId.meta({ description: "上司の社員 ID。在籍の社員" }),
+    model: StaffModel,
+  })
+  .strict()
+  .meta({ id: "CreateStaffInput" });
+
+/** 社員を足す入力の型 */
+export type CreateStaffInput = z.infer<typeof CreateStaffInput>;
+
+/** 社員の設定を直す入力。送った項目だけを直す */
+export const UpdateStaffInput = z
+  .object({
+    version: z.number().int().meta({ description: "読んだ時の設定の版。今と違えば 409 conflict" }),
+    role: StaffName.optional(),
+    bossId: StaffId.optional().meta({ description: "上司の社員 ID。社長には送れない" }),
+    model: StaffModel.optional(),
+    schedule: WorkSchedule.nullable().optional().meta({ description: "この社員だけの勤務の時刻。null で全体の勤務の時刻に戻す" }),
+  })
+  .strict()
+  .meta({ id: "UpdateStaffInput" });
+
+/** 社員の設定を直す入力の型 */
+export type UpdateStaffInput = z.infer<typeof UpdateStaffInput>;
 
 /** その日だけの指示を出す入力。extend と leave_early は日本時間の終わりの時刻 until が要り、off は持たない */
 export const CreateOrderInput = z

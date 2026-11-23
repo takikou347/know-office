@@ -2,7 +2,7 @@
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
-export { allowedModels, batchCostMicroUsd, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, DEV_STAFF_HEADER, HAIKU, OPUS, SONNET } from "./claude.ts";
+export { allowedModels, batchCostMicroUsd, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, DEV_STAFF_HEADER, HAIKU, isStaffModel, JOB_MODEL, OPUS, SONNET, SELECTABLE_MODELS } from "./claude.ts";
 export { ClaudeErrorBody, SPEND_LIMIT_KINDS, type SpendLimitKind } from "./schemas/claude.ts";
 export { Secret } from "./secret.ts";
 export { CONTAINER_CA, WORKSPACE_KEY_ENV } from "./container.ts";
@@ -139,10 +139,13 @@ export {
   DEFAULT_OFF_HOURS_CALL,
   DEFAULT_SCHEDULE,
   CreateOrderInput,
+  CreateStaffInput,
+  UpdateStaffInput,
   OffHoursCall,
   Order,
   OrderKind,
   StaffId,
+  StaffJob,
   StaffOverview,
   StaffState,
   StaffStatus,

@@ -1,11 +1,11 @@
 // Claude のプロキシ。作業トークンを確かめた要求を、鍵を替えて Claude API へ流れのまま送り、使った量と上限の待ちを残す (社員が考えるの 3.4)
-import { allowedFetch, allowedModels, AppError, DEV_STAFF_HEADER, PROBLEMS, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
+import { allowedFetch, allowedModels, AppError, DEV_STAFF_HEADER, isStaffModel, PROBLEMS, type ClaudeModel, type ClaudeUsage, costMicroUsd, log, newId, type Secret, type StaffId } from "@know-office/core";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { z } from "zod";
 import { usage } from "../db/records.ts";
 import { endpoints } from "../endpoints.ts";
-import type { GateEnv, Staff } from "../env.ts";
+import type { Bindings, GateEnv, Staff } from "../env.ts";
 import { ensureRunning, staffOf } from "../guard/actions.ts";
 import { observe } from "../guard/observe.ts";
 import { CLAUDE_FAILED, recordError } from "../ledger/errors.ts";
@@ -16,6 +16,7 @@ import { clockAt } from "./attendance.ts";
 import { noteRateLimit, noteSpendLimit, readSpendLimit, SPEND_STATUSES } from "./claude-limits.ts";
 import { claudeKey } from "./claude-key.ts";
 import { findNode, recordsOf } from "./nodes.ts";
+import { activeStaffRow } from "./roster.ts";
 import type { TicketClaims } from "./ticket.ts";
 
 /** 送る道。Messages API とトークンを数える API だけ */
@@ -81,7 +82,7 @@ export async function relayClaude(c: Context<GateEnv>, ticket: TicketClaims): Pr
   if (c.req.method !== "POST" || (path !== MESSAGES && path !== COUNT_TOKENS)) throw new AppError("not_found", `${path} は存在しない`);
   await ensureRunning(c.env, ticket.staffId, ticket.nodeId);
   const text = await c.req.text();
-  const model = checkedModel(text, ticket.staffId);
+  const model = checkedModel(text, await ticketModel(c.env, ticket));
   let res: Response;
   try {
     res = await callUpstream(c, path, text, ticket.staffId);
@@ -141,21 +142,35 @@ async function noteClaudeFailure(c: Context<GateEnv>, path: string, status: numb
 }
 
 /**
- * 本文を読み、モデルが社員の役で許した物かを確かめる
+ * その作業で使えるモデルを決める。作業トークンが持つ、作業を始めた時の社員のモデルを使い、作業の途中で設定を変えても同じ作業は同じモデルで続ける。
+ * モデルを持たない前の版の作業トークンは、在籍の社員の今のモデルで確かめる
+ * @param env バインディング
+ * @param ticket 確かめた作業トークン
+ * @returns その作業のモデル
+ * @throws forbidden 選べるモデルでない時、在籍の社員でない時
+ */
+async function ticketModel(env: Bindings, ticket: TicketClaims): Promise<ClaudeModel> {
+  const model = ticket.model ?? (await activeStaffRow(env.DB, ticket.staffId))?.model ?? "";
+  if (!isStaffModel(model)) throw new AppError("forbidden", "この社員では使えないモデル");
+  return model;
+}
+
+/**
+ * 本文を読み、モデルがその作業で許した物かを確かめる
  * @param text 本文
- * @param staffId 社員 ID
+ * @param base その作業のモデル
  * @returns 許したモデル
  * @throws malformed_request JSON でない時
  * @throws validation_failed モデルが無い時
- * @throws forbidden 役で許していないモデルの時
+ * @throws forbidden その作業で許していないモデルの時
  */
-function checkedModel(text: string, staffId: StaffId): ClaudeModel {
+function checkedModel(text: string, base: ClaudeModel): ClaudeModel {
   const json = safeJson(text);
   if (json === undefined) throw new AppError("malformed_request", "本文が JSON でない");
   const parsed = ClaudeRequest.safeParse(json);
   if (!parsed.success) throw new AppError("validation_failed", "本文にモデルが無い");
-  const model = allowedModels(staffId).find((m) => m === parsed.data.model);
-  if (!model) throw new AppError("forbidden", "この役では使えないモデル");
+  const model = allowedModels(base).find((m) => m === parsed.data.model);
+  if (!model) throw new AppError("forbidden", "この社員では使えないモデル");
   return model;
 }
 

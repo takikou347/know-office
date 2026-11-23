@@ -10,6 +10,7 @@ import { insertWhenStatement } from "../db/when.ts";
 import { announce } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, newNodeRow, type NodeRow, recordCreated, revertNode } from "./nodes.ts";
+import { pickStaff } from "./roster.ts";
 
 /** 2 つのコミットの間で変わった 1 ファイル。patch は統一形式の差分の本文で、GitHub が大きすぎて返さない時は null */
 export type ChangedFile = { path: string; previousPath?: string; status: ReviewFileStatus; patch: string | null };
@@ -459,11 +460,11 @@ export async function intakeTask(env: Bindings, input: Intake, now: number): Pro
   const project = await intakeProject(env, input.scope, actor);
   const row = await createNode(
     env,
-    { kind: "task", parentId: project.id, scope: input.scope, title: input.title, body: input.body, taskKind: "plan", assignee: "president", source: input.source, issueNumber: input.issueNumber },
+    { kind: "task", parentId: project.id, scope: input.scope, title: input.title, body: input.body, taskKind: "plan", assignee: await pickStaff(env.DB, "president"), source: input.source, issueNumber: input.issueNumber },
     actor,
   );
   // 勤務時間外には呼び出さず、手の空いた社長が次に取る
-  await notifyStaff(env, "president", now, false);
+  if (row.assignee !== null) await notifyStaff(env, row.assignee, now, false);
   return row.id;
 }
 
@@ -508,7 +509,7 @@ export async function intakeMessage(env: Bindings, message: { id: string; at: nu
       title: intakeTitle(message.body),
       body: `オーナーの発言 (日本時間 ${jstDay(message.at)} ${jstClock(message.at)})。読んでタスクに分け、山に足す。\n\n${message.body}`,
       taskKind: "plan",
-      assignee: "president",
+      assignee: await pickStaff(env.DB, "president"),
       priority: INTAKE_PRIORITY,
       source,
     },
@@ -523,13 +524,13 @@ export async function intakeMessage(env: Bindings, message: { id: string; at: nu
       sql`NOT EXISTS (SELECT 1 FROM ${nodes} WHERE ${nodes.source} = ${source}) AND NOT EXISTS (SELECT 1 FROM message_deliveries WHERE message_id = ${message.id})`,
     ),
     env.DB.prepare(
-      "INSERT INTO message_deliveries (message_id, staff_id, node_id, via, delivered_at) SELECT ?, 'president', ?, 'task', ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ?) ON CONFLICT(message_id) DO NOTHING",
-    ).bind(message.id, row.id, now, row.id),
+      "INSERT INTO message_deliveries (message_id, staff_id, node_id, via, delivered_at) SELECT ?, ?, ?, 'task', ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ?) ON CONFLICT(message_id) DO NOTHING",
+    ).bind(message.id, row.assignee, row.id, now, row.id),
   ]);
   if (added?.meta.changes !== 1) return null;
   await recordCreated(env, row, actor);
   await announce(env, { type: "message_delivered", delivery: { id: message.id, via: "task", at: new Date(now).toISOString(), taskId: row.id } }, clockAt(now));
   // 勤務時間外には呼び出さず、手の空いた社長が次に取る
-  await notifyStaff(env, "president", now, false, traceId);
+  if (row.assignee !== null) await notifyStaff(env, row.assignee, now, false, traceId);
   return row.id;
 }

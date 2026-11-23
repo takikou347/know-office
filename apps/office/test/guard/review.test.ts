@@ -36,7 +36,7 @@ beforeEach(async () => {
   w.gate = await createTestGate({ clock: w.clock, d1: w.d1 });
   await w.d1.DB.batch(
     (["president", "builder", "reviewer"] as const).map((id) =>
-      w.d1.DB.prepare("INSERT OR REPLACE INTO staff (id, role, boss_id, model, effort, prompt_version, created_at) VALUES (?, ?, ?, 'claude-opus-5-5', 'high', 1, 0)").bind(id, id, id === "president" ? null : "president"),
+      w.d1.DB.prepare("INSERT OR REPLACE INTO staff (id, job, role, boss_id, model, effort, prompt_version, created_at) VALUES (?, ?, ?, ?, 'claude-opus-5-5', 'high', 1, 0)").bind(id, id, id, id === "president" ? null : "president"),
     ),
   );
 }, 30_000);

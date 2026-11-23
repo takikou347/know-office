@@ -12,6 +12,7 @@ import { closeLspAll } from "../live/lsp.ts";
 import { announceNotice, closeLive } from "../live/publish.ts";
 import { clockAt } from "../work/attendance.ts";
 import type { GuardDeps, RecentOp } from "./deps.ts";
+import { allStaff } from "../work/roster.ts";
 
 /** stops の 1 行 */
 export type StopRowData = typeof stops.$inferSelect;
@@ -34,14 +35,20 @@ export type StopInput = Pick<Judgment, "scope" | "target" | "signal" | "measured
 
 const SCOPE_LABEL: Record<GuardScope, string> = { task: "タスク", staff: "社員", service: "サービス", office: "全体" };
 
-const ALL_STAFF = StaffId.options;
+/**
+ * 全部の社員 ID を名簿の順に並べる。削除した社員も含め、削除の途中で残った社員 DO も止める
+ * @param db 今の状態の D1
+ * @returns 社員 ID
+ */
+const allStaffIds = async (db: D1Database): Promise<StaffId[]> => (await allStaff(db)).map((p) => p.id);
 
 /**
- * 社員 ID を役割の順に並べる
+ * 社員 ID を名簿の順に並べる
+ * @param db 今の状態の D1
  * @param ids 社員 ID。重なりと null を含んでよい
- * @returns 役割の順の社員 ID
+ * @returns 名簿の順の社員 ID
  */
-const ordered = (ids: (string | null)[]) => ALL_STAFF.filter((id) => ids.includes(id));
+const ordered = async (db: D1Database, ids: (string | null)[]) => (await allStaffIds(db)).filter((id) => ids.includes(id));
 const NodeProgress = z.object({ staffId: StaffId.nullable(), progress: z.unknown() }).loose();
 
 /**
@@ -245,7 +252,7 @@ async function enforce(env: Bindings, input: StopInput & { stopId: string }, sta
       return;
     }
     case "office":
-      for (const id of ALL_STAFF) await staffOf(env, id).halt(now);
+      for (const id of await allStaffIds(env.DB)) await staffOf(env, id).halt(now);
       await orm.update(sessions).set({ endedAt: now }).where(isNull(sessions.endedAt));
       // 切ったログインセッションの配信を開いたままにしない
       await closeLive(env, clockAt(now), (live) => live.closeAll(null));
@@ -362,7 +369,7 @@ export async function resumeStop(env: Bindings, stop: StopRowData, by: "reviewer
         await staffOf(env, StaffId.parse(stop.target)).resume(now);
         break;
       case "office":
-        for (const id of ALL_STAFF) await staffOf(env, id).resume(now);
+        for (const id of await allStaffIds(env.DB)) await staffOf(env, id).resume(now);
         break;
       default:
         // サービスは止めた記録が開いている間だけ公開を断るので、記録を閉じれば戻る
@@ -420,7 +427,7 @@ export async function previewStop(db: D1Database, scope: GuardScope, target: str
     case "task": {
       const [node] = await orm.select().from(nodes).where(and(eq(nodes.id, target), eq(nodes.kind, "task"))).limit(1);
       if (!node) throw new AppError("not_found", "タスクが無い");
-      return { staff: ordered([node.assignee]), nodes: 1 };
+      return { staff: await ordered(db, [node.assignee]), nodes: 1 };
     }
     case "staff": {
       const id = StaffId.safeParse(target);
@@ -431,11 +438,11 @@ export async function previewStop(db: D1Database, scope: GuardScope, target: str
       const [service] = await orm.select({ id: services.id }).from(services).where(eq(services.id, target)).limit(1);
       if (!service) throw new AppError("not_found", "サービスが無い");
       const held = await doing(eq(nodes.scope, target));
-      return { staff: ordered(held.map((n) => n.assignee)), nodes: held.length };
+      return { staff: await ordered(db, held.map((n) => n.assignee)), nodes: held.length };
     }
     case "office":
       if (target !== "office") throw new AppError("not_found", "全体の相手は office");
-      return { staff: [...ALL_STAFF], nodes: (await doing()).length };
+      return { staff: await allStaffIds(db), nodes: (await doing()).length };
     default:
       return scope satisfies never;
   }

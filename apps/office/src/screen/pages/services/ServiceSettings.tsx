@@ -4,7 +4,8 @@ import { Card, Field, Select, Stack, Status } from "knowidea-ui";
 import { useState } from "react";
 import { FailedAlert } from "../../parts/load.tsx";
 import { type CardProps, type PutSetting, RuleCard, SaveBar, useSettingCards } from "../../parts/rule-card.tsx";
-import { STAFF_LABEL } from "../guard/labels.ts";
+import { staffLabel } from "../guard/labels.ts";
+import { useStaffOptions } from "../../parts/staff-list.ts";
 import { UNSET } from "./labels.ts";
 import { RepoPicker } from "./StageActions.tsx";
 
@@ -40,15 +41,16 @@ function RepoCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { p
 function StaffCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { put: PutSetting }) {
   const now = StaffId.safeParse(setting.value);
   const [draft, setDraft] = useState<StaffId | null>(now.success ? now.data : null);
+  const people = useStaffOptions();
   return (
-    <Card title="担当の社員" headingLevel={3} badge={<Status kind="info" label={now.success ? STAFF_LABEL[now.data] : UNSET} />}>
+    <Card title="担当の社員" headingLevel={3} badge={<Status kind="info" label={now.success ? (people.find((p) => p.value === now.data)?.label ?? staffLabel(now.data)) : UNSET} />}>
       <Stack gap={3}>
         <Field label="担当の社員">
           <Select
             aria-label="担当の社員"
             value={draft}
             placeholder="選ぶ"
-            options={StaffId.options.map((s) => ({ value: s, label: STAFF_LABEL[s] }))}
+            options={people}
             onValueChange={(v) => {
               const staff = StaffId.safeParse(v);
               if (staff.success) setDraft(staff.data);

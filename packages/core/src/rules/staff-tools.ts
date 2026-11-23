@@ -22,12 +22,12 @@ export const STAFF_TOOL_NAMES = [
 /** 社員のツールの名前。`STAFF_TOOL_NAMES` の 1 つ */
 export type StaffToolName = (typeof STAFF_TOOL_NAMES)[number];
 
-/** 役ごとに使える社員のツール。ここに無いツールはルールの判断が断り、ゲートウェイも not_found で断る */
+/** 職種ごとに使える社員のツール。ここに無いツールはルールの判断が断り、ゲートウェイも not_found で断る */
 export const ROLE_TOOLS = {
   president: ["node_create", "node_assign", "staff_request", "study_submit", "issue_plan", "idea_add", "service_close_request", "ask_boss", "ask_owner", "checkpoint", "report", "owner_info_read"],
   builder: ["pr_open", "docs_pr_open", "idea_add", "service_close_request", "ask_boss", "ask_owner", "checkpoint", "report", "owner_info_read"],
   reviewer: ["review_submit", "idea_add", "ask_boss", "ask_owner", "checkpoint", "report", "owner_info_read"],
-} as const satisfies Record<string, readonly StaffToolName[]>;
+} as const satisfies Record<"president" | "builder" | "reviewer", readonly StaffToolName[]>;
 
 /**
  * 名前が社員のツールかを確かめる

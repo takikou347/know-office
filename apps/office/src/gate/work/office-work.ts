@@ -1,14 +1,11 @@
 // タスクの出来事から、オフィスで見せる仕事の出来事 (渡す、レビューを頼む、承認、差し戻し) を決める (画面の全体の 3.2、社員が考えるの 3.8)
 import { type Clock, type OfficeWork, StaffId } from "@know-office/core";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { announce } from "../live/publish.ts";
-
-/** レビューを受け持つ社員 */
-const REVIEWER: StaffId = "reviewer";
 
 /** 出来事を決めるのに使うタスクの項目 */
 export type WorkRow = Pick<typeof nodes.$inferSelect, "id" | "kind" | "title" | "assignee" | "taskKind">;
@@ -21,6 +18,8 @@ export type WorkCause = {
   staffId: string | null;
   /** 頼む先を替えた時の、前と後の担当。updated の時だけ呼ぶ側が渡す */
   assigned?: { from: string | null; to: string | null } | undefined;
+  /** レビューを頼んだ先。pr_opened の時だけ、呼ぶ側がそのプルリクエストのレビューのタスクから渡す */
+  reviewer?: string | null | undefined;
 };
 
 /**
@@ -65,8 +64,10 @@ export function officeWorkOf(cause: WorkCause, row: WorkRow): OfficeWork | null 
       const handedOver = to !== null && cause.assigned?.from !== to;
       return handedOver ? { ...base, action: "assign", from, to } : null;
     }
-    case "pr_opened":
-      return { ...base, action: "review-request", from, to: REVIEWER };
+    case "pr_opened": {
+      const reviewer = staffOf(cause.reviewer);
+      return reviewer === null ? null : { ...base, action: "review-request", from, to: reviewer };
+    }
     case "review_approved":
     case "owner_approved":
       return maker === null ? null : { ...base, action: "approve", from, to: maker };
@@ -81,6 +82,22 @@ export function officeWorkOf(cause: WorkCause, row: WorkRow): OfficeWork | null 
 const WORK_KINDS: ReadonlySet<string> = new Set(["created", "updated", "pr_opened", "review_approved", "owner_approved", "review_rejected"]);
 
 /**
+ * プルリクエストを出したタスクの、開いたレビューのタスクの担当を読む
+ * @param env バインディング
+ * @param row プルリクエストを出したタスク
+ * @returns レビュー担当の社員 ID。まだ無ければ null
+ */
+async function reviewerOf(env: Bindings, row: typeof nodes.$inferSelect): Promise<string | null> {
+  if (row.repo === null || row.prNumber === null) return null;
+  const [review] = await drizzle(env.DB)
+    .select({ assignee: nodes.assignee })
+    .from(nodes)
+    .where(and(eq(nodes.repo, row.repo), eq(nodes.prNumber, row.prNumber), eq(nodes.taskKind, "review"), inArray(nodes.status, ["todo", "doing"])))
+    .limit(1);
+  return review?.assignee ?? null;
+}
+
+/**
  * オフィスで見せる出来事なら、タスクを読み直して仕事の出来事を配る。出来事は書けた後なので、読めない時と配れない時はエラーログに残すだけで投げない
  * @param env バインディング
  * @param cause タスクの出来事
@@ -91,7 +108,7 @@ export async function announceWork(env: Bindings, cause: WorkCause & { nodeId: s
   try {
     const [row] = await drizzle(env.DB).select().from(nodes).where(eq(nodes.id, cause.nodeId)).limit(1);
     if (!row) throw new Error("出来事のタスクが無い");
-    const work = officeWorkOf(cause, row);
+    const work = officeWorkOf(cause.kind === "pr_opened" ? { ...cause, reviewer: await reviewerOf(env, row) } : cause, row);
     if (work !== null) await announce(env, { type: "work", work }, clock);
   } catch (error) {
     await recordError(env, { source: "live_do", level: "warn", code: "live_publish_failed", error }, clock);

@@ -132,8 +132,8 @@ export function arrangeFloor(builtIn: readonly RoomDef[], extensions: readonly u
       doors.add(edge({ x, z: inside }, { x, z: outside }));
     }
     for (const f of def.furniture) furniture.push({ ...f, x: f.x + room.x, z: f.z + room.z, room: def.id });
-    for (const [id, s] of Object.entries(def.seats ?? {})) seats[id] = { seat: shift(s.seat, room), handoff: shift(s.handoff, room) };
-    for (const [id, s] of Object.entries(def.rest ?? {})) rest[id] = shift(s, room);
+    for (const [id, s] of Object.entries(def.seats ?? {})) if (s) seats[id] = { seat: shift(s.seat, room), handoff: shift(s.handoff, room) };
+    for (const [id, s] of Object.entries(def.rest ?? {})) if (s) rest[id] = shift(s, room);
   }
 
   const blocked = new Set(

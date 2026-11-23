@@ -88,7 +88,7 @@ export async function readOwnerData(db: D1Database, master: string, read: { extI
  * @returns 値。項目が無ければ null
  * @throws internal 戻せない時。中身も鍵も文に入れない
  */
-export async function openOwnerData(db: D1Database, master: string, read: { extId: string; field: string; by: StaffId | "owner"; nodeId: string | null }, now: number): Promise<string | null> {
+export async function openOwnerData(db: D1Database, master: string, read: { extId: string; field: string; by: StaffId; nodeId: string | null }, now: number): Promise<string | null> {
   const values = await openOwnerFields(db, master, { extId: read.extId, fields: [read.field], by: read.by, nodeId: read.nodeId }, now);
   return values[read.field] ?? null;
 }
@@ -110,7 +110,7 @@ export async function openOwnerData(db: D1Database, master: string, read: { extI
 export async function openOwnerFields(
   db: D1Database,
   master: string,
-  read: { extId: string; fields: readonly string[]; by: StaffId | "owner"; nodeId: string | null },
+  read: { extId: string; fields: readonly string[]; by: StaffId; nodeId: string | null },
   now: number,
 ): Promise<Record<string, string>> {
   if (read.fields.length === 0) return {};

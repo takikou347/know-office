@@ -1,8 +1,9 @@
 // その日の勤務の予定。勤務の時刻とその日の指示から、始まりと終わりの時刻を決める (社員と勤怠の 2 章、3.3、3.4)
 import type { D1Database } from "@cloudflare/workers-types";
-import { jstDay, OrderKind, type StaffId } from "@know-office/core";
+import { jstDay, OrderKind, type StaffId, WorkSchedule } from "@know-office/core";
 import { z } from "zod";
 import { loadOrders, loadSchedule } from "./attendance.ts";
+import { activeStaffRow } from "./roster.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -53,14 +54,29 @@ function at(day: string, clock: string): number {
 }
 
 /**
+ * 社員の勤務の時刻を読む。社員だけの時刻があればそれを、無ければ全体の時刻を使う
+ * @param db D1 の DB
+ * @param staffId 社員 ID
+ * @returns 勤務の時刻。削除した社員と居ない社員は出勤しないので null
+ */
+async function scheduleOf(db: D1Database, staffId: StaffId): Promise<WorkSchedule | null> {
+  const row = await activeStaffRow(db, staffId);
+  if (!row) return null;
+  // 社員の行の JSON は書く時に確かめている。読めない形なら全体の時刻で働かせ、出勤を止めない
+  const own = WorkSchedule.safeParse(row.schedule);
+  return own.success ? own.data : loadSchedule(db);
+}
+
+/**
  * 勤務の時刻とその日の指示から予定を作る
  * @param db D1 の DB
  * @param staffId 社員 ID
  * @param day 日本時間の日
- * @returns 予定。勤務の曜日でなければ null
+ * @returns 予定。勤務の曜日でない時、削除した社員と居ない社員は null
  */
 export async function planDay(db: D1Database, staffId: StaffId, day: string): Promise<Plan | null> {
-  const schedule = await loadSchedule(db);
+  const schedule = await scheduleOf(db, staffId);
+  if (schedule === null) return null;
   const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
   if (!schedule.days.includes(weekday)) return null;
   const start = at(day, schedule.start);

@@ -42,11 +42,11 @@ describe("Claude の単価", () => {
   });
 });
 
-describe("役ごとのモデル", () => {
-  it("社長とレビュー担当は Opus、開発担当は Sonnet、どの役も軽いタスクに Haiku を使える", () => {
-    expect(allowedModels("president")).toEqual(["claude-opus-5-5", "claude-haiku-5-5"]);
-    expect(allowedModels("reviewer")).toEqual(["claude-opus-5-5", "claude-haiku-5-5"]);
-    expect(allowedModels("builder")).toEqual(["claude-sonnet-5-5", "claude-haiku-5-5"]);
+describe("社員ごとのモデル", () => {
+  it("社員は設定したモデルと、軽いタスクに Haiku を使える", () => {
+    expect(allowedModels("claude-opus-5-5")).toEqual(["claude-opus-5-5", "claude-haiku-5-5"]);
+    expect(allowedModels("claude-sonnet-5-5")).toEqual(["claude-sonnet-5-5", "claude-haiku-5-5"]);
+    expect(allowedModels("claude-haiku-5-5")).toEqual(["claude-haiku-5-5"]);
   });
 });
 

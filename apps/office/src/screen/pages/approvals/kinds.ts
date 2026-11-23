@@ -1,7 +1,7 @@
 // 承認の種類ごとの、見出し、説明、決める所。ゲートウェイが承認を受ける種類と、ほかの画面で決める種類を分ける (タスクとレビューの 3.1)
 import { APPROVAL_KIND_LABEL, type Approval, type ApprovalKind, StaffId } from "@know-office/core";
 import { z } from "zod";
-import { STAFF_LABEL } from "../guard/labels.ts";
+import { staffLabel } from "../guard/labels.ts";
 
 /** 承認の種類ごとの、オーナーに出す説明。承認すると何が起きるかを書く */
 export const KIND_NOTE: Record<ApprovalKind, string> = {
@@ -46,7 +46,7 @@ const Reason = z.object({ reason: z.string() }).loose();
  */
 export function approvalTitle(a: Pick<Approval, "kind" | "target">): string {
   const staff = StaffId.safeParse(a.target);
-  const target = a.kind === "role_change" && staff.success ? STAFF_LABEL[staff.data] : a.target;
+  const target = a.kind === "role_change" && staff.success ? staffLabel(staff.data) : a.target;
   return `${APPROVAL_KIND_LABEL[a.kind]}: ${target}`;
 }
 
@@ -57,7 +57,7 @@ export function approvalTitle(a: Pick<Approval, "kind" | "target">): string {
  */
 export function requesterName(requestedBy: string): string {
   const staff = StaffId.safeParse(requestedBy);
-  return staff.success ? STAFF_LABEL[staff.data] : requestedBy;
+  return staff.success ? staffLabel(staff.data) : requestedBy;
 }
 
 /**
@@ -68,7 +68,7 @@ export function requesterName(requestedBy: string): string {
 export function approvalDetails(a: Pick<Approval, "kind" | "payload">): string[] {
   const lines: string[] = [];
   const role = RoleChange.safeParse(a.payload);
-  if (a.kind === "role_change" && role.success) lines.push(`新しい役: ${role.data.role}、上司: ${role.data.bossId === null ? "無し" : STAFF_LABEL[role.data.bossId]}`);
+  if (a.kind === "role_change" && role.success) lines.push(`新しい役: ${role.data.role}、上司: ${role.data.bossId === null ? "無し" : staffLabel(role.data.bossId)}`);
   const reason = Reason.safeParse(a.payload);
   if (reason.success) lines.push(`理由: ${reason.data.reason}`);
   return lines;

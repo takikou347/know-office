@@ -4,7 +4,7 @@ import { Alert, Button, Dialog, DialogClose } from "knowidea-ui";
 import { useContext, useState } from "react";
 import { ApiContext } from "../../api.ts";
 import { type Failed, FailedAlert, failureOf } from "../../parts/load.tsx";
-import { SCOPE_LABEL, STAFF_LABEL } from "./labels.ts";
+import { SCOPE_LABEL, staffLabel } from "./labels.ts";
 
 const REASON = "オーナーが画面のボタンで止めた";
 
@@ -77,7 +77,7 @@ export function StopButton({ scope, target, label, onStopped }: StopButtonProps)
         {preview ? (
           <ul>
             <li>止まる範囲: {SCOPE_LABEL[scope]}</li>
-            <li>止まる社員: {preview.staff.length === 0 ? "なし" : preview.staff.map((id) => STAFF_LABEL[id]).join("、")}</li>
+            <li>止まる社員: {preview.staff.length === 0 ? "なし" : preview.staff.map((id) => staffLabel(id)).join("、")}</li>
             <li>止まるタスク: {preview.nodes} 件</li>
           </ul>
         ) : null}

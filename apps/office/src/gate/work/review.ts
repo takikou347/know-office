@@ -3,7 +3,7 @@ import { AppError, CommitSha, decideRepo, docsMergeNeeds, log, newId, ownerGuard
 import { and, eq, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
-import { nodes, reviews, services } from "../db/main.ts";
+import { nodes, reviews, services, staff } from "../db/main.ts";
 import { insertWhenStatement } from "../db/when.ts";
 import { expectedDocsName, isFirstDocs, verifyDocsPr } from "../devloop/docs-pr.ts";
 import { childOf, missingTests, readPrFiles } from "../devloop/pr-issue.ts";
@@ -18,6 +18,7 @@ import { type DocsTarget, linkedGate } from "./docs-merge.ts";
 import { landReady } from "./merge-land.ts";
 import type { SeenReview } from "./merge-made.ts";
 import { type Actor, appendNodeEvent, checkPair, findNode, type NodeRow, recordCreated } from "./nodes.ts";
+import { pickStaff } from "./roster.ts";
 
 /** マイグレーションで 2 番目に登録した know-office 自身のサービス。このリポジトリの守りのファイルを変える PR はオーナーの承認も要る (タスクとレビューの 3.3) */
 const SELF_SERVICE_ID = "00000000-0000-7000-8000-000000000102";
@@ -249,8 +250,20 @@ export async function callMaker(env: Bindings, nodeId: string, now: number): Pro
   if (made.status === "todo" && made.assignee !== null) await notifyStaff(env, made.assignee, now, true);
 }
 
-/** レビューのタスクを割り振る社員 */
-export const REVIEWER: StaffId = "reviewer";
+/**
+ * 作った社員と別のモデルの、在籍のレビュー担当を選ぶ。別のモデルの中から終わりでないタスクの少ない人を選ぶ
+ * @param db 今の状態の D1
+ * @param maker 作った社員
+ * @returns レビュー担当の社員 ID
+ * @throws conflict 作った社員と別のモデルのレビュー担当が居ない時
+ */
+export async function reviewerFor(db: D1Database, maker: string): Promise<StaffId> {
+  const [made] = await drizzle(db).select({ model: staff.model }).from(staff).where(eq(staff.id, maker)).limit(1);
+  const reviewer = await pickStaff(db, "reviewer", { avoidModel: made?.model ?? null }).catch(() => null);
+  if (reviewer === null) throw new AppError("conflict", "在籍のレビュー担当が居ない");
+  await checkPair(db, maker, reviewer);
+  return reviewer;
+}
 
 /** 定期の確かめが拾う、レビューのタスクの無いままレビューを待つタスクの古さ (10 分)。書く順の間にあるタスクを拾わない */
 export const RECHECK_AFTER_MS = 10 * 60_000;
@@ -272,12 +285,13 @@ export type AskReview = { row: NodeRow; statement: D1PreparedStatement };
  * @param pull.prNumber プルリクエストの番号
  * @param actor 誰がいつ
  * @param also ほかに足す条件。一緒に書く物と同じ条件を渡す
- * @returns 文と足す行。作った社員が分からないか、レビュー担当と同じモデルの時は、割り振れないので null
+ * @returns 文と足す行。作った社員が分からないか、別のモデルの在籍のレビュー担当が居ない時は、割り振れないので null
  */
 export async function askReview(env: Bindings, made: NodeRow, pull: { repo: string; branch: string; prNumber: number; body?: string | null }, actor: Actor, also: SQL = sql`1`): Promise<AskReview | null> {
+  let reviewer: StaffId;
   try {
     if (made.assignee === null) throw new AppError("conflict", "作った社員が分からない");
-    await checkPair(env.DB, made.assignee, REVIEWER);
+    reviewer = await reviewerFor(env.DB, made.assignee);
   } catch (error) {
     if (!(error instanceof AppError)) throw error;
     log("warn", "review_not_asked", { nodeId: made.id, reason: error.message });
@@ -291,7 +305,7 @@ export async function askReview(env: Bindings, made: NodeRow, pull: { repo: stri
     title: `レビュー: ${made.title}`,
     body: pull.body ?? null,
     taskKind: "review",
-    assignee: REVIEWER,
+    assignee: reviewer,
     status: "todo",
     priority: made.priority,
     repo: pull.repo,
@@ -321,7 +335,7 @@ export async function askReview(env: Bindings, made: NodeRow, pull: { repo: stri
 export async function reviewAsked(env: Bindings, asked: AskReview | null, result: D1Result | undefined, actor: Actor): Promise<boolean> {
   if (asked === null || (result?.meta.changes ?? 0) === 0) return false;
   await recordCreated(env, asked.row, actor);
-  await notifyStaff(env, REVIEWER, actor.now, false);
+  if (asked.row.assignee !== null) await notifyStaff(env, asked.row.assignee, actor.now, false);
   return true;
 }
 
@@ -337,10 +351,10 @@ export async function recheckReviews(env: Bindings, now: number): Promise<number
     "SELECT n.id AS id, r.repo AS repo, r.branch AS branch, r.pr_number AS pr FROM nodes n JOIN reviews r ON r.node_id = n.id " +
       "WHERE n.status = 'review' AND n.task_kind <> 'review' AND n.updated_at < ? AND r.reviewer_verdict IS NULL " +
       "AND NOT EXISTS (SELECT 1 FROM nodes x WHERE x.repo = r.repo AND x.pr_number = r.pr_number AND x.task_kind = 'review' AND x.status IN ('todo', 'doing')) " +
-      // レビューを割り振れない組 (作った社員とレビュー担当が同じモデル) は拾わない。拾っても askReview が断るだけで、上限の件数を食う
-      "AND EXISTS (SELECT 1 FROM staff m JOIN staff v ON v.id = ? WHERE m.id = n.assignee AND m.model <> v.model) LIMIT ?",
+      // レビューを割り振れない組 (作った社員と別のモデルの在籍のレビュー担当が居ない) は拾わない。拾っても askReview が断るだけで、上限の件数を食う
+      "AND EXISTS (SELECT 1 FROM staff m JOIN staff v ON v.job = 'reviewer' AND v.retired_at IS NULL WHERE m.id = n.assignee AND m.model <> v.model) LIMIT ?",
   )
-    .bind(now - RECHECK_AFTER_MS, REVIEWER, RECHECK_LIMIT)
+    .bind(now - RECHECK_AFTER_MS, RECHECK_LIMIT)
     .all<{ id: string; repo: string; branch: string; pr: number }>();
   const actor: Actor = { by: "system", now };
   let added = 0;

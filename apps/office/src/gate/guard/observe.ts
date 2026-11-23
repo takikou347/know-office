@@ -1,5 +1,5 @@
 // ゲートウェイの中のセキュリティに関わる出来事を受け、持ち主の DO で数え、止めるか近かったかを残す (自動停止の 2 章、3.3)
-import { AppError, DEFAULT_THRESHOLDS, GuardEvent, isStaffEvent, type Judgment, StaffId, taskOverrun } from "@know-office/core";
+import { AppError, DEFAULT_THRESHOLDS, GuardEvent, isStaffEvent, type Judgment, type StaffId, taskOverrun } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
 import { applyStop, askReviewer, guardDo, recordNear, staffOf, type StopInput } from "./actions.ts";
@@ -7,6 +7,7 @@ import type { GuardDeps, Observed } from "./deps.ts";
 import { loadThresholds, thresholdsHash } from "./thresholds.ts";
 import { recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
+import { allStaff } from "../work/roster.ts";
 
 /** 基準の最新の行のうち、確かめに使う所 */
 const LatestThresholds = z.object({ id: z.string(), value: z.string().nullable(), version: z.number().int(), created_at: z.number() });
@@ -101,7 +102,7 @@ export async function verifyWorkToken(env: Bindings, staffId: StaffId, jti: stri
  */
 export async function checkOverruns(env: Bindings, now: number, deps: GuardDeps): Promise<void> {
   const { thresholds, version } = await loadThresholds(env.DB);
-  for (const id of StaffId.options) {
+  for (const { id } of await allStaff(env.DB)) {
     const clock = await staffOf(env, id).taskClock(now);
     if (!clock) continue;
     const judgment = taskOverrun(clock.nodeId, clock.activeMs, thresholds);

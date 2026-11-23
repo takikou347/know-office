@@ -1,5 +1,5 @@
 // 管理の拡張の差し込み口。設定で入れ切りし、切るとルートとツールが使えなくなり、入れ直すと前のデータが残っている (サービスと拡張の 3.8)
-import { decide, DEFAULT_RULES, RunInput, type StaffId, toOperation } from "@know-office/core";
+import { decide, DEFAULT_RULES, RunInput, type StaffJob, toOperation } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
@@ -47,7 +47,7 @@ async function toggle(w: WorkWorld, id: string, enabled: boolean): Promise<z.inf
  * @returns 判断の data
  */
 async function ask(gate: TestGate, w: WorkWorld, toolName: string, extensions?: readonly ExtensionDefinition[]): Promise<{ allow: boolean; reason: string }> {
-  const staffId: StaffId = "builder";
+  const staffId: StaffJob = "builder";
   const { book } = gate.staff[staffId];
   if ((await book.status(w.clock.now())).nodeId === null) {
     const nodeId = crypto.randomUUID();

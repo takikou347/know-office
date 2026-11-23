@@ -189,7 +189,9 @@ export async function countSignal(env: Bindings, kind: "slow" | "cost", fingerpr
       for (const t of z.array(z.object({ tool: z.string(), n: z.number() })).parse(results)) if ((await slowFingerprint(t.tool)) === fingerprint) total += t.n;
       continue;
     }
-    for (const id of StaffId.options) {
+    // 削除した社員の分も、記録が残る間は数える。社員は記録の D1 の usage にある ID から取る
+    const { results: ids } = await db.prepare("SELECT DISTINCT staff_id AS id FROM usage WHERE at >= ? AND at < ?").bind(from, to).all();
+    for (const { id } of z.array(z.object({ id: z.string() })).parse(ids)) {
       if ((await costFingerprint(id)) !== fingerprint) continue;
       const row = await db.prepare(`SELECT count(*) AS n FROM usage WHERE staff_id = ? AND at >= ? AND at < ? AND ${WASTED}`).bind(id, from, to).first<{ n: number }>();
       total += row?.n ?? 0;

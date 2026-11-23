@@ -1,6 +1,6 @@
 // タスクの繰り返しのテストの手伝い。D1、ゲートウェイ、GitHub の代わりを置き、木を作ってツールを呼ぶ (テスト設計のタスクとレビュー)
 import type { D1Database } from "@cloudflare/workers-types";
-import type { StaffId, ToolResult } from "@know-office/core";
+import type { StaffJob, ToolResult } from "@know-office/core";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import { z } from "zod";
 import { UNCONNECTED_DEV_ISSUES } from "../../src/gate/devloop/dev-issues.ts";
@@ -200,7 +200,7 @@ export async function purposeAndGoal(world: WorkWorld): Promise<{ purpose: strin
  * @param staffId 社員 ID
  * @returns 社員 DO の代わり
  */
-export function staffOf(world: WorkWorld, staffId: StaffId): Staff {
+export function staffOf(world: WorkWorld, staffId: StaffJob): Staff {
   return world.gate.env.STAFF.get(world.gate.env.STAFF.idFromName(staffId));
 }
 
@@ -209,7 +209,7 @@ export function staffOf(world: WorkWorld, staffId: StaffId): Staff {
  * @param world テストの物
  * @param ids 出勤させる社員
  */
-export async function clockIn(world: WorkWorld, ...ids: StaffId[]): Promise<void> {
+export async function clockIn(world: WorkWorld, ...ids: StaffJob[]): Promise<void> {
   for (const id of ids) {
     await world.gate.staff[id].book.wake(at(8));
     await world.gate.staff[id].book.wake(at(9));
@@ -225,7 +225,7 @@ export async function clockIn(world: WorkWorld, ...ids: StaffId[]): Promise<void
  * @param input 入力
  * @returns ツールの答え
  */
-export function tool(world: WorkWorld, staffId: StaffId, name: string, input: unknown): Promise<ToolResult> {
+export function tool(world: WorkWorld, staffId: StaffJob, name: string, input: unknown): Promise<ToolResult> {
   return runTool(world.gate.env, world.forge, { staffId, tool: name, input, now: world.clock.now() });
 }
 

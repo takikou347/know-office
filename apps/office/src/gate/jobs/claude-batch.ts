@@ -6,6 +6,7 @@ import type { Bindings } from "../env.ts";
 import { clockAt } from "../work/attendance.ts";
 import { claudeKey } from "../work/claude-key.ts";
 import { recordsOf } from "../work/nodes.ts";
+import { pickStaff } from "../work/roster.ts";
 
 /** Anthropic の API の版 */
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -206,9 +207,11 @@ export async function batchResults(env: Bindings, fetch: Fetcher, batchId: strin
  * @param batchId バッチの ID
  * @param results バッチの結果
  * @param at 残す時刻。読み直しても変わらないよう、batches の行を作った時刻を渡す
- * @param staffId 使った社員。蒸留と調べはレビュー担当、アイデア出しは社長
+ * @param job 使った職種。蒸留と調べはレビュー担当、アイデア出しは社長。在籍のその職種の社員の分にする
  */
-export async function recordBatchUsage(env: Bindings, batchId: string, results: BatchResult[], at: number, staffId: "reviewer" | "president" = "reviewer"): Promise<void> {
+export async function recordBatchUsage(env: Bindings, batchId: string, results: BatchResult[], at: number, job: "reviewer" | "president" = "reviewer"): Promise<void> {
+  // その職種が居なくなっていても使った量は残す。最初の社員の ID に付ける
+  const staffId = await pickStaff(env.DB, job).catch(() => job);
   const db = recordsOf(env, at);
   const statements = results.flatMap((r, i) => {
     if (!r.usage) return [];

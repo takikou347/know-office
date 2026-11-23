@@ -231,7 +231,7 @@ describe("止めた記録", () => {
     await w.gate.staff.builder.book.take({ nodeId: NODE2, title: "次", scope: "office" }, null, jst(10, 1));
     await send(denied(NODE2, "/root"), jst(10, 2));
     const [stop] = await rows(w, "SELECT id, scope, signal, measured, threshold, rules_version, model FROM stops WHERE scope = 'staff'");
-    expect(stop).toMatchObject({ scope: "staff", signal: "staff_rule_denied", measured: 2, threshold: 2, rules_version: 0, model: "claude-opus-5-5" });
+    expect(stop).toMatchObject({ scope: "staff", signal: "staff_rule_denied", measured: 2, threshold: 2, rules_version: 0, model: "claude-sonnet-5-5" });
     const record = w.gate.audits.find((a) => a.action === "guard.stop" && a.target === stop?.["id"]);
     const detail = z.object({ recentOps: z.array(z.object({ type: z.string() }).loose()) }).parse(record?.detail);
     expect(detail.recentOps).toHaveLength(20);

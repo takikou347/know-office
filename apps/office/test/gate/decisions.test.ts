@@ -1,5 +1,5 @@
 // ワークスペースのフックが聞くルールの判断 (POST /ws/v1/decisions) を、作業トークンから記録と自動停止まで確かめる (社員が考えるの 3.5)
-import type { StaffId } from "@know-office/core";
+import type { StaffJob } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
@@ -23,7 +23,7 @@ function at(h: number, m = 0): number {
 }
 
 /** 1 つのテストの社員、タスク、作業トークン */
-type Work = { staffId: StaffId; nodeId: string; token: string };
+type Work = { staffId: StaffJob; nodeId: string; token: string };
 
 /**
  * 社員を 9 時に出勤させ、新しいタスクを持たせて作業トークンを出す。REC_2026 はテストの間で空にしないので、タスクはテストごとに新しくする
@@ -31,7 +31,7 @@ type Work = { staffId: StaffId; nodeId: string; token: string };
  * @returns 社員、タスク、作業トークン
  */
 async function startTask(scope = "office"): Promise<Work> {
-  const staffId: StaffId = "builder";
+  const staffId: StaffJob = "builder";
   const nodeId = crypto.randomUUID();
   w.clock.advance(at(8) - w.clock.now());
   const { book } = w.gate.staff[staffId];

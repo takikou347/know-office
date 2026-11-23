@@ -350,10 +350,11 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
    * @param workspaceId 渡すワークスペースの ID
    * @param now 今の時刻
    * @param traceId 呼び出しを始めた要求の traceId
-   * @returns 作業トークン ID と期限と traceId
+   * @param model 作業を始めた時の社員のモデル
+   * @returns 作業トークン ID と期限と traceId とモデル
    */
-  issueToken(nodeId: string, workspaceId: string, now: number, traceId: string | null = null): Promise<IssuedTicket> {
-    return this.#serial(() => this.#guardOf().then((g) => g.issueToken(nodeId, workspaceId, now, traceId)));
+  issueToken(nodeId: string, workspaceId: string, now: number, traceId: string | null = null, model: string | null = null): Promise<IssuedTicket> {
+    return this.#serial(() => this.#guardOf().then((g) => g.issueToken(nodeId, workspaceId, now, traceId, model)));
   }
 
   /**

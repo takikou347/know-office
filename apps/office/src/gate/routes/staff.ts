@@ -1,12 +1,12 @@
 // 社員: 一覧と、その日だけの指示 (社員と勤怠の 3.4、API の staff)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, CreateOrderInput, jstClock, log, newId, Order, StaffId, StaffOverview } from "@know-office/core";
+import { AppError, CreateOrderInput, jstClock, log, newId, Order, StaffId, StaffJob, StaffOverview, WorkSchedule } from "@know-office/core";
 import { and, asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { createRouter } from "../app.ts";
 import { requireStepUp } from "../auth/passkey.ts";
-import { dayOrders, staff } from "../db/main.ts";
+import { dayOrders } from "../db/main.ts";
 import type { Bindings, GateEnv, Staff } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { audit } from "../ledger/record.ts";
@@ -14,10 +14,11 @@ import { createdResponse, listQuery, listResponse, okResponse, problems } from "
 import { created, list, ok } from "../respond.ts";
 import { type DayOrderRow } from "../work/attendance.ts";
 import { addOrder } from "../work/orders.ts";
+import { activeStaff } from "../work/roster.ts";
 
 const router = createRouter();
 
-const StaffParam = StaffId.openapi({ param: { name: "staffId", in: "path" }, description: "社員 ID。役割ごとに固定" });
+const StaffParam = StaffId.openapi({ param: { name: "staffId", in: "path" }, description: "社員 ID" });
 const DayQuery = z.iso.date().openapi({ param: { name: "day", in: "query" }, description: "日本時間の日付 YYYY-MM-DD" });
 
 const listStaffRoute = createRoute({
@@ -26,8 +27,8 @@ const listStaffRoute = createRoute({
   operationId: "listStaff",
   tags: ["staff"],
   summary: "社員の現在の状態",
-  description: "3 人の状態、担当中のタスク、今日の勤務時間に、組織図の役の名前とモデルを足す。",
-  "x-steps": ["3 人分の `StaffDO.status()` を並行して呼ぶ。1 人でも答えなければ 500 にする", "`staff` の役の名前とモデルを足す"],
+  description: "在籍の社員の状態、担当中のタスク、今日の勤務時間に、職種、組織図の役の名前と上司、モデル、勤務の時刻、設定の版を足す。",
+  "x-steps": ["`staff` から在籍の社員を社長、作った順、ID の順に読む", "社員ごとの `StaffDO.status()` を並行して呼ぶ。1 人でも答えなければ 500 にする"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(StaffOverview), ...problems(400, 401, 403, 422, 429, 500) },
 });
@@ -102,17 +103,31 @@ function staffOf(env: Bindings, staffId: StaffId): Staff {
 }
 
 /**
- * 3 人の今の状態に、組織図の役の名前とモデルを足す。1 人でも答えなければ投げる
+ * 在籍の社員の今の状態に、組織図の役の名前とモデルと設定を足す。1 人でも答えなければ投げる
  * @param env バインディング
  * @param now 今の時刻
- * @returns 社員の並び。社長、開発担当、レビュー担当の順
+ * @returns 社員の並び。社長、作った順
  */
 export async function loadStaff(env: Bindings, now: number): Promise<StaffOverview[]> {
-  const [statuses, rows] = await Promise.all([Promise.all(StaffId.options.map((id) => staffOf(env, id).status(now))), drizzle(env.DB).select({ id: staff.id, role: staff.role, model: staff.model }).from(staff)]);
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  return statuses.map((s) => {
-    const row = byId.get(s.id);
-    return { id: s.id, role: row?.role ?? s.id, model: row?.model ?? "", state: s.state, nodeId: s.nodeId, nodeTitle: s.nodeTitle, workedMsToday: s.workedMsToday };
+  const rows = await activeStaff(env.DB);
+  const statuses = await Promise.all(rows.map((r) => staffOf(env, r.id).status(now)));
+  return rows.map((row, i) => {
+    const s = statuses[i];
+    if (s === undefined) throw new Error("社員の状態が足りない");
+    const schedule = WorkSchedule.safeParse(row.schedule);
+    return {
+      id: row.id,
+      job: StaffJob.parse(row.job),
+      role: row.role,
+      bossId: row.bossId,
+      model: row.model,
+      schedule: schedule.success ? schedule.data : null,
+      version: row.version,
+      state: s.state,
+      nodeId: s.nodeId,
+      nodeTitle: s.nodeTitle,
+      workedMsToday: s.workedMsToday,
+    };
   });
 }
 

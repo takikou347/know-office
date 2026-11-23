@@ -1,5 +1,5 @@
 // 気付く: Claude の API の失敗が続いたら 5 分以内に通知を出し、画面が読む通知のルートで読めて、既読にできる (サービスと拡張の 3.5)
-import type { Fetcher, StaffId } from "@know-office/core";
+import type { Fetcher, StaffJob } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type Caller, routeEgress } from "../../src/gate/egress.ts";
@@ -40,7 +40,7 @@ const NoticeList = z.object({ data: z.array(Notice), meta: z.object({ next: z.st
  * @param staffId 社員 ID
  * @returns 社員と作業トークン
  */
-async function startTask(start: number, staffId: StaffId = "builder"): Promise<{ staffId: StaffId; token: string }> {
+async function startTask(start: number, staffId: StaffJob = "builder"): Promise<{ staffId: StaffJob; token: string }> {
   const nodeId = crypto.randomUUID();
   w.clock.advance(start - w.clock.now());
   const { book } = w.gate.staff[staffId];
@@ -60,7 +60,7 @@ async function startTask(start: number, staffId: StaffId = "builder"): Promise<{
  * @param fetcher ゲートウェイが外へ出す fetch。省くと代わりの Claude API に回す
  * @returns 受け手の返事
  */
-async function callClaude(work: { staffId: StaffId; token: string }, when: number, fetcher: Fetcher = w.gate.fetch): Promise<Response> {
+async function callClaude(work: { staffId: StaffJob; token: string }, when: number, fetcher: Fetcher = w.gate.fetch): Promise<Response> {
   w.clock.advance(when - w.clock.now());
   await w.gate.staff[work.staffId].book.heartbeat(w.clock.now());
   const caller: Caller = { staffId: work.staffId, workspaceId: workspaceIdOf(w.gate.env, work.staffId) };

@@ -16,6 +16,7 @@ import { auditFrom } from "../ledger/record.ts";
 import type { DevIssue } from "./dev-issues.ts";
 import { loadDocsRepo } from "./docs-setting.ts";
 import { reopenParent, settleParent } from "./release.ts";
+import { pickStaff } from "../work/roster.ts";
 
 /** pending の行を、書いた呼び出しが落ちたとみて引き取るまでの時間 (2 分)。1 回の issue_plan は書きの間を空けても 1 分に収まる */
 export const PENDING_STALE_MS = 2 * 60_000;
@@ -173,7 +174,7 @@ export async function materialize(ctx: Ctx, row: Row, spec: Spec, parent: { numb
   const added = z.object({ meta: z.object({ changes: z.number() }).loose() }).loose().safeParse(results[1]);
   if (task !== null && added.success && added.data.meta.changes > 0) {
     await recordCreated(env, task, actor);
-    await notifyStaff(env, "builder", actor.now, false);
+    if (task.assignee !== null) await notifyStaff(env, task.assignee, actor.now, false);
   }
   const [after] = await orm.select().from(devIssues).where(eq(devIssues.id, row.id)).limit(1);
   if (!after) throw new AppError("internal", "dev_issues の行が消えた");
@@ -199,7 +200,7 @@ async function childTask(ctx: Ctx, spec: Spec, number: number) {
       title: `#${String(number)} ${spec.requirement ?? ""}`,
       body: taskBody({ repo: service.repo, docs, spec, number }),
       taskKind: spec.issueKind === "bug" ? "fix" : "build",
-      assignee: "builder",
+      assignee: await pickStaff(env.DB, "builder"),
       repo: service.repo,
       source: `issue:${String(number)}`,
       issueNumber: number,
