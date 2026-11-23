@@ -74,7 +74,8 @@ const screenProjects = chosen.flatMap((b, i) =>
 // 利用場面の通し (e2e/flows/) は、本物のゲートウェイの D1 と DO を書き換える。幅ごとに同時に流すと版の 409 と二重の決定になり、
 // パスキーの仮想の認証器は Chrome にしか無いので、Chrome の幅 1,280 で 1 本ずつ流す。セッションをすべて切る場面があるので、ほかの通しの後に流す
 const chrome = chosen.find((b) => b.name === "chrome");
-const flowUse = chrome ? { ...chrome.use, viewport: widths[0].viewport, extraHTTPHeaders: { "CF-Connecting-IP": sourceIp(browsers.length * widths.length) } } : null;
+// オーナーは日本に居て、画面の「今日」(日付の欄など) はブラウザーの時間帯で決まる。CI の時間帯 (協定世界時) のままだと日本時間の 0 時から 9 時は前の日になるので、日本時間にそろえる
+const flowUse = chrome ? { ...chrome.use, viewport: widths[0].viewport, timezoneId: "Asia/Tokyo", extraHTTPHeaders: { "CF-Connecting-IP": sourceIp(browsers.length * widths.length) } } : null;
 const flowProjects = flowUse
   ? [
       { name: "flows-passkey", testMatch: /flows\/passkey\.setup\.ts/, dependencies: ["attack"], teardown: "flows-cleanup", use: flowUse },
