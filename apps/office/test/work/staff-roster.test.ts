@@ -97,10 +97,55 @@ describe("社員の名簿", () => {
     const picked = await pickStaff(world.d1.DB, "builder");
     expect(picked).toBe("builder-aaaaaa");
     await retire(world, picked);
-    await expect(task(world, picked).catch(chain)).resolves.toMatch(/assignee not active/);
+    await expect(task(world, picked)).rejects.toMatchObject({ code: "validation_failed" });
+    // 確かめを抜けた書き込みも、D1 のトリガーが止める
+    const insert = "INSERT INTO nodes (id, kind, scope, title, status, priority, assignee, created_by, created_at, updated_at) VALUES (?, 'task', 'office', '抜けた', 'todo', 1, ?, 'owner', 0, 0)";
+    await expect(world.d1.DB.prepare(insert).bind(newId(world.clock), picked).run().catch(chain)).resolves.toMatch(/assignee not active/);
     const moving = await task(world, "builder");
     await expect(world.d1.DB.prepare("UPDATE nodes SET assignee = ? WHERE id = ?").bind(picked, moving).run()).rejects.toThrow(/assignee not active/);
     expect(await rows(world.d1.DB, "SELECT id FROM nodes WHERE assignee = ?", picked)).toEqual([]);
+  });
+
+  it("在籍でない社員と居ない ID を担当にする時は 422、確かめた後に削除された時は 409 にする", async () => {
+    await hire(world, "builder-aaaaaa", { job: "builder", createdAt: 5 });
+    const nodeId = await task(world, "builder");
+    const version = async () => z.number().parse((await rows(world.d1.DB, "SELECT version FROM nodes WHERE id = ?", nodeId))[0]?.["version"]);
+    await api(world, "PATCH", `/api/v1/nodes/${nodeId}`, { version: await version(), assignee: "builder-zzzzzz" }, 422);
+    await retire(world, "reviewer");
+    await api(world, "PATCH", `/api/v1/nodes/${nodeId}`, { version: await version(), assignee: "reviewer" }, 422);
+    // 担当を確かめた後、書く前に削除された時は、D1 のトリガーが止めた物を 409 にする
+    const db = world.gate.env.DB;
+    let once = true;
+    world.gate.env.DB = new Proxy(db, {
+      get: (t, key) => {
+        if (key !== "prepare") return z.unknown().parse(Reflect.get(t, key));
+        return (query: string) => {
+          const stmt = t.prepare(query);
+          if (!once || !query.startsWith('update "nodes" set')) return stmt;
+          once = false;
+          // 担当を確かめた後、書く文を流す前に削除する
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...values: unknown[]) => {
+            const bound = bind(...values);
+            const raw: unknown = Reflect.get(bound, "raw");
+            Object.defineProperty(bound, "raw", {
+              value: async (...args: unknown[]): Promise<unknown> => {
+                await retire(world, "builder-aaaaaa");
+                return z.unknown().parse(await Reflect.apply(z.function().parse(raw), bound, args));
+              },
+            });
+            return bound;
+          };
+          return stmt;
+        };
+      },
+    });
+    try {
+      await api(world, "PATCH", `/api/v1/nodes/${nodeId}`, { version: await version(), assignee: "builder-aaaaaa" }, 409);
+    } finally {
+      world.gate.env.DB = db;
+    }
+    expect(await rows(world.d1.DB, "SELECT assignee FROM nodes WHERE id = ?", nodeId)).toEqual([{ assignee: "builder" }]);
   });
 
   it("全体の停止は退職した社員の DO も止める", async () => {
@@ -109,19 +154,25 @@ describe("社員の名簿", () => {
   });
 
   it("退職した社員の役の変更の承認と説明文の更新は書かない", async () => {
-    const decide = async (target: string) => {
+    const decide = async (target: string, bossId: string, status: number) => {
       const id = newId(world.clock);
       await world.d1.DB.prepare("INSERT INTO approvals (id, kind, target, payload, status, requested_by, requested_at) VALUES (?, 'role_change', ?, ?, 'pending', 'president', ?)")
-        .bind(id, target, JSON.stringify({ target, role: "直した役", bossId: "president" }), world.clock.now())
+        .bind(id, target, JSON.stringify({ target, role: "直した役", bossId }), world.clock.now())
         .run();
-      await api(world, "POST", `/api/v1/approvals/${id}/decision`, { decision: "approve", reason: "直す" });
+      await api(world, "POST", `/api/v1/approvals/${id}/decision`, { decision: "approve", reason: "直す" }, status);
+      return (await rows(world.d1.DB, `SELECT status FROM approvals WHERE id = '${id}'`))[0];
     };
     // 在籍の社員の役の変更は、設定の版を 1 上げる
-    await decide("reviewer");
+    expect(await decide("reviewer", "president", 200)).toEqual({ status: "approved" });
     expect(await rows(world.d1.DB, "SELECT role, version FROM staff WHERE id = 'reviewer'")).toEqual([{ role: "直した役", version: 2 }]);
     await retire(world, "builder");
-    await decide("builder");
-    expect(await rows(world.d1.DB, "SELECT role, version FROM staff WHERE id = 'builder'")).toEqual([{ role: "開発担当", version: 1 }]);
+    // 削除した社員を対象にした承認と、削除した社員を上司にする承認は、承認しないで 409 にする
+    expect(await decide("builder", "president", 409)).toEqual({ status: "pending" });
+    expect(await decide("reviewer", "builder", 409)).toEqual({ status: "pending" });
+    expect(await rows(world.d1.DB, "SELECT id, role, boss_id, version FROM staff WHERE id IN ('builder', 'reviewer') ORDER BY id")).toEqual([
+      { id: "builder", role: "開発担当", boss_id: "president", version: 1 },
+      { id: "reviewer", role: "直した役", boss_id: "president", version: 2 },
+    ]);
     await api(world, "PUT", "/api/v1/staff/builder/prompt", { version: 1, body: "削除した社員の説明文" }, 404);
   });
 

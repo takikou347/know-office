@@ -13,6 +13,7 @@ import { announce } from "../live/publish.ts";
 import { clockAt } from "./attendance.ts";
 import { announceWork, type WorkCause } from "./office-work.ts";
 import { iso, toNode } from "./node-view.ts";
+import { requireActive } from "./roster.ts";
 import { wakeWaiting } from "./wake.ts";
 
 /** nodes の行 */
@@ -139,7 +140,7 @@ export type NewNode = {
  * @param input 作る物
  * @param actor 誰がいつ
  * @returns 足す行
- * @throws validation_failed タスクでない物に種類、担当、優先度、リポジトリを付けた時、タスクに種類が無い時
+ * @throws validation_failed タスクでない物に種類、担当、優先度、リポジトリを付けた時、タスクに種類が無い時、担当が在籍の社員でない時
  * @throws not_found 親が無い時
  * @throws conflict 親の種類が階層に合わない時、レビューのタスクを作った社員と同じモデルか、作った社員の分からないレビューのタスクを割り振る時
  */
@@ -150,6 +151,7 @@ export async function newNodeRow(env: Bindings, input: NewNode, actor: Actor): P
   }
   if (isTask && input.taskKind === undefined) throw new AppError("validation_failed", "タスクには種類が要る");
   if (input.source !== "intake") await checkParent(env.DB, input.kind, input.parentId, input.scope);
+  await requireActive(env.DB, input.assignee);
   const row: NodeRow = {
     id: newId(clockAt(actor.now)),
     kind: input.kind,
@@ -236,7 +238,7 @@ export type NodeChange = {
  * @returns 変えた行
  * @throws not_found 無い時、付け替える親が無い時
  * @throws conflict バージョンが違う時、親が階層に合わない時、同じモデルの組の時、作業中のタスクの担当か状態を変える時
- * @throws validation_failed タスクでない物に担当か優先度を付ける時
+ * @throws validation_failed タスクでない物に担当か優先度を付ける時、担当を在籍でない社員に替える時
  */
 export async function updateNode(env: Bindings, id: string, version: number, change: NodeChange, actor: Actor): Promise<NodeRow> {
   const row = await findNode(env.DB, id);
@@ -246,6 +248,7 @@ export async function updateNode(env: Bindings, id: string, version: number, cha
     throw new AppError("conflict", "作業中のタスクの担当と状態は変えない");
   }
   if (change.parentId !== undefined) await checkParent(env.DB, row.kind, change.parentId, row.scope);
+  if (change.assignee !== row.assignee) await requireActive(env.DB, change.assignee);
   if (change.assignee !== undefined && row.taskKind === "review") await checkModels(env.DB, row, change.assignee);
   const next: NodeRow = {
     ...row,

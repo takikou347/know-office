@@ -91,3 +91,29 @@ export async function pickStaff(db: D1Database, job: StaffJob, options: PickOpti
   if (!row) throw new AppError("internal", `在籍の${job}が居ない`);
   return row.id;
 }
+
+/** タスクの担当が在籍の社員でない時に、D1 のトリガー (0026) が出す文 */
+const INACTIVE_ASSIGNEE = "assignee not active";
+
+/**
+ * 投げられた物が、在籍でない社員を担当に書こうとして D1 のトリガーに止められた物かを返す。Drizzle が包むので cause をたどる
+ * @param error 投げられた物
+ * @returns トリガーに止められた時 true
+ */
+export function isInactiveAssignee(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) {
+    if (e.message.includes(INACTIVE_ASSIGNEE)) return true;
+  }
+  return false;
+}
+
+/**
+ * 担当に書く社員が在籍かを確かめる。読んだ後に削除された時は、D1 のトリガーが書くのを止める
+ * @param db 今の状態の D1
+ * @param assignee 担当の社員 ID。null と undefined は確かめない
+ * @throws validation_failed 在籍の社員でない時
+ */
+export async function requireActive(db: D1Database, assignee: StaffId | null | undefined): Promise<void> {
+  if (assignee === null || assignee === undefined) return;
+  if (!(await activeStaffRow(db, assignee))) throw new AppError("validation_failed", "担当は在籍の社員にする");
+}

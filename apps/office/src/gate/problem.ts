@@ -4,6 +4,7 @@ import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import type { GateEnv } from "./env.ts";
 import { recordError } from "./ledger/errors.ts";
 import { audit } from "./ledger/record.ts";
+import { isInactiveAssignee } from "./work/roster.ts";
 
 /**
  * problem+json の本文を作る
@@ -41,13 +42,22 @@ export function problemResponse(c: Context<GateEnv>, err: AppError): Response {
 }
 
 /**
+ * AppError でない失敗を直す。担当を確かめた後に社員が削除され、D1 のトリガーが書くのを止めた時は 409、ほかは 500
+ * @param err 投げられた物
+ * @returns 返す失敗
+ */
+function unexpected(err: unknown): AppError {
+  return isInactiveAssignee(err) ? new AppError("conflict", "担当の社員が削除された") : new AppError("internal", "想定外のエラーが起きた");
+}
+
+/**
  * 投げられた失敗を problem+json に直す。想定外は 500 で中身を返さない
  * @param err 投げられた物
  * @param c 要求の文脈
  * @returns problem+json の返事
  */
 export const onError: ErrorHandler<GateEnv> = async (err, c) => {
-  const known = err instanceof AppError ? err : new AppError("internal", "想定外のエラーが起きた");
+  const known = err instanceof AppError ? err : unexpected(err);
   const status = PROBLEMS[known.code].status;
   // 500 台は直す所なので、スタックトレースを log に、1 行を error_events に残す。中身は返事に入れない
   if (status >= 500) {

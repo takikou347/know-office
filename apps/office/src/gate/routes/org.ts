@@ -17,6 +17,7 @@ import { clockAt } from "../work/attendance.ts";
 import { notifyStaff } from "../work/loop.ts";
 import { appendNodeEvent } from "../work/nodes.ts";
 import { loadOrg } from "../work/org.ts";
+import { activeStaffRow } from "../work/roster.ts";
 
 const router = createRouter();
 
@@ -82,7 +83,7 @@ const decideApprovalRoute = createRoute({
   "x-errors": [
     "401 `step_up_required`: 外部連携か費用の増える事の承認で、パスキーの確認がない。承認は未決定のまま",
     "404 `not_found`: 承認の項目が存在しない",
-    "409 `conflict`: すでに決定済み、ほかの画面で決める種類を承認しようとした (差し戻しは受ける)、閉じる案のサービスが閉じられる段階にない、または承認を読んだ後に閉じる案のサービスの段階が変わった。どれも承認は未決定のまま",
+    "409 `conflict`: すでに決定済み、ほかの画面で決める種類を承認しようとした (差し戻しは受ける)、閉じる案のサービスが閉じられる段階にない、承認を読んだ後に閉じる案のサービスの段階が変わった、または役の変更の対象か上司が在籍の社員でない (読んだ後に削除された時を含む)。どれも承認は未決定のまま",
     "422 `validation_failed`: 役割の変更の `payload` の形が違う。承認は未決定のまま",
   ],
   // 外部連携と費用の増える事の承認だけ、読んだ行の種類で確かめる
@@ -120,7 +121,7 @@ type Effects = { before: BatchItem<"sqlite">[]; after: BatchItem<"sqlite">[]; gu
  * @param now 今の時刻
  * @returns batch に入れる文と、承認を書く条件
  * @throws validation_failed 役の変更か閉じる案の中身の形が違う時
- * @throws conflict 閉じる案のサービスが閉じられる段階にない時
+ * @throws conflict 閉じる案のサービスが閉じられる段階にない時、役の変更の対象か上司が在籍の社員でない時
  */
 async function approvedEffects(db: D1Database, row: ApprovalRow, now: number): Promise<Effects> {
   if (RECORD_ONLY_KINDS.has(row.kind)) return { before: [], after: [], guard: undefined };
@@ -139,17 +140,30 @@ async function approvedEffects(db: D1Database, row: ApprovalRow, now: number): P
   // 形の違う役の変更は、承認の更新も社員の更新も書かずに断る
   const change = RoleChange.safeParse(row.payload);
   if (!change.success) throw new AppError("validation_failed", "役の変更の中身の形が違う");
+  const { target, bossId } = change.data;
+  // 対象と上司が在籍の時だけ承認する。読んだ後に削除された時は、同じ条件を承認と社員の更新の両方に入れて、どちらも書かない
+  const bossGone = bossId !== null && (bossId === target || !(await activeStaffRow(db, bossId)));
+  if (bossGone || !(await activeStaffRow(db, target))) throw new AppError("conflict", "対象か上司が在籍の社員でない");
   const pending = sql`EXISTS (SELECT 1 FROM ${approvals} WHERE ${approvals.id} = ${row.id} AND ${approvals.status} = 'pending')`;
   return {
     before: [
       drizzle(db)
         .update(staff)
-        .set({ role: change.data.role, bossId: change.data.bossId, version: sql`${staff.version} + 1` })
-        .where(and(eq(staff.id, change.data.target), isNull(staff.retiredAt), pending)),
+        .set({ role: change.data.role, bossId, version: sql`${staff.version} + 1` })
+        .where(and(eq(staff.id, target), isNull(staff.retiredAt), active(bossId), pending)),
     ],
     after: [],
-    guard: undefined,
+    guard: and(active(target), active(bossId)),
   };
+}
+
+/**
+ * 社員が在籍かの条件。上司の無い社長への変更は条件を付けない
+ * @param id 社員 ID か null
+ * @returns SQL の条件
+ */
+function active(id: string | null): SQL {
+  return id === null ? sql`1` : sql`EXISTS (SELECT 1 FROM ${staff} WHERE ${staff.id} = ${id} AND ${staff.retiredAt} IS NULL)`;
 }
 
 /**
