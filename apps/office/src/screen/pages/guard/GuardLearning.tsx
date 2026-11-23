@@ -4,7 +4,7 @@ import { Alert, Button, Grid, Stack, Stat, Table } from "knowidea-ui";
 import { useContext, useState } from "react";
 import { z } from "zod";
 import { ApiContext } from "../../api.ts";
-import { signalLabel } from "./labels.ts";
+import { EMPTY_TEXT, signalLabel } from "./labels.ts";
 import { type Failed, FailedAlert, failureOf, type Loaded, useLoad } from "../../parts/load.tsx";
 
 /** 案の種類 */
@@ -44,7 +44,7 @@ export function GuardEffectView() {
         label="多い原因"
         rowKey={(r) => r.signal}
         rows={topCauses}
-        emptyText="止めた記録はありません"
+        emptyText={EMPTY_TEXT.causes}
         columns={[
           { key: "signal", header: "原因", render: (r) => signalLabel(r.signal) },
           { key: "count", header: "止めた回数", numeric: true, render: (r) => `${String(r.count)} 回` },
@@ -54,7 +54,7 @@ export function GuardEffectView() {
         label="入れた対策の効き目"
         rowKey={(r) => r.lessonId}
         rows={measures}
-        emptyText="入れた対策はありません"
+        emptyText={EMPTY_TEXT.measures}
         columns={[
           { key: "lessonId", header: "対策", wrap: true, render: (r) => proposals.get(r.lessonId) ?? r.lessonId },
           { key: "before", header: "入れる前の 7 日", numeric: true, render: (r) => `${String(r.before)} 回` },
@@ -109,7 +109,7 @@ export function LessonList() {
         label="蒸留した学び"
         rowKey={(r) => r.id}
         rows={rows}
-        emptyText="学びはありません"
+        emptyText={EMPTY_TEXT.lessons}
         columns={[
           { key: "proposal", header: "案", wrap: true, render: (r) => `${KIND_LABEL[r.kind]}: ${r.proposal}` },
           { key: "cause", header: "原因", render: (r) => signalLabel(r.cause) },

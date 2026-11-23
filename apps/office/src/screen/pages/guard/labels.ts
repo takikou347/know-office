@@ -1,4 +1,4 @@
-// セキュリティの画面に出す名前。範囲、社員、シグナル、判定、基準の項目と、基準の値の単位
+// ハーネスの画面に出す名前。範囲、社員、シグナル、判定、基準の項目と、基準の値の単位、空の時の文
 import { GuardSignal, type GuardScope, StaffId, type StopVerdict, type Thresholds } from "@know-office/core";
 import type { z } from "zod";
 
@@ -10,6 +10,17 @@ export const STAFF_LABEL: Record<StaffId, string> = { president: "社長", build
 
 /** 判定の名前 */
 export const VERDICT_LABEL: Record<z.infer<typeof StopVerdict>, string> = { correct: "正しく止めた", false: "誤って止めた", unknown: "分からない" };
+
+/** 行もデータも無い時の文。どれも「〜はありません」の形にする */
+export const EMPTY_TEXT = {
+  stopped: "今止まっている物はありません",
+  history: "止めた記録はありません",
+  causes: "止めた記録はありません",
+  measures: "入れた対策はありません",
+  lessons: "学びはありません",
+  recentOps: "直前の操作はありません",
+  timeline: "再開と判定の記録はありません",
+} as const;
 
 /** シグナルの名前 */
 const SIGNAL_LABEL: Record<GuardSignal, string> = {

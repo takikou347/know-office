@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ApiContext } from "../../api.ts";
 import { jstDateTime } from "../../format.ts";
 import { type Failed, FailedAlert, send, useLoad } from "../../parts/load.tsx";
-import { SCOPE_LABEL, signalLabel, targetLabel, VERDICT_LABEL } from "./labels.ts";
+import { EMPTY_TEXT, SCOPE_LABEL, signalLabel, targetLabel, VERDICT_LABEL } from "./labels.ts";
 
 /** 止めた記録を出す件数。直前の 20 件 */
 const HISTORY_LIMIT = 20;
@@ -85,7 +85,7 @@ export function StoppedList({ tick, onChanged }: GuardStopsProps) {
   const signals = new Map((rows.state === "ok" ? rows.data : []).map((r) => [r.id, reasonText(r)]));
   return (
     <Stack gap={3}>
-      {state.data.stopped.length === 0 ? <p>今止まっている物はありません</p> : null}
+      {state.data.stopped.length === 0 ? <p>{EMPTY_TEXT.stopped}</p> : null}
       {state.data.stopped.map((s) => {
         const name = targetLabel(s.scope, s.target, services);
         return (
@@ -130,7 +130,7 @@ export function StopHistory({ tick, onChanged }: GuardStopsProps) {
         label="止めた記録"
         rowKey={(r) => r.id}
         rows={shown}
-        emptyText="止めた記録はありません"
+        emptyText={EMPTY_TEXT.history}
         columns={[
           { key: "at", header: "時刻", numeric: true, render: (r) => jstDateTime(r.at) },
           { key: "name", header: "相手" },
@@ -252,7 +252,7 @@ function StopRecord({ stopId, services, onClose, onJudged }: StopRecordProps) {
           <section aria-label="直前の操作">
             <h3>直前の操作 ({d.recentOps.length} 件)</h3>
             {d.recentOps.length === 0 ? (
-              <p>直前の操作はありません</p>
+              <p>{EMPTY_TEXT.recentOps}</p>
             ) : (
               <ol>
                 {d.recentOps.map((op, i) => (
@@ -268,7 +268,7 @@ function StopRecord({ stopId, services, onClose, onJudged }: StopRecordProps) {
           <section aria-label="経緯">
             <h3>経緯</h3>
             {d.updates.length === 0 ? (
-              <p>再開と判定の記録はありません</p>
+              <p>{EMPTY_TEXT.timeline}</p>
             ) : (
               <ul>
                 {d.updates.map((u, i) => (
