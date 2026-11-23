@@ -41,6 +41,7 @@ const SIGNAL_LABEL: Record<GuardSignal, string> = {
   repeated_failure: "同じ失敗の繰り返し",
   unchecked_merge: "チェックを通らないマージ",
   task_overrun: "1 つのタスクの最長時間",
+  task_cost: "1 つのタスクの費用の上限",
   staff_rule_denied: "社員のルールの外の操作",
   token_rate: "トークンの速さ",
   tool_rate: "操作の速さ",

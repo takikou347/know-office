@@ -1,8 +1,8 @@
 // 蒸留。前の週の止めた記録と近かった記録を原因ごとにまとめてレビュー担当のモデルに送り、返った案を lessons に入れる (サービスと拡張の 3.6)
-import { DistillAnswer, newId, OPUS } from "@know-office/core";
+import { DistillAnswer, newId } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
-import { answerJson, BATCH_EFFORT, BATCH_MAX_TOKENS, type BatchRequest, type BatchResult, recordBatchUsage } from "../jobs/claude-batch.ts";
+import { answerJson, BATCH_EFFORT, BATCH_MAX_TOKENS, BATCH_MODEL, type BatchRequest, type BatchResult, recordBatchUsage } from "../jobs/claude-batch.ts";
 import type { BatchRow, WeekRange, WeeklyDeps, WeeklyJob } from "../jobs/weekly.ts";
 import { clockAt } from "../work/attendance.ts";
 
@@ -61,7 +61,7 @@ async function prepare(env: Bindings, range: WeekRange, maxRequests: number): Pr
   return {
     requests: groups.map((g) => ({
       customId: g.customId,
-      model: OPUS,
+      model: BATCH_MODEL,
       system: SYSTEM,
       prompt: [
         `原因: ${g.cause}`,

@@ -2,6 +2,8 @@
 import { AppError, DEFAULT_THRESHOLDS, GuardEvent, isStaffEvent, type Judgment, type StaffId, taskOverrun } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
+import { loadBudget, usdText } from "../services/budget.ts";
+import { recordsOf } from "../work/nodes.ts";
 import { applyStop, askReviewer, guardDo, recordNear, staffOf, type StopInput } from "./actions.ts";
 import type { GuardDeps, Observed } from "./deps.ts";
 import { loadThresholds, thresholdsHash } from "./thresholds.ts";
@@ -40,6 +42,38 @@ export async function observe(env: Bindings, input: unknown, now: number, deps: 
 }
 
 /**
+ * タスクの費用を足し、月の予算の 1 タスクの上限を超えたら、シグナル task_cost でタスクを止める。同じ所を回り続ける呼び出しを、費用で止める
+ * 再開した後は、最後に再開した時から数え直す。使った量を usage に足した後に呼ぶ
+ * @param env バインディング
+ * @param input 社員とタスク
+ * @param input.staffId 社員 ID
+ * @param input.nodeId タスク ID
+ * @param now 今の時刻
+ * @param deps 外へ頼む口
+ * @param traceId 要求のトレース ID
+ * @returns 止めたら true
+ */
+export async function checkTaskCost(env: Bindings, input: { staffId: StaffId; nodeId: string }, now: number, deps: GuardDeps, traceId?: string): Promise<boolean> {
+  const budget = await loadBudget(env.DB);
+  const cap = Math.round(budget.value.taskMaxUsd * 1_000_000);
+  // 最後に再開した時より後だけを数える。止めた記録は今の状態の D1、使った量は記録の D1 にあるので、2 つの文に分ける
+  const resumed = await env.DB.prepare(
+    "SELECT coalesce(max(u.at), 0) AS at FROM stop_updates u JOIN stops s ON s.id = u.stop_id WHERE s.scope = 'task' AND s.target = ? AND s.signal = 'task_cost' AND u.kind = 'resumed'",
+  )
+    .bind(input.nodeId)
+    .first<{ at: number }>();
+  const row = await recordsOf(env, now)
+    .prepare("SELECT coalesce(sum(cost_micro_usd), 0) AS cost FROM usage WHERE node_id = ? AND at > ?")
+    .bind(input.nodeId, resumed?.at ?? 0)
+    .first<{ cost: number }>();
+  const cost = row?.cost ?? 0;
+  if (cost <= cap) return false;
+  const observed: Observed = { action: "stop", scope: "task", target: input.nodeId, signal: "task_cost", measured: cost, threshold: cap, recentOps: [], externalSources: [] };
+  await settle(env, observed, budget.version, now, deps, traceId, `1 つのタスクの費用 ${usdText(cost)} が上限 ${usdText(cap)} を超えた`);
+  return true;
+}
+
+/**
  * 数えた答えに従って止めるか、近かったを残す
  * @param env バインディング
  * @param observed 数えた答え
@@ -47,8 +81,9 @@ export async function observe(env: Bindings, input: unknown, now: number, deps: 
  * @param now 今の時刻
  * @param deps 外へ頼む口
  * @param traceId 要求のトレース ID
+ * @param reason 通知に出す訳。無ければシグナルと数えた値と基準
  */
-async function settle(env: Bindings, observed: Observed, rulesVersion: number, now: number, deps: GuardDeps, traceId?: string): Promise<void> {
+async function settle(env: Bindings, observed: Observed, rulesVersion: number, now: number, deps: GuardDeps, traceId?: string, reason?: string): Promise<void> {
   if (observed.action === "none" || observed.signal === "") return;
   const input: StopInput = {
     scope: observed.scope,
@@ -61,6 +96,7 @@ async function settle(env: Bindings, observed: Observed, rulesVersion: number, n
     externalSources: observed.externalSources,
     by: "system",
     ...(traceId === undefined ? {} : { traceId }),
+    ...(reason === undefined ? {} : { reason }),
   };
   if (observed.action === "near") {
     await recordNear(env, input, now);

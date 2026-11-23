@@ -7,7 +7,7 @@ import { usage } from "../db/records.ts";
 import { endpoints } from "../endpoints.ts";
 import type { Bindings, GateEnv, Staff } from "../env.ts";
 import { ensureRunning, staffOf } from "../guard/actions.ts";
-import { observe } from "../guard/observe.ts";
+import { checkTaskCost, observe } from "../guard/observe.ts";
 import { CLAUDE_FAILED, recordError } from "../ledger/errors.ts";
 import { noticeClaudeFailures } from "../ledger/notices.ts";
 import { problemResponse } from "../problem.ts";
@@ -402,6 +402,7 @@ async function recordUsage(c: Context<GateEnv>, call: Call, body: UsageBody): Pr
       });
     const tokens = u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens;
     await observe(env, { type: "usage", staffId: call.staffId, tokens }, at, c.var.guard, c.var.traceId);
+    await checkTaskCost(env, { staffId: call.staffId, nodeId: call.nodeId }, at, c.var.guard, c.var.traceId);
   } catch (error) {
     log("error", "usage_record_failed", { staffId: call.staffId, nodeId: call.nodeId, traceId: c.var.traceId, error: error instanceof Error ? error.message : "unknown" });
   }

@@ -7,6 +7,7 @@ import type { DevIssues } from "../devloop/dev-issues.ts";
 import type { IssueTracker } from "../findings/tracker.ts";
 import { DISTILL_JOB } from "../guard/distill.ts";
 import { recordError } from "../ledger/errors.ts";
+import { budgetPace } from "../services/budget.ts";
 import { claudeBlocked, noticeAuthFailed } from "../work/run.ts";
 import { BATCH_DEADLINE_MS, countApplyFailure, countNotFound, failBatch, noticeGiveUp, recordAnswerFailures } from "./batch-giveup.ts";
 import { IDEAS_JOB } from "./ideas.ts";
@@ -123,7 +124,18 @@ function clockOf(now: number): Clock {
 }
 
 /**
- * 前の週のバッチ処理を始める。種類の設定が on でない時、Claude の鍵が断られた通知を読んでいない時、送る物が無い週、もう始めた週は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
+ * 今月の Claude の API の費用が月の予算に届いたか。届いた月はバッチ処理を送らない
+ * @param env バインディング
+ * @param now 今の時刻
+ * @returns 届いていれば true
+ */
+async function monthSpent(env: Bindings, now: number): Promise<boolean> {
+  const pace = await budgetPace(env, now);
+  return pace.monthMicroUsd >= pace.budgetMicroUsd;
+}
+
+/**
+ * 前の週のバッチ処理を始める。種類の設定が on でない時、Claude の鍵が断られた通知を読んでいない時、月の予算に届いた時、送る物が無い週、もう始めた週は何もしない。送れなかった時は始めた印を戻し、エラーログに残す
  * @param env バインディング
  * @param kind 種類
  * @param deps 外へ頼む口
@@ -136,6 +148,7 @@ export async function startBatch(env: Bindings, kind: BatchKind, deps: WeeklyDep
   const limit = WEEKLY_LIMITS[kind];
   if (env[limit.flag] !== "on") return null;
   if (await claudeBlocked(env.DB)) return null;
+  if (await monthSpent(env, now)) return null;
   const range = previousWeek(now);
   const prepared = await JOBS[kind].prepare(env, range, limit.perRun);
   if (!prepared || prepared.requests.length === 0) return null;
@@ -225,7 +238,7 @@ export async function pollBatches(env: Bindings, deps: WeeklyDeps, now: number):
   // 前の回に作れなかった Issue を作り直す。GitHub だけを呼ぶので鍵の断りに関わらず行う
   await syncIssues(env, deps.tracker, now, deps.issues);
   // 終わりを見る間に鍵を断られたら、急ぐ故障も送らない
-  if (!claudeOpen || (await claudeBlocked(env.DB))) return;
+  if (!claudeOpen || (await claudeBlocked(env.DB)) || (await monthSpent(env, now))) return;
   // 急ぐ故障は週を待たずに調べる。結果は次の 5 分で入れる
   for (const urgent of await urgentBatches(env, now)) await submitOnce(env, "urgent", urgent.key, urgent, deps, now, { prefix: urgent.day, max: URGENT_PER_DAY });
 }

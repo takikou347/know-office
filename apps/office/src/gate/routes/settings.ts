@@ -19,6 +19,7 @@ import {
   updateSchedule,
   updateServiceSetting,
 } from "../services/settings.ts";
+import { BUDGET_KEY, loadBudget, updateBudget } from "../services/budget.ts";
 import { chooseRepo } from "../services/repo.ts";
 import { COST_SWITCHES, loadSwitch, updateSwitch } from "../services/switches.ts";
 import { staffDo } from "../work/loop.ts";
@@ -80,7 +81,7 @@ const listSettingsRoute = createRoute({
   operationId: "listSettings",
   tags: ["settings"],
   summary: "office の設定とサービスの初期値",
-  description: "キーは勤務の時刻 (`workday.schedule`)、時間外の呼び出し (`workday.offHoursCall`)、会話の言葉の指示 (`workday.chatOrders`)、レビュー担当に止めた記録を聞く事 (`guard.review`)、自動停止の基準 (`guard.thresholds`)、サービスの初期値 (`service.actions`、`service.mergeWhen`、`service.deployWhen`、`service.protectedPaths`、`service.paused`) の順。行が無い項目は組み込みの初期値をバージョン 0 で返し、inherited を true にする。",
+  description: "キーは勤務の時刻 (`workday.schedule`)、時間外の呼び出し (`workday.offHoursCall`)、会話の言葉の指示 (`workday.chatOrders`)、レビュー担当に止めた記録を聞く事 (`guard.review`)、Claude の API の月の予算 (`claude.budget`)、自動停止の基準 (`guard.thresholds`)、サービスの初期値 (`service.actions`、`service.mergeWhen`、`service.deployWhen`、`service.protectedPaths`、`service.paused`) の順。行が無い項目は組み込みの初期値をバージョン 0 で返し、inherited を true にする。",
   "x-steps": ["`settings` からキーごとの最新の値を取得する"],
   request: { query: listQuery(router) },
   responses: { 200: listResponse(Setting), ...problems(400, 401, 403, 422, 429, 500) },
@@ -92,17 +93,17 @@ const updateSettingRoute = createRoute({
   operationId: "updateSetting",
   tags: ["settings"],
   summary: "office の設定を変更する",
-  description: "守りを弱める変更、勤務を延ばす変更、時間外の呼び出しか会話の言葉の指示かレビュー担当に聞く事を開くか回数を増やす変更の場合のみ、15 分以内のパスキーの確認が必要。",
+  description: "守りを弱める変更、勤務を延ばす変更、時間外の呼び出しか会話の言葉の指示かレビュー担当に聞く事を開くか回数を増やす変更、月の予算を増やす変更の場合のみ、15 分以内のパスキーの確認が必要。",
   "x-steps": [
-    "`key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`、勤務の時刻の `workday.schedule`、時間外の呼び出しの `workday.offHoursCall`、会話の言葉の指示の `workday.chatOrders`、レビュー担当に止めた記録を聞く事の `guard.review`) かを確認し、キーごとの Zod スキーマで値を検証する。勤務の時刻は始まりと終わりが違い、曜日が 1 つ以上で重ならない事も確かめる。`guard.thresholds` と `github.rules` は専用のルートで変更する",
+    "`key` がこのルートで変えられる項目 (サービスの初期値の `service.<項目>`、勤務の時刻の `workday.schedule`、時間外の呼び出しの `workday.offHoursCall`、会話の言葉の指示の `workday.chatOrders`、レビュー担当に止めた記録を聞く事の `guard.review`、Claude の API の月の予算の `claude.budget`) かを確認し、キーごとの Zod スキーマで値を検証する。勤務の時刻は始まりと終わりが違い、曜日が 1 つ以上で重ならない事も確かめる。`guard.thresholds` と `github.rules` は専用のルートで変更する",
     "`version` が現在と一致することを確認する",
-    "今の初期値と変えた後の値を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める。勤務の時刻は、今の勤務の時間に無い時間を足す変更 (終わりを遅らせる、始まりを早める、曜日を足す) ならパスキーの確認を求める。時間外の呼び出しと会話の言葉の指示とレビュー担当に聞く事は、開く変更と回数を増やす変更ならパスキーの確認を求める",
+    "今の初期値と変えた後の値を比べ、守りを弱める変更 (できる操作に今の値に無い操作を足す、main にマージする条件か本番にデプロイする条件から条件を外す、触れない所から道を外す、止めたサービスを動かす) ならパスキーの確認を求める。勤務の時刻は、今の勤務の時間に無い時間を足す変更 (終わりを遅らせる、始まりを早める、曜日を足す) ならパスキーの確認を求める。時間外の呼び出しと会話の言葉の指示とレビュー担当に聞く事は、開く変更と回数を増やす変更ならパスキーの確認を求める。月の予算は、月の額か 1 タスクの上限を増やす変更ならパスキーの確認を求める",
     "`settings` に範囲 `office` で、読んだ版より新しい行が無い時だけ追加し、監査ログに `setting.update` を記録する",
     "`key` が `service.mergeWhen` の時は、サービスのリポジトリと触れるリポジトリのうち公開のリポジトリに、ルールセット「know-office」を新しい条件で設定し直す。`workday.schedule` の時は、3 人の `StaffDO` の alarm を新しい時刻で掛け直す。掛け直せなかった社員は変更を残したまま `error_events` に `schedule_rearm_failed` で残す",
   ],
   "x-errors": [
     "404 `not_found`: 設定項目が存在しない、または`guard.thresholds` と `github.rules` は専用のルートで変更するため、このルートでは扱えない",
-    "401 `step_up_required`: 守りを弱める変更、勤務を延ばす変更、時間外の呼び出しか会話の言葉の指示かレビュー担当に聞く事を開くか回数を増やす変更で、パスキーの確認がない",
+    "401 `step_up_required`: 守りを弱める変更、勤務を延ばす変更、時間外の呼び出しか会話の言葉の指示かレビュー担当に聞く事を開くか回数を増やす変更、月の予算を増やす変更で、パスキーの確認がない",
     "409 `conflict`: バージョンが異なる",
     "422 `validation_failed`: 値が項目の形に合わない、または `null` を送った",
     "429 `rate_limited`: GitHub の上限に当たった。待つ秒を `Retry-After` に付ける",
@@ -152,10 +153,17 @@ export const settingRoutes = router
   })
   .openapi(listSettingsRoute, async (c) => {
     const db = c.env.DB;
-    const [schedule, switches, thresholds, defaults] = await Promise.all([loadScheduleSetting(db), Promise.all(COST_SWITCHES.map((sw) => loadSwitch(db, sw))), loadThresholds(db), loadOfficeDefaults(db)]);
+    const [schedule, switches, budget, thresholds, defaults] = await Promise.all([
+      loadScheduleSetting(db),
+      Promise.all(COST_SWITCHES.map((sw) => loadSwitch(db, sw))),
+      loadBudget(db),
+      loadThresholds(db),
+      loadOfficeDefaults(db),
+    ]);
     const all: Setting[] = [
       schedule,
       ...switches,
+      budget,
       { key: "guard.thresholds", value: thresholds.thresholds, inherited: thresholds.version === 0, version: thresholds.version },
       ...INHERITED_KEYS.map((k) => ({ key: `${DEFAULT_PREFIX}${k}`, value: defaults[k].value, inherited: !defaults[k].set, version: defaults[k].version })),
     ];
@@ -186,6 +194,11 @@ export const settingRoutes = router
       const changed = await updateSwitch(c.env.DB, sw, { value, version, reason, now }, () => requireStepUp(c));
       await audit(c, "setting.update", key, { value: changed.value, version: changed.version, reason });
       return ok(c, changed);
+    }
+    if (key === BUDGET_KEY) {
+      const budget = await updateBudget(c.env.DB, { value, version, reason, now }, () => requireStepUp(c));
+      await audit(c, "setting.update", key, { value: budget.value, version: budget.version, reason });
+      return ok(c, budget);
     }
     const setting = await updateOfficeDefault(c.env.DB, { key, value, version, reason, now }, () => requireStepUp(c));
     await audit(c, "setting.update", key, { value: setting.value, version: setting.version, reason });

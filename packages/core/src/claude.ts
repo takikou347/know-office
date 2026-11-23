@@ -2,9 +2,9 @@
 import { ClaudeErrorBody, type SpendLimitKind } from "./schemas/claude.ts";
 import type { StaffJob } from "./schemas/workday.ts";
 
-/** 社長とレビュー担当のモデル */
+/** レビュー担当のモデル。作った者と別のモデルで見るので、開発担当より上のモデルにする */
 export const OPUS = "claude-opus-5-5";
-/** 開発担当のモデル */
+/** 社長と開発担当のモデル。ゲートウェイのバッチ処理と止めた記録を聞く時もこれを使う */
 export const SONNET = "claude-sonnet-5-5";
 /** 軽いタスク (題を付ける、要約するなど) のモデル。SDK が裏で呼ぶので、どの役にも許す */
 export const HAIKU = "claude-haiku-5-5";
@@ -46,8 +46,8 @@ const PRICES: Record<typeof OPUS | typeof SONNET, Price> = {
 /** 社員に選べるモデル。画面の選ぶ欄の元 */
 export const SELECTABLE_MODELS: readonly ClaudeModel[] = [OPUS, SONNET, HAIKU];
 
-/** 職種ごとの初期のモデル。社員を足す時の選ぶ欄の初期値 */
-export const JOB_MODEL: Record<StaffJob, ClaudeModel> = { president: OPUS, reviewer: OPUS, builder: SONNET };
+/** 職種ごとの初期のモデル。社員を足す時の選ぶ欄の初期値。月の予算に収めるため、レビュー担当だけ Opus にする */
+export const JOB_MODEL: Record<StaffJob, ClaudeModel> = { president: SONNET, reviewer: OPUS, builder: SONNET };
 
 /**
  * 選べるモデルかを確かめる
@@ -131,3 +131,23 @@ export function claudeSpendLimit(status: number, body: unknown): ClaudeSpendLimi
   if (status === 402 && type === "billing_error") return { kind: "billing", message };
   return null;
 }
+
+/**
+ * 今日の配分を出す。今月の予算から今日より前に使った額を引き、今日を入れた月の残りの日数で割る。端数は切り捨てる
+ * @param budgetMicroUsd 月の予算 (百万分の 1 ドル)
+ * @param spentBeforeTodayMicroUsd 今月の今日より前に使った額
+ * @param today 日本時間の今日 YYYY-MM-DD
+ * @returns 今日の配分 (百万分の 1 ドル)。予算を使い切っていれば 0
+ */
+export function dailyAllowanceMicroUsd(budgetMicroUsd: number, spentBeforeTodayMicroUsd: number, today: string): number {
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+  const day = Number(today.slice(8, 10));
+  // 次の月の 0 日は今月の最後の日
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const daysLeft = lastDay - day + 1;
+  const left = budgetMicroUsd - spentBeforeTodayMicroUsd;
+  if (left <= 0) return 0;
+  return Math.floor(left / Math.max(1, daysLeft));
+}
+

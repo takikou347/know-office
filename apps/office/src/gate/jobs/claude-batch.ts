@@ -1,5 +1,5 @@
 // Claude のバッチ処理の API を呼ぶ口。送る、終わったかを見る、結果を読む。急がないタスクはワークスペースを通さずここから回す (サービスと拡張の 3.6、社員が考えるの 3.4)
-import { allowedFetch, AppError, batchCostMicroUsd, type ClaudeUsage, type Fetcher, newId, OPUS } from "@know-office/core";
+import { allowedFetch, AppError, batchCostMicroUsd, type ClaudeUsage, type Fetcher, newId, SONNET } from "@know-office/core";
 import { z } from "zod";
 import { endpoints } from "../endpoints.ts";
 import type { Bindings } from "../env.ts";
@@ -38,6 +38,9 @@ export type BatchRequest = {
   /** 考える深さ */
   effort: BatchEffort;
 };
+
+/** ゲートウェイのバッチ処理のモデル。決まった形の JSON を返すだけなので、月の予算に収めるため Sonnet にする */
+export const BATCH_MODEL = SONNET;
 
 /** 考える深さ。Opus 5.5 は考える事を切れないので、深さだけで費用を抑える (https://docs.claude.com/en/build-with-claude/effort) */
 export type BatchEffort = "low" | "medium" | "high";
@@ -201,7 +204,7 @@ export async function batchResults(env: Bindings, fetch: Fetcher, batchId: strin
 }
 
 /**
- * バッチ処理の使った量を office の範囲で usage に残す。Opus で、1 件ずつの半額で数える。
+ * バッチ処理の使った量を office の範囲で usage に残す。BATCH_MODEL で、1 件ずつの半額で数える。
  * 同じバッチを読み直して 2 度呼んでも、結果ごとに 1 行だけ残す
  * @param env バインディング
  * @param batchId バッチの ID
@@ -223,7 +226,7 @@ export async function recordBatchUsage(env: Bindings, batchId: string, results: 
           `INSERT INTO usage (id, at, staff_id, node_id, scope, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micro_usd, request_id, waited_ms, trace_id)
            SELECT ?, ?, ?, NULL, 'office', ?, ?, ?, ?, ?, ?, ?, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM usage WHERE at = ? AND request_id = ?)`,
         )
-        .bind(newId(clockAt(at + i)), at, staffId, OPUS, r.usage.inputTokens, r.usage.outputTokens, r.usage.cacheReadTokens, r.usage.cacheWriteTokens, batchCostMicroUsd(OPUS, r.usage), requestId, at, requestId),
+        .bind(newId(clockAt(at + i)), at, staffId, BATCH_MODEL, r.usage.inputTokens, r.usage.outputTokens, r.usage.cacheReadTokens, r.usage.cacheWriteTokens, batchCostMicroUsd(BATCH_MODEL, r.usage), requestId, at, requestId),
     ];
   });
   if (statements.length > 0) await db.batch(statements);

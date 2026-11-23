@@ -1,8 +1,8 @@
 // 見つけて直す調べ。前の週のエラー、遅い所、無駄な費用と、見つけた時の急ぐ故障を原因の指紋ごとにまとめてレビュー担当のモデルに送り、1 つの原因を 1 件の Issue にする (サービスと拡張の 3.7)
-import { type Clock, FindingAnswer, jstClock, jstDay, newId, OPUS, redactPublic } from "@know-office/core";
+import { type Clock, FindingAnswer, jstClock, jstDay, newId, redactPublic } from "@know-office/core";
 import { z } from "zod";
 import type { Bindings } from "../env.ts";
-import { answerJson, BATCH_EFFORT, BATCH_MAX_TOKENS, type BatchRequest, type BatchResult, recordBatchUsage } from "../jobs/claude-batch.ts";
+import { answerJson, BATCH_EFFORT, BATCH_MAX_TOKENS, BATCH_MODEL, type BatchRequest, type BatchResult, recordBatchUsage } from "../jobs/claude-batch.ts";
 import type { BatchRow, WeekRange, WeeklyDeps, WeeklyJob } from "../jobs/weekly.ts";
 import { BURST_LIMIT, BURST_WINDOW_MS, CLAUDE_FAILED, recordError } from "../ledger/errors.ts";
 import { clockAt } from "../work/attendance.ts";
@@ -127,7 +127,7 @@ async function errorGroups(env: Bindings, from: number, to: number, filter: { ov
 function requestOf(group: DetailGroup, lines: string[], urgent: boolean): BatchRequest {
   const label = urgent ? `急ぐ故障 (${KINDS[group.kind].label})` : KINDS[group.kind].label;
   const when = `最初: ${jstDay(group.firstAt)} ${jstClock(group.firstAt)}、最後: ${jstDay(group.lastAt)} ${jstClock(group.lastAt)}`;
-  return { customId: group.customId, model: OPUS, system: SYSTEM, prompt: redactPublic([`種類: ${label}`, ...lines, when].join("\n")), maxTokens: BATCH_MAX_TOKENS, effort: BATCH_EFFORT };
+  return { customId: group.customId, model: BATCH_MODEL, system: SYSTEM, prompt: redactPublic([`種類: ${label}`, ...lines, when].join("\n")), maxTokens: BATCH_MAX_TOKENS, effort: BATCH_EFFORT };
 }
 
 /**

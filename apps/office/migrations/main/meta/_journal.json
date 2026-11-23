@@ -204,6 +204,13 @@
       "when": 1795435489454,
       "tag": "0028_staff_manage",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1795445445201,
+      "tag": "0029_president_sonnet",
+      "breakpoints": true
     }
   ]
 }

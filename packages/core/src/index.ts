@@ -2,8 +2,8 @@
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
-export { allowedModels, batchCostMicroUsd, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, DEV_STAFF_HEADER, HAIKU, isStaffModel, JOB_MODEL, OPUS, SONNET, SELECTABLE_MODELS } from "./claude.ts";
-export { ClaudeErrorBody, SPEND_LIMIT_KINDS, type SpendLimitKind } from "./schemas/claude.ts";
+export { allowedModels, batchCostMicroUsd, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, dailyAllowanceMicroUsd, DEV_STAFF_HEADER, HAIKU, isStaffModel, JOB_MODEL, OPUS, SONNET, SELECTABLE_MODELS } from "./claude.ts";
+export { ClaudeBudget, ClaudeErrorBody, DEFAULT_CLAUDE_BUDGET, SPEND_LIMIT_KINDS, type SpendLimitKind } from "./schemas/claude.ts";
 export { Secret } from "./secret.ts";
 export { CONTAINER_CA, WORKSPACE_KEY_ENV } from "./container.ts";
 export { keyedId, newId } from "./id.ts";

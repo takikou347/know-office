@@ -1,5 +1,5 @@
-// 設定の画面の、全体のルールとサービスの初期値。勤務の時刻、時間外の呼び出し、会話の言葉の指示と、サービスが受け継ぐ 5 項目を読み、1 項目ずつ変える (サービスと拡張の 3.3、社員と勤怠の 2 章)
-import { INHERITED_KEYS, type Setting, WorkSchedule } from "@know-office/core";
+// 設定の画面の、全体のルールとサービスの初期値。勤務の時刻、Claude の API の月の予算、時間外の呼び出し、会話の言葉の指示と、サービスが受け継ぐ 5 項目を読み、1 項目ずつ変える (サービスと拡張の 3.3、社員と勤怠の 2 章)
+import { ClaudeBudget, INHERITED_KEYS, type Setting, WorkSchedule } from "@know-office/core";
 import { Card, Checkbox, Stack, Status, TextField } from "knowidea-ui";
 import { useState } from "react";
 import { z } from "zod";
@@ -9,6 +9,7 @@ import { Part } from "../../parts/section.tsx";
 
 const SCHEDULE_KEY = "workday.schedule";
 const DEFAULT_PREFIX = "service.";
+const BUDGET_KEY = "claude.budget";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
@@ -68,6 +69,47 @@ function ScheduleCard({ setting, onSaved, onRefused, refusal }: CardProps) {
   );
 }
 
+/** Claude の API の月の予算。月の額と 1 タスクの上限を変える。増やす変更はパスキーで確かめる */
+function BudgetCard({ setting, onSaved, onRefused, refusal }: CardProps) {
+  const read = ClaudeBudget.safeParse(setting.value);
+  const start = read.success ? read.data : { monthlyUsd: 90, taskMaxUsd: 1 };
+  const [monthly, setMonthly] = useState(String(start.monthlyUsd));
+  const [taskMax, setTaskMax] = useState(String(start.taskMaxUsd));
+  const next = ClaudeBudget.safeParse({ monthlyUsd: Number(monthly), taskMaxUsd: Number(taskMax) });
+  const changed = next.success && !same(next.data, setting.value);
+  return (
+    <Card title="Claude の API の月の予算" headingLevel={3} badge={<Status kind={setting.inherited ? "neutral" : "info"} label={setting.inherited ? "組み込みの初期値" : `バージョン ${String(setting.version)}`} />}>
+      <Stack gap={3}>
+        <Stack direction="row" gap={3} wrap>
+          <TextField label="月の予算 (ドル)" type="number" inputMode="decimal" min={1} step="any" value={monthly} onChange={(e) => setMonthly(e.target.value)} />
+          <TextField label="1 タスクの上限 (ドル)" type="number" inputMode="decimal" min={0.1} step="any" value={taskMax} onChange={(e) => setTaskMax(e.target.value)} />
+        </Stack>
+        {next.success ? null : <p role="alert">どちらも 0 より大きい額にしてください</p>}
+        <p>
+          今月の残りを残りの日数で割った額が今日の配分です。配分に届いた社員は新しい呼び出しを始めず、明日の勤務で続けます。1 タスクの費用が上限を超えたら、そのタスクを止めます。Console
+          の上限より下に置いてください。増やす変更はパスキーで確かめます
+        </p>
+        <SaveBar
+          label="月の予算"
+          put={officePut(BUDGET_KEY)}
+          version={setting.version}
+          value={changed ? next.data : null}
+          onSaved={(saved) => {
+            const parsed = ClaudeBudget.safeParse(saved.value);
+            if (parsed.success) {
+              setMonthly(String(parsed.data.monthlyUsd));
+              setTaskMax(String(parsed.data.taskMaxUsd));
+            }
+            onSaved(saved);
+          }}
+          onRefused={onRefused}
+          refusal={refusal}
+        />
+      </Stack>
+    </Card>
+  );
+}
+
 /** 費用の出る口の設定の、画面に出す言葉と回数の上限 */
 type SwitchText = {
   /** 設定のキー */
@@ -108,7 +150,7 @@ const SWITCHES: readonly SwitchText[] = [
     check: "タスクか社員を止めたら、止めた記録をレビュー担当に読ませ、問題が無ければ再開する",
     perDayLabel: "1 日の回数 (全員で)",
     max: 50,
-    note: "開くと止めるたびに Claude (Opus) の費用が出ます。答えが無い時と回数を使い切った時は、オーナーが再開するまで止めたままです。開く変更と回数を増やす変更はパスキーで確かめます",
+    note: "開くと止めるたびに Claude (Sonnet) の費用が出ます。答えが無い時と回数を使い切った時は、オーナーが再開するまで止めたままです。開く変更と回数を増やす変更はパスキーで確かめます",
   },
 ];
 
@@ -152,7 +194,7 @@ function SwitchCard({ text, setting, onSaved, onRefused, refusal }: CardProps & 
   );
 }
 
-/** 全体のルール (勤務の時刻、時間外の呼び出し、会話の言葉の指示) とサービスの初期値 */
+/** 全体のルール (勤務の時刻、月の予算、時間外の呼び出し、会話の言葉の指示) とサービスの初期値 */
 export function OfficeRules() {
   const cards = useSettingCards((a) => a.api.v1.settings.$get({ query: { limit: "100" } }));
   const { loaded, round } = cards;
@@ -162,10 +204,12 @@ export function OfficeRules() {
   // 断られた時は理由を残したまま読み直し、届いた今の値でカードを作り直す。変えられた時はカードを残し、変えた事を出したままにする
   const props = (setting: Setting) => ({ setting, onSaved: cards.keep, onRefused: cards.refuse(setting.key), refusal: cards.refusalOf(setting.key) });
   const schedule = cards.find(SCHEDULE_KEY);
+  const budget = cards.find(BUDGET_KEY);
   return (
     <>
       <Part title="全体のルール">
         {schedule ? <ScheduleCard key={round} {...props(schedule)} /> : null}
+        {budget ? <BudgetCard key={`${BUDGET_KEY}:${String(round)}`} {...props(budget)} /> : null}
         {SWITCHES.map((text) => {
           const setting = cards.find(text.key);
           return setting ? <SwitchCard key={`${text.key}:${String(round)}`} text={text} {...props(setting)} /> : null;

@@ -1,5 +1,5 @@
 // 止めた記録をレビュー担当のモデルに渡し、再開してよいかを聞く。設定 guard.review で閉じて入れ、1 日の回数で止める (自動停止の 3.5)
-import { type Clock, type Fetcher, jstDay, log, OPUS, ReviewAnswer } from "@know-office/core";
+import { type Clock, type Fetcher, jstDay, log, ReviewAnswer, SONNET } from "@know-office/core";
 import type { Bindings } from "../env.ts";
 import { recordError } from "../ledger/errors.ts";
 import { GUARD_REVIEW, loadSwitch } from "../services/switches.ts";
@@ -81,14 +81,14 @@ export function connectReview(env: Bindings, fetch: Fetcher, clock: Clock): Guar
       // 呼んで失敗した回も数えるので、印は返さない
       if (!(await reserveReview(env.DB, { stopId: record.stopId, day: jstDay(now), perDay: setting.value.perDay }, now))) return null;
       // 止めた記録は JSON の文字列にして渡し、記録の中の文で区切りを偽らせない
-      reply = await callTool(env, fetch, { model: OPUS, maxTokens: MAX_TOKENS, system: SYSTEM, tool: RECORD_REVIEW, content: JSON.stringify(record), timeoutMs: REVIEW_TIMEOUT_MS });
+      reply = await callTool(env, fetch, { model: SONNET, maxTokens: MAX_TOKENS, system: SYSTEM, tool: RECORD_REVIEW, content: JSON.stringify(record), timeoutMs: REVIEW_TIMEOUT_MS });
     } catch (error) {
       return failed(error);
     }
     try {
       // 判断はゲートウェイがレビュー担当の役で呼ぶので、在籍のレビュー担当の分にする。居なければ最初のレビュー担当の ID に付ける
       const staffId = await pickStaff(env.DB, "reviewer").catch(() => "reviewer");
-      await recordGateUsage(env, { staffId, nodeId: record.scope === "task" ? record.target : null, model: OPUS, usage: reply.usage, requestId: `guard_review:${record.stopId}`, traceId: null }, now);
+      await recordGateUsage(env, { staffId, nodeId: record.scope === "task" ? record.target : null, model: SONNET, usage: reply.usage, requestId: `guard_review:${record.stopId}`, traceId: null }, now);
     } catch (error) {
       await failed(error);
     }

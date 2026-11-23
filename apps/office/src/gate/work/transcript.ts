@@ -8,7 +8,7 @@ import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
 import { clockAt } from "./attendance.ts";
 import { afterRunStarted, headMessages, withOwnerMessages } from "./deliver.ts";
-import { claudeBlocked, runBase, type RunStart, startRun } from "./run.ts";
+import { budgetHeld, claudeBlocked, runBase, type RunStart, startRun } from "./run.ts";
 import { issueTicket, retireOtherTickets } from "./ticket.ts";
 
 /** 会話の記録の置き場。社員 DO だけが持つ */
@@ -189,6 +189,8 @@ export async function resumeRun(env: Bindings, staffId: StaffId, now: number): P
   if (!saved) return false;
   // 鍵が違う間と使用の上限の間は、続きも呼ばない。読んだ後の arm で呼ぶ
   if (await claudeBlocked(env.DB)) return false;
+  // 今日の配分に届いた時も続きを呼ばない。後の startRun が同じ判断で paced を返す
+  if (await budgetHeld(env, now)) return false;
   const workspace = env.WORKSPACE.get(env.WORKSPACE.idFromName(staffId));
   await workspace.restore(saved);
   const { promptVersion } = await staffDo.runState(nodeId);

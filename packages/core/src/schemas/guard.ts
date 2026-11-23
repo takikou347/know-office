@@ -15,6 +15,7 @@ export const GuardSignal = z.enum([
   "repeated_failure",
   "unchecked_merge",
   "task_overrun",
+  "task_cost",
   "staff_rule_denied",
   "token_rate",
   "tool_rate",

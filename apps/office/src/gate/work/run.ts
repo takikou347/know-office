@@ -1,11 +1,12 @@
 // 社員が取ったタスクの SDK の呼び出しを始める。最初の runs、作り直しと再開の後の続き、失敗の数え方と鍵の失敗の間の止め方を持つ (社員が考えるの 3.3、タスクとレビューの 3.1)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, log, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, StaffJob, type WorkResult } from "@know-office/core";
+import { AppError, jstDay, log, ORG_RULES, ROLE_TOOLS, RunInput, type StaffId, StaffJob, type WorkResult } from "@know-office/core";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { nodes, notices, staff, staffPrompts } from "../db/main.ts";
 import type { Bindings } from "../env.ts";
 import { staffOf } from "../guard/actions.ts";
+import { BUDGET_PACED_NOTICE, budgetPace, usdText } from "../services/budget.ts";
 import { noticeOnce } from "./notice.ts";
 import { afterRunStarted, headMessages, withOwnerMessages } from "./deliver.ts";
 import { appendNodeEvent, findNode, type NodeRow, revertNode } from "./nodes.ts";
@@ -27,8 +28,8 @@ const BLOCKING_NOTICES = [AUTH_FAILED_NOTICE, SPEND_LIMIT_NOTICE] as const;
 /** 続けて失敗したタスクの通知の種類 */
 export const RUN_FAILED_NOTICE = "staff_run_failed";
 
-/** タスクの種類ごとの考える深さ。作るタスクは medium、見るタスクは high。ここに無い種類は社員の初期値を使う (社員が考えるの 3.4) */
-const EFFORT_BY_KIND: Partial<Record<string, RunInput["effort"]>> = { build: "medium", fix: "medium", content: "medium", review: "high" };
+/** タスクの種類ごとの考える深さ。月の予算に収めるため、作るタスクも見るタスクも medium。ここに無い種類は社員の初期値を使う (社員が考えるの 3.4) */
+const EFFORT_BY_KIND: Partial<Record<string, RunInput["effort"]>> = { build: "medium", fix: "medium", content: "medium", review: "medium" };
 
 /** 呼び出しを始められる社員の状態。waiting はワークスペースを作り直して待つ間で、受け付けられなければ失敗に数える。延長の終わり (wrapping)、止まり、退勤の後は始めない */
 const RUNNABLE = new Set(["working", "called", "waiting"]);
@@ -54,6 +55,25 @@ export async function claudeBlocked(db: D1Database): Promise<boolean> {
     .where(and(inArray(notices.kind, [...BLOCKING_NOTICES]), isNull(notices.readAt)))
     .limit(1);
   return open !== undefined;
+}
+
+/**
+ * 今日の配分か月の予算に届いていれば、通知を日ごとに 1 件出して true を返す。届いた社員は新しい呼び出しも続きも始めず、次の日の arm で始める
+ * 走っている呼び出しは切らないので、超えるのは走っている分だけで、それも 1 タスクの上限 (task_cost) で抑える
+ * @param env バインディング
+ * @param now 今の時刻
+ * @returns 届いていれば true
+ */
+export async function budgetHeld(env: Bindings, now: number): Promise<boolean> {
+  const pace = await budgetPace(env, now);
+  if (!pace.held) return false;
+  const month = pace.monthMicroUsd >= pace.budgetMicroUsd;
+  const title = month ? `Claude の API の月の予算 ${usdText(pace.budgetMicroUsd)} に届いた` : `${jstDay(now)} の Claude の API の配分 ${usdText(pace.allowanceMicroUsd)} に届いた`;
+  const body = month
+    ? `今月は ${usdText(pace.monthMicroUsd)} 使った。社員は来月の 1 日まで新しい呼び出しを始めない。急ぐ時は設定の月の予算を上げる`
+    : `今日は ${usdText(pace.todayMicroUsd)} 使った。社員は持っているタスクを明日の勤務で続ける。配分は今月の残りを残りの日数で割った額`;
+  await noticeOnce(env, { kind: BUDGET_PACED_NOTICE, title, body }, now, "info");
+  return true;
 }
 
 /**
@@ -127,8 +147,8 @@ export async function runFailed(env: Bindings, staffId: StaffId, nodeId: string,
   return failures;
 }
 
-/** 呼び出しを始めた結果。blocked は鍵の失敗か使用の上限の通知が読まれていない、busy はワークスペースがもう走っている */
-export type RunStart = "started" | "skipped" | "blocked" | "busy" | "failed";
+/** 呼び出しを始めた結果。blocked は鍵の失敗か使用の上限の通知が読まれていない、paced は今日の配分か月の予算に届いた、busy はワークスペースがもう走っている */
+export type RunStart = "started" | "skipped" | "blocked" | "paced" | "busy" | "failed";
 
 /**
  * 社員が持つタスクの最初の呼び出しを、新しい作業トークンで始める。社員 DO の鎖の外で呼ぶ (鎖の中で呼ぶと、作業トークンの発行が同じ鎖を待って止まる)
@@ -145,6 +165,7 @@ export async function startRun(env: Bindings, staffId: StaffId, now: number, tra
   if (nodeId === null || !RUNNABLE.has(state)) return "skipped";
   // 鍵が違う間と使用の上限の間に呼ぶと、どの社員も同じ失敗を繰り返す。オーナーが読むまで待ち、読んだ後の arm で始める
   if (await claudeBlocked(env.DB)) return "blocked";
+  if (await budgetHeld(env, now)) return "paced";
   const row = await findNode(env.DB, nodeId);
   if (row.status !== "doing" || row.assignee !== staffId) return "skipped";
   const { promptVersion } = await target.runState(nodeId);
