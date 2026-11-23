@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ROLE_TOOLS, StaffId, StaffJob } from "../src/index.ts";
+import { HAIKU, isPricier, OPUS, ROLE_TOOLS, SELECTABLE_MODELS, SONNET, StaffId, StaffJob } from "../src/index.ts";
+import { MODELS } from "../src/master/models.ts";
 import { JOBS } from "../src/master/jobs.ts";
 
 describe("社員の名簿", () => {
@@ -16,5 +17,10 @@ describe("社員の名簿", () => {
 
   it("職種のマスタデータは職種の値と同じ並び", () => {
     expect(JOBS.map((j) => j.value)).toEqual(StaffJob.options);
+  });
+
+  it("モデルのマスタデータは選べるモデルと同じ並びで、単価の高い順", () => {
+    expect(MODELS.map((m) => m.value)).toEqual(SELECTABLE_MODELS);
+    expect([isPricier(OPUS, SONNET), isPricier(SONNET, HAIKU), isPricier(SONNET, OPUS), isPricier(HAIKU, HAIKU)]).toEqual([true, true, false, false]);
   });
 });

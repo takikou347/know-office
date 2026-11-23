@@ -9,6 +9,7 @@ import { observe } from "../guard/observe.ts";
 import { recordError } from "../ledger/errors.ts";
 import type { WeeklyDeps } from "./weekly.ts";
 import { allStaff } from "../work/roster.ts";
+import { handOverLeftovers } from "../work/staff-manage.ts";
 
 /** 日本時間の 0 時 5 分。Cron は協定世界時で書くので 15 時 5 分になる。wrangler.jsonc の triggers.crons に同じ文字列を置く */
 export const DAILY_CRON = "5 15 * * *";
@@ -103,7 +104,7 @@ export async function checkFutureYears(env: Bindings, tracker: IssueTracker, clo
 
 /**
  * 0 時 5 分の定期ジョブを走らせる。失敗は投げずにエラーログに残す。次の日の 0 時 5 分か、出勤や訂正でまた作り直す
- * 週のバッチ処理の口を渡した時は、直してから 7 日たった Issue の効き目も確かめる (サービスと拡張の 3.7)
+ * 削除した社員に残ったタスクも移し直す。週のバッチ処理の口を渡した時は、直してから 7 日たった Issue の効き目も確かめる (サービスと拡張の 3.7)
  * @param env バインディング
  * @param ctx 返事の後も処理を続けさせる waitUntil
  * @param ctx.waitUntil 待たせる Promise を渡す
@@ -114,6 +115,8 @@ export function runDaily(env: Bindings, ctx: { waitUntil(promise: Promise<unknow
   ctx.waitUntil(
     rebuildYesterday(env, clock).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "daily_totals_rebuild_failed", error }, clock)),
   );
+  // 社員の削除の途中で落ちて、削除した社員に残ったタスクを移し直す
+  ctx.waitUntil(handOverLeftovers(env.DB, clock.now()).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "staff_handover_failed", error }, clock)));
   // 書き換えは監査ログを読んだ時だけでなく、毎日 1 度は全部の年で確かめる
   ctx.waitUntil(verifyChains(env, clock, UNCONNECTED_DEPS).catch((error: unknown) => recordError(env, { source: "job", level: "error", code: "chain_verify_failed", error }, clock)));
   if (weekly) {

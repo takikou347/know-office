@@ -2527,6 +2527,81 @@ components:
         - day
         - kind
       additionalProperties: false
+    CreateStaffInput:
+      type: object
+      properties:
+        job:
+          type: string
+          enum:
+            - builder
+            - reviewer
+        role:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: 画面に出す名前
+        bossId:
+          type: string
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+          description: 上司の社員 ID。在籍の社員
+        model:
+          type: string
+          enum:
+            - claude-opus-5-5
+            - claude-sonnet-5-5
+            - claude-haiku-5-5
+      required:
+        - job
+        - role
+        - bossId
+        - model
+      additionalProperties: false
+    UpdateStaffInput:
+      type: object
+      properties:
+        version:
+          type: integer
+          description: 読んだ時の設定の版。今と違えば 409 conflict
+        role:
+          type: string
+          minLength: 1
+          maxLength: 40
+        bossId:
+          type: string
+          pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+          description: 上司の社員 ID。社長には送れない
+        model:
+          type: string
+          enum:
+            - claude-opus-5-5
+            - claude-sonnet-5-5
+            - claude-haiku-5-5
+        schedule:
+          type:
+            - object
+            - "null"
+          properties:
+            start:
+              type: string
+              pattern: ^([01]\d|2[0-3]):[0-5]\d$
+            end:
+              type: string
+              pattern: ^([01]\d|2[0-3]):[0-5]\d$
+            days:
+              type: array
+              items:
+                type: integer
+                minimum: 0
+                maximum: 6
+          required:
+            - start
+            - end
+            - days
+          additionalProperties: false
+          description: この社員だけの勤務の時刻。null で全体の勤務の時刻に戻す
+      required:
+        - version
+      additionalProperties: false
     Message:
       type: object
       properties:
@@ -8166,6 +8241,82 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
       security: *a1
+    post:
+      operationId: createStaff
+      tags:
+        - staff
+      summary: 社員を足す
+      description: |-
+        社員を 1 人足すと Claude の費用とワークスペースの稼働が増えるので、15 分以内のパスキーの確認が要る。社長は足せない。
+
+        処理の流れ:
+
+        1. パスキーの確認を求める
+        2. `<職種>-<小文字と数字の 6 字>` の ID を作り、上司が在籍で在籍の社員が 10 人より少ない時だけ、`staff` と、同じ職種の最初の社員の最新の説明文の写しの `staff_prompts` を 1 回のバッチで追加する。ID が重なれば 1 度だけ作り直す
+        3. `StaffDO.wake` で出勤の予定を組ませる。届かなければエラーログに `staff_wake_failed` を残し、社員 DO が次に起きた時に組む
+        4. 監査ログに `staff.create` を記録する
+
+        このルート固有のエラー:
+
+        - 401 `step_up_required`: パスキーの確認がない
+        - 409 `refused`: 在籍の社員がもう 10 人いる
+        - 422 `validation_failed`: 上司が在籍の社員でない
+      x-steps:
+        - パスキーの確認を求める
+        - "`<職種>-<小文字と数字の 6 字>` の ID を作り、上司が在籍で在籍の社員が 10 人より少ない時だけ、`staff` と、同じ職種の最初の社員の最新の説明文の写しの `staff_prompts` を 1 回のバッチで追加する。ID が重なれば 1 度だけ作り直す"
+        - "`StaffDO.wake` で出勤の予定を組ませる。届かなければエラーログに `staff_wake_failed` を残し、社員 DO が次に起きた時に組む"
+        - 監査ログに `staff.create` を記録する
+      x-errors:
+        - "401 `step_up_required`: パスキーの確認がない"
+        - "409 `refused`: 在籍の社員がもう 10 人いる"
+        - "422 `validation_failed`: 上司が在籍の社員でない"
+      x-step-up: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStaffInput"
+      responses:
+        "201":
+          description: 作成した
+          headers:
+            Location:
+              description: 作成したリソースの URL
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/StaffOverview"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security: *a1
   /api/v1/staff/{staffId}/orders:
     get:
       operationId: listOrders
@@ -8388,6 +8539,153 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security: *a1
+  /api/v1/staff/{staffId}:
+    delete:
+      operationId: deleteStaff
+      tags:
+        - staff
+      summary: 社員を削除する
+      description: |-
+        費用が減る側なのでパスキーの確認は要らない。削除した社員の勤怠、会話、使用量の記録は残り、ID は使い回さない。
+
+        処理の流れ:
+
+        1. 在籍の社員でなければ 404、社長なら 409 `refused`
+        2. 在籍で同じ職種の在籍がほかに居る時だけ、`retired_at` を 1 文で書く
+        3. `StaffDO.wake` で予定を消させてから `StaffDO.status` を読み、作業中か作業中のタスクを持っていれば、書いた `retired_at` の時だけ戻し、予定を組み直させて 409 にする。印の後はタスクを取る文が担当の在籍を見て断る
+        4. 終わりでないタスクを 1 つずつ、同じ職種の在籍で終わりでないタスクの少ない社員 (居なければ社長) に移し (doing は todo に戻す)、部下の上司を社長にする。途中で落ちた分は、印から 10 分たった後に日次の定期ジョブが移し直す
+        5. 作業トークンをすべて失効させ、監査ログに `ticket.revoke` を残す。`StaffDO.wake` で予定を消させる
+        6. 監査ログに `staff.retire` を記録し、移した先の社員に知らせる
+
+        このルート固有のエラー:
+
+        - 404 `not_found`: 在籍の社員でない
+        - 409 `refused`: 社長か、職種の最後の 1 人
+        - 409 `conflict`: 作業中、または同時に削除した
+      x-steps:
+        - 在籍の社員でなければ 404、社長なら 409 `refused`
+        - 在籍で同じ職種の在籍がほかに居る時だけ、`retired_at` を 1 文で書く
+        - "`StaffDO.wake` で予定を消させてから `StaffDO.status` を読み、作業中か作業中のタスクを持っていれば、書いた `retired_at` の時だけ戻し、予定を組み直させて 409 にする。印の後はタスクを取る文が担当の在籍を見て断る"
+        - 終わりでないタスクを 1 つずつ、同じ職種の在籍で終わりでないタスクの少ない社員 (居なければ社長) に移し (doing は todo に戻す)、部下の上司を社長にする。途中で落ちた分は、印から 10 分たった後に日次の定期ジョブが移し直す
+        - 作業トークンをすべて失効させ、監査ログに `ticket.revoke` を残す。`StaffDO.wake` で予定を消させる
+        - 監査ログに `staff.retire` を記録し、移した先の社員に知らせる
+      x-errors:
+        - "404 `not_found`: 在籍の社員でない"
+        - "409 `refused`: 社長か、職種の最後の 1 人"
+        - "409 `conflict`: 作業中、または同時に削除した"
+      parameters:
+        - schema:
+            type: string
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+            description: 社員 ID
+          required: true
+          description: 社員 ID
+          name: staffId
+          in: path
+      responses:
+        "204":
+          description: 削除した
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security: *a1
+    patch:
+      operationId: updateStaff
+      tags:
+        - staff
+      summary: 社員の設定を直す
+      description: |-
+        名前、上司、モデル、勤務の時刻を直す。モデルの変更は次の作業から効き、作業中の作業は始めた時のモデルのまま続く。
+
+        処理の流れ:
+
+        1. 在籍の社員を読む
+        2. 単価の高いモデルに替える時と、週の勤務の時間が増える時 (全体の勤務の時刻に戻す時を含む) だけパスキーの確認を求める
+        3. `version` が今のままで在籍の時だけ 1 文で更新し、`version` を 1 上げる。上司は在籍で、新しい上司から上へたどった中に自分が居ない時だけ書く
+        4. 勤務の時刻を変えた時は `StaffDO.wake` で予定を組み直させる。届かなければエラーログに `staff_wake_failed` を残す
+        5. 監査ログに `staff.update` を記録する
+
+        このルート固有のエラー:
+
+        - 401 `step_up_required`: 単価の高いモデルか、長い勤務に変えるのにパスキーの確認がない
+        - 404 `not_found`: 在籍の社員でない
+        - 409 `conflict`: 読んだ後に設定が変わったか、削除された
+        - 422 `validation_failed`: 社長に上司を付けた、または上司が在籍でないか、自分か自分の下
+      x-steps:
+        - 在籍の社員を読む
+        - 単価の高いモデルに替える時と、週の勤務の時間が増える時 (全体の勤務の時刻に戻す時を含む) だけパスキーの確認を求める
+        - "`version` が今のままで在籍の時だけ 1 文で更新し、`version` を 1 上げる。上司は在籍で、新しい上司から上へたどった中に自分が居ない時だけ書く"
+        - 勤務の時刻を変えた時は `StaffDO.wake` で予定を組み直させる。届かなければエラーログに `staff_wake_failed` を残す
+        - 監査ログに `staff.update` を記録する
+      x-errors:
+        - "401 `step_up_required`: 単価の高いモデルか、長い勤務に変えるのにパスキーの確認がない"
+        - "404 `not_found`: 在籍の社員でない"
+        - "409 `conflict`: 読んだ後に設定が変わったか、削除された"
+        - "422 `validation_failed`: 社長に上司を付けた、または上司が在籍でないか、自分か自分の下"
+      x-step-up: conditional
+      parameters:
+        - schema:
+            type: string
+            pattern: ^(president|builder|reviewer)(-[a-z0-9]{6})?$
+            description: 社員 ID
+          required: true
+          description: 社員 ID
+          name: staffId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStaffInput"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/StaffOverview"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "422":
           $ref: "#/components/responses/UnprocessableContent"
         "429":

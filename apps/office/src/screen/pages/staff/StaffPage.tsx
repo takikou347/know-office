@@ -1,8 +1,10 @@
-// 社員と仕事の画面。社員の一覧を入口から読み、会話とタスクと勤怠のタブ、今日だけの指示、タスクの詳細とレビューを 1 つの一覧と詳細に並べる (社員と勤怠の 3.4、社員と自動の 3.7)
+// 社員と仕事の画面。社員の一覧を入口から読み、社員を足し、会話とタスクと勤怠と設定のタブ、今日だけの指示、タスクの詳細とレビューを 1 つの一覧と詳細に並べる (社員と勤怠の 3.4、社員と自動の 3.7)
 import { jstDay, Order, StaffOverview, systemClock } from "@know-office/core";
 import { EmptyState, List, ListDetail, Stack, Tabs } from "knowidea-ui";
 import { useState } from "react";
 import { z } from "zod";
+import { labelOf } from "@know-office/core/master/master";
+import { MODELS } from "@know-office/core/master/models";
 import { useLiveTick } from "../../parts/live.tsx";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import type { Navigate } from "../../parts/navigate.ts";
@@ -11,9 +13,11 @@ import { StaffStatus } from "../../parts/staff-status.tsx";
 import { AttendanceTable } from "./AttendanceTable.tsx";
 import { DayOrders } from "./DayOrders.tsx";
 import { Talk } from "./Talk.tsx";
+import { StaffAdd } from "./StaffAdd.tsx";
+import { StaffSettings } from "./StaffSettings.tsx";
 import { TaskDetail, TaskPile } from "./TaskDetail.tsx";
 
-const staffTabs = ["talk", "tasks", "attendance"] as const;
+const staffTabs = ["talk", "tasks", "attendance", "settings"] as const;
 type StaffTab = (typeof staffTabs)[number];
 const isStaffTab = (v: string | null): v is StaffTab => staffTabs.some((t) => t === v);
 
@@ -35,15 +39,19 @@ export interface StaffDetailProps {
   day: string | null;
   /** タブを替えた時に道の問いを変える */
   navigate: Navigate;
+  /** 上司に選べる在籍の社員 */
+  people: StaffOverview[];
+  /** 設定を直した後と削除した後に呼ぶ */
+  onChanged: (deleted: boolean) => void;
 }
 
 /**
- * 社員 1 人の様子。今の状態とタスク、今日だけの指示、会話とタスクと勤怠のタブ。
+ * 社員 1 人の様子。今の状態とタスク、今日だけの指示、会話とタスクと勤怠と設定のタブ。
  * タブは上に並ぶ今日だけの指示の一覧を読み終えてから出す。読み終えた一覧の行の数でタブの位置が変わり、押し下げてから離すまでの間に動くと押した事にならないため
- * @param props 社員、開くタブ、勤怠の日
+ * @param props 社員、開くタブ、勤怠の日、在籍の社員、直した後に呼ぶ
  * @returns 様子
  */
-export function StaffDetail({ s, tab, day, navigate }: StaffDetailProps) {
+export function StaffDetail({ s, tab, day, navigate, people, onChanged }: StaffDetailProps) {
   const today = jstDay(systemClock.now());
   const [ordersTick, setOrdersTick] = useState(0);
   const orders = useLoad(z.array(Order), (a) => a.api.v1.staff[":staffId"].orders.$get({ param: { staffId: s.id }, query: { day: today } }), ordersTick);
@@ -66,6 +74,8 @@ export function StaffDetail({ s, tab, day, navigate }: StaffDetailProps) {
             { value: "talk", label: "会話", content: <Talk staff={s} /> },
             { value: "tasks", label: "タスク", content: <TaskPile staff={s} /> },
             { value: "attendance", label: "勤怠", content: <AttendanceTable staffId={s.id} role={s.role} day={day} /> },
+            // 版が変わったら直している中身を読み直した値で始め直す。会話の入力は版で作り直さない
+            { value: "settings", label: "設定", content: <StaffSettings key={s.version} s={s} people={people} onChanged={onChanged} /> },
           ]}
         />
       )}
@@ -89,14 +99,20 @@ export interface StaffPageProps {
  */
 export function StaffPage({ pathname, query, navigate }: StaffPageProps) {
   const [, , id = "", , taskId = ""] = pathname.split("/");
-  const tick = useLiveTick((e) => e.type === "staff");
-  const loaded = useLoad(z.array(StaffOverview), (a) => a.api.v1.staff.$get({ query: {} }), tick);
+  const live = useLiveTick((e) => e.type === "staff");
+  const [changed, setChanged] = useState(0);
+  const loaded = useLoad(z.array(StaffOverview), (a) => a.api.v1.staff.$get({ query: {} }), live + changed);
+  const reload = (deleted: boolean) => {
+    setChanged((t) => t + 1);
+    if (deleted) navigate("/staff");
+  };
   const people = loaded.state === "ok" ? loaded.data : [];
   const selected = people.find((s) => s.id === id);
   // タスク ID は UUID だけを受け、ほかは社員の様子を出す
   const inTask = selected !== undefined && z.uuid().safeParse(taskId).success;
   const tab = staffTabOf(query.get("tab"));
-  const detail = (s: StaffOverview) => (inTask ? <TaskDetail key={taskId} staffId={s.id} nodeId={taskId} /> : <StaffDetail key={s.id} s={s} tab={tab} day={query.get("day")} navigate={navigate} />);
+  const detail = (s: StaffOverview) =>
+    inTask ? <TaskDetail key={taskId} staffId={s.id} nodeId={taskId} /> : <StaffDetail key={s.id} s={s} tab={tab} day={query.get("day")} navigate={navigate} people={people} onChanged={reload} />;
   return (
     <ListDetail
       listLabel="社員"
@@ -108,21 +124,33 @@ export function StaffPage({ pathname, query, navigate }: StaffPageProps) {
         loaded.state === "failed" ? (
           <FailedAlert title="社員を読めませんでした" failure={loaded} />
         ) : (
-          <List
-            label="社員"
-            state={loaded.state === "loading" ? "loading" : "ready"}
-            loadingText="社員を読んでいます"
-            items={people.map((s) => ({
-              id: s.id,
-              title: s.role,
-              href: `/staff/${s.id}`,
-              meta: (
-                <>
-                  <StaffStatus state={s.state} /> {s.model}
-                </>
-              ),
-            }))}
-          />
+          <Stack gap={3}>
+            <Stack direction="row" justify="end">
+              <StaffAdd
+                people={people}
+                onAdded={(added) => {
+                  setChanged((t) => t + 1);
+                  navigate(`/staff/${added}?tab=settings`);
+                }}
+              />
+            </Stack>
+            <List
+              label="社員"
+              state={loaded.state === "loading" ? "loading" : "ready"}
+              loadingText="社員を読んでいます"
+              items={people.map((s) => ({
+                id: s.id,
+                title: s.role,
+                href: `/staff/${s.id}`,
+                meta: (
+                  <>
+                    <StaffStatus state={s.state} /> {labelOf(MODELS, s.model)}
+                  </>
+                ),
+              }))}
+              emptyText="データがありません"
+            />
+          </Stack>
         )
       }
       detail={selected ? detail(selected) : undefined}

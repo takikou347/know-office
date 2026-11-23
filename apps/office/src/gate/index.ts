@@ -15,6 +15,7 @@ import { mcpRoutes } from "./routes/mcp.ts";
 import { mcpClientRoutes } from "./routes/mcp-clients.ts";
 import { messageRoutes } from "./routes/messages.ts";
 import { staffRoutes } from "./routes/staff.ts";
+import { staffManageRoutes } from "./routes/staff-manage.ts";
 import { extensionRoutes } from "./routes/extensions.ts";
 import { githubRoutes, hookRoutes } from "./routes/github.ts";
 import { findingRoutes } from "./routes/findings.ts";
@@ -57,6 +58,7 @@ export function createGate(options: { clock?: Clock; fetch?: Fetcher; guard?: Gu
     .route("/", settingRoutes)
     .route("/", noticeRoutes)
     .route("/", staffRoutes)
+    .route("/", staffManageRoutes)
     .route("/", messageRoutes)
     .route("/", liveRoutes)
     .route("/", dashboardRoutes)

@@ -378,6 +378,14 @@ export class StaffDO extends DurableObject<Bindings> implements Staff {
   }
 
   /**
+   * 社員の作業トークンをすべて失効させる
+   * @returns 失効させた作業トークン ID
+   */
+  revokeAll(): Promise<string[]> {
+    return this.#serial(() => this.#guardOf().then((g) => g.revokeAll()));
+  }
+
+  /**
    * タスクの作業トークンを、残す 1 本のほかすべて失効させる
    * @param nodeId タスク ID
    * @param keepJti 残す作業トークン ID

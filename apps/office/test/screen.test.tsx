@@ -65,7 +65,7 @@ describe("画面", () => {
     const api = createApi("http://gate.invalid", () => new Promise<Response>(() => undefined));
     const html = renderToString(
       <ApiContext value={api}>
-        <StaffDetail s={REVIEWER} tab="talk" day={null} navigate={() => {}} />
+        <StaffDetail s={REVIEWER} tab="talk" day={null} navigate={() => {}} people={[REVIEWER]} onChanged={() => {}} />
       </ApiContext>,
     );
     expect(html).not.toContain('role="tab"');

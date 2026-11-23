@@ -22,7 +22,7 @@ import type { TestD1 } from "./d1.ts";
 import { accessKeyPair, githubAppKey } from "./keys.ts";
 import { fakeLive, type TestLive } from "./live.ts";
 import { overRpc } from "./rpc.ts";
-import { named, type RunMarks, staffRunFakes, workspaceFake, type WorkspaceSeen } from "./staff-runs.ts";
+import { rosterOf, type RunMarks, staffRunFakes, workspaceFake, type WorkspaceSeen } from "./staff-runs.ts";
 
 const FAKES = "http://localhost:5199";
 /** テストのゲートウェイの origin。app.request は http://localhost に要求を出す */
@@ -71,6 +71,8 @@ export type TestGate = {
   office: OfficeGuard;
   /** 社員ごとの、勤務と数え方の代わり。StaffDO と同じ物 */
   staff: Record<StaffJob, TestStaff>;
+  /** 足した社員も含めて、社員 ID から勤務の本と数え方の本を引く */
+  member(id: string): TestStaff;
   /** 社員ごとのワークスペースの代わり。差し替えた作業トークンを並べ、down なら届かない */
   workspaces: Record<StaffJob, TestWorkspace>;
   /** 配信 DO の代わり。配った出来事と、出した作業トークン */
@@ -250,16 +252,16 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     keyState: office.keyState.bind(office),
     releaseKeys: office.releaseKeys.bind(office),
     setThresholdHash: office.setThresholdHash.bind(office), thresholdHash: office.thresholdHash.bind(office),
-    claimStop: office.claimStop.bind(office),
-    releaseStop: office.releaseStop.bind(office), dropClaim: office.dropClaim.bind(office),
-    restoreStop: office.restoreStop.bind(office),
+    claimStop: office.claimStop.bind(office), releaseStop: office.releaseStop.bind(office),
+    dropClaim: office.dropClaim.bind(office), restoreStop: office.restoreStop.bind(office),
   };
+  const member = rosterOf(staff, (id) => testStaff(id, options.d1));
   const workspaces: Record<StaffJob, TestWorkspace> = { president: { tickets: [], runs: [], down: false }, builder: { tickets: [], runs: [], down: false }, reviewer: { tickets: [], runs: [], down: false } };
-  const workspaceDo = (id: StaffId) => workspaceFake(named(workspaces, id));
+  const workspaceOf = rosterOf(workspaces, (): TestWorkspace => ({ tickets: [], runs: [], down: false })), workspaceDo = (id: StaffId) => workspaceFake(workspaceOf(id));
   const runMarks: RunMarks = new Map();
   // StaffDO は勤務の本と数え方の本を持つ。名前ごとに別の代わりを返す
   const staffDo = (id: StaffId) => {
-    const { book, guard: g } = named(staff, id);
+    const { book, guard: g } = member(id);
     return {
       status: book.status.bind(book),
       wake: async (now: number) => {
@@ -301,7 +303,7 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
       }),
       renewToken: g.renewToken.bind(g),
       revokeTokens: g.revokeTokens.bind(g),
-      revokeOthers: g.revokeOthers.bind(g),
+      revokeOthers: g.revokeOthers.bind(g), revokeAll: g.revokeAll.bind(g),
       // 社員 DO は会話の記録を鎖の中で 1 つずつ足す。テストは呼び出しを重ねないので鎖を省く
       appendTranscript: overRpc(async (nodeId: string, input: unknown, now: number) => {
         await appendTranscript(transcripts, id, nodeId, input, now);
@@ -371,12 +373,9 @@ export async function createTestGate(options: { clock: Clock; d1: TestD1; extens
     githubTokens,
     githubCache,
     forge,
-    certs,
-    audits,
-    storage,
-    guard,
-    office,
-    staff,
+    certs, audits, storage,
+    guard, office,
+    staff, member,
     deps,
     live,
     workspaces,

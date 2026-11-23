@@ -14,7 +14,7 @@ import { createdResponse, listQuery, listResponse, okResponse, problems } from "
 import { created, list, ok } from "../respond.ts";
 import { type DayOrderRow } from "../work/attendance.ts";
 import { addOrder } from "../work/orders.ts";
-import { activeStaff } from "../work/roster.ts";
+import { activeStaff, type StaffRow } from "../work/roster.ts";
 
 const router = createRouter();
 
@@ -109,26 +109,32 @@ function staffOf(env: Bindings, staffId: StaffId): Staff {
  * @returns 社員の並び。社長、作った順
  */
 export async function loadStaff(env: Bindings, now: number): Promise<StaffOverview[]> {
-  const rows = await activeStaff(env.DB);
-  const statuses = await Promise.all(rows.map((r) => staffOf(env, r.id).status(now)));
-  return rows.map((row, i) => {
-    const s = statuses[i];
-    if (s === undefined) throw new Error("社員の状態が足りない");
-    const schedule = WorkSchedule.safeParse(row.schedule);
-    return {
-      id: row.id,
-      job: StaffJob.parse(row.job),
-      role: row.role,
-      bossId: row.bossId,
-      model: row.model,
-      schedule: schedule.success ? schedule.data : null,
-      version: row.version,
-      state: s.state,
-      nodeId: s.nodeId,
-      nodeTitle: s.nodeTitle,
-      workedMsToday: s.workedMsToday,
-    };
-  });
+  return Promise.all((await activeStaff(env.DB)).map((row) => staffOverview(env, row, now)));
+}
+
+/**
+ * 社員の行と社員 DO の今の状態から、一覧の 1 人の形を作る
+ * @param env バインディング
+ * @param row 社員の行
+ * @param now 今の時刻
+ * @returns 社員の今の状態
+ */
+export async function staffOverview(env: Bindings, row: StaffRow, now: number): Promise<StaffOverview> {
+  const s = await staffOf(env, row.id).status(now);
+  const schedule = WorkSchedule.safeParse(row.schedule);
+  return {
+    id: row.id,
+    job: StaffJob.parse(row.job),
+    role: row.role,
+    bossId: row.bossId,
+    model: row.model,
+    schedule: schedule.success ? schedule.data : null,
+    version: row.version,
+    state: s.state,
+    nodeId: s.nodeId,
+    nodeTitle: s.nodeTitle,
+    workedMsToday: s.workedMsToday,
+  };
 }
 
 /**

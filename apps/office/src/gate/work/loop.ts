@@ -199,7 +199,7 @@ async function hasTodo(env: Bindings, staffId: string): Promise<boolean> {
 }
 
 /**
- * タスクを doing に取る。読んだ時から版が進んでいれば取らない。子 Issue のタスクは、同じ文の中で重なる doing か review の子が無い事も確かめる。
+ * タスクを doing に取る。読んだ時から版が進んでいるか、担当が削除の印を書かれていれば取らない。子 Issue のタスクは、同じ文の中で重なる doing か review の子が無い事も確かめる。
  * 同時に重なる 2 つが取りに来ても、書きは 1 つずつなので、後から書く方は先の doing を見て取れない
  * @param env バインディング
  * @param row 読んだ時のタスクの行
@@ -208,11 +208,13 @@ async function hasTodo(env: Bindings, staffId: string): Promise<boolean> {
  */
 export async function claimNode(env: Bindings, row: NodeRow, now: number): Promise<NodeRow | null> {
   const branch = branchOf(row);
-  if (row.issueNumber === null || row.repo === null) return moveNode(env.DB, row, "doing", now, { branch });
+  // 削除の印を書いた社員には取らせない。印と取る文の競り合いを、取る文の条件で止める
+  const active = sql`EXISTS (SELECT 1 FROM ${staff} WHERE ${staff.id} = ${nodes.assignee} AND ${staff.retiredAt} IS NULL)`;
+  const overlap = row.issueNumber === null || row.repo === null ? sql`1` : and(eq(nodes.status, "todo"), noOverlap({ repo: sql`${row.repo}`, issue: sql`${row.issueNumber}`, id: sql`${row.id}` }));
   const done = await drizzle(env.DB)
     .update(nodes)
     .set({ status: "doing", branch, version: row.version + 1, updatedAt: now })
-    .where(and(eq(nodes.id, row.id), eq(nodes.version, row.version), eq(nodes.status, "todo"), noOverlap({ repo: sql`${row.repo}`, issue: sql`${row.issueNumber}`, id: sql`${row.id}` })))
+    .where(and(eq(nodes.id, row.id), eq(nodes.version, row.version), active, overlap))
     .returning({ id: nodes.id });
   return done.length > 0 ? { ...row, status: "doing", branch, version: row.version + 1, updatedAt: now } : null;
 }

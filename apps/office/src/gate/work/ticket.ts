@@ -192,6 +192,20 @@ export async function retireOtherTickets(env: Bindings, staffId: StaffId, nodeId
 }
 
 /**
+ * 社員の作業トークンをすべて失効させ、監査ログに残す。社員を削除した時に使う
+ * @param env バインディング
+ * @param staffId 社員 ID
+ * @param now 今の時刻
+ * @param traceId 要求のトレース ID
+ * @returns 失効させた作業トークン ID
+ */
+export async function revokeStaffTickets(env: Bindings, staffId: StaffId, now: number, traceId: string): Promise<string[]> {
+  const revoked = await staffOf(env, staffId).revokeAll();
+  for (const jti of revoked) await record(env, now, "ticket.revoke", staffId, jti, { reason: "retired" }, traceId);
+  return revoked;
+}
+
+/**
  * タスクの作業トークンを失効させ、監査ログに残す。only を渡せばその作業トークンだけ、無ければそのタスクのすべて
  * @param env バインディング
  * @param staffId 社員 ID

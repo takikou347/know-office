@@ -194,6 +194,16 @@ export class StaffGuard {
   }
 
   /**
+   * 社員の作業トークンをすべて失効させる。削除した社員に使わせないため
+   * @returns 失効させた作業トークン ID
+   */
+  async revokeAll(): Promise<string[]> {
+    const all = (await this.#tickets()).map((t) => t.jti);
+    await this.#revoke(() => true);
+    return all;
+  }
+
+  /**
    * タスクの作業トークンを、残す 1 本のほかすべて失効させる。落ちたワークスペースに渡していた物を、続きを渡した後に使えなくする
    * @param nodeId タスク ID
    * @param keepJti 残す作業トークン ID

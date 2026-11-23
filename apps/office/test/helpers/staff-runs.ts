@@ -104,3 +104,18 @@ export function named<T>(table: Record<StaffJob, T>, id: string): T {
   return table[job.data];
 }
 
+/**
+ * 最初の 3 人は職種の表から、足した社員は初めて引いた時に作って覚えた物を引く
+ * @param table 職種ごとの表
+ * @param make 足した社員の物を作る
+ * @returns 社員 ID から物を引く関数
+ */
+export function rosterOf<T>(table: Record<StaffJob, T>, make: (id: string) => T): (id: string) => T {
+  const added = new Map<string, T>();
+  return (id) => {
+    if (StaffJob.safeParse(id).success) return named(table, id);
+    const found = added.get(id) ?? make(id);
+    added.set(id, found);
+    return found;
+  };
+}

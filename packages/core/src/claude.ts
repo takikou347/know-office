@@ -59,6 +59,17 @@ export function isStaffModel(model: string): model is ClaudeModel {
 }
 
 /**
+ * 替えた後のモデルの単価が前より高いかを返す。入力と出力を百万トークンずつ使った時の費用で比べる
+ * @param next 替えた後のモデル
+ * @param prev 前のモデル
+ * @returns 高くなる時 true
+ */
+export function isPricier(next: ClaudeModel, prev: ClaudeModel): boolean {
+  const usage: ClaudeUsage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  return costMicroUsd(next, usage) > costMicroUsd(prev, usage);
+}
+
+/**
  * 社員が使えるモデルを返す。社員の設定のモデルと、SDK が裏で呼ぶ軽いモデル
  * @param model 社員の設定のモデル
  * @returns 使えるモデル。先頭が社員のモデル
