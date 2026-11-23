@@ -87,7 +87,7 @@ test.describe("オーナーの指示に合わせる", () => {
       // 発言の下に休みの指示が出る
       await expect(bubble.getByText(`${shortToday()} を休みにしました`)).toBeVisible();
       // 指示の一覧にも会話から足した休みが出る
-      await page.goto("/staff/reviewer");
+      await page.goto("/staff/reviewer?tab=attendance");
       // 前の通しが取り消した休みも並ぶので、取り消せる物だけを数える
       const activeOff = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("button", { name: "休みの指示を取り消す" });
       await expect(activeOff).toHaveCount(1);
@@ -95,7 +95,7 @@ test.describe("オーナーの指示に合わせる", () => {
       await page.goto("/staff/reviewer?tab=talk");
       await bubble.getByRole("button", { name: "休みの指示を取り消す" }).click();
       await expect(bubble.getByText(`${shortToday()} を休みにしました (取り消しました)`)).toBeVisible();
-      await page.goto("/staff/reviewer");
+      await page.goto("/staff/reviewer?tab=attendance");
       await expect(activeOff).toHaveCount(0);
       // 先にほかの所で取り消された指示は、会話のボタンから取り消すと「もう取り消されています」と出す
       await scriptOrders(page, [{ kind: "off", day: tomorrow() }]);

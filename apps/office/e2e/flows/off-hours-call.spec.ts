@@ -31,7 +31,7 @@ async function setOffHoursCall(page: Page, enabled: boolean): Promise<void> {
  * @param page 画面を開くページ
  */
 async function restReviewer(page: Page): Promise<void> {
-  await page.goto("/staff/reviewer");
+  await page.goto("/staff/reviewer?tab=attendance");
   await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "休み" }).click();
   await page.getByRole("button", { name: "変更を登録する" }).click();
   await expect(page.getByText("レビュー担当を今日は休みにしました")).toBeVisible();

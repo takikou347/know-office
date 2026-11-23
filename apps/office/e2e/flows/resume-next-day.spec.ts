@@ -60,7 +60,7 @@ test.describe("チェックポイントで退勤する", () => {
       await expect.poll(runsOf, { timeout: 30_000 }).toHaveLength(1);
 
       // 勤務の時刻はほかの社員と同じなので変えず、社員と仕事の画面のボタンで、レビュー担当の今日の終わりを 2 分後にする
-      await page.goto("/staff/reviewer");
+      await page.goto("/staff/reviewer?tab=attendance");
       await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "早退" }).click();
       await chooseTime(page, "終了時刻", until.hhmm);
       await page.getByRole("button", { name: "変更を登録する" }).click();
@@ -74,7 +74,7 @@ test.describe("チェックポイントで退勤する", () => {
       await expect(part(page, "作業の流れ").getByText("continued", { exact: true })).toBeVisible();
 
       // 翌日: 今日の終わりを取り消し、退勤した日の印を消して出勤させる。続けたタスクを先に取り、すぐ SDK が呼ぶので、終わりの返事は出勤させる前に積む
-      await page.goto("/staff/reviewer");
+      await page.goto("/staff/reviewer?tab=attendance");
       const active = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("listitem").filter({ hasText: "に登録" });
       await active.getByRole("button", { name: "早退の指示を取り消す" }).click();
       await expect(page.getByText("早退の指示を取り消しました")).toBeVisible();

@@ -12,7 +12,7 @@ test.describe("オーナーの指示に合わせる", () => {
   test("その日だけ休みにする", async ({ page }) => {
     // 前に流した日の指示が残っていても、同じ指示の 409 にならないよう取り消してから始める
     cancelLeftOrders("reviewer");
-    await page.goto("/staff/reviewer");
+    await page.goto("/staff/reviewer?tab=attendance");
     await expect(page.getByRole("heading", { level: 2, name: "レビュー担当" })).toBeVisible();
     await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "休み" }).click();
     await expect(page.getByRole("combobox", { name: /^終了時刻/ })).toHaveCount(0);
@@ -33,7 +33,7 @@ test.describe("オーナーの指示に合わせる", () => {
 
   test("延長はパスキーで確かめてから出す", async ({ page }) => {
     cancelLeftOrders("president");
-    await page.goto("/staff/president");
+    await page.goto("/staff/president?tab=attendance");
     await useOwnerPasskey(page);
     await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "延長" }).click();
     await chooseTime(page, "終了時刻", "23:59");
@@ -48,7 +48,7 @@ test.describe("オーナーの指示に合わせる", () => {
 
   test("終わりより前への延長を断る", async ({ page }) => {
     cancelLeftOrders("president");
-    await page.goto("/staff/president");
+    await page.goto("/staff/president?tab=attendance");
     await useOwnerPasskey(page);
     await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "延長" }).click();
     // 0 時 1 分はどの日も終わりの時刻より前。ほかで変わったとは言わずに、終わりの時刻より後にする事を出す

@@ -275,7 +275,7 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
     await expect.poll(async () => Runs.parse(await (await page.request.get(`${FAKES}/workspace/__fake/runs`)).json()), { timeout: 30_000 }).toContainEqual({ staffId: "reviewer", nodeId });
 
     // 社員と仕事の画面のボタンで早退を出す
-    await page.goto("/staff/reviewer");
+    await page.goto("/staff/reviewer?tab=attendance");
     await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "早退" }).click();
     await chooseTime(page, "終了時刻", until.hhmm);
     await page.getByRole("button", { name: "変更を登録する" }).click();
@@ -290,7 +290,7 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
     await expect(part(page, "作業の流れ").getByText("continued", { exact: true })).toBeVisible();
 
     // 早退を取り消し、出勤し直すと、同じ社員が続けたタスクを先に取って呼び直す。開発の代わりのワークスペースは会話の記録を送らないので、続きからでなく最初から呼ぶ
-    await page.goto("/staff/reviewer");
+    await page.goto("/staff/reviewer?tab=attendance");
     const active = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("listitem").filter({ hasText: "に登録" });
     await active.getByRole("button", { name: "早退の指示を取り消す" }).click();
     await expect(page.getByText("早退の指示を取り消しました")).toBeVisible();

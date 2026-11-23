@@ -61,14 +61,14 @@ describe("画面", () => {
     expect(html).toMatch(/<p role="status"[^>]*>サービスごとの記録を読んでいます/);
   });
 
-  it("社員の様子は、上に並ぶ今日だけの指示を読み終えるまでタブを出さない。読み終えた一覧の高さでタブが動き、押す途中のタブが外れるため", () => {
+  it("社員の様子は、今日だけの指示を勤怠のタブに置き、指示を読んでいる間もタブを出す", () => {
     const api = createApi("http://gate.invalid", () => new Promise<Response>(() => undefined));
     const html = renderToString(
       <ApiContext value={api}>
-        <StaffDetail s={REVIEWER} tab="talk" day={null} navigate={() => {}} people={[REVIEWER]} onChanged={() => {}} />
+        <StaffDetail s={REVIEWER} tab="attendance" day={null} navigate={() => {}} people={[REVIEWER]} onChanged={() => {}} />
       </ApiContext>,
     );
-    expect(html).not.toContain('role="tab"');
-    expect(html).toMatch(/role="status"[^>]*>指示を読んでいます/);
+    expect(html).toContain('role="tab"');
+    expect(html).toMatch(/role="tabpanel"[\s\S]*今日だけの指示[\s\S]*指示を読んでいます/);
   });
 });
