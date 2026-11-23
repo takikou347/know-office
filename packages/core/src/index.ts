@@ -2,6 +2,7 @@
 export { systemClock, type Clock } from "./clock.ts";
 export { canonicalJson, sha256Hex } from "./hash.ts";
 export { allowedFetch, FETCH_TIMEOUT_MS, type Fetcher } from "./fetch.ts";
+export { cloudflareMonthMicroUsd, WORKERS_PAID_MICRO_USD } from "./cloudflare.ts";
 export { allowedModels, batchCostMicroUsd, type ClaudeModel, claudeSpendLimit, type ClaudeSpendLimit, type ClaudeUsage, costMicroUsd, dailyAllowanceMicroUsd, DEV_STAFF_HEADER, HAIKU, isPricier, isStaffModel, JOB_MODEL, OPUS, SONNET, SELECTABLE_MODELS } from "./claude.ts";
 export { ClaudeBudget, ClaudeErrorBody, DEFAULT_CLAUDE_BUDGET, SPEND_LIMIT_KINDS, type SpendLimitKind } from "./schemas/claude.ts";
 export { Secret } from "./secret.ts";
@@ -18,7 +19,7 @@ export { Notice, NoticeLevel, NoticeLink } from "./schemas/notices.ts";
 export { AnalyticsEngineTables, AnalyticsEngineVisits, VISIT_HEADER, VisitHeader, WorkersInvocationsResponse } from "./schemas/analytics.ts";
 export { codePoints, CreateMessageInput, headChars, LiveEvent, LiveTicket, Message, MessageDelivery, MessageOrder, MESSAGE_INLINE_CHARS, MESSAGE_MAX_CHARS, OFFICE_WORK_ACTIONS, OfficeWork, type OwnerMessage, ownerMessagesPrompt, SkippedOrder } from "./schemas/conversation.ts";
 export { StorageUse } from "./schemas/storage.ts";
-export { AttendanceQuery, DailyCost, Dashboard, HomeService, Month, OwnerReview, RecordGroup, RecordSummary, RecordTotals, Uptime, UptimeQuery } from "./schemas/records.ts";
+export { AttendanceQuery, CostHistory, CostMonth, DailyCost, Dashboard, HomeService, Month, OwnerReview, RecordGroup, RecordSummary, RecordTotals, Uptime, UptimeQuery } from "./schemas/records.ts";
 export { Me, Passkey, PasskeyOptions, PasskeyOptionsInput, Session, StepUp, WebAuthnResponse } from "./schemas/auth.ts";
 export { CreatedMcpClient, CreateMcpClientInput, McpClient, McpDecideArgs, McpMessageArgs, McpNoArgs, McpRequest, McpResponse, McpScope, McpTaskArgs } from "./schemas/mcp.ts";
 export { ErrorCode, Health, ListMeta, Meta, Part, Problem } from "./schemas/common.ts";

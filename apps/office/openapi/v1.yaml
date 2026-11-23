@@ -530,6 +530,45 @@ components:
         - rows
         - total
       additionalProperties: false
+    CostHistory:
+      type: object
+      properties:
+        months:
+          type: array
+          items:
+            $ref: "#/components/schemas/CostMonth"
+          description: 最初に記録のある月から今月までを古い順に。使わなかった月も並べる
+        claudeMicroUsd:
+          type: integer
+        cloudflareMicroUsd:
+          type: integer
+        totalMicroUsd:
+          type: integer
+      required:
+        - months
+        - claudeMicroUsd
+        - cloudflareMicroUsd
+        - totalMicroUsd
+      additionalProperties: false
+    CostMonth:
+      type: object
+      properties:
+        month:
+          type: string
+          description: 日本時間の月 YYYY-MM
+        claudeMicroUsd:
+          type: integer
+        cloudflareMicroUsd:
+          type: integer
+          description: Workers Paid の月額と、社員の働いた時間を basic のコンテナの時間と見た Containers の見込み
+        totalMicroUsd:
+          type: integer
+      required:
+        - month
+        - claudeMicroUsd
+        - cloudflareMicroUsd
+        - totalMicroUsd
+      additionalProperties: false
     Uptime:
       type: object
       properties:
@@ -2777,11 +2816,12 @@ components:
             $ref: "#/components/schemas/Node"
         monthCostMicroUsd:
           type: integer
+          description: 日本時間の今月の Claude API と Cloudflare の見込みの合計。記録の費用の推移の今月と同じ
         dailyCosts:
           type: array
           items:
             $ref: "#/components/schemas/DailyCost"
-          description: 日本時間の今月の 1 日から今日までの日ごとの費用
+          description: 日本時間の今月の 1 日から今日までの日ごとの Claude API の費用
         services:
           type: array
           items:
@@ -4454,6 +4494,77 @@ paths:
         処理の流れ:
 
         1. `GET /api/v1/records/summary` と同じ集計を CSV で返す
+      security: *a1
+  /api/v1/records/costs:
+    get:
+      operationId: getCostHistory
+      tags:
+        - records
+      summary: 費用の推移と累計
+      description: |-
+        Cloudflare の額は見込み。Workers Paid の月額に、社員の働いた時間を basic のコンテナ (1/4 vCPU、1 GiB、4 GB) が動いた時間と見た Containers の額を足す。CPU は割り当てた分を全部使った上限で数える。今月の合計はホームの今月の費用と同じ。
+
+        処理の流れ:
+
+        1. バインドした `REC_<年>` ごとに、今までの `usage.cost_micro_usd` を日本時間の月ごとに足し、年の境の月を足し合わせる
+        2. `daily_totals.worked_ms` を月ごとに足し、Workers Paid と Containers の料金で Cloudflare の見込みにする
+        3. 最初に記録のある月から今月までを古い順に並べ、使わなかった月も Workers Paid だけで並べ、累計を足す
+      x-steps:
+        - バインドした `REC_<年>` ごとに、今までの `usage.cost_micro_usd` を日本時間の月ごとに足し、年の境の月を足し合わせる
+        - "`daily_totals.worked_ms` を月ごとに足し、Workers Paid と Containers の料金で Cloudflare の見込みにする"
+        - 最初に記録のある月から今月までを古い順に並べ、使わなかった月も Workers Paid だけで並べ、累計を足す
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/CostHistory"
+                  meta:
+                    $ref: "#/components/schemas/Meta"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security: *a1
+  /api/v1/records/costs/export:
+    get:
+      operationId: exportCostHistory
+      tags:
+        - records
+      summary: 費用の推移と累計を CSV で出力する
+      x-steps:
+        - "`GET /api/v1/records/costs` と同じ月ごとの内訳を、ドルで CSV にし、最後に累計の行を置く"
+      responses:
+        "200":
+          description: CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      description: |-
+        処理の流れ:
+
+        1. `GET /api/v1/records/costs` と同じ月ごとの内訳を、ドルで CSV にし、最後に累計の行を置く
       security: *a1
   /api/v1/records/uptime:
     get:
@@ -8977,13 +9088,13 @@ paths:
         1. 3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする
         2. `pending` の承認、今日のタスク、未読の通知を `DB` から読む
         3. `reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む
-        4. 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足し、日本時間の日ごとにも足す
+        4. 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で日本時間の日ごとに足す。今月の費用は `GET /api/v1/records/costs` の今月の合計 (Claude API と Cloudflare の見込み)
         5. `services` の試作、サービス、運用の行ごとに、サービスの詳細と同じ種類ごとの様子を組み立てる
       x-steps:
         - 3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする
         - "`pending` の承認、今日のタスク、未読の通知を `DB` から読む"
         - "`reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む"
-        - 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足し、日本時間の日ごとにも足す
+        - 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で日本時間の日ごとに足す。今月の費用は `GET /api/v1/records/costs` の今月の合計 (Claude API と Cloudflare の見込み)
         - "`services` の試作、サービス、運用の行ごとに、サービスの詳細と同じ種類ごとの様子を組み立てる"
       responses:
         "200":

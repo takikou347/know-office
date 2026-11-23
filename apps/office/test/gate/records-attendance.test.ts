@@ -1,4 +1,5 @@
 // 勤怠の履歴とダッシュボードのルート。記録の画面とダッシュボードが本物の記録から読む (API の records と settings)
+import { WORKERS_PAID_MICRO_USD } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { fixedClock } from "../helpers/clock.ts";
@@ -118,7 +119,8 @@ describe("ダッシュボード", () => {
     expect(data.staff.map((s) => `${s.role} ${s.state}`)).toEqual(["社長 off", "開発担当 working", "レビュー担当 off"]);
     expect(data.approvals.map((a) => a.id)).toEqual(["019a7b00-0000-7000-8000-0000000000a1"]);
     expect(data.todayTasks.map((t) => t.title)).toEqual(["今の仕事", "見る仕事"]);
-    expect(data.monthCostMicroUsd).toBe(1_750_000);
+    // 今日の勤怠がまだ無いので、Cloudflare は Workers Paid の月額だけ
+    expect(data.monthCostMicroUsd).toBe(1_750_000 + WORKERS_PAID_MICRO_USD);
     expect(data.notices.map((n) => n.title)).toEqual(["未読"]);
   });
 

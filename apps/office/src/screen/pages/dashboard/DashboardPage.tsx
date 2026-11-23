@@ -109,7 +109,7 @@ export function DashboardPage() {
         <Grid minItemWidth={200}>
           <WaitingStat pending={pending} reviews={reviews} />
           <Stat label="今日のタスク" icon="flag" value={data.todayTasks.length} unit="件" />
-          <Stat label="今月の費用" icon="chart-bar" value={(data.monthCostMicroUsd / 1_000_000).toFixed(2)} unit="ドル" spark={data.dailyCosts.map((d) => d.costMicroUsd)} sparkLabel="今月の日ごとの費用の推移" />
+          <Stat label="今月の費用" icon="chart-bar" value={(data.monthCostMicroUsd / 1_000_000).toFixed(2)} unit="ドル" sub="Claude API と Cloudflare の見込み" spark={data.dailyCosts.map((d) => d.costMicroUsd)} sparkLabel="今月の日ごとの Claude API の費用の推移" />
         </Grid>
       ) : null}
       <Part title="承認を待つ物">

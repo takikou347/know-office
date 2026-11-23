@@ -7,6 +7,7 @@ import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part, Section } from "../../parts/section.tsx";
 import { ErrorLog, TraceView } from "./ErrorTrail.tsx";
 import { MonthAttendance } from "./MonthAttendance.tsx";
+import { CostTrend } from "./CostTrend.tsx";
 import { RecordBreakdown } from "./RecordBreakdown.tsx";
 import { monthLabel, recentMonths } from "./month.ts";
 
@@ -74,7 +75,22 @@ export function RecordsPage({ query }: RecordsPageProps) {
   const contents: Record<RecordTab, ReactNode> = {
     attendance: <MonthAttendance month={month} today={today} />,
     tasks: <RecordBreakdown metric="tasks" month={month} />,
-    cost: <RecordBreakdown metric="cost" month={month} />,
+    cost: (
+      <Stack gap={6}>
+        <Part title="費用の推移と累計">
+          <CostTrend
+            month={month}
+            today={today}
+            onMonthChange={(m) => {
+              if (months.includes(m)) setMonth(m);
+            }}
+          />
+        </Part>
+        <Part title="Claude API の費用の内訳">
+          <RecordBreakdown metric="cost" month={month} />
+        </Part>
+      </Stack>
+    ),
     tokens: <RecordBreakdown metric="tokens" month={month} />,
     errors: (
       <Stack gap={6}>

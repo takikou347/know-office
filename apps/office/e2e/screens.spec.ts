@@ -152,7 +152,7 @@ test("記録の画面で、サービスごとの内訳の最後に全体を出�
   const table = page.getByRole("region", { name: "サービスごとの掛けた時間" }).getByRole("table");
   await expect(table.getByRole("row", { name: /knowidea-ui/ })).toBeVisible();
   await expect(table.getByRole("row").last()).toContainText("全体");
-  const link = page.getByRole("link", { name: "CSV で出す" });
+  const link = page.getByRole("link", { name: "CSV で出す", exact: true });
   const res = await page.request.get((await link.getAttribute("href")) ?? "");
   expect(res.headers()["content-type"]).toMatch(/^text\/csv/);
   expect((await res.text()).trim().split("\r\n").at(-1)).toMatch(/^total,全体,/);
@@ -166,7 +166,7 @@ test("記録の画面で社員ごとに切り替えると、社員ごとの内�
   await expect(table.getByRole("row", { name: /開発担当/ })).toBeVisible();
   await expect(table.getByRole("row", { name: /社長/ })).toBeVisible();
   await expect(table.getByRole("row").last()).toContainText("全体");
-  await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", /group=staff/);
+  await expect(page.getByRole("link", { name: "CSV で出す", exact: true })).toHaveAttribute("href", /group=staff/);
 });
 
 test("記録を種類ごとに見る", async ({ page }) => {
@@ -181,13 +181,13 @@ test("記録を種類ごとに見る", async ({ page }) => {
   ] as const) {
     await tabs.getByRole("tab", { name: tab }).click();
     await expect(page.getByRole("region", { name: region }).getByRole("row").last()).toContainText("全体");
-    await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", /&from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}$/);
+    await expect(page.getByRole("link", { name: "CSV で出す", exact: true })).toHaveAttribute("href", /&from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}$/);
   }
   // 費用は選んだ月のほか、期間を決めない累計でも見られる
   await tabs.getByRole("tab", { name: "費用" }).click();
   await page.getByRole("radio", { name: "累計" }).check();
   await expect(page.getByRole("region", { name: "サービスごとの費用" }).getByRole("row").last()).toContainText("全体");
-  await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", "/api/v1/records/summary/export?group=service");
+  await expect(page.getByRole("link", { name: "CSV で出す", exact: true })).toHaveAttribute("href", "/api/v1/records/summary/export?group=service");
   await tabs.getByRole("tab", { name: "エラー" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "稼働率" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "エラーログ" })).toBeVisible();
@@ -290,7 +290,7 @@ test("画面を移ると、中身の先頭に戻り、中身に Tab で入れる
   // 記録も守りも長いので、移った先でも送った分が残りうる。送られるのは中身の main だけ
   await page.goto("/records?tab=tasks");
   // サービスごとの内訳を読み終えるまでは、記録の画面は送るほど長くない
-  await expect(page.getByRole("link", { name: "CSV で出す" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "CSV で出す", exact: true })).toBeVisible();
   const main = page.getByRole("main");
   await main.evaluate((el) => el.scrollTo(0, el.scrollHeight));
   expect(await main.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);

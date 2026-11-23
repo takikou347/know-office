@@ -4,7 +4,7 @@ import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { runLocalWrangler, seedMain } from "./helpers/seed.ts";
 import { settle } from "./helpers/settle.ts";
 
-// ホームと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/uptime と 5 分ごとの Cron で通す。記録は勤怠を月の表で、稼働率とエラーログをエラーのタブで見る。承認待ちとタスクは種に置き、応答を差し替えない (API の records と settings)
+// ホームと記録を、本物のゲートウェイの /dashboard、/approvals、/records/attendance、/records/costs、/records/uptime と 5 分ごとの Cron で通す。記録は勤怠を月の表で、稼働率とエラーログをエラーのタブで見る。承認待ちとタスクは種に置き、応答を差し替えない (API の records と settings)
 
 const NODE = "019a7b00-0000-7000-8000-0000000000ea";
 const APPROVAL = "019a7b00-0000-7000-8000-0000000000eb";
@@ -88,6 +88,41 @@ test.describe("記録", () => {
     const row = table.getByRole("row", { name: new RegExp(`^${String(Number(month))}/${String(Number(date))} `) });
     await expect(row.getByText("1 時間 30 分")).toBeVisible();
     await expect(table.getByRole("row").last()).toContainText("合計");
+  });
+
+  test("費用を月ごとと累計で見る", async ({ page }) => {
+    // 使った額の記録は追記だけで戻せないので足さず、前の通しが残した額のままホームと記録が同じ値を出す事を確かめる
+    await page.goto("/");
+    const home = page.getByRole("main").getByText("今月の費用").locator("..");
+    await expect(home.getByText(/^\d+\.\d{2}$/)).toBeVisible();
+    const monthTotal = await home.getByText(/^\d+\.\d{2}$/).innerText();
+    await page.goto("/records?tab=cost");
+    const day = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+    const label = `${day.slice(0, 4)}年${String(Number(day.slice(5, 7)))}月`;
+    const trend = part(page, "費用の推移と累計");
+    // 選んだ月 (今月) の合計はホームの今月の費用と同じで、Claude API と Cloudflare に分ける
+    const picked = trend.getByText(`${label}の費用`).locator("..");
+    await expect(picked.getByText(monthTotal, { exact: true })).toBeVisible();
+    await expect(picked.getByText(/Claude API \d+\.\d{2} ドル、Cloudflare \d+\.\d{2} ドル \(見込み\)/)).toBeVisible();
+    await expect(trend.getByText("累計の費用")).toBeVisible();
+    // グラフは 12 か月を並べ、選んだ月を押した状態にする
+    const chart = trend.getByRole("group", { name: "月ごとの費用の推移" });
+    await expect(chart.getByRole("button")).toHaveCount(12);
+    await expect(chart.getByRole("button", { name: new RegExp(`^${label} `) })).toHaveAttribute("aria-pressed", "true");
+    // 表は 12 か月を新しい月から並べ、今月の行の合計もホームと同じ
+    const table = trend.getByRole("region", { name: "月ごとの費用" }).getByRole("table");
+    await expect(table.getByRole("row")).toHaveCount(13);
+    await expect(table.getByRole("row").nth(1)).toContainText(label);
+    await expect(table.getByRole("row").nth(1)).toContainText(`${monthTotal} ドル`);
+    // CSV は同じ内訳を月ごとに出し、最後に累計の行を置く
+    const csv = await page.request.get(await trend.getByRole("link", { name: "月ごとの費用を CSV で出す" }).getAttribute("href") ?? "");
+    expect(csv.ok()).toBe(true);
+    const lines = (await csv.text()).trim().split("\n");
+    expect(lines[0]).toBe("month,claude_usd,cloudflare_usd,total_usd");
+    expect(lines.at(-2)).toMatch(new RegExp(`^${day.slice(0, 7)},`));
+    expect(lines.at(-1)).toMatch(/^累計,/);
+    // 内訳は選んだ月の社員ごとと、サービスごとの Claude API の費用
+    await expect(part(page, "Claude API の費用の内訳").getByRole("region", { name: "社員ごとの費用" }).or(part(page, "Claude API の費用の内訳").getByRole("region", { name: "サービスごとの費用" }))).toBeVisible();
   });
 
   test("5 分ごとの確かめから出した今月の稼働率を出す", async ({ page }) => {

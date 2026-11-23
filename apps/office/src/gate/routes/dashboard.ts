@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { createRouter } from "../app.ts";
 import { approvals, nodes, notices, services } from "../db/main.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
+import { costHistory } from "../ledger/costs.ts";
 import { toNotice } from "../ledger/notices.ts";
 import { okResponse, problems } from "../openapi.ts";
 import { ok } from "../respond.ts";
@@ -43,7 +44,7 @@ const getDashboardRoute = createRoute({
     "3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする",
     "`pending` の承認、今日のタスク、未読の通知を `DB` から読む",
     "`reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む",
-    "今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足し、日本時間の日ごとにも足す",
+    "今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で日本時間の日ごとに足す。今月の費用は `GET /api/v1/records/costs` の今月の合計 (Claude API と Cloudflare の見込み)",
     "`services` の試作、サービス、運用の行ごとに、サービスの詳細と同じ種類ごとの様子を組み立てる",
   ],
   responses: { 200: okResponse(Dashboard), ...problems(401, 403, 429, 500) },
@@ -97,7 +98,7 @@ async function liveServices(env: Bindings, now: number): Promise<HomeService[]> 
 export const dashboardRoutes = router.openapi(getDashboardRoute, async (c) => {
   const now = c.var.clock.now();
   const orm = drizzle(c.env.DB);
-  const [staff, waiting, ownerReviews, today, unread, daily, live] = await Promise.all([
+  const [staff, waiting, ownerReviews, today, unread, daily, costs, live] = await Promise.all([
     loadStaff(c.env, now),
     orm.select().from(approvals).where(eq(approvals.status, "pending")).orderBy(asc(approvals.id)),
     ownerWaitingReviews(c.env.DB),
@@ -109,6 +110,7 @@ export const dashboardRoutes = router.openapi(getDashboardRoute, async (c) => {
       .limit(TODAY_LIMIT),
     orm.select().from(notices).where(isNull(notices.readAt)).orderBy(desc(notices.id)).limit(UNREAD_LIMIT),
     dailyCosts(c.env, now),
+    costHistory(c.env, now),
     liveServices(c.env, now),
   ]);
   const toApproval = (row: (typeof waiting)[number]): Approval => {
@@ -126,5 +128,5 @@ export const dashboardRoutes = router.openapi(getDashboardRoute, async (c) => {
       reason: row.reason,
     };
   };
-  return ok(c, { staff, approvals: waiting.map(toApproval), ownerReviews, todayTasks: today.map((r) => toNode(r, r.status === "done" ? 1 : 0)), monthCostMicroUsd: daily.reduce((sum, d) => sum + d.costMicroUsd, 0), dailyCosts: daily, services: live, notices: unread.map(toNotice) });
+  return ok(c, { staff, approvals: waiting.map(toApproval), ownerReviews, todayTasks: today.map((r) => toNode(r, r.status === "done" ? 1 : 0)), monthCostMicroUsd: costs.months.at(-1)?.totalMicroUsd ?? 0, dailyCosts: daily, services: live, notices: unread.map(toNotice) });
 });

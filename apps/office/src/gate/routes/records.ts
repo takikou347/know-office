@@ -1,6 +1,6 @@
 // 記録: 年ごとの置き場から読む監査ログとハッシュチェーンの確かめ、置き場ごとの使った量、月の稼働率 (ログインと記録の 3.4、3.5、サービスと拡張の 3.5)
 import { createRoute, z } from "@hono/zod-openapi";
-import { AppError, AuditRow, AuditVerification, jstDayStart, jstYear, RecordGroup, RecordSummary, StorageUse, Uptime, UptimeQuery, VerifyAuditInput } from "@know-office/core";
+import { AppError, AuditRow, AuditVerification, CostHistory, jstDayStart, jstYear, RecordGroup, RecordSummary, StorageUse, Uptime, UptimeQuery, VerifyAuditInput } from "@know-office/core";
 import type { D1Database } from "@cloudflare/workers-types";
 import { and, desc, gte, lt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -10,6 +10,7 @@ import { recordYears } from "../db/main.ts";
 import { auditLog } from "../db/records.ts";
 import { type Bindings, RECORD_BINDINGS } from "../env.ts";
 import { observe } from "../guard/observe.ts";
+import { costCsv, costHistory } from "../ledger/costs.ts";
 import { storageUses } from "../ledger/storage.ts";
 import { monthUptime } from "../ledger/uptime.ts";
 import { type RecordDb, type SummaryRange, summarize, summaryCsv } from "../ledger/summary.ts";
@@ -94,6 +95,31 @@ const exportRecordSummaryRoute = createRoute({
   "x-steps": ["`GET /api/v1/records/summary` と同じ集計を CSV で返す"],
   request: { query: SummaryQuery },
   responses: { 200: { description: "CSV", content: { "text/csv": { schema: z.string() } } }, ...problems(400, 401, 403, 422, 429, 500) },
+});
+
+const getCostHistoryRoute = createRoute({
+  method: "get",
+  path: "/api/v1/records/costs",
+  operationId: "getCostHistory",
+  tags: ["records"],
+  summary: "費用の推移と累計",
+  description: "Cloudflare の額は見込み。Workers Paid の月額に、社員の働いた時間を basic のコンテナ (1/4 vCPU、1 GiB、4 GB) が動いた時間と見た Containers の額を足す。CPU は割り当てた分を全部使った上限で数える。今月の合計はホームの今月の費用と同じ。",
+  "x-steps": [
+    "バインドした `REC_<年>` ごとに、今までの `usage.cost_micro_usd` を日本時間の月ごとに足し、年の境の月を足し合わせる",
+    "`daily_totals.worked_ms` を月ごとに足し、Workers Paid と Containers の料金で Cloudflare の見込みにする",
+    "最初に記録のある月から今月までを古い順に並べ、使わなかった月も Workers Paid だけで並べ、累計を足す",
+  ],
+  responses: { 200: okResponse(CostHistory), ...problems(401, 403, 429, 500) },
+});
+
+const exportCostHistoryRoute = createRoute({
+  method: "get",
+  path: "/api/v1/records/costs/export",
+  operationId: "exportCostHistory",
+  tags: ["records"],
+  summary: "費用の推移と累計を CSV で出力する",
+  "x-steps": ["`GET /api/v1/records/costs` と同じ月ごとの内訳を、ドルで CSV にし、最後に累計の行を置く"],
+  responses: { 200: { description: "CSV", content: { "text/csv": { schema: z.string() } } }, ...problems(401, 403, 429, 500) },
 });
 
 const getUptimeRoute = createRoute({
@@ -203,5 +229,10 @@ export const recordRoutes = router
     const { from, to, group } = c.req.valid("query");
     const summary = await summarize(c.env.DB, boundRecords(c.env), group, rangeOf(from, to));
     return c.body(summaryCsv(summary), 200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="records-${group}.csv"` });
+  })
+  .openapi(getCostHistoryRoute, async (c) => ok(c, await costHistory(c.env, c.var.clock.now())))
+  .openapi(exportCostHistoryRoute, async (c) => {
+    const history = await costHistory(c.env, c.var.clock.now());
+    return c.body(costCsv(history), 200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="records-costs.csv"' });
   })
   .openapi(getUptimeRoute, async (c) => ok(c, await monthUptime(c.env, c.req.valid("query").month)));

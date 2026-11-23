@@ -82,6 +82,34 @@ export const DailyCost = z
 /** 日本時間の 1 日の費用の型 */
 export type DailyCost = z.infer<typeof DailyCost>;
 
+/** 日本時間の 1 か月の費用。Claude API は使った額、Cloudflare は Workers Paid と社員の働いた時間から見込んだ Containers の額 */
+export const CostMonth = z
+  .object({
+    month: z.string().openapi({ description: "日本時間の月 YYYY-MM" }),
+    claudeMicroUsd: z.number().int(),
+    cloudflareMicroUsd: z.number().int().openapi({ description: "Workers Paid の月額と、社員の働いた時間を basic のコンテナの時間と見た Containers の見込み" }),
+    totalMicroUsd: z.number().int(),
+  })
+  .strict()
+  .meta({ id: "CostMonth" });
+
+/** 日本時間の 1 か月の費用の型 */
+export type CostMonth = z.infer<typeof CostMonth>;
+
+/** 費用の推移と累計。最初に記録のある月から今月までを古い順に並べ、全部の月を足した累計を添える */
+export const CostHistory = z
+  .object({
+    months: z.array(CostMonth).openapi({ description: "最初に記録のある月から今月までを古い順に。使わなかった月も並べる" }),
+    claudeMicroUsd: z.number().int(),
+    cloudflareMicroUsd: z.number().int(),
+    totalMicroUsd: z.number().int(),
+  })
+  .strict()
+  .meta({ id: "CostHistory" });
+
+/** 費用の推移と累計の型 */
+export type CostHistory = z.infer<typeof CostHistory>;
+
 /** ホームに出すサービス 1 件の数値。種類ごとの様子をそのまま持つ */
 export const HomeService = z
   .object({ id: z.uuid(), name: z.string(), kind: ServiceKind, stage: ServiceStage, status: ServiceStatus })
@@ -98,8 +126,8 @@ export const Dashboard = z
     approvals: z.array(Approval),
     ownerReviews: z.array(OwnerReview).openapi({ description: "オーナーの判断を待つレビューを古い順に 100 件まで" }),
     todayTasks: z.array(Node),
-    monthCostMicroUsd: z.number().int(),
-    dailyCosts: z.array(DailyCost).openapi({ description: "日本時間の今月の 1 日から今日までの日ごとの費用" }),
+    monthCostMicroUsd: z.number().int().openapi({ description: "日本時間の今月の Claude API と Cloudflare の見込みの合計。記録の費用の推移の今月と同じ" }),
+    dailyCosts: z.array(DailyCost).openapi({ description: "日本時間の今月の 1 日から今日までの日ごとの Claude API の費用" }),
     services: z.array(HomeService).openapi({ description: "試作、サービス、運用の段階のサービスを ID の順に 50 件まで" }),
     notices: z.array(Notice),
   })

@@ -1,4 +1,5 @@
-// 記録に出す値: 使った額をいつでも見えるよう、ダッシュボードが今月 (日本時間) の使った額を返す (サービスと拡張の 3.4、API の settings)
+// 記録に出す値: 使った額をいつでも見えるよう、ダッシュボードが今月 (日本時間) の Claude API の額と Cloudflare の見込みの合計を返す (サービスと拡張の 3.4、API の settings)
+import { WORKERS_PAID_MICRO_USD } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fixedClock } from "../helpers/clock.ts";
@@ -40,20 +41,20 @@ describe("記録に出す値", () => {
       usage.bind("019a7b00-0000-7000-8000-0000000000b2", monthStart - 1, "office", 9_000_000),
       usage.bind("019a7b00-0000-7000-8000-0000000000b3", at(16, 9), "019a7b00-0000-7000-8000-00000000c0de", 250_000),
     ]);
-    expect(await monthCost()).toBe(1_750_000);
+    expect(await monthCost()).toBe(1_750_000 + WORKERS_PAID_MICRO_USD);
     // 使うたびに今の額に足され、読み直すと出る
     await usage.bind("019a7b00-0000-7000-8000-0000000000b6", at(16, 9, 30), "office", 5).run();
-    expect(await monthCost()).toBe(1_750_005);
+    expect(await monthCost()).toBe(1_750_005 + WORKERS_PAID_MICRO_USD);
   });
 
-  it("使っていない月の費用は 0、年をまたいだ 1 月はその年の記録から足す", async () => {
-    expect(await monthCost()).toBe(0);
+  it("使っていない月の費用は Workers Paid の月額だけ、年をまたいだ 1 月はその年の記録から足す", async () => {
+    expect(await monthCost()).toBe(WORKERS_PAID_MICRO_USD);
     // 日本時間の 2027 年 1 月 1 日 0 時ちょうどは 2027 年、その 1 ミリ秒前は 2026 年の記録
     const newYear = Date.UTC(2026, 11, 31, 15);
     await d1.REC_2026.prepare(USAGE).bind("019a7b00-0000-7000-8000-0000000000b4", newYear - 1, "office", 7_000_000).run();
     await d1.REC_2027.prepare(USAGE).bind("019a7b00-0000-7000-8000-0000000000b5", newYear, "office", 300_000).run();
     clock.advance(newYear + 60_000 - clock.now());
     headers = await gate.signIn();
-    expect(await monthCost()).toBe(300_000);
+    expect(await monthCost()).toBe(300_000 + WORKERS_PAID_MICRO_USD);
   });
 });
