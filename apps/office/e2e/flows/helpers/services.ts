@@ -16,8 +16,12 @@ const DOCS_REPOS = ["example/knowidea-docs", "example/other-docs"] as const;
  * @param option 選ぶ物
  */
 export async function choose(page: Page, label: string, option: string): Promise<void> {
-  await page.getByRole("main").getByRole("combobox", { name: label }).click();
+  const box = page.getByRole("main").getByRole("combobox", { name: label });
+  await box.click();
   await page.getByRole("option", { name: option, exact: true }).click();
+  // 選び肢の一覧が閉じ切る前に次の欄を押すと、次の一覧が見えないまま開いて選べないので、選んだ値が出て一覧が消えるまで待つ
+  await expect(box).toContainText(option);
+  await expect(page.getByRole("listbox")).toHaveCount(0);
 }
 
 /**
