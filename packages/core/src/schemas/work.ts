@@ -1,4 +1,7 @@
 // タスクの木、組織図、オーナーの承認の返す形と入力 (タスクとレビューの 2 章と 2 章、データの 2 章 と 2.5)
+import { masterSchema } from "../master/master.ts";
+import { TASK_KINDS } from "../master/task-kinds.ts";
+import { TASK_STATUSES } from "../master/task-statuses.ts";
 import { Meta } from "./common.ts";
 import { RepoName } from "./github.ts";
 import { StaffId } from "./workday.ts";
@@ -7,6 +10,8 @@ import { z } from "./zod.ts";
 const Uuid = z.uuid().openapi({ description: "UUID v7" });
 const Scope = z.string().min(1).openapi({ description: "`office` またはサービスの ID" });
 const StaffParam = StaffId.openapi({ description: "社員 ID。役割ごとに固定" });
+/** 期限の日。日本時間の日付 */
+const DueDay = z.iso.date().openapi({ description: "期限の日。日本時間の日付 YYYY-MM-DD" });
 const Entries = z.record(z.string(), z.unknown()).openapi({ additionalProperties: true });
 
 /** 木の階層。上から目的、目標、プロジェクト、タスク */
@@ -22,7 +27,7 @@ export const TaskKind = z.enum(["build", "content", "fix", "plan", "review"]);
 export type TaskKind = z.infer<typeof TaskKind>;
 
 /** 木の 1 件の状態 */
-export const NodeStatus = z.enum(["todo", "doing", "review", "done", "stopped", "waiting_owner", "dropped"]);
+export const NodeStatus = masterSchema(TASK_STATUSES);
 
 /** 木の 1 件の状態の型 */
 export type NodeStatus = z.infer<typeof NodeStatus>;
@@ -42,6 +47,7 @@ export const Node = z
     status: NodeStatus,
     priority: z.number().int().meta({ description: "小さいほど先に取る" }),
     progress: z.number().min(0).max(1).meta({ description: "配下のタスクのうち済んだ割合。見送ったタスクは数えない。タスクは済めば 1" }),
+    dueDay: DueDay.nullable(),
     version: z.number().int().meta({ description: "変えるたびに 1 増える。PATCH の version に渡す" }),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -93,10 +99,11 @@ export const CreateNodeInput = z
     scope: Scope,
     title: z.string().min(1).max(200),
     body: z.string().max(20_000).optional(),
-    taskKind: z.enum(["build", "content", "fix"]).optional().meta({ description: "タスクだけが持ち、タスクには要る" }),
+    taskKind: masterSchema(TASK_KINDS).optional().meta({ description: "タスクだけが持ち、タスクには要る" }),
     assignee: StaffParam.optional(),
     priority: z.number().int().min(0).max(1000).optional().meta({ description: "小さいほど先に取る。無ければ 100" }),
     repo: RepoName.optional().meta({ description: "タスクだけが持つ。社員が直す GitHub のリポジトリ (`owner/name`)" }),
+    dueDay: DueDay.optional(),
   })
   .strict()
   .meta({ id: "CreateNodeInput" });
@@ -114,6 +121,7 @@ export const UpdateNodeInput = z
     assignee: StaffParam.optional(),
     priority: z.number().int().min(0).max(1000).optional(),
     status: z.enum(["todo", "dropped"]).optional(),
+    dueDay: DueDay.nullable().optional().meta({ description: "期限の日。null で消す" }),
   })
   .strict()
   .meta({ id: "UpdateNodeInput" });

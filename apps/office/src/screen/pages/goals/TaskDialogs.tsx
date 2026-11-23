@@ -1,24 +1,27 @@
-// 目的と組織図の画面で、プロジェクトの下にタスクを足して社員に頼み、頼む先を変え、取り消す (タスクとレビューの 3.1、API の nodes)
+// 目標の画面で、目標の下にタスクを足して社員に頼み、頼む先と期限を変え、取り消す。入力は選ぶ欄と日付のピッカーを基本にする (タスクとレビューの 3.1、API の nodes)
 import type { NodeTree, OrgStaff } from "@know-office/core";
-import { RepoName, StaffId } from "@know-office/core";
-import { Button, Dialog, DialogClose, RadioGroup, Stack, TextField } from "knowidea-ui";
+import { Repo, StaffId } from "@know-office/core";
+import { optionsOf } from "@know-office/core/master/master";
+import { TASK_KINDS } from "@know-office/core/master/task-kinds";
+import { Button, DatePicker, Dialog, DialogClose, Field, Select, Stack, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";
+import { z } from "zod";
 import { ApiContext } from "../../api.ts";
-import { type Failed, FailedAlert, send } from "../../parts/load.tsx";
+import { type Failed, FailedAlert, send, useLoad } from "../../parts/load.tsx";
+import { dateOf, dayOf } from "./model.ts";
 
 /** 頼む先を決めない時の選ぶ欄の値 */
 const NOBODY = "nobody";
 
-/** オーナーが選べるタスクの種類 */
-const TASK_KINDS = [
-  { value: "build", label: "作る" },
-  { value: "content", label: "コンテンツ" },
-  { value: "fix", label: "直す" },
-] as const;
+/** 新しいプロジェクトを作る時の選ぶ欄の値 */
+const NEW_PROJECT = "new";
+
+/** リポジトリを付けない時の選ぶ欄の値 */
+const NO_REPO = "none";
 
 type OwnerTaskKind = (typeof TASK_KINDS)[number]["value"];
 
-/** 頼み直せるタスクの状態。作業中、確かめ待ち、済み、見送りのタスクは変えない */
+/** 頼み直し、取り消せるタスクの状態。作業中、レビュー中、完了、取り消したタスクは頼む先を変えない */
 const CHANGEABLE: readonly string[] = ["todo", "stopped", "waiting_owner"];
 
 /**
@@ -51,56 +54,121 @@ function staffOf(value: string): StaffId | undefined {
   return id.success ? id.data : undefined;
 }
 
-interface AddTaskProps {
-  /** タスクを足すプロジェクト */
-  project: NodeTree;
-  /** プロジェクトの親の目標。受け付けのプロジェクトには無い。同じ名前のプロジェクトを見分けるのに使う */
-  goal?: NodeTree | undefined;
-  /** 頼む先に選べる社員 */
-  staff: OrgStaff[];
-  /** 足した後に呼ぶ。木を読み直すのに使う */
-  onDone: () => void;
+/**
+ * 目標の下のプロジェクトを集める。受け付けのプロジェクトはそれ自身
+ * @param goal 目標か受け付けのプロジェクト
+ * @returns プロジェクトの並び
+ */
+export function projectsOf(goal: NodeTree): NodeTree[] {
+  return goal.kind === "project" ? [goal] : goal.children.filter((c) => c.kind === "project");
 }
 
-/** プロジェクトの下にタスクを足すボタンとダイアログ。題、本文、種類、頼む先、リポジトリを入れる */
-export function AddTask({ project, goal, staff, onDone }: AddTaskProps) {
+interface RepoSelectProps {
+  /** 選んでいる値。付けない時は NO_REPO */
+  value: string;
+  /** 選び直した時に呼ぶ */
+  onChange: (value: string) => void;
+}
+
+/** GitHub の触れるリポジトリから選ぶ欄。つないでいなければ「リポジトリ無し」だけを出す */
+function RepoSelect({ value, onChange }: RepoSelectProps) {
+  const repos = useLoad(z.array(Repo), (a) => a.api.v1.github.repos.$get({ query: { limit: "100" } }));
+  const options = [{ value: NO_REPO, label: "リポジトリ無し" }, ...(repos.state === "ok" ? repos.data.map((r) => ({ value: r.fullName, label: r.fullName })) : [])];
+  return (
+    <Field label="リポジトリ" hint={repos.state === "failed" ? "設定の画面で GitHub とつなぐと選べます" : "社員が直すリポジトリ"}>
+      <Select aria-label="リポジトリ" loading={repos.state === "loading"} value={value} options={options} onValueChange={(v) => onChange(v ?? NO_REPO)} />
+    </Field>
+  );
+}
+
+interface AddTaskProps {
+  /** タスクを足す目標か、受け付けのプロジェクト */
+  goal: NodeTree;
+  /** 頼む先に選べる社員 */
+  staff: OrgStaff[];
+  /** 社員を読んでいる間は、頼む先を選ばせない */
+  staffLoading: boolean;
+  /** 足した後に呼ぶ。木を読み直すのに使う */
+  onDone: () => void;
+  /** プロジェクトだけを作れてタスクを足せないまま閉じた時に呼ぶ。木を読み直すのに使う */
+  onCreated: () => void;
+}
+
+/** 目標の下にタスクを足すボタンとダイアログ。プロジェクト、種類、頼む先、リポジトリは選び、期限はピッカーで決める */
+export function AddTask({ goal, staff, staffLoading, onDone, onCreated }: AddTaskProps) {
   const api = useContext(ApiContext);
+  const projects = projectsOf(goal);
+  const firstProject = projects[0]?.id ?? NEW_PROJECT;
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [project, setProject] = useState(firstProject);
+  const [projectName, setProjectName] = useState(projects.length === 0 ? goal.title : "");
+  // プロジェクトを作れてタスクを足せなかった時に、作ったプロジェクトを選ぶ欄に残す
+  const [made, setMade] = useState<{ value: string; label: string } | null>(null);
   const [kind, setKind] = useState<OwnerTaskKind>("build");
   const [assignee, setAssignee] = useState(NOBODY);
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState(NO_REPO);
+  const [due, setDue] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failed>();
-  const name = goal === undefined ? `「${project.title}」にタスクを足す` : `「${goal.title}」の「${project.title}」にタスクを足す`;
-  const repoBad = repo.trim() !== "" && !RepoName.safeParse(repo.trim()).success;
+  const name = `「${goal.title}」にタスクを足す`;
+  const needsName = project === NEW_PROJECT && projectName.trim() === "";
+  const ready = title.trim() !== "" && !needsName;
 
   const reset = () => {
     setTitle("");
     setBody("");
+    setProject(firstProject);
+    setProjectName(projects.length === 0 ? goal.title : "");
     setKind("build");
     setAssignee(NOBODY);
-    setRepo("");
+    setRepo(NO_REPO);
+    setDue(null);
     setFailure(undefined);
+    setMade(null);
+  };
+
+  /**
+   * 足す先のプロジェクトを決める。新しいプロジェクトなら先に作り、作れたら選び直して二重に作らない
+   * @returns プロジェクトの ID。作れなければ null
+   */
+  const projectId = async (): Promise<string | null> => {
+    if (project !== NEW_PROJECT) return project;
+    if (!api) return null;
+    const sent = await send(api, () => api.api.v1.nodes.$post({ json: { kind: "project", parentId: goal.id, scope: goal.scope, title: projectName.trim() } }));
+    if (!sent.ok) {
+      setFailure(sent.failure);
+      return null;
+    }
+    const id = z.object({ data: z.object({ id: z.string() }).loose() }).loose().parse(await sent.res.json()).data.id;
+    setMade({ value: id, label: projectName.trim() });
+    setProject(id);
+    return id;
   };
 
   const submit = async () => {
-    if (!api || busy || title.trim() === "" || repoBad) return;
+    if (!api || busy || !ready) return;
     setBusy(true);
     setFailure(undefined);
+    const parentId = await projectId();
+    if (parentId === null) {
+      setBusy(false);
+      return;
+    }
     const who = staffOf(assignee);
     const sent = await send(api, () =>
       api.api.v1.nodes.$post({
         json: {
           kind: "task",
-          parentId: project.id,
-          scope: project.scope,
+          parentId,
+          scope: goal.scope,
           title: title.trim(),
           taskKind: kind,
           ...(body.trim() === "" ? {} : { body: body.trim() }),
           ...(who === undefined ? {} : { assignee: who }),
-          ...(repo.trim() === "" ? {} : { repo: repo.trim() }),
+          ...(repo === NO_REPO ? {} : { repo }),
+          ...(due === null ? {} : { dueDay: dayOf(due) }),
         },
       }),
     );
@@ -120,13 +188,11 @@ export function AddTask({ project, goal, staff, onDone }: AddTaskProps) {
       onOpenChange={(next) => {
         if (busy) return;
         setOpen(next);
-        if (!next) reset();
+        if (next) return;
+        if (made) onCreated();
+        reset();
       }}
-      trigger={
-        <Button variant="quiet">
-          {name}
-        </Button>
-      }
+      trigger={<Button>タスクを足す</Button>}
       title={name}
       description="頼んだ社員は、手が空いていればすぐに取ります。勤務時間外なら呼び出して取ります。"
       actions={
@@ -134,32 +200,44 @@ export function AddTask({ project, goal, staff, onDone }: AddTaskProps) {
           <DialogClose variant="secondary" disabled={busy}>
             やめる
           </DialogClose>
-          <Button loading={busy} disabled={title.trim() === "" || repoBad} onClick={() => void submit()}>
-            タスクを足す
+          <Button loading={busy} disabled={!ready} onClick={() => void submit()}>
+            足す
           </Button>
         </>
       }
     >
       <Stack gap={3}>
         <TextField label="題" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-        <TextField label="本文" multiline rows={4} maxLength={20_000} value={body} onChange={(e) => setBody(e.target.value)} />
-        <RadioGroup
-          legend="種類"
-          value={kind}
-          options={TASK_KINDS.map((k) => ({ value: k.value, label: k.label }))}
-          onValueChange={(v) => {
-            const next = TASK_KINDS.find((k) => k.value === v);
-            if (next) setKind(next.value);
-          }}
-        />
-        <RadioGroup legend="頼む先" value={assignee} options={assigneeOptions(staff)} onValueChange={(v) => setAssignee(v)} />
-        <TextField
-          label="リポジトリ"
-          hint="直すリポジトリを owner/name の形で。無ければ空のまま"
-          error={repoBad ? "owner/name の形で入れてください" : undefined}
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-        />
+        {goal.kind === "goal" ? (
+          <Field label="プロジェクト">
+            <Select
+              aria-label="プロジェクト"
+              value={project}
+              options={[...projects.map((p) => ({ value: p.id, label: p.title })), ...(made ? [made] : []), { value: NEW_PROJECT, label: "新しいプロジェクト" }]}
+              onValueChange={(v) => setProject(v ?? firstProject)}
+            />
+          </Field>
+        ) : null}
+        {project === NEW_PROJECT ? <TextField label="プロジェクトの名前" required maxLength={200} value={projectName} onChange={(e) => setProjectName(e.target.value)} /> : null}
+        <Field label="種類">
+          <Select
+            aria-label="種類"
+            value={kind}
+            options={optionsOf(TASK_KINDS)}
+            onValueChange={(v) => {
+              const next = TASK_KINDS.find((k) => k.value === v);
+              if (next) setKind(next.value);
+            }}
+          />
+        </Field>
+        <Field label="頼む先">
+          <Select aria-label="頼む先" loading={staffLoading} value={assignee} options={assigneeOptions(staff)} onValueChange={(v) => setAssignee(v ?? NOBODY)} />
+        </Field>
+        <RepoSelect value={repo} onChange={setRepo} />
+        <Field label="期限">
+          <DatePicker aria-label="期限" value={due} onValueChange={setDue} clearable placeholder="期限を選ぶ" />
+        </Field>
+        <TextField label="本文" hint="無くても足せます" multiline rows={3} maxLength={20_000} value={body} onChange={(e) => setBody(e.target.value)} />
         {failure ? <FailedAlert title="タスクを足せませんでした" failure={failure} /> : null}
       </Stack>
     </Dialog>
@@ -171,31 +249,40 @@ interface ChangeTaskProps {
   task: NodeTree;
   /** 頼む先に選べる社員 */
   staff: OrgStaff[];
+  /** 社員を読んでいる間は、頼む先を選ばせない */
+  staffLoading: boolean;
   /** 変えた後に呼ぶ。木を読み直すのに使う */
   onDone: () => void;
   /** ほかで先に変わっていた (409) 時に呼ぶ。木を読み直すとこのダイアログは閉じるので、知らせは呼ぶ側が出す */
   onConflict: () => void;
 }
 
-/** タスクの頼む先を変える、タスクを取り消すボタンとダイアログ。作業中のタスクには出さない */
-export function ChangeTask({ task, staff, onDone, onConflict }: ChangeTaskProps) {
+/** タスクの頼む先と期限を変える、タスクを取り消すボタンとダイアログ。完了と取り消したタスクには出さず、作業中とレビュー中は期限だけを変える */
+export function ChangeTask({ task, staff, staffLoading, onDone, onConflict }: ChangeTaskProps) {
   const api = useContext(ApiContext);
   const [open, setOpen] = useState(false);
   const [assignee, setAssignee] = useState(task.assignee ?? NOBODY);
+  const [due, setDue] = useState<Date | null>(dateOf(task.dueDay));
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failed>();
-  if (!CHANGEABLE.includes(task.status)) return null;
+  if (task.status === "done" || task.status === "dropped") return null;
+  const changeable = CHANGEABLE.includes(task.status);
   const name = `${task.title}を変える`;
   const who = staffOf(assignee);
+  const dueDay = due === null ? null : dayOf(due);
+  const change = {
+    ...(changeable && who !== undefined && who !== task.assignee ? { assignee: who } : {}),
+    ...(dueDay === task.dueDay ? {} : { dueDay }),
+  };
 
-  const patch = async (change: { assignee: StaffId } | { status: "dropped" }) => {
+  const patch = async (json: { assignee?: StaffId; dueDay?: string | null } | { status: "dropped" }) => {
     if (!api || busy) return;
     setBusy(true);
     setFailure(undefined);
-    const sent = await send(api, () => api.api.v1.nodes[":nodeId"].$patch({ param: { nodeId: task.id }, json: { version: task.version, ...change } }));
+    const sent = await send(api, () => api.api.v1.nodes[":nodeId"].$patch({ param: { nodeId: task.id }, json: { version: task.version, ...json } }));
     setBusy(false);
     if (!sent.ok) {
-      // ほかで先に変わっていたら、今の木を読み直して版を合わせる。読み直すとこのダイアログは作り直されるので、知らせは木の上に出す
+      // ほかで先に変わっていたら、今の木を読み直して版を合わせる。読み直すとこのダイアログは作り直されるので、知らせは呼ぶ側が出す
       if (sent.failure.code === "conflict") {
         setOpen(false);
         onConflict();
@@ -214,31 +301,48 @@ export function ChangeTask({ task, staff, onDone, onConflict }: ChangeTaskProps)
       onOpenChange={(next) => {
         if (busy) return;
         setOpen(next);
-        if (!next) setFailure(undefined);
+        if (next) return;
+        setAssignee(task.assignee ?? NOBODY);
+        setDue(dateOf(task.dueDay));
+        setFailure(undefined);
       }}
       trigger={
-        <Button variant="quiet">
-          {name}
+        <Button variant="quiet" aria-label={name}>
+          変える
         </Button>
       }
       title={name}
-      description={`今の頼む先: ${roleOf(staff, task.assignee)}。タスクを取り消すと見送りになり、戻せません。`}
+      description={changeable ? "タスクを取り消すと戻せません。" : "作業中とレビュー中のタスクは、期限だけを変えられます。"}
       actions={
         <>
           <DialogClose variant="secondary" disabled={busy}>
             やめる
           </DialogClose>
-          <Button variant="danger" loading={busy} onClick={() => void patch({ status: "dropped" })}>
-            タスクを取り消す
-          </Button>
-          <Button loading={busy} disabled={who === undefined || who === task.assignee} onClick={() => void (who === undefined ? undefined : patch({ assignee: who }))}>
-            頼む先を変える
+          {changeable ? (
+            <Button variant="danger" loading={busy} onClick={() => void patch({ status: "dropped" })}>
+              取り消す
+            </Button>
+          ) : null}
+          <Button loading={busy} disabled={Object.keys(change).length === 0} onClick={() => void patch(change)}>
+            保存する
           </Button>
         </>
       }
     >
       <Stack gap={3}>
-        <RadioGroup legend="頼む先" value={assignee} options={assigneeOptions(staff).filter((o) => o.value !== NOBODY)} onValueChange={(v) => setAssignee(v)} />
+        <Field label="頼む先">
+          <Select
+            aria-label="頼む先"
+            disabled={!changeable}
+            loading={staffLoading}
+            value={assignee}
+            options={assigneeOptions(staff).filter((o) => o.value !== NOBODY || task.assignee === null)}
+            onValueChange={(v) => setAssignee(v ?? NOBODY)}
+          />
+        </Field>
+        <Field label="期限">
+          <DatePicker aria-label="期限" value={due} onValueChange={setDue} clearable placeholder="期限を選ぶ" />
+        </Field>
         {failure ? <FailedAlert title="タスクを変えられませんでした" failure={failure} /> : null}
       </Stack>
     </Dialog>

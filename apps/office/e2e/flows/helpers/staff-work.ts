@@ -7,7 +7,7 @@ import { part, post } from "./screen.ts";
 import { resumeStaff, scriptReply, staffNow } from "./staff.ts";
 import { FAKES } from "../../helpers/fakes.ts";
 
-/** 通しの置き場の木。目的と組織図の画面の見本の木と分け、見本の進み具合を変えない */
+/** 通しの置き場の木。目標の画面の見本の木と分け、見本の進み具合を変えない */
 export const PURPOSE = "019a7b00-0000-7000-8000-0000000000e1";
 export const GOAL = "019a7b00-0000-7000-8000-0000000000e2";
 export const PROJECT = "019a7b00-0000-7000-8000-0000000000e3";
@@ -39,7 +39,7 @@ export async function scriptFinish(page: Page): Promise<void> {
 }
 
 /**
- * 通しの木を開き、止めたままの社員を再開する
+ * 通しの目標を開き、止めたままの社員を再開する
  * @param page 画面を開くページ
  */
 export async function openTree(page: Page): Promise<void> {
@@ -49,30 +49,68 @@ export async function openTree(page: Page): Promise<void> {
       `('${GOAL}', 'goal', '${PURPOSE}', 'office', '社員がタスクを始める', NULL, NULL, NULL, 'todo', 900, 'owner', 1794528000000, 1794528000000), ` +
       `('${PROJECT}', 'project', '${GOAL}', 'office', '通しのタスク', NULL, NULL, NULL, 'todo', 900, 'owner', 1794528000000, 1794528000000)`,
   );
-  await page.goto("/goals");
-  await expect(page.getByRole("heading", { level: 2, name: "目的: 社員の仕事の通し" })).toBeVisible();
+  await page.goto(`/goals/${GOAL}`);
+  await expect(page.getByRole("heading", { level: 2, name: GOAL_TITLE })).toBeVisible();
   await resumeStaff(page);
 }
 
+/** 通しの目標の名前 */
+export const GOAL_TITLE = "社員がタスクを始める";
+
 /**
- * 通しのプロジェクトの「タスクを足す」から、題と頼む先を入れてタスクを足し、木に出るのを待つ
+ * 選ぶ欄を開いて 1 つ選ぶ
+ * @param scope 選ぶ欄のある所
+ * @param page 開いているページ。選ぶ物はページの上に開く
+ * @param name 選ぶ欄の名前
+ * @param option 選ぶ物の名前
+ */
+export async function pick(scope: Locator, page: Page, name: string, option: string): Promise<void> {
+  await scope.getByRole("combobox", { name }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+}
+
+/**
+ * 目標の画面の 4 列のうち、1 つの列
+ * @param page 開いているページ
+ * @param label 列の名前 (未着手、進行中、レビュー、完了)
+ * @returns 列
+ */
+export function column(page: Page, label: string): Locator {
+  return page.getByRole("main").getByRole("region", { name: label, exact: true });
+}
+
+/**
+ * 目標の画面のタスクのカード
+ * @param page 開いているページ
+ * @param title タスクの題
+ * @param scope 探す所。無ければ画面の中身すべて
+ * @returns カード
+ */
+export function taskCard(page: Page, title: string, scope: Locator = page.getByRole("main")): Locator {
+  return scope.getByRole("article").filter({ has: page.getByRole("heading", { level: 4, name: title, exact: true }) });
+}
+
+/**
+ * 通しの目標の「タスクを足す」から、題と頼む先を選んでタスクを足し、未着手の列か先の列に出るのを待つ
  * @param page 画面を開いたページ
  * @param title 題
  * @param assignee 頼む先の役職。まだ頼まない時は「まだ頼まない」
  * @returns 足したタスクの ID
  */
 export async function addTask(page: Page, title: string, assignee: string): Promise<string> {
-  const tree = part(page, "目的: 社員の仕事の通し");
-  await tree.getByRole("button", { name: "「社員がタスクを始める」の「通しのタスク」にタスクを足す" }).click();
-  const dialog = page.getByRole("dialog", { name: "「社員がタスクを始める」の「通しのタスク」にタスクを足す" });
+  await page.goto(`/goals/${GOAL}`);
+  const goal = part(page, GOAL_TITLE);
+  await goal.getByRole("button", { name: "タスクを足す" }).click();
+  const dialog = page.getByRole("dialog", { name: `「${GOAL_TITLE}」にタスクを足す` });
   await dialog.getByRole("textbox", { name: "題" }).fill(title);
+  await pick(dialog, page, "プロジェクト", "通しのタスク");
+  await pick(dialog, page, "種類", "作る");
+  await pick(dialog, page, "頼む先", assignee);
+  // リポジトリは GitHub をつないだ通しの後でしか選べないので、付けずに足す。社員が取って終えるのにリポジトリは要らない
   await dialog.getByRole("textbox", { name: "本文" }).fill("通しで足したタスク");
-  await dialog.getByRole("radiogroup", { name: "種類" }).getByRole("radio", { name: "作る" }).click();
-  await dialog.getByRole("radiogroup", { name: "頼む先" }).getByRole("radio", { name: assignee }).click();
-  await dialog.getByRole("textbox", { name: "リポジトリ" }).fill("example/know-office");
-  await dialog.getByRole("button", { name: "タスクを足す" }).click();
+  await dialog.getByRole("button", { name: "足す", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(tree.getByText(`タスク: ${title}`)).toBeVisible();
+  await expect(taskCard(page, title)).toBeVisible();
   const found = Trees.parse(await (await page.request.get(`/api/v1/nodes?rootId=${PURPOSE}`)).json())
     .data.flatMap(function walk(n: Tree): Tree[] {
       return [n, ...n.children.flatMap(walk)];

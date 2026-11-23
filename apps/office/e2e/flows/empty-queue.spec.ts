@@ -98,11 +98,11 @@ test.describe("タスクの繰り返し", () => {
       await expect(page.getByRole("heading", { level: 2, name: PLAN_TITLE })).toBeVisible();
       await expect(part(page, "作業の流れ").getByText("finished", { exact: true })).toBeVisible();
 
-      // 開発担当の仕事の山に、社長が作ったタスクが済で出る
+      // 開発担当の仕事の山に、社長が作ったタスクが完了で出る
       await page.goto("/staff/builder?tab=tasks");
       const row = page.getByRole("main").locator("li", { hasText: title }).first();
       await expect(row).toBeVisible();
-      await expect(row.getByText("済", { exact: true })).toBeVisible();
+      await expect(row.getByText("完了", { exact: true })).toBeVisible();
     }, undo);
   });
 });

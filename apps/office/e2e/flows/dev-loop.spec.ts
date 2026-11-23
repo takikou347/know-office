@@ -141,11 +141,11 @@ test.describe("タスクの繰り返し", () => {
           .poll(async () => z.object({ state: z.string(), state_reason: z.string().nullable() }).parse(await (await page.request.get(`${FAKE_GITHUB}/repos/${REPO}/issues/${String(issue)}`, github)).json()), { timeout: 20_000 })
           .toEqual({ state: "closed", state_reason: "completed" });
         expect((await status()).status).toBe("done");
-        // 画面のタスクが済みになっている
+        // 画面のタスクが完了になっている
         await page.goto("/staff/builder?tab=tasks");
         const row = page.getByRole("main").locator("li", { hasText: `#${String(issue)} 動画を作る` }).first();
         await expect(row).toBeVisible();
-        await expect(row.getByText("済", { exact: true })).toBeVisible();
+        await expect(row.getByText("完了", { exact: true })).toBeVisible();
       } finally {
         try {
           // 後の通しに残さない。main は前の先に戻し (前が無ければ消し)、出したブランチも消す

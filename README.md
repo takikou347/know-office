@@ -20,7 +20,7 @@ Docker も Cloudflare のアカウントも要らない。`pnpm install` の後�
 | コマンド | 中身 |
 | --- | --- |
 | `pnpm local` | 手元の D1 にマイグレーションを流して起こす。データは社員 3 人だけの空から始まる |
-| `pnpm local:demo` | 上に加えて、勤怠、目的と組織図の木、レビュー待ちと承認待ちのタスク、運用中のサービス、通知を置いて起こす (`e2e/seed.sql` と `dev/demo.sql`)。何度流しても重ならない |
+| `pnpm local:demo` | 上に加えて、勤怠、目標とタスク、レビュー待ちと承認待ちのタスク、運用中のサービス、通知を置いて起こす (`e2e/seed.sql` と `dev/demo.sql`)。何度流しても重ならない |
 | `pnpm local:reset` | 手元のデータを消す。先に Ctrl+C で止めてから流す。次の `pnpm local` で空に戻る |
 
 - ログイン、GitHub、Claude API、Cloudflare の数は `apps/office/dev/` の代わりの物が受ける。開くとオーナーとしてログインした形になり、外へは何も送らず費用も出ない。社員への言葉には代わりの Claude が答える

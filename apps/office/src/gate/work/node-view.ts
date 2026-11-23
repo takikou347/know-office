@@ -29,6 +29,7 @@ export function toNode(row: typeof nodes.$inferSelect, progress: number): Node {
     status: row.status,
     priority: row.priority,
     progress,
+    dueDay: row.dueDay,
     version: row.version,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),

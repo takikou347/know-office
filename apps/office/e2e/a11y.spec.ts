@@ -22,6 +22,9 @@ async function withSampleNotes(page: Page): Promise<void> {
   await page.route("**/api/v1/ext/sample-notes/note", (route) => route.fulfill({ json: { data: { body: "金曜は早く上がる" }, meta: META } }));
 }
 
+/** 目標の画面の題。メニューの名前に合わせる */
+const GOALS_HEADING = screens.find((s) => s.id === "goals")?.label ?? "";
+
 /** axe に掛ける所。8 画面に、その他と、社員とサービスを選んだ所と、入れた拡張の画面を足す */
 const pages: readonly { name: string; path: string; heading: string; ready?: string; mock?: (page: Page) => Promise<void>; open?: (page: Page) => Promise<void> }[] = [
   // オフィスは 3D の部屋と名札を読み終えてから掛ける
@@ -49,10 +52,11 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
       await page.getByRole("tab", { name: "Issue" }).click();
     },
   },
-  // 木と組織図は records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
+  // 目標とタスクは records.setup.ts が手元の D1 に置いた物を、読み終えてから掛ける
   // 記録のサービスごとの内訳は、入口から読み終えてから掛ける
   { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },
-  { name: "目的と組織図の木", path: "/goals", heading: "目標", ready: "目標: know-office を動かし始める" },
+  { name: "目標の一覧", path: "/goals", heading: GOALS_HEADING, ready: "タスク 2 件のうち 1 件が完了" },
+  { name: "目標のタスクの 4 列", path: "/goals/019a7b00-0000-7000-8000-0000000000d2", heading: GOALS_HEADING, ready: "勤怠の訂正を出す" },
   // 守りの効き目と蒸留した学びは、表を読み終えてから掛ける
   { name: "守りの効き目と蒸留した学び", path: "/guard", heading: "ハーネス", ready: "入れる前の 7 日", mock: (page) => withGuardLearning(page) },
   // 入れた拡張の画面は、メモを読み終えてから掛ける

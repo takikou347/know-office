@@ -282,17 +282,22 @@ test("今いる画面のリンクを押しても、履歴は積まない", async
   await expect(page).toHaveURL(/\/$/);
 });
 
-test("目的と組織図で、目的からタスクまでの木と進み具合、組織図と役目の説明文が出る", async ({ page }) => {
-  test.skip(narrow(page), WIDE_ONLY);
+test("目標の画面で、目標を進み具合のカードで並べ、開くとタスクを状態の 4 列で見せる", async ({ page }) => {
   await page.goto("/goals");
-  await expect(page.getByRole("heading", { level: 2, name: "目的: AI の社員が自分で回る会社にする" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "目標: know-office を動かし始める" })).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "know-office を動かし始めるの進み具合" })).toHaveAttribute("aria-valuenow", "50");
-  await expect(page.getByText("タスク: 勤怠の訂正を出す")).toBeVisible();
-  const org = page.getByRole("main");
-  await expect(org.getByText("社長", { exact: true })).toBeVisible();
-  await org.getByRole("button", { name: "開発担当の説明文を直す" }).click();
-  await expect(org.getByRole("textbox", { name: "開発担当の役目の説明文" })).toHaveValue(/未確認/);
+  const main = page.getByRole("main");
+  const card = main.getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "know-office を動かし始める" }) });
+  await expect(card.getByText("目的: AI の社員が自分で回る会社にする")).toBeVisible();
+  await expect(card.getByRole("progressbar", { name: "know-office を動かし始めるの進み具合" })).toHaveAttribute("aria-valuenow", "50");
+  await expect(card.getByText("タスク 2 件のうち 1 件が完了")).toBeVisible();
+  await card.getByRole("link", { name: "know-office を動かし始める" }).click();
+  await expect(page).toHaveURL(/\/goals\/019a7b00-0000-7000-8000-0000000000d2$/);
+  await expect(main.getByRole("heading", { level: 2, name: "know-office を動かし始める" })).toBeVisible();
+  const todo = main.getByRole("region", { name: "未着手", exact: true });
+  await expect(todo.getByRole("heading", { level: 4, name: "勤怠の訂正を出す" })).toBeVisible();
+  await expect(main.getByRole("region", { name: "完了", exact: true }).getByRole("heading", { level: 4, name: "勤怠の表の画面を作る" })).toBeVisible();
+  await expect(main.getByRole("region", { name: "進行中", exact: true }).getByText("データがありません")).toBeVisible();
+  await main.getByRole("link", { name: "目標の一覧へ戻る" }).click();
+  await expect(card).toBeVisible();
 });
 
 test("左上のロゴでホームへ戻り、サイドメニューの開け閉めと明るさを覚える", async ({ page }) => {

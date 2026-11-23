@@ -52,7 +52,7 @@ function Chosen({ screen, pathname, query, navigate, extensions, toggleExtension
     case "goals":
       return (
         <Section>
-          <GoalsPage />
+          <GoalsPage pathname={pathname} navigate={navigate} />
         </Section>
       );
     case "office":

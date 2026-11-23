@@ -127,7 +127,7 @@ async function seeDone(page: Page, title: string): Promise<void> {
   await page.goto("/staff/builder?tab=tasks");
   const row = page.getByRole("main").locator("li", { hasText: title }).first();
   await expect(row).toBeVisible();
-  await expect(row.getByText("済", { exact: true })).toBeVisible();
+  await expect(row.getByText("完了", { exact: true })).toBeVisible();
 }
 
 test.describe("通知を受ける", () => {

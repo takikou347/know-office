@@ -1366,6 +1366,12 @@ components:
           minimum: 0
           maximum: 1
           description: 配下のタスクのうち済んだ割合。見送ったタスクは数えない。タスクは済めば 1
+        dueDay:
+          type:
+            - string
+            - "null"
+          format: date
+          description: 期限の日。日本時間の日付 YYYY-MM-DD
         version:
           type: integer
           description: 変えるたびに 1 増える。PATCH の version に渡す
@@ -1388,6 +1394,7 @@ components:
         - status
         - priority
         - progress
+        - dueDay
         - version
         - createdAt
         - updatedAt
@@ -1441,6 +1448,10 @@ components:
           maxLength: 140
           pattern: ^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.{1,2}$)[\w.-]{1,100}$
           description: タスクだけが持つ。社員が直す GitHub のリポジトリ (`owner/name`)
+        dueDay:
+          type: string
+          format: date
+          description: 期限の日。日本時間の日付 YYYY-MM-DD
       required:
         - kind
         - scope
@@ -1515,6 +1526,12 @@ components:
           enum:
             - todo
             - dropped
+        dueDay:
+          type:
+            - string
+            - "null"
+          format: date
+          description: 期限の日。null で消す
       required:
         - version
       additionalProperties: false
@@ -5699,7 +5716,7 @@ paths:
         - nodes
       summary: 目的、目標、タスクを作成する
       x-steps:
-        - 親が存在し、目的、目標、プロジェクト、タスクの階層の順に合うことを確認する。種類、担当、優先度を持てるのはタスクだけ
+        - 親が存在し、目的、目標、プロジェクト、タスクの階層の順に合うことを確認する。種類、担当、優先度を持てるのはタスクだけ。期限の日はどの階層にも付けられる
         - "`nodes` と `node_events` に 1 件ずつ追加する"
         - 監査ログに `node.create` を記録する
         - 担当を付けた場合は、勤務時間外なら `StaffDO.call` で呼び出し、勤務中で手が空いていれば次のタスクを取らせる
@@ -5757,7 +5774,7 @@ paths:
       description: |-
         処理の流れ:
 
-        1. 親が存在し、目的、目標、プロジェクト、タスクの階層の順に合うことを確認する。種類、担当、優先度を持てるのはタスクだけ
+        1. 親が存在し、目的、目標、プロジェクト、タスクの階層の順に合うことを確認する。種類、担当、優先度を持てるのはタスクだけ。期限の日はどの階層にも付けられる
         2. `nodes` と `node_events` に 1 件ずつ追加する
         3. 監査ログに `node.create` を記録する
         4. 担当を付けた場合は、勤務時間外なら `StaffDO.call` で呼び出し、勤務中で手が空いていれば次のタスクを取らせる
@@ -5828,11 +5845,11 @@ paths:
       operationId: updateNode
       tags:
         - nodes
-      summary: 分割、担当、見送りを変更する
+      summary: 分割、担当、期限、見送りを変更する
       x-steps:
         - タスクを取得し、`version` が現在と一致することを確認する
         - 親を付け替える時は階層の順に合うことを、担当の割り当てで作成者とレビュー担当が同じモデルにならないことを確認する
-        - "`nodes` を更新し、`node_events` に追加する。作業中のタスクの担当と状態は変えない"
+        - "`nodes` を更新し、`node_events` に追加する。作業中のタスクの担当と状態は変えない。期限の日は作業中でも変えられ、`null` で消す"
         - 監査ログに `node.update` を記録する。担当を付けたか `todo` に戻した場合は、勤務時間外なら `StaffDO.call` で呼び出し、勤務中で手が空いていれば次のタスクを取らせる
         - 見送りにした場合は、変える前の担当の社員がそのタスクを持っていれば `StaffDO.dropTask` で離れさせ、今の呼び出しを止めさせる。届かなければエラーログに `staff_drop_failed` を残し、見送りは戻さない
       x-errors:
@@ -5894,7 +5911,7 @@ paths:
 
         1. タスクを取得し、`version` が現在と一致することを確認する
         2. 親を付け替える時は階層の順に合うことを、担当の割り当てで作成者とレビュー担当が同じモデルにならないことを確認する
-        3. `nodes` を更新し、`node_events` に追加する。作業中のタスクの担当と状態は変えない
+        3. `nodes` を更新し、`node_events` に追加する。作業中のタスクの担当と状態は変えない。期限の日は作業中でも変えられ、`null` で消す
         4. 監査ログに `node.update` を記録する。担当を付けたか `todo` に戻した場合は、勤務時間外なら `StaffDO.call` で呼び出し、勤務中で手が空いていれば次のタスクを取らせる
         5. 見送りにした場合は、変える前の担当の社員がそのタスクを持っていれば `StaffDO.dropTask` で離れさせ、今の呼び出しを止めさせる。届かなければエラーログに `staff_drop_failed` を残し、見送りは戻さない
 

@@ -11,7 +11,7 @@ INSERT OR IGNORE INTO work_entries (id, staff_id, day, node_id, scope, title, st
   ('019a7b00-0000-7000-8000-0000000000b3', 'builder', '2026-11-13', '019a7b00-0000-7000-8000-0000000000c3', 'office', '勤怠の表の画面を作る', 1794544200000, 1794557400000, 13200000, 'continued', NULL);
 INSERT OR REPLACE INTO daily_totals (staff_id, day, clock_in, clock_out, worked_ms, extension_ms, call_ms, stopped_ms, waiting_ms, reasons) VALUES
   ('builder', '2026-11-13', 1794528000000, 1794557400000, 28500000, 600000, 0, 900000, 0, '["extension:checkpoint_wait","stopped:guard_stop"]');
--- 目的と組織図に出す木。目的、目標、プロジェクト、タスク 2 件で、1 件が済んでいる
+-- 目標の画面に出す木。目的、目標、プロジェクト、タスク 2 件で、1 件が済んでいる
 INSERT OR IGNORE INTO nodes (id, kind, parent_id, scope, title, body, task_kind, assignee, status, priority, created_by, created_at, updated_at) VALUES
   ('019a7b00-0000-7000-8000-0000000000d1', 'purpose', NULL, 'office', 'AI の社員が自分で回る会社にする', NULL, NULL, NULL, 'todo', 100, 'owner', 1794528000000, 1794528000000),
   ('019a7b00-0000-7000-8000-0000000000d2', 'goal', '019a7b00-0000-7000-8000-0000000000d1', 'office', 'know-office を動かし始める', NULL, NULL, NULL, 'todo', 100, 'owner', 1794528000000, 1794528000000),

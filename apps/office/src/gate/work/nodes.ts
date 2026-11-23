@@ -130,6 +130,7 @@ export type NewNode = {
   prNumber?: number | undefined;
   source?: string | undefined;
   issueNumber?: number | undefined;
+  dueDay?: string | undefined;
 };
 
 /**
@@ -166,6 +167,7 @@ export async function newNodeRow(env: Bindings, input: NewNode, actor: Actor): P
     issueNumber: input.issueNumber ?? null,
     source: input.source ?? null,
     progress: null,
+    dueDay: input.dueDay ?? null,
     version: 1,
     createdBy: actor.by,
     createdAt: actor.now,
@@ -220,6 +222,8 @@ export type NodeChange = {
   assignee?: StaffId | undefined;
   priority?: number | undefined;
   status?: "todo" | "dropped" | undefined;
+  /** 期限の日。null で消す */
+  dueDay?: string | null | undefined;
 };
 
 /**
@@ -251,6 +255,7 @@ export async function updateNode(env: Bindings, id: string, version: number, cha
     assignee: change.assignee ?? row.assignee,
     priority: change.priority ?? row.priority,
     status: change.status ?? row.status,
+    dueDay: change.dueDay === undefined ? row.dueDay : change.dueDay,
     version: row.version + 1,
     updatedAt: actor.now,
   };

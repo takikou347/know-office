@@ -2,7 +2,7 @@
 import { expect, test } from "../helpers/test.ts";
 import { settle } from "./helpers/settle.ts";
 import { clockIn, forgetReplies, ownerPasskey, scriptReply, staffNow } from "./helpers/staff.ts";
-import { dropTodos, finishedBy, openTree, PROJECT, releaseHeld, sayTo, scriptFinish, type Tree, Trees } from "./helpers/staff-work.ts";
+import { column, dropTodos, finishedBy, GOAL, openTree, PROJECT, releaseHeld, sayTo, scriptFinish, taskCard, type Tree, Trees } from "./helpers/staff-work.ts";
 
 /**
  * 出勤させる前に落ちた時の戻し。何もしない
@@ -67,11 +67,12 @@ test.describe("目的からタスクまでの木", () => {
         await page.getByRole("log", { name: "社長との会話" }).getByRole("listitem").filter({ hasText: asked }).getByRole("link", { name: "分けるタスクを開く" }).click();
         await expect(page.getByRole("heading", { level: 2, name: asked })).toBeVisible();
 
-        // 目的と組織図の画面で、受け付けの分けるタスクと割り振られたタスクがどちらも済になる
+        // 目標の画面で、割り振られたタスクは通しの目標の、受け付けの分けるタスクは受け付けの完了の列に出る
+        await page.goto(`/goals/${GOAL}`);
+        await expect(taskCard(page, split, column(page, "完了"))).toBeVisible();
         await page.goto("/goals");
-        const main = page.getByRole("main");
-        await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${asked}` }).last().getByText("済", { exact: true })).toBeVisible();
-        await expect(main.getByRole("listitem").filter({ hasText: `タスク: ${split}` }).last().getByText("済", { exact: true })).toBeVisible();
+        await page.getByRole("main").getByRole("link", { name: "受け付け", exact: true }).first().click();
+        await expect(taskCard(page, asked, column(page, "完了"))).toBeVisible();
       },
       // 山が空になったレビュー担当が足す分けるタスクを、社長に持たせたまま残さない
       [() => forgetReplies(page, "president"), () => forgetReplies(page, "reviewer"), () => releaseHeld(page, "president"), () => dropTodos(page, "president"), () => restore()],

@@ -123,11 +123,11 @@ test("開発担当が設計書の PR とコードの PR を出し、オーナー
     const at = (repo: string) => moves.findLastIndex((r) => r.startsWith("PATCH") && r.endsWith(`/repos/${repo}/git/refs/heads/main`));
     expect(at(docs)).toBeGreaterThan(-1);
     expect(at(docs)).toBeLessThan(at(REPO));
-    // 画面のタスクが済みになっている
+    // 画面のタスクが完了になっている
     await page.goto("/staff/builder?tab=tasks");
     const row = page.getByRole("main").locator("li", { hasText: `#${String(issue)} 動画を作る` }).first();
     await expect(row).toBeVisible();
-    await expect(row.getByText("済", { exact: true })).toBeVisible();
+    await expect(row.getByText("完了", { exact: true })).toBeVisible();
   } finally {
     // 後の通しに残さない。main は前の先に戻し (前が無ければ消し)、出したブランチも消す
     for (const [repo, was, names] of [[REPO, previous.code, [codeBranch]], [docs, previous.docs, [docsBranch]]] as const) {

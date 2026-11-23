@@ -298,6 +298,7 @@ export async function askReview(env: Bindings, made: NodeRow, pull: { repo: stri
     branch: pull.branch,
     prNumber: pull.prNumber,
     issueNumber: null,
+    dueDay: made.dueDay,
     source: "review",
     progress: null,
     version: 1,
