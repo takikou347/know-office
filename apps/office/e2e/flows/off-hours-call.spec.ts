@@ -66,6 +66,8 @@ test.describe("オーナーの指示に合わせる", () => {
       // 前の通しが落ちて残した待ちと持っているタスクがあれば、片付けてから休みにする
       await unstick(page, "reviewer");
       await idleStaff(page, "reviewer");
+      // 前の通しがレビュー担当に残した todo があると、呼び出しは古い方から取り、頼んだタスクを取らない
+      await dropTodos(page, "reviewer");
       await restReviewer(page);
       const others = await Promise.all(["president", "builder"].map((id) => staffState(page, id)));
       // 呼び出された間を画面で見られるよう、終わりの返事を少し遅らせる
