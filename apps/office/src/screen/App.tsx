@@ -8,6 +8,8 @@ import { LiveProvider } from "./parts/live.tsx";
 import { OfficeNewsFeed } from "./pages/office/news.ts";
 import { LiveNoticeBar, NoticeProvider } from "./parts/notices.tsx";
 import { ThemeToggle } from "./parts/theme.tsx";
+import { useSideCollapsed } from "./parts/side.ts";
+import markUrl from "./brand/mark.svg";
 import { bottomCurrentOf, bottomItems, headingOf, morePath, screenOf, sideItemsWith } from "./routes.ts";
 
 export interface AppProps {
@@ -28,6 +30,7 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
   const shown = withScreens(extensions);
   const screen = screenOf(pathname, shown);
   useRevealFocus();
+  const [sideCollapsed, setSideCollapsed] = useSideCollapsed();
   return (
     <LiveProvider>
       <OfficeNewsFeed />
@@ -37,7 +40,10 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
           current={more ? undefined : screen.id}
           bottomItems={bottomItems}
           bottomCurrent={bottomCurrentOf(pathname, shown)}
-          brand={{ name: "know-office" }}
+          brand={{ name: "know-office", href: "/", logo: <img src={markUrl} alt="" width={24} height={24} /> }}
+          collapsible
+          collapsed={sideCollapsed}
+          onCollapsedChange={setSideCollapsed}
           cspNonce={pageCspNonce()}
           header={<AppBar title={headingOf(pathname, shown)} position="sticky" actions={<ThemeToggle />} />}
           // 通知は開いた後にも届くので、中身の下に出す。出ても中身の上の端と見出しは動かない
