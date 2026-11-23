@@ -120,7 +120,7 @@ export function ApprovalsPage({ pathname }: ApprovalsPageProps) {
   );
 }
 
-interface ApprovalCardProps {
+export interface ApprovalCardProps {
   /** 承認 */
   approval: Approval;
   /** 決めた後に呼ぶ。知らせる文を受ける */
@@ -129,8 +129,8 @@ interface ApprovalCardProps {
   onStale: (title: string) => void;
 }
 
-/** 承認 1 件。中身と、承認か差し戻しのボタン、ほかの画面で決める種類は決める所 */
-function ApprovalCard({ approval, onDecided, onStale }: ApprovalCardProps) {
+/** 承認 1 件。中身と、承認か差し戻しのボタン、ほかの画面で決める種類は決める所。ホームでも使う */
+export function ApprovalCard({ approval, onDecided, onStale }: ApprovalCardProps) {
   const [decision, setDecision] = useState<Decision | null>(null);
   const title = approvalTitle(approval);
   const place = KIND_PLACE[approval.kind];

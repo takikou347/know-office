@@ -73,7 +73,8 @@ const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 async function focusProblem(page: Page): Promise<string | null> {
   return page.evaluate(async (body) => {
     const el = document.activeElement;
-    if (!(el instanceof HTMLElement) || el === document.body) return body;
+    // グラフの点のように、SVG の物も focus を受ける
+    if (!(el instanceof HTMLElement || el instanceof SVGElement) || el === document.body) return body;
     // Safari は focus した物を画面に入れる送りを、次の描画の時に行う。送りの長さに頼らず、位置が 2 回続けて同じになるまで待つ
     let last = "";
     let still = false;
@@ -91,6 +92,8 @@ async function focusProblem(page: Page): Promise<string | null> {
       const cs = getComputedStyle(e);
       ringed = (cs.outlineStyle !== "none" && Number.parseFloat(cs.outlineWidth) > 0) || cs.boxShadow !== "none";
     }
+    // SVG の物は、中の形の線 (stroke) で輪を描く
+    if (!ringed && el instanceof SVGElement) ringed = [...el.querySelectorAll("*")].some((c) => getComputedStyle(c).stroke !== "none");
     if (!ringed) return `${name} に focus の輪が無い`;
     const r = el.getBoundingClientRect();
     const inView = r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
@@ -158,7 +161,7 @@ test.describe("使いやすさ", () => {
     await page.goto("/");
     await expect(h1("ホーム")).toBeVisible();
     // ダッシュボードは入口から読んだ物を承認を待つ物の上に足すので、読み終えて形が落ち着いてから Tab で進む
-    await expect(main.getByRole("heading", { name: "社員の様子" })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "今日のタスク" })).toBeVisible();
     await expect(main.getByText("承認を待つ物を読んでいます")).toHaveCount(0);
 
     // 切り替えから社員と仕事へ移る。今いる所に印が付く

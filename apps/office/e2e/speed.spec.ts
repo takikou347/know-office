@@ -2,7 +2,7 @@ import type { Request } from "@playwright/test";
 import { expect, test } from "./helpers/test.ts";
 
 // ダッシュボードの速さ。build した画面 (playwright.speed.config.ts のプレビュー) を、スマートフォンの幅と 4G を模した回線で、
-// 何も溜めていないブラウザーから開き、社員の様子が出るまでを 2 秒以内にする (画面の全体の 3.4)。応答を差し替えない
+// 何も溜めていないブラウザーから開き、今日のタスクが出るまでを 2 秒以内にする (画面の全体の 3.4)。応答を差し替えない
 
 /** 4G を模した回線 (画面の全体の 3.4)。要求ごとに往復 150 ミリ秒を足し、下り 1.6 Mbps、上り 750 kbps に絞る。値はバイト毎秒 */
 const SLOW_4G = { latency: 150, downloadThroughput: 1_600_000 / 8, uploadThroughput: 750_000 / 8 } as const;
@@ -20,7 +20,7 @@ test.describe("速さ", () => {
     try {
       const first = await warm.newPage();
       await first.goto("/");
-      await expect(first.getByRole("heading", { level: 2, name: "社員の様子" })).toBeVisible();
+      await expect(first.getByRole("heading", { level: 2, name: "今日のタスク" })).toBeVisible();
     } finally {
       await warm.close();
     }
@@ -29,10 +29,10 @@ test.describe("速さ", () => {
     await cdp.send("Network.enable");
     await cdp.send("Network.emulateNetworkConditions", { offline: false, ...SLOW_4G });
     await page.goto("/", { waitUntil: "commit" });
-    // 社員の様子の見出しが見えた時を、画面の開き始め (performance の 0) からのミリ秒で、画面の中で取る
+    // 今日のタスクの見出しが見えた時を、画面の開き始め (performance の 0) からのミリ秒で、画面の中で取る
     const shown = await page.waitForFunction(
       () => {
-        const heading = [...document.querySelectorAll("h2")].find((h) => h.textContent === "社員の様子");
+        const heading = [...document.querySelectorAll("h2")].find((h) => h.textContent === "今日のタスク");
         return heading?.checkVisibility() ? performance.now() : false;
       },
       undefined,
@@ -46,11 +46,11 @@ test.describe("速さ", () => {
       return { js: end((path) => path.endsWith(".js")), dashboard: end((path) => path === "/api/v1/dashboard") };
     });
     test.info().annotations.push(
-      { type: "社員の様子までのミリ秒", description: String(ms) },
+      { type: "今日のタスクまでのミリ秒", description: String(ms) },
       { type: "画面の JS を読み終えたミリ秒", description: String(loaded.js) },
       { type: "ダッシュボードの API を読み終えたミリ秒", description: String(loaded.dashboard) },
     );
-    expect(ms, `社員の様子まで ${String(ms)} ミリ秒`).toBeLessThanOrEqual(LIMIT_MS);
+    expect(ms, `今日のタスクまで ${String(ms)} ミリ秒`).toBeLessThanOrEqual(LIMIT_MS);
   });
 
   test("ダッシュボードの API を 1 度だけ読み、訪問の印を 1 度だけ付ける", async ({ page }) => {
@@ -68,7 +68,7 @@ test.describe("速さ", () => {
     });
     const opened = page.waitForEvent("websocket", (ws) => ws.url().includes("/api/v1/live"));
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 2, name: "社員の様子" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "今日のタスク" })).toBeVisible();
     await opened;
     expect(calls.filter((c) => c.path === "/api/v1/dashboard" && c.beforeLive)).toHaveLength(1);
     const visits = calls.filter((c) => c.visit);

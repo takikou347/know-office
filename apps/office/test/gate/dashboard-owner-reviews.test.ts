@@ -68,7 +68,7 @@ async function made(rows: Made[]): Promise<void> {
   );
 }
 
-const Reviews = z.object({ data: z.object({ ownerReviews: z.array(z.object({ nodeId: z.string(), title: z.string(), assignee: z.string().nullable(), repo: z.string(), prNumber: z.number(), requestedAt: z.string() }).strict()) }).loose() });
+const Reviews = z.object({ data: z.object({ ownerReviews: z.array(z.object({ nodeId: z.string(), title: z.string(), assignee: z.string().nullable(), repo: z.string(), prNumber: z.number(), headSha: z.string(), requestedAt: z.string() }).strict()) }).loose() });
 
 /**
  * ダッシュボードのオーナーの判断を待つレビューを読む
@@ -85,8 +85,8 @@ describe("know-office の中で確認する", () => {
     await ownerService(OWNER_REPO);
     await made([{ n: 2, repo: OWNER_REPO, title: "後に頼んだ直し", updatedAt: at(16, 9) }, { n: 1, repo: OWNER_REPO, title: "先に頼んだ直し", updatedAt: at(15, 9) }]);
     expect(await ownerReviews()).toEqual([
-      { nodeId: idOf(1), title: "先に頼んだ直し", assignee: "builder", repo: OWNER_REPO, prNumber: 1, requestedAt: new Date(at(15, 9)).toISOString() },
-      { nodeId: idOf(2), title: "後に頼んだ直し", assignee: "builder", repo: OWNER_REPO, prNumber: 2, requestedAt: new Date(at(16, 9)).toISOString() },
+      { nodeId: idOf(1), title: "先に頼んだ直し", assignee: "builder", repo: OWNER_REPO, prNumber: 1, headSha: "b".repeat(40), requestedAt: new Date(at(15, 9)).toISOString() },
+      { nodeId: idOf(2), title: "後に頼んだ直し", assignee: "builder", repo: OWNER_REPO, prNumber: 2, headSha: "b".repeat(40), requestedAt: new Date(at(16, 9)).toISOString() },
     ]);
   });
 

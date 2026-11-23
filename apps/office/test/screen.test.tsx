@@ -11,15 +11,12 @@ import { renderAll } from "./helpers/render.ts";
 const REVIEWER: StaffOverview = { id: "reviewer", role: "レビュー担当", model: "claude-opus-5-5", state: "working", nodeId: null, nodeTitle: null, workedMsToday: 0 };
 
 describe("画面", () => {
-  it("入口の様子を受け取る前は、確かめている事を出す", async () => {
-    const html = await renderAll(<App />);
-    expect(html).toContain("know-office");
-    expect(html).toContain("入口を確かめています");
-  });
-
-  it("入口の様子を受け取ったら、つながった事を出す", async () => {
+  it("ホームは入口の様子の文を出さない", async () => {
     const html = await renderAll(<App health={{ ok: true, part: "gate" }} />);
-    expect(html).toContain("入口とつながりました");
+    expect(html).toContain("know-office");
+    expect(html).toContain("ホームを読めませんでした");
+    expect(html).not.toContain("入口とつながりました");
+    expect(html).not.toContain("入口を確かめています");
   });
 
   it("道に合わせて画面の題を出し、知らない道はダッシュボードにする", async () => {

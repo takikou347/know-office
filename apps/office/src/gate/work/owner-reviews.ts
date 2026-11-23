@@ -32,7 +32,7 @@ export async function ownerWaitingReviews(db: D1Database, limit = OWNER_REVIEWS_
   const owned = scopes.filter((s) => s.when.includes("owner")).map((s) => s.repo);
   if (owned.length === 0) return [];
   const rows = await orm
-    .select({ nodeId: nodes.id, title: nodes.title, assignee: nodes.assignee, repo: reviews.repo, prNumber: reviews.prNumber, updatedAt: nodes.updatedAt })
+    .select({ nodeId: nodes.id, title: nodes.title, assignee: nodes.assignee, repo: reviews.repo, prNumber: reviews.prNumber, headSha: reviews.headSha, updatedAt: nodes.updatedAt })
     .from(reviews)
     .innerJoin(nodes, eq(nodes.id, reviews.nodeId))
     .where(and(waitingOwner(), inArray(reviews.repo, owned)))
@@ -40,6 +40,6 @@ export async function ownerWaitingReviews(db: D1Database, limit = OWNER_REVIEWS_
     .limit(limit);
   return rows.map((r) => {
     const assignee = StaffId.safeParse(r.assignee);
-    return { nodeId: r.nodeId, title: r.title, assignee: assignee.success ? assignee.data : null, repo: r.repo, prNumber: r.prNumber, requestedAt: new Date(r.updatedAt).toISOString() };
+    return { nodeId: r.nodeId, title: r.title, assignee: assignee.success ? assignee.data : null, repo: r.repo, prNumber: r.prNumber, headSha: r.headSha, requestedAt: new Date(r.updatedAt).toISOString() };
   });
 }

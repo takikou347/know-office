@@ -2626,6 +2626,16 @@ components:
             $ref: "#/components/schemas/Node"
         monthCostMicroUsd:
           type: integer
+        dailyCosts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyCost"
+          description: 日本時間の今月の 1 日から今日までの日ごとの費用
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/HomeService"
+          description: 試作、サービス、運用の段階のサービスを ID の順に 50 件まで
         notices:
           type: array
           items:
@@ -2636,6 +2646,8 @@ components:
         - ownerReviews
         - todayTasks
         - monthCostMicroUsd
+        - dailyCosts
+        - services
         - notices
       additionalProperties: false
     OwnerReview:
@@ -2662,6 +2674,9 @@ components:
         prNumber:
           type: integer
           exclusiveMinimum: 0
+        headSha:
+          type: string
+          description: レビュー担当が見た `head_sha`。ホームで承認か差し戻しを出す時の `baseSha`
         requestedAt:
           type: string
           format: date-time
@@ -2672,7 +2687,53 @@ components:
         - assignee
         - repo
         - prNumber
+        - headSha
         - requestedAt
+      additionalProperties: false
+    DailyCost:
+      type: object
+      properties:
+        day:
+          type: string
+          description: 日本時間の日 YYYY-MM-DD
+        costMicroUsd:
+          type: integer
+      required:
+        - day
+        - costMicroUsd
+      additionalProperties: false
+    HomeService:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - library
+            - web_app
+            - content
+        stage:
+          type: string
+          enum:
+            - idea
+            - study
+            - prototype
+            - service
+            - operation
+            - dropped
+            - closed
+        status:
+          $ref: "#/components/schemas/ServiceStatus"
+      required:
+        - id
+        - name
+        - kind
+        - stage
+        - status
       additionalProperties: false
     Extension:
       type: object
@@ -8363,21 +8424,23 @@ paths:
       operationId: getDashboard
       tags:
         - records
-      summary: ダッシュボード
+      summary: ホーム
       description: |-
-        今日のタスクは、担当の社員が手を付けている (`doing`)、レビューを待つ (`review`)、オーナーを待つ (`waiting_owner`) タスクを優先度と ID の順に 50 件まで。今月は日本時間の月の 1 日 0 時から。未読の通知は新しい順に 20 件まで。オーナーの判断を待つレビューは、main に入れる条件にオーナーの承認があるリポジトリで、レビュー担当が承認し、オーナーがまだ決めていない物を、タスクを変えた時刻の古い順に 100 件まで。
+        今日のタスクは、担当の社員が手を付けている (`doing`)、レビューを待つ (`review`)、オーナーを待つ (`waiting_owner`) タスクを優先度と ID の順に 50 件まで。今月は日本時間の月の 1 日 0 時から。未読の通知は新しい順に 20 件まで。日ごとの費用は今月の 1 日から今日まで、使っていない日も 0 で並べる。サービスの数値は試作、サービス、運用の段階のサービスを ID の順に 50 件まで、サービスの詳細と同じ種類ごとの様子で返す。オーナーの判断を待つレビューは、main に入れる条件にオーナーの承認があるリポジトリで、レビュー担当が承認し、オーナーがまだ決めていない物を、タスクを変えた時刻の古い順に 100 件まで。
 
         処理の流れ:
 
         1. 3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする
         2. `pending` の承認、今日のタスク、未読の通知を `DB` から読む
         3. `reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む
-        4. 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足す
+        4. 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足し、日本時間の日ごとにも足す
+        5. `services` の試作、サービス、運用の行ごとに、サービスの詳細と同じ種類ごとの様子を組み立てる
       x-steps:
         - 3 人分の `StaffDO.status()` を並行して呼び、`staff` の役の名前とモデルを足す。1 人でも答えなければ 500 にする
         - "`pending` の承認、今日のタスク、未読の通知を `DB` から読む"
         - "`reviewer_verdict` が `approve` で `owner_verdict` と `merged_at` と `merge_started_at` が無く、タスクが `review` の `reviews` のリポジトリごとに、サービスの設定か office の初期値の `mergeWhen` を読み、`owner` を含むリポジトリの物だけを古い順に 100 件まで読む"
-        - 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足す
+        - 今月の `usage.cost_micro_usd` を、その月の年の `REC_<年>` で足し、日本時間の日ごとにも足す
+        - "`services` の試作、サービス、運用の行ごとに、サービスの詳細と同じ種類ごとの様子を組み立てる"
       responses:
         "200":
           description: 成功

@@ -40,13 +40,13 @@ export function Page(props: PageProps) {
   );
 }
 
-function Chosen({ screen, pathname, query, health, navigate, extensions, toggleExtension }: PageProps) {
+function Chosen({ screen, pathname, query, navigate, extensions, toggleExtension }: PageProps) {
   if (isExtensionScreen(screen)) return <ExtensionPage id={screen.slice("ext:".length)} />;
   switch (screen) {
     case "dashboard":
       // 承認を決める画面は、ダッシュボードの「承認を待つ物」と通知 approval_requested から移る先で、切り替えには出さない。題は headingOf が「承認」にする
       if (pathname === APPROVALS_PATH || pathname.startsWith(`${APPROVALS_PATH}/`)) return <ApprovalsPage pathname={pathname} />;
-      return <DashboardPage health={health} />;
+      return <DashboardPage />;
     case "staff":
       return <StaffPage pathname={pathname} query={query} navigate={navigate} />;
     case "goals":

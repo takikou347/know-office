@@ -34,9 +34,10 @@ export async function stillPending(api: Api, id: string): Promise<boolean> {
 }
 
 /**
- * 決めていない承認を古い順に 100 件まで読む。ダッシュボードの件数と先頭の数件に使う
+ * 決めていない承認を古い順に 100 件まで読む。ホームの件数と、その場で決める一覧に使う
+ * @param tick 読み直す時に変える数
  * @returns 読んでいる、読めた、読めなかった
  */
-export function usePendingApprovals(): Loaded<Approval[]> {
-  return useLoad(z.array(Approval), (a) => a.api.v1.approvals.$get({ query: { status: "pending", limit: String(PENDING_LIMIT) } }));
+export function usePendingApprovals(tick = 0): Loaded<Approval[]> {
+  return useLoad(z.array(Approval), (a) => a.api.v1.approvals.$get({ query: { status: "pending", limit: String(PENDING_LIMIT) } }), tick);
 }

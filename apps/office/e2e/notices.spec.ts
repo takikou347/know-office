@@ -53,10 +53,10 @@ test("通知が中身の下の帯とダッシュボードに出て、読んだ�
   const { release, reads } = await holdNotices(page, NOTICE);
   await page.goto("/");
   const main = page.getByRole("main");
-  // 通知の返事を止めたまま、入口の /dashboard の返事から描く社員の数が出る
-  const heading = main.getByText("働いている社員");
+  // 通知の返事を止めたまま、入口の /dashboard の返事から描く今日のタスクが出る
+  const heading = main.getByRole("heading", { level: 2, name: "今日のタスク" });
   await expect(heading).toBeVisible();
-  await expect(main.getByText("ダッシュボードを読んでいます")).toBeHidden();
+  await expect(main.getByText("ホームを読んでいます")).toBeHidden();
   const before = { main: await topOf(main), heading: await topOf(heading) };
   release();
   const bar = page.getByRole("status").filter({ hasText: NOTICE.title });
@@ -101,7 +101,7 @@ test("帯が出た直後は押しても読んだにならない", async ({ page 
   await page.clock.install();
   const { release, reads } = await holdNotices(page, NOTICE);
   await page.goto("/");
-  await expect(page.getByRole("main").getByRole("heading", { name: "社員の様子" })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("heading", { name: "今日のタスク" })).toBeVisible();
   release();
   const band = page.locator(".ko-notice-band");
   await expect(band.getByRole("status")).toBeVisible();

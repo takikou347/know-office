@@ -27,7 +27,7 @@ function approval(id: string): Approval {
  * @returns レビュー
  */
 function ownerReview(requestedAt: string): OwnerReview {
-  return { nodeId: NODE, title: "勤怠の空の日を直す", assignee: "builder", repo: "example/app", prNumber: 7, requestedAt };
+  return { nodeId: NODE, title: "勤怠の空の日を直す", assignee: "builder", repo: "example/app", prNumber: 7, headSha: "b".repeat(40), requestedAt };
 }
 
 /**

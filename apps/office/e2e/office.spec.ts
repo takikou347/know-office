@@ -78,7 +78,7 @@ test.describe("速さ", () => {
     const urls = recordRequests(page);
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
-    await expect(page.getByText("入口とつながりました")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "今日のタスク" })).toBeVisible();
     expect(urls.filter((u) => heavy.test(u))).toEqual([]);
 
     // 確かめ方が効いている事: オフィスを開くと 3D のコードを読む

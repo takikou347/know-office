@@ -219,8 +219,8 @@ test.describe("設定と記録の置き場を分ける", () => {
 
 test("画面を移ると、題が変わり、中身に移る", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("main").getByRole("link", { name: /開発担当/ }).first().click();
-  await expect(page).toHaveTitle("社員 - know-office");
+  await page.getByRole("main").getByRole("link", { name: "すべて見る" }).click();
+  await expect(page).toHaveTitle("承認 - know-office");
   await expect(page.getByRole("main")).toBeFocused();
 });
 
