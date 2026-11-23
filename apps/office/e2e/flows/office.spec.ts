@@ -9,7 +9,7 @@ import { useOwnerPasskey } from "./helpers/passkey.ts";
 import { post } from "./helpers/screen.ts";
 import { seedMain } from "./helpers/seed.ts";
 import { settle } from "./helpers/settle.ts";
-import { clockIn, forgetReplies, scriptReply, staffState } from "./helpers/staff.ts";
+import { clockIn, forgetReplies, releaseHeld, scriptReply, staffNow, staffState } from "./helpers/staff.ts";
 import { addTask, NodeDetail, openTree, PURPOSE, type Tree, Trees } from "./helpers/staff-work.ts";
 
 // オフィスの部屋が、本物のゲートウェイのレビューの判断を、配信で届いた出来事として見せる。GitHub は手元の代わりにつなぎ、プルリクエストの変更だけを置く (画面の全体の 3.2)
@@ -22,7 +22,11 @@ const HEAD = "c".repeat(40);
 
 test.describe("オフィスの部屋", () => {
   // 後の通し (設定など) は GitHub をつないでいない前提なので、つないだ物を消して返す
-  test.afterEach(() => forgetGitHub());
+  test.afterEach(async ({ page }) => {
+    forgetGitHub();
+    // 差し戻したタスクは開発担当に戻り、勤務の時間の外なら開発担当を呼び出す。持たせたままにすると、後の通しで開発担当が呼ばれたまま次のタスクを取らずに退勤するので、空ける
+    if ((await staffNow(page, "builder")).nodeId === NODE) await releaseHeld(page, "builder");
+  });
 
   test("出来事を動きで見せる", async ({ page }) => {
     await page.goto("/settings");
