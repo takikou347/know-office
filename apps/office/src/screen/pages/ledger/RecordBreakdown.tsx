@@ -20,6 +20,14 @@ const GROUPS: Record<RecordGroup, { option: string; column: string }> = {
 
 const isGroup = (v: string): v is RecordGroup => v === "service" || v === "staff";
 
+/** 集める期間。選んだ月か、期間を決めない累計 */
+type Span = "month" | "all";
+
+/** 期間ごとの名前 */
+const SPANS: Record<Span, string> = { month: "この月", all: "累計" };
+
+const isSpan = (v: string): v is Span => v === "month" || v === "all";
+
 /** タブで見る値。タスクは掛けた時間と終えた数、費用、トークン */
 export type RecordMetric = "tasks" | "cost" | "tokens";
 
@@ -31,20 +39,20 @@ const METRICS: Record<RecordMetric, { name: string; unit: string; value: (r: Rec
 };
 
 /**
- * 選んだ月の、分け方ごとの集計を入口から読む
+ * 分け方ごとの集計を入口から読む
  * @param group 分け方
- * @param month YYYY-MM
+ * @param month 集める月 YYYY-MM。null なら期間を決めない累計
  * @returns 読んでいる、読めた、読めなかった。入口を呼ぶ口が無ければ読めなかった
  */
-function useRecordSummary(group: RecordGroup, month: string): Loaded {
+function useRecordSummary(group: RecordGroup, month: string | null): Loaded {
   const api = useContext(ApiContext);
   // 読んだ物を、どの分け方と月の物かと一緒に持つ。どちらかが変われば、読み終えるまで読んでいる事にする
-  const key = `${group}.${month}`;
+  const key = `${group}.${month ?? "all"}`;
   const [loaded, setLoaded] = useState<{ key: string; value: Loaded } | null>(null);
   useEffect(() => {
     let live = true;
     void api?.api.v1.records.summary
-      .$get({ query: { group, ...monthRange(month) } })
+      .$get({ query: { group, ...(month === null ? {} : monthRange(month)) } })
       .then(async (res): Promise<Loaded> => {
         if (res.ok) return { state: "ok", data: (await res.json()).data };
         // 返事は code で分け、不具合を伝えられるよう traceId を添える
@@ -53,7 +61,7 @@ function useRecordSummary(group: RecordGroup, month: string): Loaded {
       })
       .catch((): Loaded => ({ state: "failed", code: "network", traceId: null }))
       .then((value) => {
-        if (live) setLoaded({ key: `${group}.${month}`, value });
+        if (live) setLoaded({ key: `${group}.${month ?? "all"}`, value });
       });
     return () => {
       live = false;
@@ -86,14 +94,15 @@ const COLUMNS: Record<RecordMetric, { key: string; header: string; numeric: true
  * @param props 集計と見る値と月
  * @param props.data 集計
  * @param props.metric 見る値
- * @param props.month 見る月 YYYY-MM
+ * @param props.month 集めた月 YYYY-MM。null なら累計
  * @returns 内訳
  */
-function Breakdown({ data, metric, month }: { data: RecordSummary; metric: RecordMetric; month: string }) {
+function Breakdown({ data, metric, month }: { data: RecordSummary; metric: RecordMetric; month: string | null }) {
   const names = GROUPS[data.group];
   const m = METRICS[metric];
   const rows = [...data.rows.map((r) => ({ ...r, rowKey: r.key })), { ...data.total, rowKey: "total", key: "total", name: "全体" }];
-  const { from, to } = monthRange(month);
+  // 累計は期間を付けずに出し、月は画面と同じ月で切る
+  const range = month === null ? "" : `&from=${monthRange(month).from}&to=${monthRange(month).to}`;
   return (
     <>
       <Chart
@@ -109,7 +118,7 @@ function Breakdown({ data, metric, month }: { data: RecordSummary; metric: Recor
         rows={rows}
         columns={[{ key: "name", header: names.column }, ...COLUMNS[metric]]}
       />
-      <Link href={`/api/v1/records/summary/export?group=${data.group}&from=${from}&to=${to}`} download standalone>
+      <Link href={`/api/v1/records/summary/export?group=${data.group}${range}`} download standalone>
         CSV で出す
       </Link>
     </>
@@ -130,7 +139,9 @@ export interface RecordBreakdownProps {
  */
 export function RecordBreakdown({ metric, month }: RecordBreakdownProps) {
   const [group, setGroup] = useState<RecordGroup>("service");
-  const loaded = useRecordSummary(group, month);
+  const [span, setSpan] = useState<Span>("month");
+  const summed = span === "month" ? month : null;
+  const loaded = useRecordSummary(group, summed);
   const names = GROUPS[group];
   let body;
   if (loaded.state === "loading") {
@@ -143,18 +154,28 @@ export function RecordBreakdown({ metric, month }: RecordBreakdownProps) {
       </Alert>
     );
   } else {
-    body = <Breakdown data={loaded.data} metric={metric} month={month} />;
+    body = <Breakdown data={loaded.data} metric={metric} month={summed} />;
   }
   return (
     <Stack gap={3}>
-      <SegmentedControl
-        label="内訳の分け方"
-        value={group}
-        onValueChange={(v) => {
-          if (isGroup(v)) setGroup(v);
-        }}
-        options={Object.entries(GROUPS).map(([value, n]) => ({ value, label: n.option }))}
-      />
+      <Stack direction="row" gap={3} wrap>
+        <SegmentedControl
+          label="内訳の分け方"
+          value={group}
+          onValueChange={(v) => {
+            if (isGroup(v)) setGroup(v);
+          }}
+          options={Object.entries(GROUPS).map(([value, n]) => ({ value, label: n.option }))}
+        />
+        <SegmentedControl
+          label="集める期間"
+          value={span}
+          onValueChange={(v) => {
+            if (isSpan(v)) setSpan(v);
+          }}
+          options={Object.entries(SPANS).map(([value, label]) => ({ value, label }))}
+        />
+      </Stack>
       {body}
     </Stack>
   );

@@ -175,6 +175,11 @@ test("記録を種類ごとに見る", async ({ page }) => {
     await expect(page.getByRole("region", { name: region }).getByRole("row").last()).toContainText("全体");
     await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", /&from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}$/);
   }
+  // 費用は選んだ月のほか、期間を決めない累計でも見られる
+  await tabs.getByRole("tab", { name: "費用" }).click();
+  await page.getByRole("radio", { name: "累計" }).check();
+  await expect(page.getByRole("region", { name: "サービスごとの費用" }).getByRole("row").last()).toContainText("全体");
+  await expect(page.getByRole("link", { name: "CSV で出す" })).toHaveAttribute("href", "/api/v1/records/summary/export?group=service");
   await tabs.getByRole("tab", { name: "エラー" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "稼働率" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "エラーログ" })).toBeVisible();
