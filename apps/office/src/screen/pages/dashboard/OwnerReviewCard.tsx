@@ -19,10 +19,12 @@ export interface OwnerReviewCardProps {
   review: OwnerReview;
   /** 出した後に呼ぶ。知らせる文を受ける */
   onDecided: (text: string) => void;
+  /** 確かめた後に変更が足されていた時に呼ぶ。見出しを受け、ホームを読み直す */
+  onStale: (title: string) => void;
 }
 
 /** オーナーの判断を待つレビュー 1 件 */
-export function OwnerReviewCard({ review, onDecided }: OwnerReviewCardProps) {
+export function OwnerReviewCard({ review, onDecided, onStale }: OwnerReviewCardProps) {
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const title = `${APPROVAL_KIND_LABEL.merge}: ${review.title}`;
   const who = review.assignee === null ? "" : `${requesterName(review.assignee)}が `;
@@ -56,6 +58,10 @@ export function OwnerReviewCard({ review, onDecided }: OwnerReviewCardProps) {
             setVerdict(null);
             onDecided(text);
           }}
+          onStale={() => {
+            setVerdict(null);
+            onStale(title);
+          }}
         />
       ) : null}
     </Card>
@@ -73,10 +79,12 @@ interface VerdictDialogProps {
   onClose: () => void;
   /** 出した後に呼ぶ */
   onDecided: (text: string) => void;
+  /** 確かめた後に変更が足されていた時に呼ぶ。ダイアログを閉じる */
+  onStale: () => void;
 }
 
 /** 理由を入れて承認か差し戻しを出すダイアログ。差し戻しは理由が要る。出せなければ開いたまま理由を出す */
-function VerdictDialog({ review, title, verdict, onClose, onDecided }: VerdictDialogProps) {
+function VerdictDialog({ review, title, verdict, onClose, onDecided, onStale }: VerdictDialogProps) {
   const api = useContext(ApiContext);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -91,7 +99,9 @@ function VerdictDialog({ review, title, verdict, onClose, onDecided }: VerdictDi
     const sent = await send(api, () => api.api.v1.reviews[":nodeId"].verdict.$post({ param: { nodeId: review.nodeId }, json: { verdict, body: body.trim(), baseSha: review.headSha } }));
     setBusy(false);
     if (!sent.ok) {
-      setFailure(sent.failure);
+      // 409 はレビュー担当が見た後に変更が足された時。古い head_sha のままでは何度押しても断られるので、閉じて読み直す
+      if (sent.failure.code === "conflict") onStale();
+      else setFailure(sent.failure);
       return;
     }
     onDecided(`「${title}」を${DONE_LABEL[verdict]}`);
@@ -119,7 +129,6 @@ function VerdictDialog({ review, title, verdict, onClose, onDecided }: VerdictDi
       <Stack gap={3}>
         <TextField label={verdict === "approve" ? "ひとこと (任意)" : "理由"} required={verdict === "request_changes"} value={body} maxLength={20_000} onChange={(e) => setBody(e.target.value)} />
         {failure ? <FailedAlert title={`${label}事ができませんでした`} failure={failure} /> : null}
-        {failure?.code === "conflict" ? <p>確かめた後に変更が足されました。差分を見直してください。</p> : null}
       </Stack>
     </Dialog>
   );

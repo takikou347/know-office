@@ -77,8 +77,8 @@ export function DashboardPage() {
     setDone({ tone: "success", text });
     setDecidedTick((t) => t + 1);
   };
-  const stale = (title: string) => {
-    setDone({ tone: "warn", text: `「${title}」はほかの所で先に決まっていました` });
+  const stale = (title: string, what = "はほかの所で先に決まっていました") => {
+    setDone({ tone: "warn", text: `「${title}」${what}` });
     setDecidedTick((t) => t + 1);
   };
 
@@ -92,7 +92,7 @@ export function DashboardPage() {
       <ul aria-label="承認を待つ物" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "var(--space-3)" }}>
         {items.slice(0, HOME_WAITING_SHOWN).map((w) => (
           <li key={w.kind === "approval" ? w.approval.id : w.review.nodeId}>
-            {w.kind === "approval" ? <ApprovalCard approval={w.approval} onDecided={decided} onStale={stale} /> : <OwnerReviewCard review={w.review} onDecided={decided} />}
+            {w.kind === "approval" ? <ApprovalCard approval={w.approval} onDecided={decided} onStale={stale} /> : <OwnerReviewCard review={w.review} onDecided={decided} onStale={(title) => stale(title, "は確かめた後に変更が足されました。差分を見直してください")} />}
           </li>
         ))}
       </ul>

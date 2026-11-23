@@ -92,8 +92,18 @@ async function focusProblem(page: Page): Promise<string | null> {
       const cs = getComputedStyle(e);
       ringed = (cs.outlineStyle !== "none" && Number.parseFloat(cs.outlineWidth) > 0) || cs.boxShadow !== "none";
     }
-    // SVG の物は、中の形の線 (stroke) で輪を描く
-    if (!ringed && el instanceof SVGElement) ringed = [...el.querySelectorAll("*")].some((c) => getComputedStyle(c).stroke !== "none");
+    // SVG の物は、中の形に focus の色で 2 以上の太さの線 (stroke) を引いて輪を描く。いつも線を持つ形と分けるため、色と太さを見る
+    if (!ringed && el instanceof SVGElement) {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--color-focus)";
+      document.body.append(probe);
+      const focusColor = getComputedStyle(probe).color;
+      probe.remove();
+      ringed = [...el.querySelectorAll("*")].some((c) => {
+        const cs = getComputedStyle(c);
+        return cs.stroke === focusColor && Number.parseFloat(cs.strokeWidth) >= 2;
+      });
+    }
     if (!ringed) return `${name} に focus の輪が無い`;
     const r = el.getBoundingClientRect();
     const inView = r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
