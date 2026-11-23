@@ -1,10 +1,11 @@
-// 設定の 1 項目を変えるカードと、理由の欄と変えるボタン。office の初期値 (設定の画面) とサービスごとの設定 (アイデアとサービスの画面) が同じ物を使う (サービスと拡張の 3.3)
+// 設定の 1 項目を変えるカードと、送る口。office の初期値 (設定の画面) とサービスごとの設定 (アイデアとサービスの画面) が同じ物を使う (サービスと拡張の 3.3)
 import { INHERITED_SETTINGS, type InheritedKey, ReleaseCondition, RepoAction, Setting } from "@know-office/core";
-import { Alert, Button, Card, Checkbox, Stack, Switch, TextField } from "knowidea-ui";
+import { Checkbox, Stack, Switch, TextField } from "knowidea-ui";
 import { type ReactNode, useContext, useState } from "react";
 import { z } from "zod";
 import { type Api, ApiContext } from "../api.ts";
-import { type Failed, FailedAlert, type Loaded, type Reply, send, useLoad } from "./load.tsx";
+import { type Failed, type Loaded, type Reply, send, useLoad } from "./load.tsx";
+import { type SaveResult, SettingCard } from "./setting-card.tsx";
 
 const ACTION_LABEL: Record<RepoAction, string> = { read: "読む", branch: "ブランチを作る", push: "push", pull_request: "プルリクエスト", merge: "main へのマージ", issue: "Issue" };
 const CONDITION_LABEL: Record<ReleaseCondition, string> = { checks: "チェックの合格", reviewer: "レビュー担当の承認", owner: "オーナーの承認" };
@@ -24,21 +25,35 @@ export type Saved = (next: Setting) => void;
 /** 設定を 1 項目送る口。office の設定とサービスの設定で道が違う */
 export type PutSetting = (api: Api, body: { version: number; value: unknown; reason: string }) => Promise<Reply & Response>;
 
-interface SaveBarProps {
-  /** 項目の名前 */
-  label: string;
-  /** 送る口。読んだ版、値、理由を送り、入口の返事を返す */
-  put: PutSetting;
-  /** 読んだ版 */
-  version: number;
-  /** 送る値。今の値と同じか、形が合わない間は null */
-  value: unknown;
-  /** 変えた後に呼ぶ */
-  onSaved: Saved;
-  /** 断られた時に呼ぶ。断られた理由を渡し、今の値を読み直すのに使う */
-  onRefused: (failure: Failed) => void;
-  /** 作り直す前のカードで断られた理由。読み直してカードを作り直した後も出し続ける */
-  refusal?: Failed | undefined;
+/**
+ * 設定を 1 項目送り、変えた知らせの文か断られた理由を返す口を作る。守りを弱める変更と勤務を延ばす変更は、ゲートウェイがパスキーの確認を求める
+ * @param api 入口を呼ぶ口。無ければ送らず読めなかった事にする
+ * @param label 項目の名前
+ * @param put 送る口
+ * @param version 読んだ版
+ * @param value 送る値
+ * @param handlers 変えた後と断られた時に呼ぶ口
+ * @returns 理由を受けて送る関数
+ */
+export function putSave(
+  api: Api | null,
+  label: string,
+  put: PutSetting,
+  version: number,
+  value: unknown,
+  handlers: { onSaved: Saved; onRefused: (failure: Failed) => void },
+): (reason: string) => Promise<SaveResult> {
+  return async (reason) => {
+    if (!api) return { ok: false, failure: { code: "network", traceId: null } };
+    const sent = await send(api, () => put(api, { version, value, reason }));
+    if (!sent.ok) {
+      handlers.onRefused(sent.failure);
+      return sent;
+    }
+    const next = z.object({ data: Setting }).loose().parse(await sent.res.json()).data;
+    handlers.onSaved(next);
+    return { ok: true, done: `${label}を変えました (バージョン ${String(next.version)})` };
+  };
 }
 
 /**
@@ -49,50 +64,6 @@ interface SaveBarProps {
  */
 export function refusalTitle(label: string, failure: Failed): string {
   return failure.code === "upstream_failed" ? `${label}は変えましたが、GitHub に掛けられませんでした` : `${label}を変えられませんでした`;
-}
-
-/** 変える理由の欄と、変えるボタン。守りを弱める変更と勤務を延ばす変更は、ゲートウェイがパスキーの確認を求める */
-export function SaveBar({ label, put, version, value, onSaved, onRefused, refusal }: SaveBarProps) {
-  const api = useContext(ApiContext);
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<string>();
-  const [failure, setFailure] = useState<Failed | undefined>(refusal);
-
-  const save = async () => {
-    if (!api || value === null) return;
-    setBusy(true);
-    setDone(undefined);
-    setFailure(undefined);
-    const sent = await send(api, () => put(api, { version, value, reason: reason.trim() }));
-    setBusy(false);
-    if (!sent.ok) {
-      setFailure(sent.failure);
-      onRefused(sent.failure);
-      return;
-    }
-    const next = z.object({ data: Setting }).loose().parse(await sent.res.json()).data;
-    setReason("");
-    setDone(`${label}を変えました (バージョン ${String(next.version)})`);
-    onSaved(next);
-  };
-
-  return (
-    <Stack gap={2}>
-      <TextField label={`${label}を変える理由`} value={reason} maxLength={2000} disabled={value === null} onChange={(e) => setReason(e.target.value)} />
-      <Stack direction="row" gap={2}>
-        <Button aria-label={`${label}を変える`} loading={busy} disabled={value === null || reason.trim() === ""} onClick={() => void save()}>
-          変える
-        </Button>
-      </Stack>
-      {done ? (
-        <Alert tone="success" live>
-          {done}
-        </Alert>
-      ) : null}
-      {failure ? <FailedAlert title={refusalTitle(label, failure)} failure={failure} /> : null}
-    </Stack>
-  );
 }
 
 /**
@@ -156,17 +127,49 @@ function parseRule<K extends InheritedKey>(key: K, value: unknown): z.infer<(typ
   return parsed.success ? (parsed.data as z.infer<(typeof INHERITED_SETTINGS)[K]>) : null;
 }
 
+/** 受け継ぐ項目ごとの 1 行の説明 */
+const RULE_NOTE: Record<InheritedKey, string> = {
+  actions: "社員がリポジトリでしてよい操作です",
+  mergeWhen: "社員の PR を main に入れる前にそろえる条件です",
+  deployWhen: "本番にデプロイする前にそろえる条件です",
+  protectedPaths: "社員が書き換えられない道です。1 行に 1 つ書きます",
+  paused: "止めている間は、サービスのタスクを進めません",
+};
+
+/**
+ * 受け継ぐ項目の今の値を言葉にする
+ * @param name 項目の名前
+ * @param value 今の値
+ * @returns 今の値の言葉
+ */
+export function ruleText(name: InheritedKey, value: unknown): string {
+  if (name === "actions") {
+    const actions = parseRule("actions", value) ?? [];
+    return actions.length === 0 ? "できる操作はありません" : actions.map((a) => ACTION_LABEL[a]).join("、");
+  }
+  if (name === "mergeWhen" || name === "deployWhen") {
+    const conditions = parseRule(name, value) ?? [];
+    return conditions.length === 0 ? "条件はありません" : conditions.map((c) => CONDITION_LABEL[c]).join("、");
+  }
+  if (name === "protectedPaths") {
+    const paths = parseRule("protectedPaths", value) ?? [];
+    return paths.length === 0 ? "触れない所はありません" : paths.join("、");
+  }
+  return value === true ? "止めています" : "動かしています";
+}
+
 export interface RuleCardProps extends CardProps {
   /** 項目の名前 */
   name: InheritedKey;
   /** 送る口 */
   put: PutSetting;
-  /** 見出しの隣の印 */
-  badge: ReactNode;
+  /** 見出しの隣の印。無ければ出さない */
+  badge?: ReactNode;
 }
 
-/** 受け継ぐ項目の 1 つ。選び直して、理由を書いて変える。office の初期値とサービスごとの設定が使う */
+/** 受け継ぐ項目の 1 つ。編集を押して選び直し、理由を書いて保存する。office の初期値とサービスごとの設定が使う */
 export function RuleCard({ setting, name, put, badge, onSaved, onRefused, refusal }: RuleCardProps) {
+  const api = useContext(ApiContext);
   const [draft, setDraft] = useState<unknown>(setting.value);
   const label = RULE_LABEL[name];
   const valid = INHERITED_SETTINGS[name].safeParse(draft).success;
@@ -191,24 +194,25 @@ export function RuleCard({ setting, name, put, badge, onSaved, onRefused, refusa
     editor = <Switch label="サービスを止めたままにする" checked={draft === true} onCheckedChange={setDraft} />;
   }
   return (
-    <Card title={label} headingLevel={3} badge={badge}>
-      <Stack gap={3}>
-        {editor}
-        {valid ? null : <p role="alert">条件は 1 つ以上選んでください</p>}
-        <SaveBar
-          label={label}
-          put={put}
-          version={setting.version}
-          value={changed && valid ? draft : null}
-          onSaved={(next) => {
-            setDraft(next.value);
-            onSaved(next);
-          }}
-          onRefused={onRefused}
-          refusal={refusal}
-        />
-      </Stack>
-    </Card>
+    <SettingCard
+      title={label}
+      description={RULE_NOTE[name]}
+      badge={badge}
+      current={ruleText(name, setting.value)}
+      editor={editor}
+      invalid={valid ? undefined : "条件は 1 つ以上選んでください"}
+      ready={changed && valid}
+      save={putSave(api, label, put, setting.version, draft, {
+        onSaved: (next) => {
+          setDraft(next.value);
+          onSaved(next);
+        },
+        onRefused,
+      })}
+      refusedTitle={(failure) => refusalTitle(label, failure)}
+      onCancel={() => setDraft(setting.value)}
+      refusal={refusal}
+    />
   );
 }
 

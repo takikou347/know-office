@@ -67,6 +67,8 @@ export function GitHubCard() {
   const status = LINK_STATUS[link.data.state];
   return (
     <Card
+      titleSize="lg"
+      actionsAlign="end"
       title="GitHub"
       headingLevel={2}
       badge={<Status kind={status.kind} label={status.label} />}
@@ -114,7 +116,8 @@ function Linked() {
     <>
       {repos.state === "loading" ? <p role="status">リポジトリを読んでいます</p> : null}
       {repos.state === "failed" ? <FailedAlert title="連携したリポジトリを読めませんでした" failure={repos} /> : null}
-      {repos.state === "ok" ? (
+      {repos.state === "ok" && repos.data.length === 0 ? <p>連携したリポジトリはありません</p> : null}
+      {repos.state === "ok" && repos.data.length > 0 ? (
         <List label="連携したリポジトリ" items={repos.data.map((r) => ({ id: r.fullName, title: r.fullName, meta: r.private ? "非公開" : "公開" }))} />
       ) : null}
       <p>main を守るルールセットは、ルールを変えた時に掛けます。GitHub の側で外された時は掛け直します。掛ける前にパスキーで確かめます</p>

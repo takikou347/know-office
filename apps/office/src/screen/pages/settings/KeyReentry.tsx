@@ -111,6 +111,8 @@ export function KeyReentry() {
         </Alert>
       )}
       <Card
+        titleSize="lg"
+        actionsAlign="end"
         title={KEY_LABEL.github_app}
         headingLevel={2}
         badge={<Status kind={done("github_app") ? "success" : "pending"} label={done("github_app") ? "入れ直した" : "まだ"} />}
@@ -131,6 +133,8 @@ export function KeyReentry() {
         <TextField label="新しい Webhook secret" type="password" value={webhookSecret} disabled={done("github_app")} autoComplete="off" hint="16 字から 200 字" onChange={(e) => setWebhookSecret(e.target.value)} />
       </Card>
       <Card
+        titleSize="lg"
+        actionsAlign="end"
         title={KEY_LABEL.claude}
         headingLevel={2}
         badge={<Status kind={done("claude") ? "success" : "pending"} label={done("claude") ? "入れ直した" : "まだ"} />}

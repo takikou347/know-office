@@ -1,11 +1,13 @@
 // サービスごとの設定。リポジトリと担当の社員と、office の初期値から受け継ぐ 5 項目を読み、1 項目ずつ変える (サービスと拡張の 3.3)
 import { INHERITED_KEYS, type Setting, StaffId } from "@know-office/core";
-import { Card, Field, Select, Stack, Status } from "knowidea-ui";
-import { useState } from "react";
+import { Field, Select, Stack, Status } from "knowidea-ui";
+import { useContext, useState } from "react";
+import { ApiContext } from "../../api.ts";
 import { FailedAlert } from "../../parts/load.tsx";
-import { type CardProps, type PutSetting, RuleCard, SaveBar, useSettingCards } from "../../parts/rule-card.tsx";
-import { staffLabel } from "../guard/labels.ts";
+import { type CardProps, type PutSetting, putSave, refusalTitle, RuleCard, useSettingCards } from "../../parts/rule-card.tsx";
+import { SettingCard } from "../../parts/setting-card.tsx";
 import { useStaffOptions } from "../../parts/staff-list.ts";
+import { staffLabel } from "../guard/labels.ts";
 import { UNSET } from "./labels.ts";
 import { RepoPicker } from "./StageActions.tsx";
 
@@ -23,43 +25,59 @@ const servicePut =
 /** 受け継いでいるかの印 */
 const inheritBadge = (s: Setting) => <Status kind={s.inherited ? "neutral" : "info"} label={s.inherited ? "office の初期値と同じ" : "初期値から変えている"} />;
 
-/** リポジトリ。GitHub の触れるリポジトリから選び直す */
+/** リポジトリ。編集を押して GitHub の触れるリポジトリから選び直す */
 function RepoCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { put: PutSetting }) {
+  const api = useContext(ApiContext);
   const now = typeof setting.value === "string" ? setting.value : null;
   const [draft, setDraft] = useState<string | null>(now);
   return (
-    <Card title="リポジトリ" headingLevel={3} badge={<Status kind="info" label={now ?? UNSET} />}>
-      <Stack gap={3}>
-        <RepoPicker value={draft} onChange={setDraft} />
-        <SaveBar label="リポジトリ" put={put} version={setting.version} value={draft !== null && draft !== now ? draft : null} onSaved={onSaved} onRefused={onRefused} refusal={refusal} />
-      </Stack>
-    </Card>
+    <SettingCard
+      title="リポジトリ"
+      description="社員がこのサービスで触るリポジトリです"
+      current={now ?? UNSET}
+      editor={<RepoPicker value={draft} onChange={setDraft} />}
+      ready={draft !== null && draft !== now}
+      save={putSave(api, "リポジトリ", put, setting.version, draft, { onSaved, onRefused })}
+      refusedTitle={(failure) => refusalTitle("リポジトリ", failure)}
+      onCancel={() => setDraft(now)}
+      refusal={refusal}
+    />
   );
 }
 
-/** 担当の社員 */
+/** 担当の社員。編集を押して選び直す */
 function StaffCard({ setting, put, onSaved, onRefused, refusal }: CardProps & { put: PutSetting }) {
-  const now = StaffId.safeParse(setting.value);
-  const [draft, setDraft] = useState<StaffId | null>(now.success ? now.data : null);
+  const api = useContext(ApiContext);
+  const read = StaffId.safeParse(setting.value);
+  const now = read.success ? read.data : null;
+  const [draft, setDraft] = useState<StaffId | null>(now);
   const people = useStaffOptions();
+  const editor = (
+    <Field label="担当の社員">
+      <Select
+        aria-label="担当の社員"
+        value={draft}
+        placeholder="選ぶ"
+        options={people}
+        onValueChange={(v) => {
+          const staff = StaffId.safeParse(v);
+          if (staff.success) setDraft(staff.data);
+        }}
+      />
+    </Field>
+  );
   return (
-    <Card title="担当の社員" headingLevel={3} badge={<Status kind="info" label={now.success ? (people.find((p) => p.value === now.data)?.label ?? staffLabel(now.data)) : UNSET} />}>
-      <Stack gap={3}>
-        <Field label="担当の社員">
-          <Select
-            aria-label="担当の社員"
-            value={draft}
-            placeholder="選ぶ"
-            options={people}
-            onValueChange={(v) => {
-              const staff = StaffId.safeParse(v);
-              if (staff.success) setDraft(staff.data);
-            }}
-          />
-        </Field>
-        <SaveBar label="担当の社員" put={put} version={setting.version} value={draft !== null && draft !== setting.value ? draft : null} onSaved={onSaved} onRefused={onRefused} refusal={refusal} />
-      </Stack>
-    </Card>
+    <SettingCard
+      title="担当の社員"
+      description="このサービスのタスクを受け持つ社員です"
+      current={now ? (people.find((p) => p.value === now)?.label ?? staffLabel(now)) : UNSET}
+      editor={editor}
+      ready={draft !== null && draft !== now}
+      save={putSave(api, "担当の社員", put, setting.version, draft, { onSaved, onRefused })}
+      refusedTitle={(failure) => refusalTitle("担当の社員", failure)}
+      onCancel={() => setDraft(now)}
+      refusal={refusal}
+    />
   );
 }
 

@@ -5,7 +5,7 @@ import { FAKES } from "../helpers/fakes.ts";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { part, post } from "./helpers/screen.ts";
+import { cancelCard, editCard, part, post, saveCard } from "./helpers/screen.ts";
 import { seedMain } from "./helpers/seed.ts";
 import { settle } from "./helpers/settle.ts";
 
@@ -29,11 +29,14 @@ async function setGuardReview(page: Page, enabled: boolean): Promise<void> {
   await page.goto("/settings");
   const box = page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "止めた記録をレビュー担当に聞く", exact: true }) });
   const check = box.getByRole("checkbox", { name: "タスクか社員を止めたら、止めた記録をレビュー担当に読ませ、問題が無ければ再開する" });
+  await editCard(box, "止めた記録をレビュー担当に聞く");
   await expect(check).toBeVisible();
-  if ((await check.isChecked()) === enabled) return;
+  if ((await check.isChecked()) === enabled) {
+    await cancelCard(box, "止めた記録をレビュー担当に聞く");
+    return;
+  }
   await check.click();
-  await box.getByLabel("止めた記録をレビュー担当に聞くを変える理由").fill("レビュー担当の通し");
-  await box.getByRole("button", { name: "止めた記録をレビュー担当に聞くを変える" }).click();
+  await saveCard(box, "止めた記録をレビュー担当に聞く", "レビュー担当の通し");
   await expect(box.getByText(/止めた記録をレビュー担当に聞くを変えました/)).toBeVisible();
 }
 

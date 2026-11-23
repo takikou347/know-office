@@ -6,6 +6,7 @@ import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
 import { ownerPasskey } from "./helpers/staff.ts";
 import { sayToReviewer } from "./helpers/staff-work.ts";
+import { cancelCard, editCard, saveCard } from "./helpers/screen.ts";
 
 /**
  * 設定の画面で会話の言葉の指示を開くか閉じる。開く時はパスキーで確かめる
@@ -16,11 +17,14 @@ async function setChatOrders(page: Page, enabled: boolean): Promise<void> {
   await page.goto("/settings");
   const box = page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "会話の言葉の指示", exact: true }) });
   const check = box.getByRole("checkbox", { name: "話しかけた言葉から休み、早退、延長の指示を読み取る" });
+  await editCard(box, "会話の言葉の指示");
   await expect(check).toBeVisible();
-  if ((await check.isChecked()) === enabled) return;
+  if ((await check.isChecked()) === enabled) {
+    await cancelCard(box, "会話の言葉の指示");
+    return;
+  }
   await check.click();
-  await box.getByLabel("会話の言葉の指示を変える理由").fill("会話の言葉の指示の通し");
-  await box.getByRole("button", { name: "会話の言葉の指示を変える" }).click();
+  await saveCard(box, "会話の言葉の指示", "会話の言葉の指示の通し");
   await expect(box.getByText(/会話の言葉の指示を変えました/)).toBeVisible();
 }
 

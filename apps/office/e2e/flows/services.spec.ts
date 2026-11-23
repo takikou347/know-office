@@ -8,6 +8,7 @@ import { z } from "zod";
 import { expect, test } from "../helpers/test.ts";
 import { connectGitHub, FAKE_GITHUB, fakeGitHubRoute, forgetGitHub } from "./helpers/github.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
+import { editCard, saveCard } from "./helpers/screen.ts";
 import { freeRepoNames, restoreSeedServices, runLocalWrangler, seedMain } from "./helpers/seed.ts";
 import { addIdea, choose, chooseDocsRepo, move, prototypeService, settingCard } from "./helpers/services.ts";
 
@@ -85,11 +86,11 @@ async function deployableService(page: Page, owner: boolean): Promise<number> {
   // 設定の画面で、本番にデプロイする条件にチェックとレビュー担当の承認を足す
   await main.getByRole("tab", { name: "設定" }).click();
   const deployWhen = main.getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "本番にデプロイする条件", exact: true }) });
+  await editCard(deployWhen, "本番にデプロイする条件");
   if (!owner) await deployWhen.getByRole("checkbox", { name: "オーナーの承認" }).uncheck();
   await deployWhen.getByRole("checkbox", { name: "チェックの合格" }).check();
   await deployWhen.getByRole("checkbox", { name: "レビュー担当の承認" }).check();
-  await deployWhen.getByLabel("本番にデプロイする条件を変える理由").fill("チェックとレビューも見る");
-  await deployWhen.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
+  await saveCard(deployWhen, "本番にデプロイする条件", "チェックとレビューも見る");
   await expect(deployWhen.getByText(/本番にデプロイする条件を変えました/)).toBeVisible();
 
   // 既定のブランチの先のチェックはまだ終わらず、レビュー担当の承認も無い
@@ -165,15 +166,15 @@ test("案を足し、検討して元の案をたどり、リポジトリを選�
   // 変えていない項目は office の初期値を受け継ぐ
   await expect(main.getByText("office の初期値と同じ")).toHaveCount(5);
   const repoCard = main.getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "リポジトリ", exact: true }) });
+  await editCard(repoCard, "リポジトリ");
   await choose(page, "リポジトリ", OTHER_REPO);
-  await repoCard.getByLabel("リポジトリを変える理由").fill("置き場を移す");
-  await repoCard.getByRole("button", { name: "リポジトリを変える" }).click();
+  await saveCard(repoCard, "リポジトリ", "置き場を移す");
   await expect(repoCard.getByText(/リポジトリを変えました/)).toBeVisible();
   await expect(main.getByText(`リポジトリ: ${OTHER_REPO}、担当: 開発担当`)).toBeVisible();
   await main.getByRole("tab", { name: "設定" }).click();
+  await editCard(repoCard, "リポジトリ");
   await choose(page, "リポジトリ", REPO);
-  await repoCard.getByLabel("リポジトリを変える理由").fill("元に戻す");
-  await repoCard.getByRole("button", { name: "リポジトリを変える" }).click();
+  await saveCard(repoCard, "リポジトリ", "元に戻す");
   await expect(main.getByText(`リポジトリ: ${REPO}、担当: 開発担当`)).toBeVisible();
 
   // デプロイは GitHub の通知が残すので、通知の代わりに記録を置く
@@ -222,10 +223,10 @@ test("デプロイの条件がそろわないとサービスにできず、足�
   // 設定の画面で、オーナーの承認にチェックとレビュー担当の承認を足す (足すだけなので、パスキーは要らない)
   await main.getByRole("tab", { name: "設定" }).click();
   const deploy = main.getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "本番にデプロイする条件", exact: true }) });
+  await editCard(deploy, "本番にデプロイする条件");
   await deploy.getByRole("checkbox", { name: "チェックの合格" }).check();
   await deploy.getByRole("checkbox", { name: "レビュー担当の承認" }).check();
-  await deploy.getByLabel("本番にデプロイする条件を変える理由").fill("チェックとレビューも見る");
-  await deploy.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
+  await saveCard(deploy, "本番にデプロイする条件", "チェックとレビューも見る");
   await expect(deploy.getByText(/本番にデプロイする条件を変えました/)).toBeVisible();
   // 既定のブランチの先のチェックはまだ終わっていない
   const head = "d".repeat(40);
@@ -302,7 +303,7 @@ test.describe("サービスごとの設定", () => {
     const main = page.getByRole("main");
     await main.getByRole("tab", { name: "設定" }).click();
     const deployWhen = settingCard(page, "本番にデプロイする条件");
-    await expect(deployWhen.getByRole("checkbox", { name: "オーナーの承認" })).toBeChecked();
+    await expect(deployWhen.getByText("オーナーの承認", { exact: true })).toBeVisible();
 
     // 同じ設定を読んだ別の画面で、先にチェックの合格を足す
     const other = await page.context().newPage();
@@ -310,18 +311,20 @@ test.describe("サービスごとの設定", () => {
       await other.goto(`/services/${id}`);
       await other.getByRole("main").getByRole("tab", { name: "設定" }).click();
       const elsewhere = settingCard(other, "本番にデプロイする条件");
+      await editCard(elsewhere, "本番にデプロイする条件");
       await elsewhere.getByRole("checkbox", { name: "チェックの合格" }).check();
-      await elsewhere.getByLabel("本番にデプロイする条件を変える理由").fill("別の画面で足す");
-      await elsewhere.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
+      await saveCard(elsewhere, "本番にデプロイする条件", "別の画面で足す");
       await expect(elsewhere.getByText(/本番にデプロイする条件を変えました/)).toBeVisible();
     } finally {
       await other.close();
     }
 
     // 前の版のままレビュー担当の承認を足すと 409 で断られ、知らせが残り、選び欄は別の画面で変えた今の値になる
+    await editCard(deployWhen, "本番にデプロイする条件");
     await deployWhen.getByRole("checkbox", { name: "レビュー担当の承認" }).check();
-    await deployWhen.getByLabel("本番にデプロイする条件を変える理由").fill("前の版から足す");
-    await deployWhen.getByRole("button", { name: "本番にデプロイする条件を変える" }).click();
+    await saveCard(deployWhen, "本番にデプロイする条件", "前の版から足す");
+    await expect(deployWhen.getByText("チェックの合格、オーナーの承認", { exact: true })).toBeVisible();
+    await editCard(deployWhen, "本番にデプロイする条件");
     await expect(deployWhen.getByRole("checkbox", { name: "チェックの合格" })).toBeChecked();
     await expect(deployWhen.getByRole("checkbox", { name: "レビュー担当の承認" })).not.toBeChecked();
     const refused = deployWhen.getByRole("alert").filter({ hasText: "本番にデプロイする条件を変えられませんでした" });
@@ -334,12 +337,13 @@ test.describe("サービスごとの設定", () => {
     try {
       expect((await page.request.post(`${FAKE_GITHUB}/__fake/failures`, { data: { route: rulesets, status: 500, times: 5 } })).status()).toBe(204);
       const mergeWhen = settingCard(page, "main にマージする条件");
+      await editCard(mergeWhen, "main にマージする条件");
       await mergeWhen.getByRole("checkbox", { name: "オーナーの承認" }).check();
-      await mergeWhen.getByLabel("main にマージする条件を変える理由").fill("オーナーも見る");
-      await mergeWhen.getByRole("button", { name: "main にマージする条件を変える" }).click();
+      await saveCard(mergeWhen, "main にマージする条件", "オーナーも見る");
       const unapplied = mergeWhen.getByRole("alert").filter({ hasText: "main にマージする条件は変えましたが、GitHub に掛けられませんでした" });
       await expect(unapplied).toContainText("問い合わせの番号");
       await expect(mergeWhen.getByText("初期値から変えている")).toBeVisible();
+      await editCard(mergeWhen, "main にマージする条件");
       await expect(mergeWhen.getByRole("checkbox", { name: "オーナーの承認" })).toBeChecked();
       // 読み直した後も、前に断られた本番にデプロイする条件の知らせは残る
       await expect(refused).toBeVisible();

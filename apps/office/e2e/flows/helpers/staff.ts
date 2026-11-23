@@ -4,7 +4,7 @@ import { jstClock } from "@know-office/core";
 import { z } from "zod";
 import { FAKES } from "../../helpers/fakes.ts";
 import { useOwnerPasskey } from "./passkey.ts";
-import { post } from "./screen.ts";
+import { editCard, pickTime, post, saveCard } from "./screen.ts";
 
 const Staff = z.object({ data: z.array(z.object({ id: z.string(), state: z.string(), nodeId: z.string().nullable() }).loose()) });
 const State = z.object({ data: z.object({ stopped: z.array(z.object({ scope: z.string(), target: z.string(), stopId: z.string() })) }) });
@@ -55,12 +55,13 @@ async function readSchedule(page: Page): Promise<{ start: string; end: string }>
 async function scheduleCard(page: Page): Promise<Locator> {
   await page.goto("/settings");
   const box = page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "勤務の時刻", exact: true }) });
-  await expect(box.getByLabel("終わり (日本時間)")).toHaveValue(/^\d\d:\d\d$/);
+  await editCard(box, "勤務の時刻");
+  await expect(box.getByRole("combobox", { name: "終わり (日本時間)" })).toHaveText(/\d\d:\d\d/);
   return box;
 }
 
 /**
- * 設定の画面の勤務の時刻を変える。時間を足す変更はパスキーで確かめる。既にその時刻なら、変える所が無く理由の欄が開かないので画面を開かずに何もしない
+ * 設定の画面の勤務の時刻を変える。時間を足す変更はパスキーで確かめる。既にその時刻なら、保存を押せないので画面を開かずに何もしない
  * @param page 画面を開くページ。useOwnerPasskey を付けておく
  * @param start 始まり (日本時間)
  * @param end 終わり (日本時間)
@@ -69,10 +70,9 @@ async function setSchedule(page: Page, start: string, end: string): Promise<void
   const now = await readSchedule(page);
   if (now.start === start && now.end === end) return;
   const box = await scheduleCard(page);
-  await box.getByLabel("始まり (日本時間)").fill(start);
-  await box.getByLabel("終わり (日本時間)").fill(end);
-  await box.getByLabel("勤務の時刻を変える理由").fill("社員の仕事の通し");
-  await box.getByRole("button", { name: "勤務の時刻を変える" }).click();
+  await pickTime(box, "始まり (日本時間)", start);
+  await pickTime(box, "終わり (日本時間)", end);
+  await saveCard(box, "勤務の時刻", "社員の仕事の通し");
   await expect(box.getByText(/勤務の時刻を変えました/)).toBeVisible();
 }
 
@@ -100,18 +100,30 @@ export async function staffState(page: Page, staffId: string): Promise<string | 
 /** 通しが勤務の時刻を日をまたぐ形に広げる、日本時間の時 (この時から 0 時まで) */
 const LATE_HOUR = 22;
 
+/** 設定の画面の時刻の欄 (TimePicker) の刻み (分)。通しが選ぶ時刻はこの刻みに乗せる */
+const TIME_STEP = 15;
+
 /**
- * 通しの間だけ広げる勤務の時刻を作る。ふだんは 00:00 から 23:59 にする。
- * 日本時間の 22 時より後は、23:59 から 0:00 の間で通しの途中に終わりに届いて退勤するので、1 時間前に始まりその 1 分前 (翌日) に終わる 23 時間 59 分にし、空く 1 分を今から遠ざける。
+ * 0 時からの分を HH:MM にする
+ * @param total 0 時からの分
+ * @returns 時刻
+ */
+function clock(total: number): string {
+  const m = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+/**
+ * 通しの間だけ広げる勤務の時刻を作る。時刻の欄の刻み (15 分) に乗せる。ふだんは 00:00 から 23:45 にする。
+ * 日本時間の 22 時より後は、終わりから 0:00 の間で通しの途中に終わりに届いて退勤するので、1 時間前より前の刻みに始まりその 1 刻み前 (翌日) に終わる 23 時間 45 分にし、空く 15 分を今から遠ざける。
  * 日をまたぐ形は早退の指示を出せない (所定の終わりが同じ日の始まりより前になる) ので、22 時より前は使わない
  * @param now 今の時刻
  * @returns 始まりと終わり (日本時間)
  */
 function wideSchedule(now: number): { start: string; end: string } {
-  if (Number(jstClock(now).slice(0, 2)) < LATE_HOUR) return { start: "00:00", end: "23:59" };
-  const start = jstClock(now - 60 * 60 * 1000);
-  const end = (minutes(start) + 24 * 60 - 1) % (24 * 60);
-  return { start, end: `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}` };
+  if (Number(jstClock(now).slice(0, 2)) < LATE_HOUR) return { start: "00:00", end: clock(24 * 60 - TIME_STEP) };
+  const start = Math.floor(minutes(jstClock(now - 60 * 60 * 1000)) / TIME_STEP) * TIME_STEP;
+  return { start: clock(start), end: clock(start - TIME_STEP) };
 }
 
 /**
@@ -124,14 +136,16 @@ function minutes(hhmm: string): number {
 }
 
 /**
- * 勤務の時刻が、通しが広げた 23 時間 59 分のままか
+ * 勤務の時刻が、通しが広げた 23 時間 45 分 (前の形の 23 時間 59 分を含む) のままか
  * @param schedule 始まりと終わり (日本時間)
  * @param schedule.start 始まり
  * @param schedule.end 終わり
  * @returns 広げたままなら true
  */
 function widened({ start, end }: { start: string; end: string }): boolean {
-  return (minutes(start) - minutes(end) + 24 * 60) % (24 * 60) === 1;
+  // 前の形 (1 分だけ空ける) で広げたまま残った物も見分ける
+  const gap = (minutes(start) - minutes(end) + 24 * 60) % (24 * 60);
+  return gap === 1 || gap === TIME_STEP;
 }
 
 /**

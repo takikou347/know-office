@@ -51,6 +51,8 @@ export function Passkey() {
   const has = me.data.hasPasskey;
   return (
     <Card
+      titleSize="lg"
+      actionsAlign="end"
       title="パスキー"
       headingLevel={3}
       badge={<Status kind={has ? "success" : "warn"} label={has ? "登録済み" : "まだ登録していない"} />}

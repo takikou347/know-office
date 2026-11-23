@@ -2,7 +2,7 @@
 import type { Browser, Locator, Page } from "@playwright/test";
 import { expect, test } from "../helpers/test.ts";
 import { useOwnerPasskey } from "./helpers/passkey.ts";
-import { part } from "./helpers/screen.ts";
+import { cancelCard, editCard, part, pickTime, saveCard } from "./helpers/screen.ts";
 
 const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1";
 
@@ -25,17 +25,6 @@ function card(page: Page, title: string): Locator {
  */
 function settingPut(page: Page, key: string, status: number) {
   return page.waitForResponse((r) => r.url().endsWith(`/api/v1/settings/${key}`) && r.request().method() === "PUT" && r.status() === status);
-}
-
-/**
- * カードの中の理由を書いて、変えるボタンを押す
- * @param box カード
- * @param label 項目の名前
- * @param reason 理由
- */
-async function save(box: Locator, label: string, reason: string): Promise<void> {
-  await box.getByLabel(`${label}を変える理由`).fill(reason);
-  await box.getByRole("button", { name: `${label}を変える` }).click();
 }
 
 /**
@@ -63,94 +52,114 @@ function freshIp(): string {
 
 test.describe("サービスごとの設定", () => {
   test("office の初期値を変える", async ({ page }) => {
+    const label = "main にマージする条件";
     await useOwnerPasskey(page);
     await page.goto("/settings");
-    const merge = card(page, "main にマージする条件");
+    const merge = card(page, label);
     const owner = merge.getByRole("checkbox", { name: "オーナーの承認" });
+    // 組み込みの初期値の印は出さず、今の値だけを出す
+    await expect(merge.getByText("組み込みの初期値")).toHaveCount(0);
+    await editCard(merge, label);
     await expect(merge.getByRole("checkbox", { name: "チェックの合格" })).toBeChecked();
     if (await owner.isChecked()) {
       // 前の通しが途中で落ちて条件を足したままなら、先に外して初期の値から始める
       await owner.uncheck();
-      await save(merge, "main にマージする条件", "前の通しの残りを戻す");
+      await saveCard(merge, label, "前の通しの残りを戻す");
       await expect(merge.getByText(/main にマージする条件を変えました/)).toBeVisible();
       // 戻す時に通したパスキーの確認を残さないよう、ログインセッションを作り直す
       await page.context().clearCookies();
       await page.reload();
+      await editCard(merge, label);
       await expect(owner).not.toBeChecked();
     }
 
-    // 条件を足すのは守りを強めるので、パスキーを求められない
+    // 条件を足すのは守りを強めるので、パスキーを求められない。保存すると入力を閉じ、今の値に戻る
     await owner.check();
     const strengthened = settingPut(page, "service.mergeWhen", 200);
-    await save(merge, "main にマージする条件", "main はオーナーも見る");
+    await saveCard(merge, label, "main はオーナーも見る");
     await strengthened;
     await expect(merge.getByText(/main にマージする条件を変えました \(バージョン \d+\)/)).toBeVisible();
+    await expect(owner).toHaveCount(0);
+    await expect(merge.getByText(/^チェックの合格、.*オーナーの承認$/)).toBeVisible();
 
     // 読み直しても、足した条件が出る
     await page.reload();
-    await expect(card(page, "main にマージする条件").getByRole("checkbox", { name: "オーナーの承認" })).toBeChecked();
-    await expect(card(page, "main にマージする条件").getByRole("checkbox", { name: "チェックの合格" })).toBeChecked();
+    await expect(merge.getByText(/^チェックの合格、.*オーナーの承認$/)).toBeVisible();
+    await editCard(merge, label);
+    await expect(owner).toBeChecked();
+    await expect(merge.getByRole("checkbox", { name: "チェックの合格" })).toBeChecked();
 
     // 条件を外すのは守りを弱めるので、パスキーで確かめてから 1 度だけ送り直す
     const refused = settingPut(page, "service.mergeWhen", 401);
     const confirmed = page.waitForResponse((r) => r.url().endsWith("/api/v1/me/step-up") && r.status() === 200);
-    await card(page, "main にマージする条件").getByRole("checkbox", { name: "オーナーの承認" }).uncheck();
-    await save(card(page, "main にマージする条件"), "main にマージする条件", "元に戻す");
+    await owner.uncheck();
+    await saveCard(merge, label, "元に戻す");
     await refused;
     await confirmed;
-    await expect(card(page, "main にマージする条件").getByText(/main にマージする条件を変えました/)).toBeVisible();
+    await expect(merge.getByText(/main にマージする条件を変えました/)).toBeVisible();
     await page.reload();
-    await expect(card(page, "main にマージする条件").getByRole("checkbox", { name: "オーナーの承認" })).not.toBeChecked();
+    await expect(merge.getByText(/^チェックの合格/)).toBeVisible();
+    await expect(merge.getByText(/オーナーの承認$/)).toHaveCount(0);
   });
 
   test("条件を 1 つも選ばないと、変えるボタンを押せない", async ({ page }) => {
+    const label = "本番にデプロイする条件";
     await page.goto("/settings");
-    const deploy = card(page, "本番にデプロイする条件");
+    const deploy = card(page, label);
+    await editCard(deploy, label);
     await deploy.getByRole("checkbox", { name: "オーナーの承認" }).uncheck();
     await expect(deploy.getByText("条件は 1 つ以上選んでください")).toBeVisible();
-    // 形の合わない間は、理由も書けない
-    await expect(deploy.getByLabel("本番にデプロイする条件を変える理由")).toBeDisabled();
-    await expect(deploy.getByRole("button", { name: "本番にデプロイする条件を変える" })).toBeDisabled();
+    // 形の合わない間は、理由を書いても保存を押せない
+    await deploy.getByLabel(`${label}を変える理由`).fill("外す");
+    await expect(deploy.getByRole("button", { name: `${label}を保存` })).toBeDisabled();
+    // 取り消すと入力を閉じ、今の値に戻る
+    await cancelCard(deploy, label);
+    await expect(deploy.getByText("オーナーの承認", { exact: true })).toBeVisible();
   });
 });
 
 test.describe("勤務の時間", () => {
   test("時刻を変える", async ({ page }) => {
+    const label = "勤務の時刻";
     await useOwnerPasskey(page);
     await page.goto("/settings");
-    const schedule = card(page, "勤務の時刻");
-    await expect(schedule.getByLabel("終わり (日本時間)")).toHaveValue(/^\d\d:\d\d$/);
-    if ((await schedule.getByLabel("終わり (日本時間)").inputValue()) !== "17:00") {
+    const schedule = card(page, label);
+    await editCard(schedule, label);
+    await expect(schedule.getByRole("combobox", { name: "終わり (日本時間)" })).toHaveText(/\d\d:\d\d/);
+    if (!(await schedule.getByRole("combobox", { name: "終わり (日本時間)" }).innerText()).includes("17:00")) {
       // 前の通しが途中で落ちて時刻を変えたままなら、先に初期の時刻へ戻す
-      await schedule.getByLabel("始まり (日本時間)").fill("09:00");
-      await schedule.getByLabel("終わり (日本時間)").fill("17:00");
-      await save(schedule, "勤務の時刻", "前の通しの残りを戻す");
+      await pickTime(schedule, "始まり (日本時間)", "09:00");
+      await pickTime(schedule, "終わり (日本時間)", "17:00");
+      await saveCard(schedule, label, "前の通しの残りを戻す");
       await expect(schedule.getByText(/勤務の時刻を変えました/)).toBeVisible();
       // 戻す時に通したパスキーの確認を残さないよう、ログインセッションを作り直す
       await page.context().clearCookies();
       await page.reload();
+      await editCard(schedule, label);
     }
-    await expect(schedule.getByLabel("始まり (日本時間)")).toHaveValue("09:00");
+    await expect(schedule.getByRole("combobox", { name: "始まり (日本時間)" })).toHaveText("09:00");
 
     // 終わりを遅らせると勤務が延びるので、パスキーで確かめてから 1 度だけ送り直す
-    await schedule.getByLabel("始まり (日本時間)").fill("10:00");
-    await schedule.getByLabel("終わり (日本時間)").fill("18:00");
+    await pickTime(schedule, "始まり (日本時間)", "10:00");
+    await pickTime(schedule, "終わり (日本時間)", "18:00");
     const refused = settingPut(page, "workday.schedule", 401);
-    await save(schedule, "勤務の時刻", "朝を遅くする");
+    await saveCard(schedule, label, "朝を遅くする");
     await refused;
     await expect(schedule.getByText(/勤務の時刻を変えました \(バージョン \d+\)/)).toBeVisible();
+    await expect(schedule.getByText(/^10:00 から 18:00 \(日本時間\)/)).toBeVisible();
 
     await page.reload();
-    await expect(card(page, "勤務の時刻").getByLabel("始まり (日本時間)")).toHaveValue("10:00");
-    await expect(card(page, "勤務の時刻").getByLabel("終わり (日本時間)")).toHaveValue("18:00");
+    await expect(schedule.getByText(/^10:00 から 18:00 \(日本時間\)/)).toBeVisible();
 
     // 次の通しのために初期の時刻へ戻す。確認は 15 分有効
-    await card(page, "勤務の時刻").getByLabel("始まり (日本時間)").fill("09:00");
-    await card(page, "勤務の時刻").getByLabel("終わり (日本時間)").fill("17:00");
-    await save(card(page, "勤務の時刻"), "勤務の時刻", "元に戻す");
-    await expect(card(page, "勤務の時刻").getByText(/勤務の時刻を変えました/)).toBeVisible();
+    await editCard(schedule, label);
+    await expect(schedule.getByRole("combobox", { name: "始まり (日本時間)" })).toHaveText("10:00");
+    await pickTime(schedule, "始まり (日本時間)", "09:00");
+    await pickTime(schedule, "終わり (日本時間)", "17:00");
+    await saveCard(schedule, label, "元に戻す");
+    await expect(schedule.getByText(/勤務の時刻を変えました/)).toBeVisible();
     await page.reload();
-    await expect(card(page, "勤務の時刻").getByLabel("始まり (日本時間)")).toHaveValue("09:00");
+    await expect(schedule.getByText(/^09:00 から 17:00 \(日本時間\)/)).toBeVisible();
   });
 });
 

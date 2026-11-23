@@ -4,6 +4,7 @@ import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders, seedMain } from "./helpers/seed.ts";
 import { idleStaff, ownerPasskey, scriptReply, staffState, unstick } from "./helpers/staff.ts";
 import { addTask, CARRY_TITLE, claudeReceived, dropLeftovers, finishedBy, NodeStatus, openTree, PROJECT, sayToReviewer, scriptFinish } from "./helpers/staff-work.ts";
+import { cancelCard, editCard, saveCard } from "./helpers/screen.ts";
 
 /**
  * 設定の画面で時間外の呼び出しを開くか閉じる。開く時はパスキーで確かめる
@@ -14,11 +15,14 @@ async function setOffHoursCall(page: Page, enabled: boolean): Promise<void> {
   await page.goto("/settings");
   const box = page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 3, name: "時間外の呼び出し", exact: true }) });
   const check = box.getByRole("checkbox", { name: "勤務の時間の外に話しかけたら社員を呼び出す" });
+  await editCard(box, "時間外の呼び出し");
   await expect(check).toBeVisible();
-  if ((await check.isChecked()) === enabled) return;
+  if ((await check.isChecked()) === enabled) {
+    await cancelCard(box, "時間外の呼び出し");
+    return;
+  }
   await check.click();
-  await box.getByLabel("時間外の呼び出しを変える理由").fill("時間外の呼び出しの通し");
-  await box.getByRole("button", { name: "時間外の呼び出しを変える" }).click();
+  await saveCard(box, "時間外の呼び出し", "時間外の呼び出しの通し");
   await expect(box.getByText(/時間外の呼び出しを変えました/)).toBeVisible();
 }
 

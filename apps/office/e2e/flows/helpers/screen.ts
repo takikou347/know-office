@@ -22,3 +22,43 @@ export async function post(page: Page, path: string): Promise<number> {
   const res = await page.request.post(path, { headers: { Origin: origin } });
   return res.status();
 }
+
+/**
+ * 設定のカードの編集を押し、その場の入力を開く
+ * @param box カード
+ * @param label カードの見出し
+ */
+export async function editCard(box: Locator, label: string): Promise<void> {
+  await box.getByRole("button", { name: `${label}を編集`, exact: true }).click();
+}
+
+/**
+ * 設定のカードの編集の中で、理由を書いて保存を押す
+ * @param box カード
+ * @param label カードの見出し
+ * @param reason 変える理由
+ */
+export async function saveCard(box: Locator, label: string, reason: string): Promise<void> {
+  await box.getByLabel(`${label}を変える理由`).fill(reason);
+  await box.getByRole("button", { name: `${label}を保存`, exact: true }).click();
+}
+
+/**
+ * 設定のカードの編集を取り消す
+ * @param box カード
+ * @param label カードの見出し
+ */
+export async function cancelCard(box: Locator, label: string): Promise<void> {
+  await box.getByRole("button", { name: `${label}の編集を取り消す`, exact: true }).click();
+}
+
+/**
+ * カードの中の時刻の欄 (knowidea-ui の TimePicker) を開き、時刻を選ぶ
+ * @param box カード
+ * @param label 欄の名前
+ * @param time 選ぶ時刻 (HH:MM)。欄の刻みに乗る時刻か、今の値
+ */
+export async function pickTime(box: Locator, label: string, time: string): Promise<void> {
+  await box.getByRole("combobox", { name: label }).click();
+  await box.page().getByRole("option", { name: time, exact: true }).click();
+}

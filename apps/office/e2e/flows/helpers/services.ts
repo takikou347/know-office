@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { expect } from "../../helpers/test.ts";
 import { z } from "zod";
 import { connectGitHub } from "./github.ts";
+import { editCard, saveCard } from "./screen.ts";
 import { freeRepoNames } from "./seed.ts";
 
 /** 代わりの GitHub が初めから入れる非公開のリポジトリ 2 つ。設計書のリポジトリに交互に選ぶ */
@@ -65,13 +66,13 @@ export async function move(page: Page, button: string, reason: string): Promise<
  */
 export async function chooseDocsRepo(page: Page): Promise<string> {
   await page.goto("/settings");
-  const docs = page.getByRole("main").locator("section", { has: page.getByRole("heading", { level: 2, name: "設計書のリポジトリ", exact: true }) });
+  const docs = page.getByRole("main").getByRole("article").filter({ has: page.getByRole("heading", { level: 2, name: "設計書のリポジトリ", exact: true }) });
   const now = z.object({ data: z.object({ repo: z.string().nullable() }) }).parse(await (await page.request.get("/api/v1/devloop/docs-repo")).json()).data.repo;
   const repo = DOCS_REPOS.find((r) => r !== now) ?? DOCS_REPOS[0];
+  await editCard(docs, "設計書のリポジトリ");
   await docs.getByRole("combobox", { name: "設計書のリポジトリ" }).click();
   await page.getByRole("option", { name: repo, exact: true }).click();
-  await docs.getByLabel("選ぶ理由").fill("設計書を置く");
-  await docs.getByRole("button", { name: "設計書のリポジトリを保存する" }).click();
+  await saveCard(docs, "設計書のリポジトリ", "設計書を置く");
   await expect(docs.getByText(`${repo} を設計書のリポジトリにしました`)).toBeVisible();
   return repo;
 }
