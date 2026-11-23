@@ -8,7 +8,7 @@ import { services } from "../db/main.ts";
 import type { Bindings, GateEnv } from "../env.ts";
 import { guardOf } from "../auth/middleware.ts";
 import { auditFrom } from "../ledger/record.ts";
-import { intakeTask } from "../work/loop.ts";
+import { intakeTask } from "../work/intake.ts";
 import { synchronize } from "./sync.ts";
 import { afterChecks, checkChanges } from "./hooks-checks.ts";
 import { intakeReview } from "./hooks-reviews.ts";

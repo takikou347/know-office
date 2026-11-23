@@ -1,6 +1,6 @@
 // 社員との会話。入口から新しい順に読んで古い順に並べ、配信で届いた発言を足し、オーナーの言葉を送り、社員に渡ったかと社長のタスクにしたかを出す (社員と自動の 3.7、社員が考えるの 3.9、タスクとレビューの 3.1 の 7)
 import { Message, type MessageDelivery, type MessageOrder, type SkippedOrder, type StaffOverview } from "@know-office/core";
-import { Badge, Button, Conversation, Link, Stack, TextField } from "knowidea-ui";
+import { Badge, Button, Conversation, Field, Link, Select, Stack, TextField } from "knowidea-ui";
 import { useContext, useState } from "react";
 import { z } from "zod";
 import { ApiContext } from "../../api.ts";
@@ -17,7 +17,7 @@ const MESSAGE_PAGE = "50";
 const DELIVERY_LABEL: Record<MessageDelivery | "pending", string> = {
   run: "社員に渡しました",
   next_task: "次のタスクの頭で渡しました",
-  task: "社長のタスクにしました",
+  task: "タスクにしました",
   skipped: "渡していません",
   pending: "次のタスクで渡します",
 };
@@ -31,6 +31,20 @@ export type Delivered = { via: MessageDelivery; taskId: string | null };
 export interface TalkProps {
   /** 話す社員 */
   staff: StaffOverview;
+}
+
+/** 頼みを入れる所の選ぶ欄の、office 全体の値 */
+const OFFICE = "office";
+
+const ServiceNames = z.array(z.object({ id: z.string(), name: z.string() }).loose());
+
+/**
+ * 頼みを入れられるサービスを読む。読めない間は空で、office 全体だけを選べる
+ * @returns サービスの ID と名前
+ */
+function useServices(): { id: string; name: string }[] {
+  const loaded = useLoad(ServiceNames, (a) => a.api.v1.services.$get({ query: { limit: "100" } }));
+  return loaded.state === "ok" ? loaded.data : [];
 }
 
 /**
@@ -56,6 +70,8 @@ export function Talk({ staff }: TalkProps) {
     setDelivered((before) => new Map(before).set(e.delivery.id, { via: e.delivery.via, taskId: e.delivery.taskId }));
   });
   const [text, setText] = useState("");
+  const [scope, setScope] = useState(OFFICE);
+  const services = useServices();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failed>();
   if (loaded.state === "loading") return <p role="status">会話を読んでいます</p>;
@@ -67,7 +83,8 @@ export function Talk({ staff }: TalkProps) {
     if (!api || text.trim() === "") return;
     setBusy(true);
     setFailure(undefined);
-    const sent = await send(api, () => api.api.v1.staff[":staffId"].messages.$post({ param: { staffId: staff.id }, json: { body: text } }));
+    const serviceId = services.find((x) => x.id === scope)?.id;
+    const sent = await send(api, () => api.api.v1.staff[":staffId"].messages.$post({ param: { staffId: staff.id }, json: serviceId === undefined ? { body: text } : { body: text, serviceId } }));
     setBusy(false);
     if (!sent.ok) return setFailure(sent.failure);
     const made = z.object({ data: Message }).loose().parse(await sent.res.json()).data;
@@ -95,7 +112,10 @@ export function Talk({ staff }: TalkProps) {
         onChange={(e) => setText(e.target.value)}
         multiline
       />
-      <Stack direction="row" gap={2}>
+      <Field label="頼みを入れる所" hint="サービスの頼みは、そのサービスのタスクになります">
+        <Select aria-label="頼みを入れる所" options={[{ value: OFFICE, label: "office 全体" }, ...services.map((x) => ({ value: x.id, label: x.name }))]} value={scope} onValueChange={(v) => setScope(v ?? OFFICE)} />
+      </Field>
+      <Stack direction="row" gap={2} justify="end">
         <Button loading={busy} disabled={busy || text.trim() === ""} onClick={() => void submit()}>
           送る
         </Button>
@@ -106,13 +126,12 @@ export function Talk({ staff }: TalkProps) {
 }
 
 /**
- * 会話の入力の説明。社長への言葉は、走っていない時に社長が分けるタスクになる
+ * 会話の入力の説明。社員への言葉は、走っていない時にその社員のタスクになる
  * @param staff 話す社員
  * @returns 説明
  */
-export function talkHint(staff: Pick<StaffOverview, "id">): string {
-  if (staff.id === "president") return "社長が作業中なら今の作業に渡します。作業していない時は、社長が分けるタスクとして仕事の山に足します。渡すまで最長 1 分かかります";
-  return "タスク中なら今の作業に渡します。タスクの外なら次のタスクの頭で渡します。渡すまで最長 1 分かかります";
+export function talkHint(staff: Pick<StaffOverview, "role">): string {
+  return `頼みたい事をそのまま書いてください。${staff.role}が作業していなければタスクにして、タスクのタブに足します。作業中なら今の作業に渡します`;
 }
 
 /** オーナーの発言の本文の props */
@@ -142,7 +161,7 @@ export function OwnerBody({ staff, body, delivery, orders }: OwnerBodyProps) {
       {delivery?.via === "task" && delivery.taskId !== null ? (
         <>
           {" "}
-          <Link href={taskHref("president", delivery.taskId)}>分けるタスクを開く</Link>
+          <Link href={taskHref(staff.id, delivery.taskId)}>タスクを開く</Link>
         </>
       ) : null}
       <MessageOrders staff={staff} orders={orders} />

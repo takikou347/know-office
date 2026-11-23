@@ -1,9 +1,9 @@
-// 時間外の呼び出しの通し。退勤したレビュー担当に、オーナーが目標の画面でタスクを頼むと、その社員だけが呼び出されて進める。設定の画面で時間外の呼び出しを開いて話しかけると、残っていたタスクを取って発言を最初の呼び出しの頭で受ける。ゲートウェイの返事は差し替えない (社員と勤怠の 3.4)
+// 時間外の呼び出しの通し。退勤したレビュー担当に、オーナーが目標の画面でタスクを頼むと、その社員だけが呼び出されて進める。設定の画面で時間外の呼び出しを開いて話しかけると、発言がその社員のタスクになり、呼び出された社員が取って本文で受ける。ゲートウェイの返事は差し替えない (社員と勤怠の 3.4)
 import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders, seedMain } from "./helpers/seed.ts";
 import { idleStaff, ownerPasskey, scriptReply, staffState, unstick } from "./helpers/staff.ts";
-import { addTask, CARRY_TITLE, claudeReceived, dropLeftovers, finishedBy, NodeStatus, openTree, PROJECT, sayToReviewer, scriptFinish } from "./helpers/staff-work.ts";
+import { addTask, CARRY_TITLE, claudeReceived, dropLeftovers, dropTodos, finishedBy, NodeStatus, openTree, PROJECT, sayToReviewer, scriptFinish } from "./helpers/staff-work.ts";
 import { cancelCard, editCard, saveCard } from "./helpers/screen.ts";
 
 /**
@@ -98,15 +98,14 @@ test.describe("オーナーの指示に合わせる", () => {
     try {
       await setOffHoursCall(page, true);
       await restReviewer(page);
-      const nodeId = seedReviewerTodo(`${CARRY_TITLE} 時間外 ${String(Date.now())}`);
       await scriptFinish(page);
       const said = `時間外の話しかけ ${String(Date.now())}`;
       const bubble = await sayToReviewer(page, said);
-      // 退勤した社員が呼び出され、残っていたタスクを取り、発言を最初の呼び出しの頭で受けて終える
-      await finishedBy(page, nodeId);
+      // 発言はレビュー担当のタスクになり、退勤した社員が呼び出されて取り、本文で受けて終える
+      await expect(bubble.getByText("タスクにしました")).toBeVisible();
+      const taskId = ((await bubble.getByRole("link", { name: "タスクを開く" }).getAttribute("href")) ?? "").split("/").at(-1) ?? "";
+      await finishedBy(page, taskId);
       expect(await claudeReceived(page, said)).toBe(true);
-      await page.goto("/staff/reviewer?tab=talk");
-      await expect(bubble.getByText("次のタスクの頭で渡しました")).toBeVisible();
       // 頼まれたタスクを終えたら退勤する
       await expect.poll(() => staffState(page, "reviewer"), { timeout: 30_000 }).toBe("off");
     } finally {
@@ -128,13 +127,15 @@ test.describe("オーナーの指示に合わせる", () => {
       await restReviewer(page);
       const nodeId = seedReviewerTodo(`${CARRY_TITLE} 閉じた時間外 ${String(Date.now())}`);
       const bubble = await sayToReviewer(page, `閉じた時間外の話しかけ ${String(Date.now())}`);
-      await expect(bubble.getByText("次のタスクで渡します")).toBeVisible();
+      await expect(bubble.getByText("タスクにしました")).toBeVisible();
       // 発言を返した後も、社員は退勤したままでタスクは待ちのまま
       expect(await staffState(page, "reviewer")).toBe("off");
       expect(NodeStatus.parse(await (await page.request.get(`/api/v1/nodes/${nodeId}`)).json()).data.status).toBe("todo");
     } finally {
       cancelLeftOrders("reviewer");
       await dropLeftovers(page);
+      // 発言から足したタスクは目的の木の外の受け付けにあるので、待ちの物を見送りにする
+      await dropTodos(page, "reviewer");
     }
   });
 });

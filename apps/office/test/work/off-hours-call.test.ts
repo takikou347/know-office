@@ -16,7 +16,6 @@ function at(h: number, m = 0): number {
   return Date.UTC(2026, 11, 1, h - 9, m);
 }
 const TASK = "019a7b00-0000-7000-8000-0000000000a1";
-const NEXT = "019a7b00-0000-7000-8000-0000000000a2";
 
 let clock: ReturnType<typeof fixedClock>;
 let d1: TestD1;
@@ -30,7 +29,7 @@ beforeEach(async () => {
 });
 afterEach(() => d1.dispose());
 
-const Sent = z.object({ id: z.string() }).loose();
+const Sent = z.object({ id: z.string(), taskId: z.string().nullable() }).loose();
 const RunCall = z.object({ prompt: z.string() }).loose();
 
 /**
@@ -91,14 +90,15 @@ describe("オーナーの指示に合わせる", () => {
     headers = await gate.signIn();
     const sent = await say("今夜のうちに見て");
     expect(sent.status).toBe(201);
-    // 話しかけた社員だけが呼ばれ、ほかの社員は退勤したまま
-    expect(await gate.staff.builder.book.status(clock.now())).toMatchObject({ state: "called", nodeId: TASK });
+    // 話しかけた発言はタスクになり、優先が高いので先に取る。話しかけた社員だけが呼ばれ、ほかの社員は退勤したまま
+    const taskId = z.string().parse(sent.data.taskId);
+    expect(await gate.staff.builder.book.status(clock.now())).toMatchObject({ state: "called", nodeId: taskId });
     expect((await gate.staff.reviewer.book.status(clock.now())).state).toBe("off");
-    expect(await nodeStatus(TASK)).toBe("doing");
-    // 発言は最初の呼び出しの頭で渡す
+    expect([await nodeStatus(taskId), await nodeStatus(TASK)]).toEqual(["doing", "todo"]);
+    // 発言はタスクの本文で渡す
     expect(await startRun(gate.env, "builder", clock.now())).toBe("started");
-    expect(RunCall.parse(gate.workspaces.builder.runs.at(-1)).prompt).toContain('オーナーの発言 (日本時間 2026-12-01 21:00): "今夜のうちに見て"');
-    expect(await marks()).toEqual([{ message_id: sent.data.id, node_id: TASK, via: "next_task" }]);
+    expect(RunCall.parse(gate.workspaces.builder.runs.at(-1)).prompt).toContain("今夜のうちに見て");
+    expect(await marks()).toEqual([{ message_id: sent.data.id, node_id: taskId, via: "task" }]);
   });
 
   it("呼び出しが閉じていれば呼び出さない", async () => {
@@ -116,7 +116,18 @@ describe("オーナーの指示に合わせる", () => {
   it("取るタスクが無ければ呼び出さない", async () => {
     await setOffHoursCall({ enabled: true, perDay: 2 });
     headers = await gate.signIn();
+    // 発言をタスクにできなかった時は、取るタスクが無い
+    const db = gate.env.DB;
+    gate.env.DB = new Proxy(db, {
+      get: (t, k) => {
+        if (k === "batch") return () => Promise.reject(new Error("D1 が落ちた"));
+        const value: unknown = Reflect.get(t, k, t);
+        const bound: unknown = typeof value === "function" ? value.bind(t) : value;
+        return bound;
+      },
+    });
     const sent = await say("明日の朝に見て");
+    gate.env.DB = db;
     expect(sent.status).toBe(201);
     expect((await gate.staff.builder.book.status(clock.now())).state).toBe("off");
     expect(await marks()).toEqual([]);
@@ -124,17 +135,16 @@ describe("オーナーの指示に合わせる", () => {
 
   it("1 日の回数で呼び出さない", async () => {
     await setOffHoursCall({ enabled: true, perDay: 1 });
-    await seedTask(TASK, "勤怠の表を作る");
-    await seedTask(NEXT, "記録の画面を作る");
     headers = await gate.signIn();
-    await say("1 つ目");
-    await gate.staff.builder.book.checkpoint({ kind: "pr", nodeId: TASK }, clock.now() + 60_000);
+    const first = z.string().parse((await say("1 つ目")).data.taskId);
+    await gate.staff.builder.book.checkpoint({ kind: "pr", nodeId: first }, clock.now() + 60_000);
     clock.advance(10 * 60_000);
     headers = await gate.signIn();
     // 上限の日も 201 で、タスクは todo に戻す
-    expect((await say("2 つ目")).status).toBe(201);
+    const second = await say("2 つ目");
+    expect(second.status).toBe(201);
     expect((await gate.staff.builder.book.status(clock.now())).state).toBe("off");
-    expect(await nodeStatus(NEXT)).toBe("todo");
+    expect(await nodeStatus(z.string().parse(second.data.taskId))).toBe("todo");
   });
 
   it("呼び出しが落ちても 201 を返し、エラーログに残してタスクを戻す", async () => {
@@ -142,8 +152,9 @@ describe("オーナーの指示に合わせる", () => {
     await seedTask(TASK, "勤怠の表を作る");
     gate.staff.builder.book.call = () => Promise.reject(new Error("StaffDO に届かない"));
     headers = await gate.signIn();
-    expect((await say("今夜のうちに見て")).status).toBe(201);
-    expect(await nodeStatus(TASK)).toBe("todo");
+    const sent = await say("今夜のうちに見て");
+    expect(sent.status).toBe(201);
+    expect([await nodeStatus(z.string().parse(sent.data.taskId)), await nodeStatus(TASK)]).toEqual(["todo", "todo"]);
     const { results } = await d1.REC_2026.prepare("SELECT code FROM error_events").all();
     expect(results).toEqual([{ code: "message_call_failed" }]);
   });

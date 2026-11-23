@@ -43,10 +43,10 @@ test.describe("目的からタスクまでの木", () => {
         await scriptReply(page, "president", [{ type: "text", text: "分けて割り振った" }], "end_turn");
         await scriptFinish(page);
 
-        // 社長の会話で話しかけると、発言の下に社長のタスクにした印と、分けるタスクへの道が出る
+        // 社長の会話で話しかけると、発言の下にタスクにした印と、分けるタスクへの道が出る
         const bubble = await sayTo(page, "president", "社長", `${asked}\n週の合計が欲しい`);
-        await expect(bubble.getByText("社長のタスクにしました")).toBeVisible();
-        const link = bubble.getByRole("link", { name: "分けるタスクを開く" });
+        await expect(bubble.getByText("タスクにしました")).toBeVisible();
+        const link = bubble.getByRole("link", { name: "タスクを開く" });
         const href = (await link.getAttribute("href")) ?? "";
         const planId = href.split("/").at(-1) ?? "";
         expect(href).toBe(`/staff/president/tasks/${planId}`);
@@ -64,7 +64,7 @@ test.describe("目的からタスクまでの木", () => {
 
         // 会話の道から分けるタスクを開くと、発言の 1 行目が題になっている
         await page.goto("/staff/president?tab=talk");
-        await page.getByRole("log", { name: "社長との会話" }).getByRole("listitem").filter({ hasText: asked }).getByRole("link", { name: "分けるタスクを開く" }).click();
+        await page.getByRole("log", { name: "社長との会話" }).getByRole("listitem").filter({ hasText: asked }).getByRole("link", { name: "タスクを開く" }).click();
         await expect(page.getByRole("heading", { level: 2, name: asked })).toBeVisible();
 
         // 目標の画面で、割り振られたタスクは通しの目標の、受け付けの分けるタスクは受け付けの完了の列に出る

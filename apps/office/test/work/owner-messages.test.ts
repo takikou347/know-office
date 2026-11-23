@@ -82,6 +82,15 @@ async function say(body: string): Promise<{ status: number; data: z.infer<typeof
 }
 
 /**
+ * タスクにできず、今の呼び出しにも渡せなかった発言を置く。話しかけのルートは走っていない社員への発言をタスクにするので、発言だけを足す
+ * @param body 本文
+ * @returns 足した発言
+ */
+async function left(body: string): Promise<z.infer<typeof Listed>> {
+  return Listed.parse(await appendMessage(gate.env, { staffId: "builder", sender: "owner", body, nodeId: null, traceId: null }, clock));
+}
+
+/**
  * 会話を新しい順に読む
  * @returns メッセージ
  */
@@ -168,8 +177,9 @@ describe("オーナーの発言を渡す", () => {
     expect(gate.live.published).toContainEqual({ type: "message_delivered", delivery: { id: sent.data.id, via: "run", at: new Date(clock.now()).toISOString(), taskId: null } });
   });
 
-  it("タスクの外で話しかけて次のタスクで渡す", async () => {
-    const sent = await say("次は記録の画面を先に");
+  it("渡していない発言は次のタスクで渡す", async () => {
+    // タスクにできず、今の呼び出しにも渡せなかった発言
+    const sent = { data: await left("次は記録の画面を先に") };
     expect(sent.data).toMatchObject({ delivery: null, deliveredAt: null });
     expect(gate.workspaces.builder.messages).toBeUndefined();
     expect((await listed())[0]).toMatchObject({ delivery: null, deliveredAt: null });
@@ -242,9 +252,9 @@ describe("オーナーの発言を渡す境目", () => {
 
   it("本文は D1 の頭の 2,000 字だけを渡し、R2 に置いた長い発言には続きの在りかを書き添える", async () => {
     const exact = "😀".repeat(2000);
-    await say(exact);
+    await left(exact);
     clock.advance(1000);
-    await say(`${"あ".repeat(2000)}い`);
+    await left(`${"あ".repeat(2000)}い`);
     await seedTask(TASK, "勤怠の表を作る");
     await clockIn();
     const { prompt } = await takeAndStart();

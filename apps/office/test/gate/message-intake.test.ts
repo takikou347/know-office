@@ -3,7 +3,7 @@ import type { StaffJob } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { appendMessage } from "../../src/gate/routes/messages.ts";
-import { intakeMessage } from "../../src/gate/work/loop.ts";
+import { intakeMessage } from "../../src/gate/work/intake.ts";
 import { startRun } from "../../src/gate/work/run.ts";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
@@ -40,10 +40,12 @@ const RunCall = z.object({ prompt: z.string() }).loose();
  * オーナーが話しかける
  * @param body 本文
  * @param staffId 社員 ID
+ * @param serviceId 頼みを入れるサービス。省くと office
  * @returns 返事のステータスと data
  */
-async function say(body: string, staffId: StaffJob = "president"): Promise<{ status: number; data: z.infer<typeof Sent> }> {
-  const res = await gate.request(`/api/v1/staff/${staffId}/messages`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ body }) });
+async function say(body: string, staffId: StaffJob = "president", serviceId?: string): Promise<{ status: number; data: z.infer<typeof Sent> }> {
+  const input = serviceId === undefined ? { body } : { body, serviceId };
+  const res = await gate.request(`/api/v1/staff/${staffId}/messages`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(input) });
   const json: unknown = await res.json();
   return { status: res.status, data: res.ok ? z.object({ data: Sent }).loose().parse(json).data : Sent.parse({ id: "", delivery: null, deliveredAt: null, taskId: null, orders: [] }) };
 }
@@ -199,10 +201,22 @@ describe("会話と配信", () => {
     expect(await gate.staff.president.book.status(clock.now())).toMatchObject({ nodeId: sent.data.taskId });
   });
 
-  it("社長でない社員への発言はタスクにしない", async () => {
-    const sent = await say("次は記録の画面を先に", "builder");
-    expect(sent.data).toMatchObject({ delivery: null, taskId: null });
-    expect(await rows("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 0 }]);
+  it("手の空いた社員への発言は、その社員のタスクになる", async () => {
+    const built = await say("記録の画面の表を月ごとにして", "builder");
+    const read = await say("README の古い所を調べて", "reviewer");
+    expect([built.data.delivery, read.data.delivery]).toEqual(["task", "task"]);
+    expect(await rows("SELECT assignee, task_kind, scope, priority FROM nodes WHERE kind = 'task' ORDER BY assignee")).toEqual([
+      { assignee: "builder", task_kind: "build", scope: "office", priority: 0 },
+      { assignee: "reviewer", task_kind: "content", scope: "office", priority: 0 },
+    ]);
+  });
+
+  it("サービスを選んだ頼みは、そのサービスの受け付けに入る", async () => {
+    await d1.DB.prepare("INSERT INTO services (id, name, kind, stage, created_at) VALUES ('019a7b00-0000-7000-8000-0000000000c1', 'ui', 'library', 'service', 0)").run();
+    const sent = await say("ボタンの色を直して", "builder", "019a7b00-0000-7000-8000-0000000000c1");
+    expect(sent.data.delivery).toBe("task");
+    expect(await rows("SELECT n.scope, p.source FROM nodes n JOIN nodes p ON p.id = n.parent_id WHERE n.id = ?", sent.data.taskId)).toEqual([{ scope: "019a7b00-0000-7000-8000-0000000000c1", source: "intake" }]);
+    expect((await say("無いサービス", "builder", "019a7b00-0000-7000-8000-0000000000c2")).status).toBe(422);
   });
 
   it("止めた社長は 409 で、タスクも印も足さない", async () => {

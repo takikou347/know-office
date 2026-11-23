@@ -1,7 +1,8 @@
 // 目的からタスクまでの木とタスクの繰り返し。社長が分け、開発担当が取り、レビュー担当の承認で main に入るまで (タスクとレビューの 3.1)
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { finishTask, intakeTask, pullNext, type TaskBook } from "../../src/gate/work/loop.ts";
+import { intakeTask } from "../../src/gate/work/intake.ts";
+import { finishTask, pullNext, type TaskBook } from "../../src/gate/work/loop.ts";
 import { createNode, findNode, recordsOf } from "../../src/gate/work/nodes.ts";
 import { taskPrompt } from "../../src/gate/work/run.ts";
 import { api, at, advance, clockIn, idOf, purposeAndGoal, REPO, rows, staffOf, tool, useWork, type WorkWorld } from "../helpers/work.ts";

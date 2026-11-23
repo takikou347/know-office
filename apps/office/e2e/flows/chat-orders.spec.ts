@@ -5,7 +5,7 @@ import { FAKES } from "../helpers/fakes.ts";
 import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
 import { ownerPasskey } from "./helpers/staff.ts";
-import { sayToReviewer } from "./helpers/staff-work.ts";
+import { dropTodos, sayToReviewer } from "./helpers/staff-work.ts";
 import { cancelCard, editCard, saveCard } from "./helpers/screen.ts";
 
 /**
@@ -71,6 +71,11 @@ function shortToday(): string {
   return `${String(Number(m))}/${String(Number(d))}`;
 }
 
+// 手の空いたレビュー担当への発言はタスクになるので、通しの後に待ちの物を見送りにする
+test.afterEach(async ({ page }) => {
+  await dropTodos(page, "reviewer");
+});
+
 test.describe("オーナーの指示に合わせる", () => {
   test("会話の言葉で休みにする", async ({ page }) => {
     cancelLeftOrders("reviewer");
@@ -124,7 +129,7 @@ test.describe("オーナーの指示に合わせる", () => {
     const before = await extracted();
     const said = `閉じた時の休み ${String(Date.now())}`;
     const bubble = await sayToReviewer(page, `今日は休みにして ${said}`);
-    await expect(bubble.getByText("次のタスクで渡します").or(bubble.getByText("社員に渡しました"))).toBeVisible();
+    await expect(bubble.getByText(/^(タスクにしました|社員に渡しました)$/)).toBeVisible();
     await expect(bubble.getByText("を休みにしました")).toHaveCount(0);
     // ゲートウェイは抜き出しのために Claude を呼ばない
     expect(await extracted()).toBe(before);

@@ -1,16 +1,12 @@
 // タスクの繰り返し。社員が自分の山から 1 つ取り、空なら上司に求め、終えたら次を取る (タスクとレビューの 3.1)
 import type { D1Database } from "@cloudflare/workers-types";
-import { AppError, headChars, jstClock, jstDay, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
+import { AppError, jstDay, type ReleaseCondition, type ReviewFileStatus, StaffId, type StaffStatus, type StaffTask, type WorkResult } from "@know-office/core";
 import { and, asc, desc, eq, exists, gte, inArray, not, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { approvals, nodes, staff, workEntries } from "../db/main.ts";
 import { type DevIssues, UNCONNECTED_DEV_ISSUES } from "../devloop/dev-issues.ts";
 import type { Bindings, Staff } from "../env.ts";
-import { insertWhenStatement } from "../db/when.ts";
-import { announce } from "../live/publish.ts";
-import { clockAt } from "./attendance.ts";
-import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, newNodeRow, type NodeRow, recordCreated, revertNode } from "./nodes.ts";
-import { pickStaff } from "./roster.ts";
+import { type Actor, appendNodeEvent, createNode, findNode, intakeProject, moveNode, type NodeRow, revertNode } from "./nodes.ts";
 
 /** 2 つのコミットの間で変わった 1 ファイル。patch は統一形式の差分の本文で、GitHub が大きすぎて返さない時は null */
 export type ChangedFile = { path: string; previousPath?: string; status: ReviewFileStatus; patch: string | null };
@@ -445,94 +441,4 @@ export async function finishTask(env: Bindings, staffId: string, nodeId: string,
   if ((await moveNode(env.DB, row, "done", now)) === null) throw new AppError("conflict", "タスクはもう変わった");
   await appendNodeEvent(env, { nodeId, staffId, kind: "finished", detail: {} }, { by: staffId, now });
   await leaveTask(env, staffId, "done", now);
-}
-
-/** 受け付ける選んだリポジトリの Issue。オーナーの発言は intakeMessage で受ける */
-export type Intake = { scope: string; title: string; body: string; source: "issue"; issueNumber: number };
-
-/**
- * Issue を、受け付けのプロジェクトの下に社長が分けるタスクとして足す
- * @param env バインディング
- * @param input 受け付ける物
- * @param now 今の時刻
- * @returns 足したタスクの ID
- */
-export async function intakeTask(env: Bindings, input: Intake, now: number): Promise<string> {
-  const actor: Actor = { by: "github", now };
-  const project = await intakeProject(env, input.scope, actor);
-  const row = await createNode(
-    env,
-    { kind: "task", parentId: project.id, scope: input.scope, title: input.title, body: input.body, taskKind: "plan", assignee: await pickStaff(env.DB, "president"), source: input.source, issueNumber: input.issueNumber },
-    actor,
-  );
-  // 勤務時間外には呼び出さず、手の空いた社長が次に取る
-  if (row.assignee !== null) await notifyStaff(env, row.assignee, now, false);
-  return row.id;
-}
-
-/** 発言から作るタスクの題の長さの上限 (コードポイント) */
-const INTAKE_TITLE_CHARS = 80;
-
-/** 発言のタスクの優先。オーナーの言葉を、山が空の時の分けるタスクや Issue の物 (100) より先に取らせる */
-const INTAKE_PRIORITY = 0;
-
-/**
- * 発言の最初の空でない行の頭から、タスクの題を作る
- * @param body 発言の本文
- * @returns 題
- */
-function intakeTitle(body: string): string {
-  const line = body.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
-  return line === "" ? "オーナーの発言" : headChars(line, INTAKE_TITLE_CHARS);
-}
-
-/**
- * 社長への発言を、受け付けのプロジェクトの下に社長が分けるタスクとして足し、同じバッチで渡した印 task を付ける。
- * 同じ発言のタスクか、渡した印 (呼び出しの頭で先に渡った物) がもうあれば何も足さない
- * @param env バインディング
- * @param message 発言の ID と時刻と本文
- * @param message.id 発言 ID
- * @param message.at 発言の時刻
- * @param message.body 本文
- * @param now 今の時刻
- * @param traceId 話しかけた要求の traceId
- * @returns 足したタスクの ID。足さなかった時は null
- */
-export async function intakeMessage(env: Bindings, message: { id: string; at: number; body: string }, now: number, traceId?: string): Promise<string | null> {
-  const actor: Actor = { by: "owner", now, traceId };
-  const project = await intakeProject(env, "office", actor);
-  const source = `chat:${message.id}`;
-  const row = await newNodeRow(
-    env,
-    {
-      kind: "task",
-      parentId: project.id,
-      scope: "office",
-      title: intakeTitle(message.body),
-      body: `オーナーの発言 (日本時間 ${jstDay(message.at)} ${jstClock(message.at)})。読んでタスクに分け、山に足す。\n\n${message.body}`,
-      taskKind: "plan",
-      assignee: await pickStaff(env.DB, "president"),
-      priority: INTAKE_PRIORITY,
-      source,
-    },
-    actor,
-  );
-  // タスクと印を 1 回のバッチで書き、片方だけを残さない。呼び出しの頭が先に印を付けた発言は、社長がもう読んだのでタスクにしない
-  const [added] = await env.DB.batch([
-    insertWhenStatement(
-      env.DB,
-      nodes,
-      row,
-      sql`NOT EXISTS (SELECT 1 FROM ${nodes} WHERE ${nodes.source} = ${source}) AND NOT EXISTS (SELECT 1 FROM message_deliveries WHERE message_id = ${message.id})`,
-    ),
-    env.DB.prepare(
-      "INSERT INTO message_deliveries (message_id, staff_id, node_id, via, delivered_at) SELECT ?, ?, ?, 'task', ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ?) ON CONFLICT(message_id) DO NOTHING",
-    ).bind(message.id, row.assignee, row.id, now, row.id),
-  ]);
-  if (added?.meta.changes !== 1) return null;
-  await recordCreated(env, row, actor);
-  await announce(env, { type: "message_delivered", delivery: { id: message.id, via: "task", at: new Date(now).toISOString(), taskId: row.id } }, clockAt(now));
-  // 勤務時間外には呼び出さず、手の空いた社長が次に取る
-  if (row.assignee !== null) await notifyStaff(env, row.assignee, now, false, traceId);
-  return row.id;
 }

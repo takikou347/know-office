@@ -67,22 +67,25 @@ test.describe("オーナーの発言を渡す", () => {
     }
   });
 
-  test("タスクの外で話しかけて次のタスクで渡す", async ({ page }) => {
-    // タスクの外で話しかけて次のタスクを取ると「次のタスクの頭で渡しました」と出る
+  test("手の空いた社員への発言は、その社員のタスクになる", async ({ page }) => {
+    // 手の空いたレビュー担当に話しかけると、その場でレビュー担当のタスクになり、レビュー担当が取って発言を本文で受ける
     test.slow();
     await openTree(page);
     const restore = await clockIn(page, "reviewer");
     try {
-      const said = `タスクの外の話しかけ ${String(Date.now())}`;
-      const bubble = await sayToReviewer(page, said);
-      await expect(bubble.getByText("次のタスクで渡します")).toBeVisible();
       await scriptFinish(page);
-      await page.goto("/goals");
-      const nodeId = await addTask(page, `次のタスク ${String(Date.now())}`, "レビュー担当");
-      await finishedBy(page, nodeId);
+      const said = `手の空いた社員への頼み ${String(Date.now())}`;
+      const bubble = await sayToReviewer(page, said);
+      await expect(bubble.getByText("タスクにしました")).toBeVisible();
+      const link = bubble.getByRole("link", { name: "タスクを開く" });
+      const href = (await link.getAttribute("href")) ?? "";
+      const taskId = href.split("/").at(-1) ?? "";
+      expect(href).toBe(`/staff/reviewer/tasks/${taskId}`);
+      await finishedBy(page, taskId);
       expect(await claudeReceived(page, said)).toBe(true);
-      await page.goto("/staff/reviewer?tab=talk");
-      await expect(bubble.getByText("次のタスクの頭で渡しました")).toBeVisible();
+      // 会話の道から開くと、発言の 1 行目が題のタスクが出る
+      await link.click();
+      await expect(page.getByRole("heading", { level: 2, name: said })).toBeVisible();
     } finally {
       await restore();
     }

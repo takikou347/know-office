@@ -94,6 +94,7 @@ export const CreateMessageInput = z
       .refine((v) => codePoints(v) >= 1 && codePoints(v) <= MESSAGE_MAX_CHARS, { message: `1 字から ${String(MESSAGE_MAX_CHARS)} 字まで` })
       .openapi({ minLength: 1, maxLength: MESSAGE_MAX_CHARS }),
     nodeId: z.uuid().optional().openapi({ description: "UUID v7" }),
+    serviceId: z.uuid().optional().openapi({ description: "頼みを入れるサービスの ID。省くと office の受け付けに入れる" }),
   })
   .strict()
   .meta({ id: "CreateMessageInput" });

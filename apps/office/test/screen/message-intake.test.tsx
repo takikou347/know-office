@@ -25,23 +25,25 @@ function draw(props: Parameters<typeof OwnerBody>[0]): string {
   );
 }
 
-describe("社長が分けるタスクにした発言の表示", () => {
+describe("タスクにした発言の表示", () => {
   it("タスクにした発言は印とタスクの詳細への道を出す", () => {
     const html = draw({ staff: PRESIDENT, body: "勤怠を週ごとにも見たい", delivery: { via: "task", taskId: TASK }, orders: [] });
-    expect(html).toContain("社長のタスクにしました");
+    expect(html).toContain("タスクにしました");
     expect(html).toContain(`href="/staff/president/tasks/${TASK}"`);
-    expect(html).toContain("分けるタスクを開く");
+    expect(html).toContain("タスクを開く");
+    // 社長でない社員のタスクは、その社員のタスクを開く
+    expect(draw({ staff: REVIEWER, body: "README を調べて", delivery: { via: "task", taskId: TASK }, orders: [] })).toContain(`href="/staff/reviewer/tasks/${TASK}"`);
   });
 
   it("ほかの道の発言には道を出さない", () => {
     const html = draw({ staff: REVIEWER, body: "テストも足して", delivery: { via: "run", taskId: null }, orders: [] });
     expect(html).toContain("社員に渡しました");
-    expect(html).not.toContain("分けるタスクを開く");
+    expect(html).not.toContain("タスクを開く");
     expect(draw({ staff: REVIEWER, body: "次は記録", delivery: null, orders: [] })).toContain("次のタスクで渡します");
   });
 
-  it("社長の会話の説明は、走っていない時にタスクにする事を伝える", () => {
-    expect(talkHint(PRESIDENT)).toBe("社長が作業中なら今の作業に渡します。作業していない時は、社長が分けるタスクとして仕事の山に足します。渡すまで最長 1 分かかります");
-    expect(talkHint(REVIEWER)).toBe("タスク中なら今の作業に渡します。タスクの外なら次のタスクの頭で渡します。渡すまで最長 1 分かかります");
+  it("会話の説明は、走っていない時にタスクにする事を伝える", () => {
+    expect(talkHint(PRESIDENT)).toBe("頼みたい事をそのまま書いてください。社長が作業していなければタスクにして、タスクのタブに足します。作業中なら今の作業に渡します");
+    expect(talkHint(REVIEWER)).toBe("頼みたい事をそのまま書いてください。レビュー担当が作業していなければタスクにして、タスクのタブに足します。作業中なら今の作業に渡します");
   });
 });
