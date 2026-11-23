@@ -12,8 +12,8 @@ function partTitles(html: string): string[] {
   return [...html.matchAll(/<h2[^>]*>(.*?)<\/h2>/g)].map((m) => m[1] ?? "");
 }
 
-describe("通知と手で止めるボタン", () => {
-  it("ハーネスの画面は、上から今止まっている物、基準の設定、止めた記録、学びの順に並ぶ", async () => {
+describe("ハーネスの画面", () => {
+  it("上から並ぶ", async () => {
     const html = await renderAll(<App url="/guard" />);
     expect(partTitles(html)).toEqual(["今止まっている物", "基準の設定", "止めた記録", "学び"]);
   });

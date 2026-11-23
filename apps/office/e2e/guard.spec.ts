@@ -69,8 +69,8 @@ test.describe("通知と手で止めるボタン", () => {
 });
 
 // 空の時の文。行もデータも無い時は、どの表も「〜はありません」の形で出す (自動停止の 3.6)
-test.describe("止めた記録", () => {
-  test("止めた記録も学びも無い時は、どの部分にもデータが無い事を正しい日本語で出す", async ({ page }) => {
+test.describe("ハーネスの画面", () => {
+  test("空の時の文", async ({ page }) => {
     const meta = { traceId: "0".repeat(32) };
     await page.route(
       (url) => url.pathname === "/api/v1/guard/state",

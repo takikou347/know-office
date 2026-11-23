@@ -41,7 +41,7 @@ describe("画面", () => {
 
   it("セキュリティと設定は、入口を呼ぶ口が無ければ、仮のデータを出さず読めなかった事を出す", async () => {
     const guard = await renderAll(<App url="/guard" />);
-    expect(guard).toContain("止めている物を読めませんでした");
+    expect(guard).toContain("今止まっている物を読めませんでした");
     expect(guard).toContain("止めた記録を読めませんでした");
     expect(guard).toContain("基準を読めませんでした");
     const settings = await renderAll(<App url="/settings" />);

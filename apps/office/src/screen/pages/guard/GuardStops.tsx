@@ -62,8 +62,8 @@ export function StoppedList({ tick, onChanged }: GuardStopsProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<string>();
   const [failure, setFailure] = useState<Failed>();
-  if (state.state === "loading") return <p role="status">止めている物を読んでいます</p>;
-  if (state.state === "failed") return <FailedAlert title="止めている物を読めませんでした" failure={state} />;
+  if (state.state === "loading") return <p role="status">今止まっている物を読んでいます</p>;
+  if (state.state === "failed") return <FailedAlert title="今止まっている物を読めませんでした" failure={state} />;
 
   const resume = async (stopId: string, name: string, scope: string) => {
     if (!api) return;
