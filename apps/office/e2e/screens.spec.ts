@@ -40,8 +40,8 @@ test.describe("画面の一覧", () => {
     // ログインした後に開く入口の道は / で、ダッシュボードを出し、切り替えでも今いる所にする
     await page.goto("/");
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: "ダッシュボード" })).toBeVisible();
-    await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/ダッシュボード/);
+    await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
+    await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/ホーム/);
   });
 });
 
@@ -73,7 +73,7 @@ test.describe("画面の一覧", () => {
     await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
     // 同じ社員とタスクの画面のまま、右にレビューが開く
     await expect(page).toHaveURL(new RegExp(`${REVIEW_PATH}$`));
-    await expect(page.getByRole("heading", { level: 1, name: "社員と仕事" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "社員" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
     await expect(page.getByRole("button", { name: "承認する" })).toBeVisible();
     await expect(page.getByRole("button", { name: "差し戻す" })).toBeVisible();
@@ -85,7 +85,7 @@ for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", REVIEW_PATH]
   test(`${path} が横にはみ出さない`, async ({ page }) => {
     await stubReview(page);
     await page.goto(path);
-    await expect(page.getByRole("heading", { level: 1, name: "社員と仕事" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "社員" })).toBeVisible();
     // 勤怠の表は記録を読み終えてから幅を測る
     if (path.includes("attendance")) await expect(page.getByText(/出勤 9:00/)).toBeVisible();
     else await expect(page.locator(".ki-diff").first()).toBeVisible();
@@ -220,13 +220,13 @@ test.describe("設定と記録の置き場を分ける", () => {
 test("画面を移ると、題が変わり、中身に移る", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("main").getByRole("link", { name: /開発担当/ }).first().click();
-  await expect(page).toHaveTitle("社員と仕事 - know-office");
+  await expect(page).toHaveTitle("社員 - know-office");
   await expect(page.getByRole("main")).toBeFocused();
 });
 
 test("画面を移った直後に Tab を押しても、中身の先頭から進む", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "ダッシュボード" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
   // 描き直しを待たずに確かめる。次の描画まで中身に移らないと、その間に押した Tab の行き先が、後から中身に戻される
   const active = await page.evaluate(async () => {
     const link = [...document.querySelectorAll<HTMLAnchorElement>('nav a[href="/staff"]')].find((a) => a.getClientRects().length > 0);
@@ -236,14 +236,14 @@ test("画面を移った直後に Tab を押しても、中身の先頭から進
     for (let n = 0; document.title === before && n < 1000; n++) await Promise.resolve();
     return { tag: document.activeElement?.tagName, title: document.title };
   });
-  expect(active).toEqual({ tag: "MAIN", title: "社員と仕事 - know-office" });
+  expect(active).toEqual({ tag: "MAIN", title: "社員 - know-office" });
 });
 
 test("ハッシュだけが違う同じ道へ移っても中身に移り、その後のタブの切り替えでは移らない", async ({ page }) => {
   // 幅が狭いと社員の画面に一覧が出ないので、どの幅でも出る下のナビゲーションから同じ道へ移る
   await page.goto("/staff#x");
   const main = page.getByRole("main");
-  await page.locator("nav:visible").getByRole("link", { name: "社員と仕事" }).click();
+  await page.locator("nav:visible").getByRole("link", { name: "社員" }).click();
   await expect(page).toHaveURL(/\/staff$/);
   await expect(main).toBeFocused();
   await main.getByRole("link", { name: /開発担当/ }).first().click();
@@ -262,8 +262,8 @@ test("画面を移ると、中身の先頭に戻り、中身に Tab で入れる
   const main = page.getByRole("main");
   await main.evaluate((el) => el.scrollTo(0, el.scrollHeight));
   expect(await main.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  await page.locator("nav:visible").getByRole("link", { name: "守り" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "守り" })).toBeVisible();
+  await page.locator("nav:visible").getByRole("link", { name: "ハーネス" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "ハーネス" })).toBeVisible();
   // 守りの画面は開いた時に読むので、読み終えて中身が長くなってから確かめる
   await expect(main.getByText("画面を読んでいます")).toBeHidden();
   expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
@@ -274,7 +274,7 @@ test("画面を移ると、中身の先頭に戻り、中身に Tab で入れる
 
 test("今いる画面のリンクを押しても、履歴は積まない", async ({ page }) => {
   await page.goto("/");
-  const staffLink = page.locator("nav:visible").getByRole("link", { name: "社員と仕事" });
+  const staffLink = page.locator("nav:visible").getByRole("link", { name: "社員" });
   await staffLink.click();
   await expect(page).toHaveURL(/\/staff$/);
   await staffLink.click();

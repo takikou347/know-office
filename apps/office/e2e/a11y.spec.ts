@@ -31,12 +31,12 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   // 動きを減らす設定では、オフィスは歩かずに置き換える部屋になる
   { name: "オフィスの動きを減らした部屋", path: "/office", heading: "オフィス", ready: "社員を押すと、その社員の会話が開きます", mock: (page) => page.emulateMedia({ reducedMotion: "reduce" }) },
   { name: "その他", path: "/more", heading: "その他" },
-  { name: "社員の会話", path: "/staff/builder", heading: "社員と仕事" },
-  { name: "社員の仕事の山", path: "/staff/builder?tab=tasks", heading: "社員と仕事" },
+  { name: "社員の会話", path: "/staff/builder", heading: "社員" },
+  { name: "社員の仕事の山", path: "/staff/builder?tab=tasks", heading: "社員" },
   // 勤怠は records.setup.ts が手元の D1 に置いた日を開き、表を読み終えてから掛ける
-  { name: "社員の勤怠", path: "/staff/builder?tab=attendance&day=2026-11-13", heading: "社員と仕事", ready: "出勤 9:00" },
+  { name: "社員の勤怠", path: "/staff/builder?tab=attendance&day=2026-11-13", heading: "社員", ready: "出勤 9:00" },
   // 入口にあるレビューは、境目のモックの返事で最初のファイルの変更を読み終えてから掛ける
-  { name: "入口のレビュー", path: REVIEW_PATH, heading: "社員と仕事", ready: "const empty = 0;", mock: async (page) => void (await stubReview(page)) },
+  { name: "入口のレビュー", path: REVIEW_PATH, heading: "社員", ready: "const empty = 0;", mock: async (page) => void (await stubReview(page)) },
   // サービスの様子は、入口から読み終えてから掛ける
   { name: "サービスの様子", path: "/services/00000000-0000-7000-8000-000000000101", heading: "アイデアとサービス", ready: "公開した版" },
   // サービスの Issue のタブは、入口から読み終えてから掛ける。見本のサービスには設計書から作った Issue が無いので、空の木
@@ -54,7 +54,7 @@ const pages: readonly { name: string; path: string; heading: string; ready?: str
   { name: "記録のサービスごとの内訳", path: "/records", heading: "記録", ready: "CSV で出す" },
   { name: "目的と組織図の木", path: "/goals", heading: "目的と組織図", ready: "目標: know-office を動かし始める" },
   // 守りの効き目と蒸留した学びは、表を読み終えてから掛ける
-  { name: "守りの効き目と蒸留した学び", path: "/guard", heading: "守り", ready: "入れる前の 7 日", mock: (page) => withGuardLearning(page) },
+  { name: "守りの効き目と蒸留した学び", path: "/guard", heading: "ハーネス", ready: "入れる前の 7 日", mock: (page) => withGuardLearning(page) },
   // 入れた拡張の画面は、メモを読み終えてから掛ける
   { name: "入れた拡張の画面 (メモ)", path: "/ext/sample-notes", heading: "メモ", ready: "社員は note_read で読みます", mock: withSampleNotes },
 ];
@@ -156,16 +156,16 @@ test.describe("使いやすさ", () => {
     const main = page.getByRole("main");
     await stubReview(page);
     await page.goto("/");
-    await expect(h1("ダッシュボード")).toBeVisible();
+    await expect(h1("ホーム")).toBeVisible();
     // ダッシュボードは入口から読んだ物を承認を待つ物の上に足すので、読み終えて形が落ち着いてから Tab で進む
     await expect(main.getByRole("heading", { name: "社員の様子" })).toBeVisible();
     await expect(main.getByText("承認を待つ物を読んでいます")).toHaveCount(0);
 
     // 切り替えから社員と仕事へ移る。今いる所に印が付く
-    await tabTo(page, page.locator("nav:visible").getByRole("link", { name: "社員と仕事" }), webkit);
+    await tabTo(page, page.locator("nav:visible").getByRole("link", { name: "社員" }), webkit);
     await page.keyboard.press("Enter");
-    await expect(h1("社員と仕事")).toBeVisible();
-    await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/社員と仕事/);
+    await expect(h1("社員")).toBeVisible();
+    await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/社員/);
 
     // 社員を選び、仕事の山のタブを矢印で選ぶ。一覧は入口から読むので、読み終えてから Tab で進む
     await expect(main.getByRole("link", { name: /開発担当/ })).toBeVisible();

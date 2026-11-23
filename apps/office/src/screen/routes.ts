@@ -21,15 +21,15 @@ export interface Screen {
   icon: NonNullable<NavItem["icon"]>;
 }
 
-const dashboardScreen: Screen = { id: "dashboard", path: "/", label: "ダッシュボード", icon: "home" };
+const dashboardScreen: Screen = { id: "dashboard", path: "/", label: "ホーム", icon: "home" };
 
 export const screens: readonly Screen[] = [
   dashboardScreen,
-  { id: "staff", path: "/staff", label: "社員と仕事", icon: "users" },
+  { id: "staff", path: "/staff", label: "社員", icon: "users" },
   { id: "goals", path: "/goals", label: "目的と組織図", icon: "flag" },
   { id: "office", path: "/office", label: "オフィス", icon: "buildings" },
   { id: "services", path: "/services", label: "アイデアとサービス", icon: "lightbulb" },
-  { id: "guard", path: "/guard", label: "守り", icon: "stop" },
+  { id: "guard", path: "/guard", label: "ハーネス", icon: "stop" },
   { id: "records", path: "/records", label: "記録", icon: "chart-bar" },
   { id: "settings", path: "/settings", label: "設定", icon: "settings" },
 ];

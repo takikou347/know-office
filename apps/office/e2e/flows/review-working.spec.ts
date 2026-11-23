@@ -43,7 +43,7 @@ test.describe("know-office の中で確認する", () => {
 
       // 社員と仕事の画面からタスクを開くと、作業中の変更が出る
       const nav = page.getByRole("navigation", { name: "画面の切り替え" }).first();
-      await nav.getByRole("link", { name: "社員と仕事" }).click();
+      await nav.getByRole("link", { name: "社員" }).click();
       await page.getByRole("link", { name: /開発担当/ }).first().click();
       await page.getByRole("tab", { name: "仕事の山" }).click();
       await page.getByRole("link", { name: /作業中の勤怠の直し/ }).click();

@@ -25,7 +25,7 @@ describe("画面", () => {
   it("道に合わせて画面の題を出し、知らない道はダッシュボードにする", async () => {
     expect(await renderAll(<App url="/guard" />)).toContain("止めた記録");
     expect(await renderAll(<App url="/more" />)).toContain("その他の画面");
-    expect(await renderAll(<App url="/nowhere" />)).toContain('<h1 class="ki-appbar__title">ダッシュボード</h1>');
+    expect(await renderAll(<App url="/nowhere" />)).toContain('<h1 class="ki-appbar__title">ホーム</h1>');
     expect(await renderAll(<App url="/nowhere" />)).toContain("承認を待つ物");
   });
 

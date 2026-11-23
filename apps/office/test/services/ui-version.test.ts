@@ -8,7 +8,7 @@ import { z } from "zod";
 const UI_PACKAGES = ["knowidea-css", "knowidea-icons", "knowidea-tokens", "knowidea-ui"] as const;
 
 /** npm の登録所が knowidea-ui の 4 つに返した、出したバージョンの一覧の記録。本物の npm は呼ばない。上げる時は出した後にここへ足す */
-const PUBLISHED = ["0.11.0", "0.12.0", "0.12.1", "0.12.2", "0.13.0", "0.14.0", "0.15.0"] as const;
+const PUBLISHED = ["0.11.0", "0.12.0", "0.12.1", "0.12.2", "0.13.0", "0.14.0", "0.15.0", "0.16.0"] as const;
 
 /** npm に出たバージョンの形。固定の x.y.z だけ */
 const EXACT = /^\d+\.\d+\.\d+$/;

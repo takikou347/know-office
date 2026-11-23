@@ -7,6 +7,7 @@ import { useRevealFocus } from "./parts/focus.ts";
 import { LiveProvider } from "./parts/live.tsx";
 import { OfficeNewsFeed } from "./pages/office/news.ts";
 import { LiveNoticeBar, NoticeProvider } from "./parts/notices.tsx";
+import { ThemeToggle } from "./parts/theme.tsx";
 import { bottomCurrentOf, bottomItems, headingOf, morePath, screenOf, sideItemsWith } from "./routes.ts";
 
 export interface AppProps {
@@ -38,7 +39,7 @@ export function App({ health, url = "/", navigate = () => {}, extensions = [], t
           bottomCurrent={bottomCurrentOf(pathname, shown)}
           brand={{ name: "know-office" }}
           cspNonce={pageCspNonce()}
-          header={<AppBar title={headingOf(pathname, shown)} position="sticky" />}
+          header={<AppBar title={headingOf(pathname, shown)} position="sticky" actions={<ThemeToggle />} />}
           // 通知は開いた後にも届くので、中身の下に出す。出ても中身の上の端と見出しは動かない
           footer={<LiveNoticeBar />}
         >

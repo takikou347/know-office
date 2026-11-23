@@ -4,12 +4,12 @@ import { bottomCurrentOf, bottomItems, headingOf, moreScreens, screenOf, screens
 describe("画面の一覧", () => {
   it("8 つの画面を持ち、最初はダッシュボード", () => {
     expect(screens.map((s) => s.label)).toEqual([
-      "ダッシュボード",
-      "社員と仕事",
+      "ホーム",
+      "社員",
       "目的と組織図",
       "オフィス",
       "アイデアとサービス",
-      "守り",
+      "ハーネス",
       "記録",
       "設定",
     ]);
@@ -30,8 +30,8 @@ describe("画面の一覧", () => {
 
   it("道から画面を決め、知らない道はダッシュボードにする", () => {
     expect(screenOf("/records").label).toBe("記録");
-    expect(screenOf("/staff/builder").label).toBe("社員と仕事");
-    expect(screenOf("/nowhere").label).toBe("ダッシュボード");
+    expect(screenOf("/staff/builder").label).toBe("社員");
+    expect(screenOf("/nowhere").label).toBe("ホーム");
   });
 
   it("下の切り替えの印は、下に無い画面とその他で「その他」に付く", () => {
@@ -53,8 +53,8 @@ describe("画面の一覧", () => {
       expect(titleOf(path)).toBe("承認 - know-office");
       expect(screenOf(path).id).toBe("dashboard");
     }
-    expect(headingOf("/")).toBe("ダッシュボード");
+    expect(headingOf("/")).toBe("ホーム");
     expect(headingOf("/more")).toBe("その他");
-    expect(headingOf("/approvalsx")).toBe("ダッシュボード");
+    expect(headingOf("/approvalsx")).toBe("ホーム");
   });
 });

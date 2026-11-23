@@ -74,7 +74,7 @@ test.describe("再開", () => {
 
         // 社員と仕事の画面からレビューを開き、オーナーが承認する
         const nav = page.getByRole("navigation", { name: "画面の切り替え" }).first();
-        await nav.getByRole("link", { name: "社員と仕事" }).click();
+        await nav.getByRole("link", { name: "社員" }).click();
         await page.getByRole("link", { name: /開発担当/ }).first().click();
         await page.getByRole("tab", { name: "仕事の山" }).click();
         await page.getByRole("link", { name: /レビュー担当に聞く直し/ }).click();
@@ -90,7 +90,7 @@ test.describe("再開", () => {
         expect(calls.map((r) => r.model)).toEqual(["claude-opus-5-5"]);
 
         // セキュリティの画面の止めた記録に、レビュー担当の再開と理由が出る
-        await nav.getByRole("link", { name: "守り" }).click();
+        await nav.getByRole("link", { name: "ハーネス" }).click();
         await expect(part(page, "止めている物").getByRole("heading", { level: 3, name: `タスク ${NODE}` })).toHaveCount(0);
         // 一覧は新しい順なので、先頭が今の通しの記録
         const row = part(page, "止めた記録").getByRole("row").filter({ hasText: NODE }).first();

@@ -77,7 +77,7 @@ test.describe("速さ", () => {
     test.skip(narrow(page), WIDE_ONLY);
     const urls = recordRequests(page);
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1, name: "ダッシュボード" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
     await expect(page.getByText("入口とつながりました")).toBeVisible();
     expect(urls.filter((u) => heavy.test(u))).toEqual([]);
 

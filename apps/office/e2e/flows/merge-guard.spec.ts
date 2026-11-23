@@ -54,7 +54,7 @@ test.describe("チェックが落ちたままのマージ", () => {
 
     // 社員と仕事の画面からレビューを開き、オーナーが承認する
     const nav = page.getByRole("navigation", { name: "画面の切り替え" }).first();
-    await nav.getByRole("link", { name: "社員と仕事" }).click();
+    await nav.getByRole("link", { name: "社員" }).click();
     await page.getByRole("link", { name: /開発担当/ }).first().click();
     await page.getByRole("tab", { name: "仕事の山" }).click();
     await page.getByRole("link", { name: /チェックの落ちた直し/ }).click();
@@ -68,7 +68,7 @@ test.describe("チェックが落ちたままのマージ", () => {
     expect(requests.slice(before).filter((r) => r.route === MERGE)).toEqual([]);
 
     // セキュリティの画面の止めている物に、止めたタスクが出る
-    await nav.getByRole("link", { name: "守り" }).click();
+    await nav.getByRole("link", { name: "ハーネス" }).click();
     await expect(page.getByRole("heading", { level: 3, name: `タスク ${NODE}` })).toBeVisible();
   });
 });
