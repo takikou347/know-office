@@ -154,9 +154,8 @@ test.describe("オーナーに上げる事", () => {
   test("1 件の道を開くとその承認だけを出し、理由が空なら送れない", async ({ page }) => {
     const id = request("external_integration", "Linear", { reason: "課題を Linear に移す" });
     request("cost_increase", "R2 の容量", { reason: "記録が増えた" });
-    await page.goto("/");
-    await part(page, "承認を待つ物").getByRole("link", { name: /外部連携: Linear/ }).click();
-    await expect(page).toHaveURL(new RegExp(`/approvals/${id}$`));
+    // ホームの「承認を待つ物」はその場で決めるカードで、1 件の道へは移らない。1 件の道は社員が承認を求めた時の通知 (approval_requested) の行き先なので、その道を直に開く
+    await page.goto(`/approvals/${id}`);
     const list = part(page, "承認を待つ物").getByRole("listitem");
     await expect(list).toHaveCount(1);
     await expect(list).toContainText("外部連携: Linear");
