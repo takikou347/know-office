@@ -14,6 +14,11 @@ export default defineConfig({
   plugins: [devFakes(), zodEnglishOnly(), react(), cloudflare({ persistState: persistDir ? { path: persistDir } : true })],
   // index.html の meta と script、style に nonce の置き場を入れる。入口 (src/gate/screen-html.ts) が要求ごとの値に替える
   html: { cspNonce: CSP_NONCE_PLACEHOLDER },
+  // 画面の最初の JS (入口から import でつながる物の全部) を 1 つのファイルにまとめる。遅れて読む画面と分け合う小さな部品 (アイコン 1 個ずつなど) が
+  // 別のファイルになると、最初に 50 を超えるファイルを読み、要求ごとの往復 150 ミリ秒が積もって 4G で 2 秒を超えた (画面の全体の 3.4)。build の画面だけに掛け、Worker は替えない
+  environments: {
+    client: { build: { rolldownOptions: { output: { codeSplitting: { groups: [{ name: "initial", tags: ["$initial"] }] } } } } },
+  },
   // 遅れて読む画面 (コードの差分、オフィスの 3D) を起動の時に先に変換し、最初に開いた時の待ちを除く。CI の冷えたサーバーで e2e が待ちきれずに落ちた
   // 画面の通しでは Vite のエラーの重ね表示を出さない。重ね表示は開いている全部の画面に配られるので、Worker への中継が一時に落ちると、落ちた要求と関わらない同時の通しの画面にも出て、a11y のチェックが重ね表示の中身を拾う
   server: { warmup: { clientFiles: ["./src/screen/pages/staff/ReviewEditor.tsx", "./src/screen/pages/office/OfficeScene.tsx"] }, ...(persistDir ? { hmr: { overlay: false } } : {}) },
