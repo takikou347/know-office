@@ -184,14 +184,14 @@ test.describe("使いやすさ", () => {
     await expect(h1("社員")).toBeVisible();
     await expect(page.locator('nav:visible [aria-current="page"]')).toHaveText(/社員/);
 
-    // 社員を選び、仕事の山のタブを矢印で選ぶ。一覧は入口から読むので、読み終えてから Tab で進む
+    // 社員を選び、タスクのタブを矢印で選ぶ。一覧は入口から読むので、読み終えてから Tab で進む
     await expect(main.getByRole("link", { name: /開発担当/ })).toBeVisible();
     await tabTo(page, main.getByRole("link", { name: /開発担当/ }), webkit);
     await page.keyboard.press("Enter");
     await tabTo(page, page.getByRole("tab", { name: "会話" }), webkit);
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "タスク" })).toHaveAttribute("aria-selected", "true");
     expect(await focusProblem(page)).toBeNull();
 
     // 変更のある仕事を開き、承認を出す。仕事の山とレビューも読み終えてから進む

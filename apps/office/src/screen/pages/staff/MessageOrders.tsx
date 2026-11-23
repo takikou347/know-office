@@ -1,12 +1,11 @@
 // オーナーの発言から足した勤務の指示を、発言の下に並べて取り消せるようにする (社員と勤怠の 3.4)
 import type { MessageOrder, SkippedOrder, StaffOverview } from "@know-office/core";
+import { DAY_ORDER_KINDS } from "@know-office/core/master/day-order-kinds";
+import { labelOf } from "@know-office/core/master/master";
 import { Button, Stack } from "knowidea-ui";
 import { useContext, useState } from "react";
 import { ApiContext } from "../../api.ts";
 import { type Failed, FailedAlert, send } from "../../parts/load.tsx";
-
-/** 指示の種類の言葉 */
-const KIND_LABEL: Record<MessageOrder["kind"], string> = { extend: "延長", leave_early: "早退", off: "休み" };
 
 /**
  * YYYY-MM-DD を M/D にする
@@ -25,7 +24,7 @@ function shortDay(day: string): string {
  */
 function addedText(o: MessageOrder): string {
   if (o.until === null) return `${shortDay(o.day)} を休みにしました`;
-  return `${shortDay(o.day)} の${KIND_LABEL[o.kind]}を ${o.until} までで出しました`;
+  return `${shortDay(o.day)} の${labelOf(DAY_ORDER_KINDS, o.kind)}を登録しました。終了時刻は ${o.until} です`;
 }
 
 export interface MessageOrdersProps {
@@ -68,7 +67,7 @@ export function MessageOrders({ staff, orders }: MessageOrdersProps) {
           <Stack key={o.id} direction="row" gap={2} wrap align="center">
             <span>{o.cancelledAt !== null || cancelled.has(o.id) ? `${addedText(o)} (取り消しました)` : addedText(o)}</span>
             {o.cancelledAt === null && !cancelled.has(o.id) && api ? (
-              <Button variant="secondary" aria-label={`${KIND_LABEL[o.kind]}の指示を取り消す`} loading={busy === o.id} disabled={busy !== null} onClick={() => void cancel(o)}>
+              <Button variant="secondary" aria-label={`${labelOf(DAY_ORDER_KINDS, o.kind)}の指示を取り消す`} loading={busy === o.id} disabled={busy !== null} onClick={() => void cancel(o)}>
                 取り消す
               </Button>
             ) : null}

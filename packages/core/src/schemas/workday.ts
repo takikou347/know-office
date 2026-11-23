@@ -1,5 +1,8 @@
 // 社員と勤怠の形。社員 DO、ゲートウェイ、画面が共に使う (社員と勤怠の 2 章と 2 章、データの 2 章)
 import { z } from "./zod.ts";
+import { ATTENDANCE_KINDS } from "../master/attendance-kinds.ts";
+import { DAY_ORDER_KINDS } from "../master/day-order-kinds.ts";
+import { masterSchema } from "../master/master.ts";
 
 /** 社員の職種。職種がツール、作業の種類、割り当てを決める。社長はちょうど 1 人 */
 export const StaffJob = z.enum(["president", "builder", "reviewer"]);
@@ -20,7 +23,7 @@ export const StaffState = z.enum(["off", "working", "wrapping", "called", "stopp
 export type StaffState = z.infer<typeof StaffState>;
 
 /** 勤怠の区分。働いた時間に入るのは前の 3 つ */
-export const AttendanceKind = z.enum(["scheduled", "extension", "call", "stopped", "waiting"]);
+export const AttendanceKind = masterSchema(ATTENDANCE_KINDS);
 
 /** 勤怠の区分の型 */
 export type AttendanceKind = z.infer<typeof AttendanceKind>;
@@ -41,7 +44,7 @@ export const WorkResult = z.enum(["done", "handed_back", "stopped", "continued"]
 export type WorkResult = z.infer<typeof WorkResult>;
 
 /** その日だけの指示の種類 */
-export const OrderKind = z.enum(["extend", "leave_early", "off"]);
+export const OrderKind = masterSchema(DAY_ORDER_KINDS);
 
 /** その日だけの指示の種類の型 */
 export type OrderKind = z.infer<typeof OrderKind>;

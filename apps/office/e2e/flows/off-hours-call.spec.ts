@@ -29,7 +29,7 @@ async function setOffHoursCall(page: Page, enabled: boolean): Promise<void> {
 async function restReviewer(page: Page): Promise<void> {
   await page.goto("/staff/reviewer");
   await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "休み" }).click();
-  await page.getByRole("button", { name: "指示を出す" }).click();
+  await page.getByRole("button", { name: "変更を登録する" }).click();
   await expect(page.getByText("レビュー担当を今日は休みにしました")).toBeVisible();
   // 同じ日に流し直しても時間外の呼び出しの回数が上限に届かないよう、開発の道で数え直す。休みの日なので出勤はしない
   expect((await page.request.post("/__dev/staff/reviewer/forget-day")).status()).toBe(204);

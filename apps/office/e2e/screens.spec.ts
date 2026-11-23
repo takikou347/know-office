@@ -59,9 +59,9 @@ test("社員と仕事で、社員を選ぶと会話と勤怠の表が出る", as
   await page.getByRole("tab", { name: "勤怠" }).click();
   // 表の名前は、表を包む区画に付く
   const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
-  await expect(table.getByRole("columnheader", { name: "始めた" })).toBeVisible();
-  await expect(table.getByRole("columnheader", { name: "終えた" })).toBeVisible();
-  await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "開始" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "終了" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "タスク" })).toBeVisible();
 });
 
 test.describe("画面の一覧", () => {
@@ -69,7 +69,7 @@ test.describe("画面の一覧", () => {
     await stubReview(page);
     await page.goto("/staff");
     await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
-    await page.getByRole("tab", { name: "仕事の山" }).click();
+    await page.getByRole("tab", { name: "タスク" }).click();
     await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
     // 同じ社員とタスクの画面のまま、右にレビューが開く
     await expect(page).toHaveURL(new RegExp(`${REVIEW_PATH}$`));
@@ -96,19 +96,27 @@ for (const path of ["/staff/builder?tab=attendance&day=2026-11-13", REVIEW_PATH]
   });
 }
 
-// 3-workday の要件。狭い幅では始めた、終えた、仕事の 3 列を出し、行を開くと残りが出る。広い幅では全部の列を出す
+// 3-workday の要件。狭い幅では開始、終了、タスクの 3 列を出し、行を開くと残りが出る。広い幅では全部の列を出す
 test.describe("日ごとのタスク", () => {
+  test("日付をカレンダーで選ぶと、その日の勤怠を出す", async ({ page }) => {
+    await page.goto("/staff/builder?tab=attendance&day=2026-11-14");
+    await expect(page.getByText(/^11\/14 \(土\) 出勤/)).toBeVisible();
+    await page.getByRole("button", { name: /^日付、2026年11月14日/ }).click();
+    await page.getByRole("button", { name: /^2026年11月13日/ }).click();
+    await expect(page.getByText(/^11\/13 \(金\) 出勤 9:00/)).toBeVisible();
+  });
+
   test("スマートフォンで勤怠を見る", async ({ page }) => {
     await page.goto("/staff/builder?tab=attendance&day=2026-11-13");
     const table = page.getByRole("region", { name: "開発担当の勤怠" }).getByRole("table");
-    await expect(table.getByRole("columnheader", { name: "始めた" })).toBeVisible();
-    await expect(table.getByRole("columnheader", { name: "終えた" })).toBeVisible();
-    await expect(table.getByRole("columnheader", { name: "仕事" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "開始" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "終了" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "タスク" })).toBeVisible();
     const phone = narrow(page);
-    await expect(table.getByRole("columnheader", { name: "掛かった" })).toBeVisible({ visible: !phone });
+    await expect(table.getByRole("columnheader", { name: "所要時間" })).toBeVisible({ visible: !phone });
     if (phone) {
       await table.locator("summary", { hasText: "DiffView の行番号を直す" }).click();
-      await expect(table.getByText("掛かった 1 時間 40 分")).toBeVisible();
+      await expect(table.getByText("所要時間 1 時間 40 分")).toBeVisible();
     }
   });
 });
@@ -196,11 +204,11 @@ test("記録の内訳を読めない時は、理由と問い合わせの番号�
   await expect(alert).toContainText("0af7651916cd43dd8448eb211c80319c");
 });
 
-test("レビューから戻ると、仕事の山のタブに戻る", async ({ page }) => {
+test("レビューから戻ると、タスクのタブに戻る", async ({ page }) => {
   await stubReview(page);
   await page.goto(REVIEW_PATH);
-  await page.getByRole("link", { name: "仕事の山に戻る" }).click();
-  await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("link", { name: "タスクの一覧に戻る" }).click();
+  await expect(page.getByRole("tab", { name: "タスク" })).toHaveAttribute("aria-selected", "true");
 });
 
 test.describe("画面の一覧", () => {
@@ -211,13 +219,13 @@ test.describe("画面の一覧", () => {
     // 1 列ずつ右へ進む。社員を選ぶと一覧は隠れ、会話とタスクの列だけになる
     await page.getByRole("main").getByRole("link", { name: /開発担当/ }).click();
     await expect(page.getByRole("main").getByRole("link", { name: /レビュー担当/ })).toBeHidden();
-    await page.getByRole("tab", { name: "仕事の山" }).click();
+    await page.getByRole("tab", { name: "タスク" }).click();
     await page.getByRole("link", { name: /空の日の勤怠を 0 で出す/ }).click();
     await expect(page.getByRole("heading", { name: "空の日の勤怠を 0 で出す" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "仕事の山" })).toBeHidden();
+    await expect(page.getByRole("tab", { name: "タスク" })).toBeHidden();
     // 戻るで 1 つ前の列に戻る
-    await page.getByRole("button", { name: "仕事の山へ戻る" }).click();
-    await expect(page.getByRole("tab", { name: "仕事の山" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("button", { name: "タスクの一覧へ戻る" }).click();
+    await expect(page.getByRole("tab", { name: "タスク" })).toHaveAttribute("aria-selected", "true");
     await page.getByRole("button", { name: "社員の一覧へ戻る" }).click();
     await expect(page.getByRole("main").getByRole("link", { name: /レビュー担当/ })).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -272,7 +280,7 @@ test("ハッシュだけが違う同じ道へ移っても中身に移り、そ�
   await expect(main).toBeFocused();
   await main.getByRole("link", { name: /開発担当/ }).first().click();
   await expect(main).toBeFocused();
-  const tab = page.getByRole("tab", { name: "仕事の山" });
+  const tab = page.getByRole("tab", { name: "タスク" });
   await tab.click();
   await expect(tab).toHaveAttribute("aria-selected", "true");
   await expect(main).not.toBeFocused();

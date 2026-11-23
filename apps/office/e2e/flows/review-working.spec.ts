@@ -45,7 +45,7 @@ test.describe("know-office の中で確認する", () => {
       const nav = page.getByRole("navigation", { name: "画面の切り替え" }).first();
       await nav.getByRole("link", { name: "社員" }).click();
       await page.getByRole("link", { name: /開発担当/ }).first().click();
-      await page.getByRole("tab", { name: "仕事の山" }).click();
+      await page.getByRole("tab", { name: "タスク" }).click();
       await page.getByRole("link", { name: /作業中の勤怠の直し/ }).click();
       await expect(page.getByRole("heading", { level: 2, name: "変更のレビュー" })).toBeVisible();
       await expect(page.getByText("作業中の変更 (プルリクエストの前)")).toBeVisible();

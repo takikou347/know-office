@@ -1,4 +1,4 @@
-// 社員と仕事の画面。社員の一覧を入口から読み、会話と仕事の山と勤怠のタブ、今日だけの指示、タスクの詳細とレビューを 1 つの一覧と詳細に並べる (社員と勤怠の 3.4、社員と自動の 3.7)
+// 社員と仕事の画面。社員の一覧を入口から読み、会話とタスクと勤怠のタブ、今日だけの指示、タスクの詳細とレビューを 1 つの一覧と詳細に並べる (社員と勤怠の 3.4、社員と自動の 3.7)
 import { jstDay, Order, StaffOverview, systemClock } from "@know-office/core";
 import { EmptyState, List, ListDetail, Stack, Tabs } from "knowidea-ui";
 import { useState } from "react";
@@ -38,7 +38,7 @@ export interface StaffDetailProps {
 }
 
 /**
- * 社員 1 人の様子。今の状態とタスク、今日だけの指示、会話と仕事の山と勤怠のタブ。
+ * 社員 1 人の様子。今の状態とタスク、今日だけの指示、会話とタスクと勤怠のタブ。
  * タブは上に並ぶ今日だけの指示の一覧を読み終えてから出す。読み終えた一覧の行の数でタブの位置が変わり、押し下げてから離すまでの間に動くと押した事にならないため
  * @param props 社員、開くタブ、勤怠の日
  * @returns 様子
@@ -64,7 +64,7 @@ export function StaffDetail({ s, tab, day, navigate }: StaffDetailProps) {
           onValueChange={(v) => navigate(`/staff/${s.id}?tab=${v}`, { replace: true })}
           items={[
             { value: "talk", label: "会話", content: <Talk staff={s} /> },
-            { value: "tasks", label: "仕事の山", content: <TaskPile staff={s} /> },
+            { value: "tasks", label: "タスク", content: <TaskPile staff={s} /> },
             { value: "attendance", label: "勤怠", content: <AttendanceTable staffId={s.id} role={s.role} day={day} /> },
           ]}
         />
@@ -103,7 +103,7 @@ export function StaffPage({ pathname, query, navigate }: StaffPageProps) {
       detailLabel="社員の様子"
       showDetail={selected !== undefined}
       onBack={() => navigate(inTask && selected ? `/staff/${selected.id}?tab=tasks` : "/staff")}
-      backLabel={inTask ? "仕事の山へ戻る" : "社員の一覧へ戻る"}
+      backLabel={inTask ? "タスクの一覧へ戻る" : "社員の一覧へ戻る"}
       list={
         loaded.state === "failed" ? (
           <FailedAlert title="社員を読めませんでした" failure={loaded} />
@@ -126,7 +126,7 @@ export function StaffPage({ pathname, query, navigate }: StaffPageProps) {
         )
       }
       detail={selected ? detail(selected) : undefined}
-      empty={<EmptyState title="社員を選ぶ">選ぶと、会話と仕事の山と勤怠が出ます</EmptyState>}
+      empty={<EmptyState title="社員を選ぶ">選ぶと、会話とタスクと勤怠が出ます</EmptyState>}
     />
   );
 }

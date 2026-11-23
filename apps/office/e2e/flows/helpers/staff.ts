@@ -213,3 +213,20 @@ export async function idleStaff(page: Page, staffId: string): Promise<void> {
   await scriptReply(page, staffId, [{ type: "text", text: "通しの前に終えた" }], "end_turn");
   await expect.poll(held, { timeout: 60_000 }).toBeNull();
 }
+
+/**
+ * 時と分の選ぶ欄で時刻を選ぶ
+ * @param page 開いているページ
+ * @param label 欄の名前。時は「<名前>の時」、分は「<名前>の分」
+ * @param hhmm 選ぶ時刻 HH:MM
+ */
+export async function chooseTime(page: Page, label: string, hhmm: string): Promise<void> {
+  for (const [part, value] of [["時", hhmm.slice(0, 2)], ["分", hhmm.slice(3, 5)]] as const) {
+    const box = page.getByRole("main").getByRole("combobox", { name: `${label}の${part}` });
+    await box.click();
+    await page.getByRole("option", { name: value, exact: true }).click();
+    // 選び肢の一覧が閉じ切る前に次の欄を押すと、閉じる途中の一覧が押した事を受けるので、選んだ値が出て一覧が消えるまで待つ
+    await expect(box).toHaveText(value);
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+  }
+}

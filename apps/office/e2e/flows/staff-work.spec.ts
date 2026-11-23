@@ -4,7 +4,7 @@ import { expect, test } from "../helpers/test.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
 import { part, post } from "./helpers/screen.ts";
 import { FAKES } from "../helpers/fakes.ts";
-import { clockIn, ownerPasskey, scriptReply, staffState } from "./helpers/staff.ts";
+import { chooseTime, clockIn, ownerPasskey, scriptReply, staffState } from "./helpers/staff.ts";
 import { CARRY_TITLE, claudeReceived, column, dropLeftovers, NodeStatus, NodeVersion, PROJECT, Runs, Trees, addTask, finishedBy, openTree, pick, sayToReviewer, scriptFinish, scriptWork, taskCard } from "./helpers/staff-work.ts";
 
 test.describe("タスクの繰り返し", () => {
@@ -274,9 +274,9 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
     // 社員と仕事の画面のボタンで早退を出す
     await page.goto("/staff/reviewer");
     await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "早退" }).click();
-    await page.getByLabel("終わりの時刻").fill(until.hhmm);
-    await page.getByRole("button", { name: "指示を出す" }).click();
-    await expect(page.getByText(`レビュー担当に今日の早退を ${until.hhmm} までで出しました`)).toBeVisible();
+    await chooseTime(page, "終了時刻", until.hhmm);
+    await page.getByRole("button", { name: "変更を登録する" }).click();
+    await expect(page.getByText(`レビュー担当の今日の早退を登録しました。終了時刻は ${until.hhmm} です`)).toBeVisible();
 
     // 早退の時刻を過ぎてチェックポイントに届くと退勤し、タスクは待ちに戻る
     await expect.poll(() => staffState(page, "reviewer"), { timeout: until.at - Date.now() + 90_000 }).toBe("off");
@@ -288,7 +288,7 @@ test("早退の指示で退勤した社員のタスクは待ちに戻り、出�
 
     // 早退を取り消し、出勤し直すと、同じ社員が続けたタスクを先に取って呼び直す。開発の代わりのワークスペースは会話の記録を送らないので、続きからでなく最初から呼ぶ
     await page.goto("/staff/reviewer");
-    const active = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("listitem").filter({ hasText: "に出した" });
+    const active = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("listitem").filter({ hasText: "に登録" });
     await active.getByRole("button", { name: "早退の指示を取り消す" }).click();
     await expect(page.getByText("早退の指示を取り消しました")).toBeVisible();
     // 出勤し直すとすぐ取って SDK が呼ぶので、終わりの返事は出勤させる前に積む。前の呼び出しは閉じたので、ほかに取られない

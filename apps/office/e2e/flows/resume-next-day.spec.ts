@@ -7,7 +7,7 @@ import { FAKES } from "../helpers/fakes.ts";
 import { cancelLeftOrders } from "./helpers/seed.ts";
 import { part } from "./helpers/screen.ts";
 import { settle } from "./helpers/settle.ts";
-import { clockIn, scriptReply, staffState } from "./helpers/staff.ts";
+import { chooseTime, clockIn, scriptReply, staffState } from "./helpers/staff.ts";
 import { addTask, CARRY_TITLE, dropLeftovers, NodeStatus, openTree, Runs, scriptFinish } from "./helpers/staff-work.ts";
 
 /** 社員 DO が続きを呼ぶ時の指示 (src/gate/work/transcript.ts の RESUME_PROMPT) の一部 */
@@ -62,9 +62,9 @@ test.describe("チェックポイントで退勤する", () => {
       // 勤務の時刻はほかの社員と同じなので変えず、社員と仕事の画面のボタンで、レビュー担当の今日の終わりを 2 分後にする
       await page.goto("/staff/reviewer");
       await page.getByRole("radiogroup", { name: "今日だけの指示" }).getByRole("radio", { name: "早退" }).click();
-      await page.getByLabel("終わりの時刻").fill(until.hhmm);
-      await page.getByRole("button", { name: "指示を出す" }).click();
-      await expect(page.getByText(`レビュー担当に今日の早退を ${until.hhmm} までで出しました`)).toBeVisible();
+      await chooseTime(page, "終了時刻", until.hhmm);
+      await page.getByRole("button", { name: "変更を登録する" }).click();
+      await expect(page.getByText(`レビュー担当の今日の早退を登録しました。終了時刻は ${until.hhmm} です`)).toBeVisible();
 
       // 終わりの時刻を過ぎてチェックポイントに届くと、タスクを持ったまま退勤し、タスクは翌日に続ける形で待ちに戻る
       await expect.poll(() => staffState(page, "reviewer"), { timeout: until.at - Date.now() + 90_000 }).toBe("off");
@@ -75,7 +75,7 @@ test.describe("チェックポイントで退勤する", () => {
 
       // 翌日: 今日の終わりを取り消し、退勤した日の印を消して出勤させる。続けたタスクを先に取り、すぐ SDK が呼ぶので、終わりの返事は出勤させる前に積む
       await page.goto("/staff/reviewer");
-      const active = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("listitem").filter({ hasText: "に出した" });
+      const active = page.getByRole("list", { name: "レビュー担当への今日の指示" }).getByRole("listitem").filter({ hasText: "に登録" });
       await active.getByRole("button", { name: "早退の指示を取り消す" }).click();
       await expect(page.getByText("早退の指示を取り消しました")).toBeVisible();
       await scriptFinish(page);

@@ -11,7 +11,7 @@ import { FailureAlert, ReviewFiles } from "./ReviewFiles.tsx";
 export interface ReviewPageProps {
   /** 作った社員のタスク ID */
   nodeId: string;
-  /** 作った社員 ID。仕事の山に戻る道に使う */
+  /** 作った社員 ID。タスクの一覧に戻る道に使う */
   staffId: string;
 }
 
@@ -105,7 +105,7 @@ export function ReviewPage({ nodeId, staffId }: ReviewPageProps) {
   const [done, setDone] = useState<string>();
   const back = (
     <Link href={`/staff/${staffId}?tab=tasks`} standalone>
-      仕事の山に戻る
+      タスクの一覧に戻る
     </Link>
   );
   if (loaded.state === "loading") return <Stack gap={4}>{back}<p role="status">レビューを読んでいます</p></Stack>;

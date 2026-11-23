@@ -29,7 +29,7 @@ describe("会話の言葉の指示の表示", () => {
       { id: ID, kind: "leave_early", day: "2026-12-01", until: "15:00", cancelledAt: null },
       { id: "0190f4a8-0000-7000-8000-000000000002", kind: "off", day: "2026-12-02", until: null, cancelledAt: "2026-12-01T03:00:00.000Z" },
     ]);
-    expect(html).toContain("12/1 の早退を 15:00 までで出しました");
+    expect(html).toContain("12/1 の早退を登録しました。終了時刻は 15:00 です");
     expect(html).toContain('aria-label="早退の指示を取り消す"');
     expect(html).toContain("12/2 を休みにしました (取り消しました)");
     expect(html).not.toContain('aria-label="休みの指示を取り消す"');
