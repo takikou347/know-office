@@ -3,6 +3,7 @@ import { dailyAllowanceMicroUsd } from "@know-office/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkTaskCost } from "../../src/gate/guard/observe.ts";
 import { startRun } from "../../src/gate/work/run.ts";
+import { resumeRun } from "../../src/gate/work/transcript.ts";
 import { fixedClock } from "../helpers/clock.ts";
 import { createTestD1, type TestD1 } from "../helpers/d1.ts";
 import { createTestGate, type TestGate } from "../helpers/gate.ts";
@@ -66,10 +67,24 @@ describe("月の予算で配分する", () => {
     expect(dailyAllowanceMicroUsd(90_000_000, 0, "2026-12-01")).toBe(Math.floor(90_000_000 / 31));
     expect(dailyAllowanceMicroUsd(90_000_000, 80_000_000, "2026-12-30")).toBe(5_000_000);
     expect(dailyAllowanceMicroUsd(90_000_000, 90_000_000, "2026-12-31")).toBe(0);
+    // 月の最終日は残りを全部、2 月は 28 日か閏年の 29 日で割る
+    expect(dailyAllowanceMicroUsd(90_000_000, 87_000_000, "2026-12-31")).toBe(3_000_000);
+    expect(dailyAllowanceMicroUsd(28_000_000, 0, "2027-02-01")).toBe(1_000_000);
+    expect(dailyAllowanceMicroUsd(29_000_000, 0, "2028-02-01")).toBe(1_000_000);
+  });
+
+  it("日本時間の月の境目で今月の額を数え直す", async () => {
+    // 11 月 30 日 23:59 (日本時間) の費用は 12 月に数えない。12 月 1 日 0:00 の物は数える
+    const firstOfMonth = Date.UTC(2026, 10, 30, 15, 0);
+    await spend(firstOfMonth - 60_000, 80_000_000);
+    expect(await takeAndStart()).toBe("started");
+    await spend(firstOfMonth, 3_000_000);
+    expect(await startRun(gate.env, "builder", clock.now())).not.toBe("started");
   });
 
   it("配分の内なら呼び出しを始める", async () => {
-    await spend(at(9), 1_000_000);
+    // 配分 2,903,225 の 1 つ手前まで使っても始める
+    await spend(at(9), Math.floor(90_000_000 / 31) - 1);
     expect(await takeAndStart()).toBe("started");
   });
 
@@ -82,6 +97,14 @@ describe("月の予算で配分する", () => {
     const notices = await d1.DB.prepare("SELECT title FROM notices WHERE kind = 'claude_budget_paced'").all<{ title: string }>();
     expect(notices.results).toHaveLength(1);
     expect(notices.results[0]?.title).toContain("2026-12-01");
+  });
+
+  it("配分ちょうどで止め、続きの呼び出しも始めない", async () => {
+    expect(await takeAndStart()).toBe("started");
+    await gate.env.STAFF.get(gate.env.STAFF.idFromName("builder")).appendTranscript(TASK, { sessionId: crypto.randomUUID(), seq: 0, chunk: btoa("{}\n") }, clock.now());
+    await spend(at(9), Math.floor(90_000_000 / 31));
+    expect(await resumeRun(gate.env, "builder", clock.now())).toBe(false);
+    expect(gate.workspaces.builder.runs).toHaveLength(1);
   });
 });
 

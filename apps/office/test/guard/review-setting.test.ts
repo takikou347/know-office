@@ -24,12 +24,12 @@ async function current(): Promise<z.infer<typeof SettingRow> | undefined> {
 
 describe("再開", () => {
   it("レビュー担当に聞く設定を開くのはパスキーで確かめる", async () => {
-    // 初期値は閉じて 1 日 10 回。一覧では会話の言葉の指示の次、基準の前に出る
+    // 初期値は閉じて 1 日 10 回。一覧では会話の言葉の指示の次、月の予算と基準の前に出る
     const keys = z
       .array(SettingRow)
       .parse(await api(world, "GET", "/api/v1/settings"))
       .map((r) => r.key);
-    expect(keys.slice(0, 5)).toEqual(["workday.schedule", "workday.offHoursCall", "workday.chatOrders", KEY, "guard.thresholds"]);
+    expect(keys.slice(0, 6)).toEqual(["workday.schedule", "workday.offHoursCall", "workday.chatOrders", KEY, "claude.budget", "guard.thresholds"]);
     expect(await current()).toEqual({ key: KEY, value: { enabled: false, perDay: 10 }, inherited: true, version: 0 });
     expect(code.parse(await api(world, "PUT", PATH, { version: 0, value: { enabled: true, perDay: 10 }, reason: "開く" }, 401)).code).toBe("step_up_required");
     expect(code.parse(await api(world, "PUT", PATH, { version: 0, value: { enabled: false, perDay: 11 }, reason: "増やす" }, 401)).code).toBe("step_up_required");

@@ -1,5 +1,5 @@
 // アイデア出しの週のバッチ処理。費用が出るので IDEA_BATCH が on の時だけ、月曜 4 時の Cron で社長のモデルに今のサービスを送り、返った案をアイデアの段階に足す (サービスと拡張の 3.1、3.6)
-import { OPUS } from "@know-office/core";
+import { SONNET } from "@know-office/core";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -30,7 +30,7 @@ describe("アイデア出し", () => {
     expect(runWeekly(FINDINGS_CRON, world.gate.env, { waitUntil: (p) => void waits.push(p) }, { now: () => dec(7, 4) }, deps)).toBe(true);
     await Promise.all(waits);
     const batch = world.gate.claude.batches.find((b) => b.requests.some((r) => r.custom_id === "ideas"));
-    expect(batch?.requests.map((r) => [r.custom_id, r.params.model])).toEqual([["ideas", OPUS]]);
+    expect(batch?.requests.map((r) => [r.custom_id, r.params.model])).toEqual([["ideas", SONNET]]);
     // 今のサービス (マイグレーションが置く knowidea-ui など) を渡し、重ならない案を求める
     expect(JSON.stringify(batch?.requests[0]?.params.messages)).toContain("knowidea-ui");
     world.gate.claude.endBatch(batch?.id ?? "", () => answerJson({ ideas: [IDEA] }, { input_tokens: 500, output_tokens: 100 }));
@@ -40,7 +40,7 @@ describe("アイデア出し", () => {
     ]);
     expect(await rows(world.d1.DB, "SELECT kind, by FROM service_events WHERE by = 'president'")).toEqual([{ kind: "stage", by: "president" }]);
     expect(await rows(world.d1.DB, "SELECT kind, status FROM batches WHERE kind = 'ideas'")).toEqual([{ kind: "ideas", status: "applied" }]);
-    expect(await rows(world.d1.REC_2026, "SELECT staff_id, scope, model FROM usage")).toEqual([{ staff_id: "president", scope: "office", model: OPUS }]);
+    expect(await rows(world.d1.REC_2026, "SELECT staff_id, scope, model FROM usage")).toEqual([{ staff_id: "president", scope: "office", model: SONNET }]);
   });
 
   it(`形の違う案は入れず、1 回に ${String(IDEAS_PER_BATCH)} 件までを入れ、同じ週は 2 度送らない`, async () => {

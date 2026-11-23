@@ -1,5 +1,5 @@
 // 設定の画面の、全体のルールとサービスの初期値。勤務の時刻、Claude の API の月の予算、時間外の呼び出し、会話の言葉の指示と、サービスが受け継ぐ 5 項目を読み、1 項目ずつ変える (サービスと拡張の 3.3、社員と勤怠の 2 章)
-import { ClaudeBudget, INHERITED_KEYS, type Setting, WorkSchedule } from "@know-office/core";
+import { ClaudeBudget, DEFAULT_CLAUDE_BUDGET, INHERITED_KEYS, type Setting, WorkSchedule } from "@know-office/core";
 import { Card, Checkbox, Stack, Status, TextField } from "knowidea-ui";
 import { useState } from "react";
 import { z } from "zod";
@@ -72,7 +72,7 @@ function ScheduleCard({ setting, onSaved, onRefused, refusal }: CardProps) {
 /** Claude の API の月の予算。月の額と 1 タスクの上限を変える。増やす変更はパスキーで確かめる */
 function BudgetCard({ setting, onSaved, onRefused, refusal }: CardProps) {
   const read = ClaudeBudget.safeParse(setting.value);
-  const start = read.success ? read.data : { monthlyUsd: 90, taskMaxUsd: 1 };
+  const start = read.success ? read.data : DEFAULT_CLAUDE_BUDGET;
   const [monthly, setMonthly] = useState(String(start.monthlyUsd));
   const [taskMax, setTaskMax] = useState(String(start.taskMaxUsd));
   const next = ClaudeBudget.safeParse({ monthlyUsd: Number(monthly), taskMaxUsd: Number(taskMax) });

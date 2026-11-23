@@ -51,10 +51,10 @@ export async function observe(env: Bindings, input: unknown, now: number, deps: 
  * @param now 今の時刻
  * @param deps 外へ頼む口
  * @param traceId 要求のトレース ID
- * @returns 止めたら true
+ * @returns 上限を超えていれば true。もう止めていて新しく止めなかった時も true
  */
 export async function checkTaskCost(env: Bindings, input: { staffId: StaffId; nodeId: string }, now: number, deps: GuardDeps, traceId?: string): Promise<boolean> {
-  const budget = await loadBudget(env.DB);
+  const [budget, { version }] = await Promise.all([loadBudget(env.DB), loadThresholds(env.DB)]);
   const cap = Math.round(budget.value.taskMaxUsd * 1_000_000);
   // 最後に再開した時より後だけを数える。止めた記録は今の状態の D1、使った量は記録の D1 にあるので、2 つの文に分ける
   const resumed = await env.DB.prepare(
@@ -69,7 +69,8 @@ export async function checkTaskCost(env: Bindings, input: { staffId: StaffId; no
   const cost = row?.cost ?? 0;
   if (cost <= cap) return false;
   const observed: Observed = { action: "stop", scope: "task", target: input.nodeId, signal: "task_cost", measured: cost, threshold: cap, recentOps: [], externalSources: [] };
-  await settle(env, observed, budget.version, now, deps, traceId, `1 つのタスクの費用 ${usdText(cost)} が上限 ${usdText(cap)} を超えた`);
+  // 止めた記録の基準の版は自動停止の基準 (guard.thresholds) の版にそろえる。上限の額は threshold に残す
+  await settle(env, observed, version, now, deps, traceId, `1 つのタスクの費用 ${usdText(cost)} が上限 ${usdText(cap)} を超えた`);
   return true;
 }
 

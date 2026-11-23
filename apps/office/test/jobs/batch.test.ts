@@ -1,5 +1,5 @@
 // 急がないタスクを、ワークスペースを起こさずにゲートウェイから Claude のバッチ処理で回す事。週に 1 度の蒸留を例に、始める、終わりを待つ、結果を入れるを確かめる (サービスと拡張の 3.6、monitoring の「トークンを減らす」)
-import { costMicroUsd, OPUS } from "@know-office/core";
+import { costMicroUsd, SONNET } from "@know-office/core";
 import { describe, expect, it } from "vitest";
 import { runScheduled } from "../../src/gate/jobs/health.ts";
 import { DISTILL_CRON, FINDINGS_CRON, pollBatches, previousWeek, runWeekly, startBatch } from "../../src/gate/jobs/weekly.ts";
@@ -20,8 +20,8 @@ describe("トークンを減らす", () => {
     // 原因ごとに 1 件の要求を、レビュー担当のモデルで 1 つのバッチに入れて送る
     const [batch] = world.gate.claude.batches;
     expect(batch?.requests.map((r) => [r.params.model, r.custom_id])).toEqual([
-      [OPUS, "c0"],
-      [OPUS, "c1"],
+      [SONNET, "c0"],
+      [SONNET, "c1"],
     ]);
     world.gate.claude.endBatch(batch?.id ?? "", () => PROPOSAL);
     await pollBatches(world.gate.env, deps, dec(7, 3, 5));
@@ -35,10 +35,10 @@ describe("トークンを減らす", () => {
     expect(world.gate.claude.requests).toEqual([]);
     expect(seen.every((s) => / http:\/\/localhost:5199\/anthropic\/v1\/messages\/batches/.test(s))).toBe(true);
     // 使った量は office の範囲で、バッチ処理の半額で残す
-    const half = Math.ceil(costMicroUsd(OPUS, { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 }) / 2);
+    const half = Math.ceil(costMicroUsd(SONNET, { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 }) / 2);
     expect(await rows(world.d1.REC_2026, "SELECT staff_id, node_id, scope, model, input_tokens, output_tokens, cost_micro_usd FROM usage")).toEqual([
-      { staff_id: "reviewer", node_id: null, scope: "office", model: OPUS, input_tokens: 1000, output_tokens: 200, cost_micro_usd: half },
-      { staff_id: "reviewer", node_id: null, scope: "office", model: OPUS, input_tokens: 1000, output_tokens: 200, cost_micro_usd: half },
+      { staff_id: "reviewer", node_id: null, scope: "office", model: SONNET, input_tokens: 1000, output_tokens: 200, cost_micro_usd: half },
+      { staff_id: "reviewer", node_id: null, scope: "office", model: SONNET, input_tokens: 1000, output_tokens: 200, cost_micro_usd: half },
     ]);
   });
 });

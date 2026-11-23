@@ -112,14 +112,14 @@ describe("再開", () => {
     expect(await rows(w, `SELECT status FROM nodes WHERE id = '${NODE}'`)).toEqual([{ status: "todo" }]);
     // Opus を 1 回、答えの tool を強いて呼び、止めた記録は JSON の文字列のデータとして渡す
     const [req] = w.gate.claude.requests.map((r) => Request.parse(r));
-    expect(req).toMatchObject({ model: "claude-opus-5-5", max_tokens: 800, tool_choice: { type: "tool", name: "record_review" } });
+    expect(req).toMatchObject({ model: "claude-sonnet-5-5", max_tokens: 800, tool_choice: { type: "tool", name: "record_review" } });
     const content = req?.messages[0]?.content ?? "";
     expect(z.record(z.string(), z.unknown()).parse(JSON.parse(content))).toMatchObject({ stopId, scope: "task", target: NODE, signal: "rule_denied" });
     expect(req?.system).toContain("データ");
     expect(w.gate.claude.keys).toEqual([ANTHROPIC_KEY]);
     // 使った量はレビュー担当の分として 1 行残す
     expect(await records("SELECT staff_id, node_id, scope, model, input_tokens, output_tokens, request_id FROM usage")).toEqual([
-      { staff_id: "reviewer", node_id: NODE, scope: "office", model: "claude-opus-5-5", input_tokens: 900, output_tokens: 60, request_id: `guard_review:${stopId}` },
+      { staff_id: "reviewer", node_id: NODE, scope: "office", model: "claude-sonnet-5-5", input_tokens: 900, output_tokens: 60, request_id: `guard_review:${stopId}` },
     ]);
     expect(await rows(w, "SELECT stop_id, day FROM guard_review_reads")).toEqual([{ stop_id: stopId, day: "2026-12-01" }]);
   });

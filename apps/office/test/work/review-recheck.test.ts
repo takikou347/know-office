@@ -25,6 +25,8 @@ describe("別のモデルによる確認", () => {
   it("定期の確かめ直しは、作った社員とレビュー担当が同じモデルの組を拾わず、上限の 50 件を食わない", async () => {
     const at = world.clock.now();
     // 社長はレビュー担当と同じモデルなので、その社長が作った 50 件はレビューを割り振れない。その後ろに開発担当が作った 1 件を置く
+    // 社長をレビュー担当と同じ Opus にして、同じモデルの組を作る
+    await world.d1.DB.prepare("UPDATE staff SET model = 'claude-opus-5-5' WHERE id = 'president'").run();
     for (let n = 1; n <= 50; n += 1) await waitingReview(n, "president", at);
     await waitingReview(51, "builder", at);
     expect(await recheckReviews(world.gate.env, at + RECHECK_AFTER_MS + 1)).toBe(1);

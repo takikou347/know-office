@@ -75,7 +75,7 @@ describe("社員の一覧", () => {
     expect(res.status).toBe(200);
     const body = z.object({ data: z.array(z.unknown()), meta: z.object({ next: z.null() }).loose() }).parse(await res.json());
     expect(body.data).toEqual([
-      { id: "president", job: "president", role: "社長", bossId: null, model: "claude-opus-5-5", schedule: null, version: 1, state: "off", nodeId: null, nodeTitle: null, workedMsToday: 0 },
+      { id: "president", job: "president", role: "社長", bossId: null, model: "claude-sonnet-5-5", schedule: null, version: 1, state: "off", nodeId: null, nodeTitle: null, workedMsToday: 0 },
       expect.objectContaining({ id: "builder", role: "開発担当", state: "working", workedMsToday: 60 * MINUTE }),
       expect.objectContaining({ id: "reviewer", role: "レビュー担当", model: "claude-opus-5-5", state: "off" }),
     ]);

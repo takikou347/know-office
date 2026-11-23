@@ -33,7 +33,7 @@ export type BatchRequest = {
   system: string;
   /** 1 件ごとの中身 */
   prompt: string;
-  /** 答えの長さの上限。Opus 5.5 は考える分もここに入る */
+  /** 答えの長さの上限。考える分もここに入る */
   maxTokens: number;
   /** 考える深さ */
   effort: BatchEffort;
@@ -42,7 +42,7 @@ export type BatchRequest = {
 /** ゲートウェイのバッチ処理のモデル。決まった形の JSON を返すだけなので、月の予算に収めるため Sonnet にする */
 export const BATCH_MODEL = SONNET;
 
-/** 考える深さ。Opus 5.5 は考える事を切れないので、深さだけで費用を抑える (https://docs.claude.com/en/build-with-claude/effort) */
+/** 考える深さ。深さで考える分の費用を抑える。Sonnet 5.5 も low から max の effort を受ける (https://platform.claude.com/docs/en/build-with-claude/effort) */
 export type BatchEffort = "low" | "medium" | "high";
 
 /** 週のバッチ処理と急ぐ故障の調べの答えの長さの上限。考える分を含めて、JSON の答えが切れない長さ */
