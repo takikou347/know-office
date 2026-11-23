@@ -134,6 +134,7 @@ export const staffManageRoutes = router
     await revokeStaffTickets(c.env, staffId, now, c.var.traceId);
     await rewake(c, staffId);
     await audit(c, "staff.retire", staffId, { moved: moved.length });
-    for (const heir of new Set(moved.map((m) => m.assignee))) await notifyStaff(c.env, heir, now, false);
+    // 取りやめにしたレビューのタスクは、呼ぶ社員が居ない
+    for (const heir of new Set(moved.flatMap((m) => (m.assignee === null ? [] : [m.assignee])))) await notifyStaff(c.env, heir, now, false);
     return noContent(c);
   });

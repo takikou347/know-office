@@ -27,6 +27,19 @@ const HEIR = `coalesce(
   (SELECT id FROM staff WHERE job = 'president' AND retired_at IS NULL LIMIT 1))`;
 
 /**
+ * 移すレビューのタスクを作った社員のモデルを引く副問い。同じ PR の、レビューでないタスクの担当のモデル。分からなければ NULL
+ */
+const MAKER_MODEL = `(SELECT ms.model FROM nodes m JOIN staff ms ON ms.id = m.assignee
+    WHERE m.repo = nodes.repo AND m.pr_number = nodes.pr_number AND coalesce(m.task_kind, '') <> 'review' ORDER BY m.created_at, m.id LIMIT 1)`;
+
+/**
+ * レビューのタスクの移す先を選ぶ副問い。職種の在籍の社員のうち、作った社員と別のモデルで、終わりでないタスクの少ない人。
+ * 居ない時と作った社員が分からない時は NULL。社長には移さない
+ */
+const REVIEW_HEIR = `(SELECT s.id FROM staff s LEFT JOIN (SELECT assignee, count(*) AS n FROM nodes WHERE kind = 'task' AND ${OPEN} GROUP BY assignee) o ON o.assignee = s.id
+    WHERE s.job = ? AND s.retired_at IS NULL AND s.model <> ${MAKER_MODEL} ORDER BY coalesce(o.n, 0), s.created_at, s.id LIMIT 1)`;
+
+/**
  * 6 字の小文字と数字を作る
  * @returns 6 字
  */
@@ -150,12 +163,12 @@ export async function updateStaff(db: D1Database, row: StaffRow, input: UpdateSt
  * @param env バインディング
  * @param staffId 社員 ID
  * @param now 今の時刻
- * @returns 移したタスクの ID と移した先
+ * @returns 移したタスクの ID と移した先。移す先が無く取りやめにしたレビューのタスクは null
  * @throws not_found 在籍の社員でない時
  * @throws refused 社長か、職種の最後の 1 人の時
  * @throws conflict 作業中の時、同時に削除した時
  */
-export async function retireStaff(env: Bindings, staffId: StaffId, now: number): Promise<{ id: string; assignee: string }[]> {
+export async function retireStaff(env: Bindings, staffId: StaffId, now: number): Promise<{ id: string; assignee: string | null }[]> {
   const row = await activeStaffRow(env.DB, staffId);
   if (!row) throw new AppError("not_found", "在籍の社員でない");
   if (row.job === "president") throw new AppError("refused", "社長は削除できない");
@@ -188,22 +201,27 @@ export async function retireStaff(env: Bindings, staffId: StaffId, now: number):
  * @param db 今の状態の D1
  * @param staffId 削除した社員 ID
  * @param now 今の時刻
- * @returns 移したタスクの ID と移した先
+ * @returns 移したタスクの ID と移した先。移す先が無く取りやめにしたレビューのタスクは null
  */
-export async function handOver(db: D1Database, staffId: StaffId, now: number): Promise<{ id: string; assignee: string }[]> {
+export async function handOver(db: D1Database, staffId: StaffId, now: number): Promise<{ id: string; assignee: string | null }[]> {
   const job = await db.prepare("SELECT job FROM staff WHERE id = ? AND retired_at IS NOT NULL").bind(staffId).first<{ job: string }>();
   if (!job) return [];
   const { results } = await db.prepare(`SELECT id FROM nodes WHERE assignee = ? AND ${OPEN} ORDER BY created_at, id`).bind(staffId).all<{ id: string }>();
   const moves = results.map(({ id }) =>
     // 印の直前に取って誰も進めていない doing は、移した先が取れるよう todo に戻す
-    db.prepare(`UPDATE nodes SET assignee = ${HEIR}, status = CASE WHEN status = 'doing' THEN 'todo' ELSE status END, version = version + 1, updated_at = ? WHERE id = ? AND assignee = ? AND ${OPEN} RETURNING id, assignee`).bind(job.job, now, id, staffId),
+    // レビューのタスクは作った社員と別のモデルの社員にだけ移す。移す先が無い時は取りやめにし、別のモデルのレビュー担当が在籍になった後に定期の確かめ (recheckReviews) が立て直す
+    db
+      .prepare(
+        `UPDATE nodes SET assignee = CASE WHEN task_kind = 'review' THEN ${REVIEW_HEIR} ELSE ${HEIR} END, status = CASE WHEN task_kind = 'review' AND ${REVIEW_HEIR} IS NULL THEN 'dropped' WHEN status = 'doing' THEN 'todo' ELSE status END, version = version + 1, updated_at = ? WHERE id = ? AND assignee = ? AND ${OPEN} RETURNING id, assignee`,
+      )
+      .bind(job.job, job.job, job.job, now, id, staffId),
   );
   const bosses = db.prepare("UPDATE staff SET boss_id = (SELECT id FROM staff WHERE job = 'president' AND retired_at IS NULL LIMIT 1), version = version + 1 WHERE boss_id = ?").bind(staffId);
   // D1 の 1 回のバッチは 100 文までなので分けて流す
-  const moved: { id: string; assignee: string }[] = [];
+  const moved: { id: string; assignee: string | null }[] = [];
   const statements = [...moves, bosses];
   for (let i = 0; i < statements.length; i += 50) {
-    for (const r of await db.batch<{ id: string; assignee: string }>(statements.slice(i, i + 50))) moved.push(...r.results);
+    for (const r of await db.batch<{ id: string; assignee: string | null }>(statements.slice(i, i + 50))) moved.push(...r.results);
   }
   return moved;
 }

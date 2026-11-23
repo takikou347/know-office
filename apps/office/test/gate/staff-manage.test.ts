@@ -54,6 +54,20 @@ async function task(w: WorkWorld, assignee: string): Promise<string> {
 }
 
 /**
+ * 開発担当が作った PR と、そのレビューのタスクを足す
+ * @param w テストの物
+ * @param reviewer レビューのタスクの担当
+ * @returns レビューのタスクの ID
+ */
+async function reviewTask(w: WorkWorld, reviewer: string): Promise<string> {
+  const actor: Actor = { by: "owner", now: w.clock.now() };
+  const project = await intakeProject(w.gate.env, "office", actor);
+  const pr = { repo: "takikou347/know-office", prNumber: 7 };
+  await createNode(w.gate.env, { kind: "task", parentId: project.id, scope: "office", title: "作ったタスク", taskKind: "build", assignee: "builder", ...pr }, actor);
+  return (await createNode(w.gate.env, { kind: "task", parentId: project.id, scope: "office", title: "レビューのタスク", taskKind: "review", assignee: reviewer, ...pr }, actor)).id;
+}
+
+/**
  * 社員を削除する
  * @param w テストの物
  * @param path 社員のパス
@@ -162,6 +176,25 @@ describe("社員を追加し、削除し、設定する", () => {
       { assignee: "builder", n: 2 },
       { assignee: second.id, n: 2 },
     ]);
+  });
+
+  it("レビューのタスクは、作った社員と別のモデルのレビュー担当に移す", async () => {
+    await stepUp(world);
+    // 別のモデルの方にタスクを 1 つ持たせ、手の空き具合だけなら同じモデルの方が選ばれる形にする
+    await hire(world, { job: "reviewer", role: "レビュー担当 2", model: "claude-sonnet-5-5" });
+    const other = await hire(world, { job: "reviewer", role: "レビュー担当 3", model: "claude-haiku-5-5" });
+    await task(world, other.id);
+    const review = await reviewTask(world, "reviewer");
+    await retire(world, "/api/v1/staff/reviewer", 204);
+    expect(await rows(world.d1.DB, `SELECT assignee, status FROM nodes WHERE id = '${review}'`)).toEqual([{ assignee: other.id, status: "todo" }]);
+  });
+
+  it("作った社員と同じモデルのレビュー担当しか残らない時は、レビューのタスクを取りやめにし、定期の確かめが立て直せる形にする", async () => {
+    await stepUp(world);
+    await hire(world, { job: "reviewer", role: "レビュー担当 2", model: "claude-sonnet-5-5" });
+    const review = await reviewTask(world, "reviewer");
+    await retire(world, "/api/v1/staff/reviewer", 204);
+    expect(await rows(world.d1.DB, `SELECT assignee, status FROM nodes WHERE id = '${review}'`)).toEqual([{ assignee: null, status: "dropped" }]);
   });
 
   it("社長と職種の最後の 1 人と作業中の社員は削除できない", async () => {
