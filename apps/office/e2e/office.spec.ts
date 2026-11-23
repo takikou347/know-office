@@ -1,13 +1,13 @@
 import type { Page, Request } from "@playwright/test";
 import { expect, test } from "./helpers/test.ts";
-import { roomOf } from "./helpers/room.ts";
+import { boxOf, pictureOf, roomOf } from "./helpers/room.ts";
 import { withoutWebgl } from "./helpers/webgl.ts";
 
 // オフィスの 3D の部屋。社員を押すと会話に移り、ほかの画面では 3D を読まず、3D を出せない時は 2D の一覧に代える。
 // 社員の動きと出来事は、社員を出勤させられる利用場面の通し (flows/office.spec.ts) で見る。画面の全体の 3.2
 
 /** 3D のコード (three.js と部屋の作り) とエディタのコードの要求か。開発の入口は 1 つずつ、作った物は分けた塊で出す。部屋の定義 (rooms) と配置 (layout) は three.js を使わないので含めない */
-const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|walls|marks|plan|vrm|gltf|themes)\b|codemirror|knowidea-ui_editor|editor-/i;
+const heavy = /three|OfficeScene|pages\/office\/(room|figure|furniture|walls|marks|plan|vrm|gltf|themes|view)\b|codemirror|knowidea-ui_editor|editor-/i;
 
 /**
  * 開いたページで出た要求の URL を貯める
@@ -117,6 +117,56 @@ test.describe("オフィスの部屋", () => {
     await expect(target).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("log", { name: "レビュー担当との会話" })).toBeVisible();
+  });
+
+  // 動きを止めるボタンが部屋の左下に部屋とくっついて出ていた (#319)
+  test("ボタンは部屋の右上に間を空けて置く", async ({ page }) => {
+    await page.goto("/office");
+    const room = roomOf(page);
+    await expect(room.locator("canvas")).toBeVisible();
+    const frame = await room.locator(".ko-office-frame").boundingBox();
+    const heading = await page.getByRole("heading", { level: 1, name: "オフィス" }).boundingBox();
+    if (!frame || !heading) throw new Error("部屋か見出しが無い");
+    const [halt, reset] = await Promise.all(["動きを止める", "元の視点に戻す"].map((name) => room.getByRole("button", { name }).boundingBox()));
+    if (!halt || !reset) throw new Error("ボタンが無い");
+    for (const button of [halt, reset]) {
+      // 部屋より上で、部屋とも見出しとも 8 ピクセル以上離す
+      expect(button.y + button.height).toBeLessThanOrEqual(frame.y - 8);
+      expect(button.y).toBeGreaterThanOrEqual(heading.y + heading.height + 8);
+    }
+    // 右に寄せて並べる。動きを止めるボタンは元の視点に戻すボタンの左で、右の端は部屋の右の端にそろえる
+    expect(halt.x + halt.width).toBeLessThan(reset.x);
+    expect(Math.abs(reset.x + reset.width - (frame.x + frame.width))).toBeLessThan(1);
+  });
+
+  test("視点を動かし、元の視点に戻す", async ({ page }) => {
+    // 動きを減らす設定では、戻す時になめらかに動かさず、すぐに元の絵に戻る
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/office");
+    const room = roomOf(page);
+    await expect(room.locator("canvas")).toBeVisible();
+    const home = await pictureOf(page);
+    const homeBox = await boxOf(page, /レビュー担当/);
+
+    // 矢印で回し、+ で寄せる。社員のリンクの箱は姿に付いていく
+    await room.getByRole("group", { name: "部屋の視点" }).focus();
+    for (const key of ["ArrowLeft", "ArrowLeft", "ArrowUp", "+"]) await page.keyboard.press(key);
+    await expect.poll(() => boxOf(page, /レビュー担当/)).not.toEqual(homeBox);
+    expect((await pictureOf(page)).equals(home)).toBe(false);
+
+    // ドラッグで回しても動く
+    const canvas = await room.locator("canvas").boundingBox();
+    if (!canvas) throw new Error("canvas が無い");
+    const moved = await boxOf(page, /レビュー担当/);
+    await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height - 20);
+    await page.mouse.down();
+    await page.mouse.move(canvas.x + canvas.width / 2 + 60, canvas.y + canvas.height - 20, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => boxOf(page, /レビュー担当/)).not.toEqual(moved);
+
+    await room.getByRole("button", { name: "元の視点に戻す" }).click();
+    await expect.poll(() => boxOf(page, /レビュー担当/)).toEqual(homeBox);
+    expect((await pictureOf(page)).equals(home)).toBe(true);
   });
 });
 

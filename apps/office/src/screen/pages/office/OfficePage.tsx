@@ -140,9 +140,8 @@ export function OfficePage() {
   return (
     <SceneBoundary fallback={list}>
       <Suspense fallback={<p role="status">部屋を読んでいます</p>}>
-        <OfficeScene people={people} batch={batch} moves={motionAllowed && !halted} onFail={fail}>
+        <OfficeScene people={people} batch={batch} moves={motionAllowed && !halted} onFail={fail} tools={halt}>
           {failed}
-          {halt}
           {news}
         </OfficeScene>
       </Suspense>

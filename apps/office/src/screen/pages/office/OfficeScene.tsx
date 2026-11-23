@@ -1,6 +1,7 @@
 // オフィスの 3D の部屋。オフィスの画面を開いた時だけ読み込み、社員の姿の上に、押すと会話が開くリンクを重ね、出来事の動きを見せる
 import "./office.css";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useRef } from "react";
+import { Button, Stack } from "knowidea-ui";
 import type { StaffOverview } from "@know-office/core";
 import { STAFF_STATES } from "../../parts/staff-status.tsx";
 import { roomStateOf } from "./layout.ts";
@@ -10,6 +11,7 @@ import { planMotions } from "./plan.ts";
 import { type ColorResolver, type Room, createRoom } from "./room.ts";
 import { type TagSizer, createTagSizer, growBoxes, separateBoxes, spreadTags } from "./tags.ts";
 import { OFFICE_THEME, themeOf } from "./themes.ts";
+import { viewKeyOf } from "./view.ts";
 
 export interface OfficeSceneProps {
   /** 部屋に置く社員と今の状態 */
@@ -20,7 +22,9 @@ export interface OfficeSceneProps {
   moves: boolean;
   /** 部屋を組めなかった時か、描く所を失った時に呼ぶ。2D の一覧に代える */
   onFail: () => void;
-  /** 部屋の上に置く物 (動きを止めるボタンと、直近の出来事) */
+  /** 部屋の右上に、元の視点に戻すボタンの前に並べるボタン (動きを止めるボタン) */
+  tools: ReactNode;
+  /** 部屋の下に置く物 (読めなかった知らせと、直近の出来事) */
   children: ReactNode;
 }
 
@@ -102,10 +106,10 @@ function placer(room: Room, links: ReadonlyMap<string, HTMLAnchorElement>, label
 
 /**
  * オフィスの 3D の部屋
- * @param props 部屋に置く社員、出来事、動かすか、組めなかった時の呼び先、部屋の上に置く物
+ * @param props 部屋に置く社員、出来事、動かすか、組めなかった時の呼び先、右上のボタン、部屋の下に置く物
  * @returns 部屋と、社員のリンク
  */
-export default function OfficeScene({ people, batch, moves, onFail, children }: OfficeSceneProps) {
+export default function OfficeScene({ people, batch, moves, onFail, tools, children }: OfficeSceneProps) {
   const frame = useRef<HTMLDivElement>(null);
   const links = useRef(new Map<string, HTMLAnchorElement>());
   const labels = useRef(new Map<string, HTMLAnchorElement>());
@@ -126,7 +130,8 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
     let room: Room;
     try {
       const seats = first.current.map((s) => ({ id: s.id, state: roomStateOf(s.state) }));
-      room = createRoom(el, seats, themeOf(OFFICE_THEME), colorResolver(box), { moves: initialMoves.current, onLost: onFail });
+      // 視点が変わったら、社員のリンクの箱を姿に合わせ直す。部屋を組み終える前は合わせる物が無い
+      room = createRoom(el, seats, themeOf(OFFICE_THEME), colorResolver(box), { moves: initialMoves.current, onLost: onFail, onView: () => control.current?.place() });
     } catch {
       el.remove();
       onFail();
@@ -211,9 +216,26 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
     c.place();
   }, [people]);
 
+  // 部屋の枠に移った時だけ、矢印で回し、+ と - で寄せ引きする。社員のリンクの上の矢印は奪わない
+  const steer = (e: KeyboardEvent<HTMLDivElement>) => {
+    const c = control.current;
+    const key = viewKeyOf(e.key);
+    if (!c || !key || e.target !== e.currentTarget || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    if ("zoom" in key) c.room.zoomView(key.zoom);
+    else c.room.rotateView(key.turn, key.tilt);
+  };
+
   return (
-    <section className="ko-office-room" aria-label="オフィスの部屋" data-motion={moves ? "moving" : "still"}>
-      <div className="ko-office-frame" ref={frame}>
+    <Stack as="section" gap={3} className="ko-office-room" aria-label="オフィスの部屋" data-motion={moves ? "moving" : "still"}>
+      <Stack direction="row" gap={2} justify="end" wrap>
+        {tools}
+        <Button variant="secondary" onClick={() => control.current?.room.resetView()}>
+          元の視点に戻す
+        </Button>
+      </Stack>
+      {/* 枠に移ると矢印と + と - で視点を動かせる。canvas は読み上げに出さないので、枠で受ける */}
+      <div className="ko-office-frame" ref={frame} role="group" aria-label="部屋の視点" aria-describedby="ko-office-view-help" tabIndex={0} onKeyDown={steer}>
         {people.map((s) => (
           <a
             key={s.id}
@@ -253,6 +275,7 @@ export default function OfficeScene({ people, batch, moves, onFail, children }: 
       </div>
       {children}
       <p>社員を押すと、その社員の会話が開きます</p>
-    </section>
+      <p id="ko-office-view-help">部屋をドラッグして回し、ホイールかピンチで寄せ引きできます。部屋を選んで、矢印で回し、+ と - で寄せ引きもできます</p>
+    </Stack>
   );
 }

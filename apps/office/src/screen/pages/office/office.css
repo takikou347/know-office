@@ -1,6 +1,8 @@
 /* オフィスの 3D の部屋。canvas の上に、社員の姿を覆うリンクと名札を重ねる */
 .ko-office-frame {
   position: relative;
+  /* 枠の線を幅に含め、上のボタンの右の端とそろえる */
+  box-sizing: border-box;
   inline-size: 100%;
   aspect-ratio: 16 / 10;
   max-block-size: 70vh;
@@ -107,4 +109,19 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
+}
+
+/* 部屋はドラッグで回し、ホイールとピンチで寄せ引きする */
+.ko-office-frame canvas {
+  cursor: grab;
+}
+
+.ko-office-frame canvas:active {
+  cursor: grabbing;
+}
+
+/* 枠に移ると矢印と + と - で視点を動かせる */
+.ko-office-frame:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
 }

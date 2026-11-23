@@ -11,6 +11,7 @@ import { activityOf, poseOf } from "./motion.ts";
 import type { Actors, Step } from "./plan.ts";
 import { buildStage } from "./stage.ts";
 import type { OfficeTheme } from "./themes.ts";
+import { createView } from "./view.ts";
 import { loadGltfAvatar } from "./gltf.ts";
 import { loadVrmAvatar } from "./vrm.ts";
 
@@ -45,6 +46,12 @@ export interface Room {
   play: (steps: readonly Step[]) => void;
   /** 動かすかを決める。動かさない時は残りの列を置き換え、息や打鍵も止めた形で描く */
   setMoving: (moves: boolean) => void;
+  /** 視点を横と縦に回す (ラジアン)。限りの外へは出ない */
+  rotateView: (turn: number, tilt: number) => void;
+  /** 視点を寄せ引きする。1 より大きいと寄せる。限りの外へは出ない */
+  zoomView: (factor: number) => void;
+  /** 元の視点に戻す。動かす間はなめらかに戻し、動かさない間はすぐに戻す */
+  resetView: () => void;
   /** 使った物を捨て、描く所を手放す */
   dispose: () => void;
 }
@@ -58,6 +65,8 @@ export interface RoomOptions {
   moves: boolean;
   /** 描く所を失った時に呼ぶ */
   onLost: () => void;
+  /** 視点が変わった時に呼ぶ。社員のリンクの箱を姿に合わせ直す */
+  onView: () => void;
 }
 
 /** 社員の姿と状態 */
@@ -101,7 +110,7 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     }
     return m;
   };
-  const { renderer, scene, camera, sun, fit } = buildStage(canvas, color(theme.background), theme, FLOOR);
+  const { renderer, scene, camera, target, sun, fit, frame } = buildStage(canvas, color(theme.background), theme, FLOOR);
   const desks: Record<string, DeskParts> = buildRoomShell(scene, FLOOR, mat, resolve, theme);
   const paperMat = mat("paper");
   let disposed = false;
@@ -172,6 +181,13 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
     renderer.render(scene, camera);
   };
 
+  // 視点: 回すたびに部屋が収まるように合わせ直す。動かさない間は描く回し方が止まっているので、ここで描く
+  const view = createView(camera, canvas, target, () => {
+    frame();
+    if (!moves) draw(0);
+    opts.onView();
+  });
+
   // 片付け: 描く所を失ったら 2D に代える。捨てる時に自分で失わせる分は聞かない
   const lost = () => opts.onLost();
   canvas.addEventListener("webglcontextlost", lost);
@@ -179,6 +195,7 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
   return {
     render: (t) => {
       director.advance(t);
+      view.advance(t);
       draw(t);
     },
     resize: (width, height) => {
@@ -234,11 +251,16 @@ export function createRoom(canvas: HTMLCanvasElement, seats: readonly Seat[], th
       moves = next;
       if (next) return;
       director.settle();
+      view.finish();
       draw(0);
     },
+    rotateView: (turn, tilt) => view.rotate(turn, tilt),
+    zoomView: (factor) => view.zoomBy(factor),
+    resetView: () => view.reset(moves),
     dispose: () => {
       disposed = true;
       canvas.removeEventListener("webglcontextlost", lost);
+      view.dispose();
       for (const f of figures.values()) f.model?.dispose();
       disposeScene(scene, materials.values());
       sun.shadow.map?.dispose();

@@ -1,4 +1,4 @@
-// 部屋の舞台を組む。描く所、明かり、カメラを作り、canvas の大きさに部屋がちょうど収まるようにカメラを合わせる
+// 部屋の舞台を組む。描く所、明かり、カメラを作り、canvas の大きさと視点の向きに部屋がちょうど収まるようにカメラを合わせる
 import { type Color, DirectionalLight, HemisphereLight, OrthographicCamera, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from "three";
 import { WALL } from "./walls.ts";
 
@@ -12,9 +12,13 @@ export interface Stage {
   renderer: WebGLRenderer;
   scene: Scene;
   camera: OrthographicCamera;
+  /** カメラが見る中心 */
+  target: Vector3;
   sun: DirectionalLight;
   /** canvas の大きさに合わせ、部屋がちょうど収まるようにカメラを合わせる */
   fit: (width: number, height: number) => void;
+  /** 視点を回した後に、今の向きで部屋がちょうど収まるようにカメラを合わせ直す */
+  frame: () => void;
 }
 
 /**
@@ -52,34 +56,40 @@ export function buildStage(canvas: HTMLCanvasElement, background: Color, light: 
   Object.assign(sun.shadow.camera, { left: -reach, right: reach, top: reach, bottom: -reach, far: 40 });
   scene.add(sun, sun.target);
 
-  const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
   const target = new Vector3(grid.cols / 2, 0.4, grid.rows / 2);
+  // 視点を回しても部屋の外から見るよう、カメラはフロアの対角より十分に離す
+  const distance = Math.max(30, Math.hypot(grid.cols, grid.rows) + 10);
+  const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, distance * 3);
   // 部屋を壁で仕切るので、低い壁越しに部屋の中が見える高さから見下ろす
-  camera.position.copy(target).add(new Vector3(0.45, 1.25, 1).normalize().multiplyScalar(30));
+  camera.position.copy(target).add(new Vector3(0.45, 1.25, 1).normalize().multiplyScalar(distance));
   camera.lookAt(target);
   camera.updateMatrixWorld();
-  // 部屋の隅を目の向きに写し、どの縦横比でも部屋がちょうど収まる広さを決める
   const corners: Vector3[] = [];
   for (const x of [-0.2, grid.cols + 0.2]) for (const y of [0, WALL.high]) for (const z of [-0.2, grid.rows + 0.2]) corners.push(new Vector3(x, y, z));
-  const view = corners.map((c) => c.clone().applyMatrix4(camera.matrixWorldInverse));
-  const span = {
-    minX: Math.min(...view.map((v) => v.x)),
-    maxX: Math.max(...view.map((v) => v.x)),
-    minY: Math.min(...view.map((v) => v.y)),
-    maxY: Math.max(...view.map((v) => v.y)),
-  };
+  let size = { width: 1, height: 1 };
 
-  const fit = (width: number, height: number) => {
-    renderer.setSize(width, height, false);
-    let w = (span.maxX - span.minX) * 1.02;
-    let h = (span.maxY - span.minY) * 1.02;
-    const aspect = width / height;
+  const frame = () => {
+    // 部屋の隅を今の目の向きに写し、どの縦横比と向きでも部屋がちょうど収まる広さを決める
+    camera.updateMatrixWorld();
+    const view = corners.map((c) => c.clone().applyMatrix4(camera.matrixWorldInverse));
+    const minX = Math.min(...view.map((v) => v.x));
+    const maxX = Math.max(...view.map((v) => v.x));
+    const minY = Math.min(...view.map((v) => v.y));
+    const maxY = Math.max(...view.map((v) => v.y));
+    let w = (maxX - minX) * 1.02;
+    let h = (maxY - minY) * 1.02;
+    const aspect = size.width / size.height;
     if (w / h < aspect) w = h * aspect;
     else h = w / aspect;
-    const cx = (span.minX + span.maxX) / 2;
-    const cy = (span.minY + span.maxY) / 2;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
     Object.assign(camera, { left: cx - w / 2, right: cx + w / 2, top: cy + h / 2, bottom: cy - h / 2 });
     camera.updateProjectionMatrix();
   };
-  return { renderer, scene, camera, sun, fit };
+  const fit = (width: number, height: number) => {
+    size = { width, height };
+    renderer.setSize(width, height, false);
+    frame();
+  };
+  return { renderer, scene, camera, target, sun, fit, frame };
 }
