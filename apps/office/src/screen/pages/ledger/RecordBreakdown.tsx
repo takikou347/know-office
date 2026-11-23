@@ -1,5 +1,7 @@
 // 記録の画面 (check.py が records のフォルダを断るので ledger に置く) のタスク、費用、トークンのタブ。選んだ月のサービスか社員ごとの値と全体を入口から読み、グラフと CSV を出す (サービスと拡張の 3.4)
 import type { RecordGroup, RecordSummary } from "@know-office/core";
+import { optionsOf } from "@know-office/core/master/master";
+import { RECORD_SPANS, type RecordSpan } from "@know-office/core/master/record-span";
 import { Alert, Chart, Link, SegmentedControl, Stack, Table } from "knowidea-ui";
 import { useContext, useEffect, useState } from "react";
 import { z } from "zod";
@@ -20,13 +22,7 @@ const GROUPS: Record<RecordGroup, { option: string; column: string }> = {
 
 const isGroup = (v: string): v is RecordGroup => v === "service" || v === "staff";
 
-/** 集める期間。選んだ月か、期間を決めない累計 */
-type Span = "month" | "all";
-
-/** 期間ごとの名前 */
-const SPANS: Record<Span, string> = { month: "この月", all: "累計" };
-
-const isSpan = (v: string): v is Span => v === "month" || v === "all";
+const isSpan = (v: string): v is RecordSpan => RECORD_SPANS.some((s) => s.value === v);
 
 /** タブで見る値。タスクは掛けた時間と終えた数、費用、トークン */
 export type RecordMetric = "tasks" | "cost" | "tokens";
@@ -139,7 +135,7 @@ export interface RecordBreakdownProps {
  */
 export function RecordBreakdown({ metric, month }: RecordBreakdownProps) {
   const [group, setGroup] = useState<RecordGroup>("service");
-  const [span, setSpan] = useState<Span>("month");
+  const [span, setSpan] = useState<RecordSpan>("month");
   const summed = span === "month" ? month : null;
   const loaded = useRecordSummary(group, summed);
   const names = GROUPS[group];
@@ -173,7 +169,7 @@ export function RecordBreakdown({ metric, month }: RecordBreakdownProps) {
           onValueChange={(v) => {
             if (isSpan(v)) setSpan(v);
           }}
-          options={Object.entries(SPANS).map(([value, label]) => ({ value, label }))}
+          options={optionsOf(RECORD_SPANS)}
         />
       </Stack>
       {body}
