@@ -87,7 +87,7 @@ test.describe("再開", () => {
         // 再開でタスクが todo に戻って社員に配られないよう、すぐ済にする
         seedMain(`UPDATE nodes SET status = 'done' WHERE id = '${NODE}'`);
         const calls = (await asked()).slice(before);
-        expect(calls.map((r) => r.model)).toEqual(["claude-opus-5-5"]);
+        expect(calls.map((r) => r.model)).toEqual(["claude-sonnet-5-5"]);
 
         // セキュリティの画面の止めた記録に、レビュー担当の再開と理由が出る
         await nav.getByRole("link", { name: "ハーネス" }).click();
