@@ -91,7 +91,7 @@ test.describe("再開", () => {
 
         // セキュリティの画面の止めた記録に、レビュー担当の再開と理由が出る
         await nav.getByRole("link", { name: "ハーネス" }).click();
-        await expect(part(page, "止めている物").getByRole("heading", { level: 3, name: `タスク ${NODE}` })).toHaveCount(0);
+        await expect(part(page, "今止まっている物").getByRole("heading", { level: 3, name: `タスク ${NODE}` })).toHaveCount(0);
         // 一覧は新しい順なので、先頭が今の通しの記録
         const row = part(page, "止めた記録").getByRole("row").filter({ hasText: NODE }).first();
         await expect(row).toContainText("に再開した");

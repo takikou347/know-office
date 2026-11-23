@@ -77,7 +77,7 @@ export function StopButton({ scope, target, label, onStopped }: StopButtonProps)
         {preview ? (
           <ul>
             <li>止まる範囲: {SCOPE_LABEL[scope]}</li>
-            <li>止まる社員: {preview.staff.length === 0 ? "無し" : preview.staff.map((id) => STAFF_LABEL[id]).join("、")}</li>
+            <li>止まる社員: {preview.staff.length === 0 ? "なし" : preview.staff.map((id) => STAFF_LABEL[id]).join("、")}</li>
             <li>止まるタスク: {preview.nodes} 件</li>
           </ul>
         ) : null}

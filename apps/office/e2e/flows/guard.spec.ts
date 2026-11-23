@@ -15,13 +15,13 @@ const Thresholds = z.object({ data: z.object({ version: z.number(), values: z.re
 async function openGuard(page: Page): Promise<void> {
   await page.goto("/guard");
   // 開いた時は初めの通知を待つ間 (長くて 1 秒) 画面を描かず、その間は「読んでいます」が無いので、出てから読み終わりを待つ
-  await expect(part(page, "止めている物").getByRole("heading", { level: 2 })).toBeVisible();
-  await expect(part(page, "止めている物").getByRole("status")).toHaveCount(0);
+  await expect(part(page, "今止まっている物").getByRole("heading", { level: 2 })).toBeVisible();
+  await expect(part(page, "今止まっている物").getByRole("status")).toHaveCount(0);
   const state = State.parse(await (await page.request.get("/api/v1/guard/state")).json());
   const left = state.data.stopped.filter((s) => s.scope === "staff");
   for (const s of left) expect(await post(page, `/api/v1/guard/stops/${s.stopId}/resume`)).toBe(200);
   if (left.length > 0) await page.reload();
-  await expect(part(page, "止めている物").getByText("止めている物は無い")).toBeVisible();
+  await expect(part(page, "今止まっている物").getByText("今止まっている物はありません")).toBeVisible();
 }
 
 /**
@@ -30,13 +30,13 @@ async function openGuard(page: Page): Promise<void> {
  * @param name 社員の名前
  */
 async function stopStaff(page: Page, name: string): Promise<void> {
-  await part(page, "手で止める").getByRole("button", { name: `${name}を止める` }).click();
+  await part(page, "今止まっている物").getByRole("button", { name: `${name}を止める` }).click();
   const dialog = page.getByRole("dialog", { name: "社員を止めますか" });
   await expect(dialog.getByText("止まる範囲: 社員")).toBeVisible();
   await expect(dialog.getByText(`止まる社員: ${name}`)).toBeVisible();
   await expect(dialog.getByText(/止まるタスク: \d+ 件/)).toBeVisible();
   await dialog.getByRole("button", { name: "止める", exact: true }).click();
-  await expect(part(page, "手で止める").getByText("社員を止めました")).toBeVisible();
+  await expect(part(page, "今止まっている物").getByText("社員を止めました")).toBeVisible();
 }
 
 test.describe("再開", () => {
@@ -44,7 +44,7 @@ test.describe("再開", () => {
     await openGuard(page);
     await stopStaff(page, "開発担当");
 
-    const stopped = part(page, "止めている物");
+    const stopped = part(page, "今止まっている物");
     await expect(stopped.getByRole("heading", { level: 3, name: "開発担当" })).toBeVisible();
     await expect(stopped.getByText("社員を止めている。手で止めた")).toBeVisible();
     const first = part(page, "止めた記録").getByRole("row").nth(1);
@@ -54,11 +54,11 @@ test.describe("再開", () => {
 
     // 読み直しても止めたまま。画面の中の印でなく、ゲートウェイの今の状態から出している
     await page.reload();
-    await expect(part(page, "止めている物").getByRole("heading", { level: 3, name: "開発担当" })).toBeVisible();
+    await expect(part(page, "今止まっている物").getByRole("heading", { level: 3, name: "開発担当" })).toBeVisible();
 
-    await part(page, "止めている物").getByRole("button", { name: "開発担当を再開する" }).click();
-    await expect(part(page, "止めている物").getByText(/開発担当を .+ に再開しました/)).toBeVisible();
-    await expect(part(page, "止めている物").getByText("止めている物は無い")).toBeVisible();
+    await part(page, "今止まっている物").getByRole("button", { name: "開発担当を再開する" }).click();
+    await expect(part(page, "今止まっている物").getByText(/開発担当を .+ に再開しました/)).toBeVisible();
+    await expect(part(page, "今止まっている物").getByText("今止まっている物はありません")).toBeVisible();
     await expect(part(page, "止めた記録").getByRole("row").nth(1)).toContainText("に再開した");
   });
 
@@ -71,14 +71,14 @@ test.describe("止めた記録", () => {
     await stopStaff(page, "レビュー担当");
     const first = part(page, "止めた記録").getByRole("row").nth(1);
     await expect(first).toContainText("レビュー担当");
-    await expect(first).toContainText("まだ");
+    await expect(first).toContainText("未判定");
 
     await first.getByRole("button", { name: /レビュー担当の記録を開く/ }).click();
     const dialog = page.getByRole("dialog", { name: "止めた記録" });
     await expect(dialog.getByText("手で止めた")).toBeVisible();
     await expect(dialog.getByText(/数えた値 0、基準 0、基準のバージョン \d+/)).toBeVisible();
     await expect(dialog.getByRole("heading", { name: "直前の操作 (0 件)" })).toBeVisible();
-    await expect(dialog.getByText("再開も判定もまだ無い")).toBeVisible();
+    await expect(dialog.getByText("再開と判定の記録はありません")).toBeVisible();
 
     await dialog.getByRole("radio", { name: "誤って止めた" }).check();
     await dialog.getByLabel("判定の理由").fill("通しの確かめで止めた");
@@ -89,8 +89,8 @@ test.describe("止めた記録", () => {
     await dialog.getByRole("button", { name: "閉じる" }).click();
     await expect(part(page, "止めた記録").getByRole("row").nth(1)).toContainText("誤って止めた");
 
-    await part(page, "止めている物").getByRole("button", { name: "レビュー担当を再開する" }).click();
-    await expect(part(page, "止めている物").getByText("止めている物は無い")).toBeVisible();
+    await part(page, "今止まっている物").getByRole("button", { name: "レビュー担当を再開する" }).click();
+    await expect(part(page, "今止まっている物").getByText("今止まっている物はありません")).toBeVisible();
   });
 });
 
@@ -98,7 +98,7 @@ test.describe("通知と手で止めるボタン", () => {
   test("手で止める", async ({ page }) => {
     await openGuard(page);
     // 確認の画面で取り消すと止めない
-    await part(page, "手で止める").getByRole("button", { name: "社長を止める" }).click();
+    await part(page, "今止まっている物").getByRole("button", { name: "社長を止める" }).click();
     const dialog = page.getByRole("dialog", { name: "社員を止めますか" });
     await expect(dialog.getByText("止まる社員: 社長")).toBeVisible();
     await dialog.getByRole("button", { name: "取り消す" }).click();
@@ -109,20 +109,20 @@ test.describe("通知と手で止めるボタン", () => {
     await all.getByRole("button", { name: "取り消す" }).click();
     await expect(all).toBeHidden();
     await page.reload();
-    await expect(part(page, "止めている物").getByText("止めている物は無い")).toBeVisible();
+    await expect(part(page, "今止まっている物").getByText("今止まっている物はありません")).toBeVisible();
 
     // 止まる範囲とタスクの数を確かめた後に止まる
     await stopStaff(page, "社長");
-    await expect(part(page, "止めている物").getByRole("heading", { level: 3, name: "社長" })).toBeVisible();
-    await part(page, "止めている物").getByRole("button", { name: "社長を再開する" }).click();
-    await expect(part(page, "止めている物").getByText("止めている物は無い")).toBeVisible();
+    await expect(part(page, "今止まっている物").getByRole("heading", { level: 3, name: "社長" })).toBeVisible();
+    await part(page, "今止まっている物").getByRole("button", { name: "社長を再開する" }).click();
+    await expect(part(page, "今止まっている物").getByText("今止まっている物はありません")).toBeVisible();
   });
 });
 
 test.describe("止める仕組みを守る", () => {
   test("基準の表は、ゲートウェイの今の基準を出す", async ({ page }) => {
     await page.goto("/guard");
-    const basis = part(page, "基準");
+    const basis = part(page, "基準の設定");
     await expect(basis.getByRole("region", { name: "基準" })).toBeVisible();
     const now = Thresholds.parse(await (await page.request.get("/api/v1/guard/thresholds")).json()).data;
     await expect(basis.getByText(`基準のバージョン ${String(now.version)}`)).toBeVisible();
@@ -136,7 +136,7 @@ test.describe("止める仕組みを守る", () => {
   test("基準を変えるとパスキーを求められ、確かめると新しい値と版が出る", async ({ page }) => {
     await useOwnerPasskey(page);
     await page.goto("/guard");
-    const basis = part(page, "基準");
+    const basis = part(page, "基準の設定");
     await expect(basis.getByRole("region", { name: "基準" })).toBeVisible();
     const before = Thresholds.parse(await (await page.request.get("/api/v1/guard/thresholds")).json()).data;
     const was = before.values["repeatedFailures"] ?? 0;
@@ -170,7 +170,7 @@ test.describe("止める仕組みを守る", () => {
 
     // 読み直しても新しい値のまま
     await page.reload();
-    await expect(part(page, "基準").getByRole("row", { name: /タスクを止める、同じ失敗の続いた数/ })).toContainText(`${String(next)} 回`);
+    await expect(part(page, "基準の設定").getByRole("row", { name: /タスクを止める、同じ失敗の続いた数/ })).toContainText(`${String(next)} 回`);
 
     // 確認は 15 分有効なので、元の値へ戻す時はパスキーを求められない
     await change(was, "通しの確かめの後に戻す");

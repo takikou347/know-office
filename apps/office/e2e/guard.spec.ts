@@ -67,3 +67,34 @@ test.describe("通知と手で止めるボタン", () => {
     expect(created).toEqual([{ scope: "office", target: "office", reason: "オーナーが画面のボタンで止めた" }]);
   });
 });
+
+// 空の時の文。行もデータも無い時は、どの表も「〜はありません」の形で出す (自動停止の 3.6)
+test.describe("止めた記録", () => {
+  test("止めた記録も学びも無い時は、どの部分にもデータが無い事を正しい日本語で出す", async ({ page }) => {
+    const meta = { traceId: "0".repeat(32) };
+    await page.route(
+      (url) => url.pathname === "/api/v1/guard/state",
+      (route) => route.fulfill({ json: { data: { stopped: [] }, meta } }),
+    );
+    await page.route(
+      (url) => url.pathname === "/api/v1/guard/stops",
+      (route) => route.fulfill({ json: { data: [], meta: { ...meta, next: null } } }),
+    );
+    await page.route(
+      (url) => url.pathname === "/api/v1/guard/effect",
+      (route) => route.fulfill({ json: { data: { stops: 0, falseRatio: 0, topCauses: [], measures: [] }, meta } }),
+    );
+    await page.route(
+      (url) => url.pathname === "/api/v1/guard/lessons",
+      (route) => route.fulfill({ json: { data: [], meta: { ...meta, next: null } } }),
+    );
+    await page.goto("/guard");
+    const main = page.getByRole("main");
+    await expect(main.getByText("今止まっている物はありません")).toBeVisible();
+    await expect(main.getByRole("region", { name: "止めた記録" })).toContainText("止めた記録はありません");
+    await expect(main.getByRole("region", { name: "多い原因" })).toContainText("止めた記録はありません");
+    await expect(main.getByRole("region", { name: "入れた対策の効き目" })).toContainText("入れた対策はありません");
+    await expect(main.getByRole("region", { name: "蒸留した学び" })).toContainText("学びはありません");
+    await expect(main).not.toContainText("まだ止めていない");
+  });
+});

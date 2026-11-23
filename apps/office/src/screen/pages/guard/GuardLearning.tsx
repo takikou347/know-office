@@ -44,7 +44,7 @@ export function GuardEffectView() {
         label="多い原因"
         rowKey={(r) => r.signal}
         rows={topCauses}
-        emptyText="まだ止めていない"
+        emptyText="止めた記録はありません"
         columns={[
           { key: "signal", header: "原因", render: (r) => signalLabel(r.signal) },
           { key: "count", header: "止めた回数", numeric: true, render: (r) => `${String(r.count)} 回` },
@@ -54,7 +54,7 @@ export function GuardEffectView() {
         label="入れた対策の効き目"
         rowKey={(r) => r.lessonId}
         rows={measures}
-        emptyText="まだ対策を入れていない"
+        emptyText="入れた対策はありません"
         columns={[
           { key: "lessonId", header: "対策", wrap: true, render: (r) => proposals.get(r.lessonId) ?? r.lessonId },
           { key: "before", header: "入れる前の 7 日", numeric: true, render: (r) => `${String(r.before)} 回` },
@@ -109,7 +109,7 @@ export function LessonList() {
         label="蒸留した学び"
         rowKey={(r) => r.id}
         rows={rows}
-        emptyText="まだ学びは無い"
+        emptyText="学びはありません"
         columns={[
           { key: "proposal", header: "案", wrap: true, render: (r) => `${KIND_LABEL[r.kind]}: ${r.proposal}` },
           { key: "cause", header: "原因", render: (r) => signalLabel(r.cause) },

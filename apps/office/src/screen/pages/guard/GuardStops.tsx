@@ -85,7 +85,7 @@ export function StoppedList({ tick, onChanged }: GuardStopsProps) {
   const signals = new Map((rows.state === "ok" ? rows.data : []).map((r) => [r.id, reasonText(r)]));
   return (
     <Stack gap={3}>
-      {state.data.stopped.length === 0 ? <p>止めている物は無い</p> : null}
+      {state.data.stopped.length === 0 ? <p>今止まっている物はありません</p> : null}
       {state.data.stopped.map((s) => {
         const name = targetLabel(s.scope, s.target, services);
         return (
@@ -130,13 +130,13 @@ export function StopHistory({ tick, onChanged }: GuardStopsProps) {
         label="止めた記録"
         rowKey={(r) => r.id}
         rows={shown}
-        emptyText="まだ止めていない"
+        emptyText="止めた記録はありません"
         columns={[
           { key: "at", header: "時刻", numeric: true, render: (r) => jstDateTime(r.at) },
           { key: "name", header: "相手" },
           { key: "signal", header: "理由", wrap: true, render: (r) => reasonText(r) },
           { key: "resumedAt", header: "今", render: (r) => nowText(r) },
-          { key: "verdict", header: "判定", render: (r) => (r.verdict === null ? "まだ" : VERDICT_LABEL[r.verdict]) },
+          { key: "verdict", header: "判定", render: (r) => (r.verdict === null ? "未判定" : VERDICT_LABEL[r.verdict]) },
           {
             key: "id",
             header: "中身",
@@ -241,18 +241,18 @@ function StopRecord({ stopId, services, onClose, onJudged }: StopRecordProps) {
               数えた値 {d.measured}、基準 {d.threshold}、基準のバージョン {d.rulesVersion}
             </dd>
             <dt>使っていたモデル</dt>
-            <dd>{d.model ?? "無し"}</dd>
+            <dd>{d.model ?? "なし"}</dd>
             <dt>読んでいた外部の文章の出所</dt>
-            <dd>{d.externalSources.length === 0 ? "無し" : d.externalSources.join("、")}</dd>
+            <dd>{d.externalSources.length === 0 ? "なし" : d.externalSources.join("、")}</dd>
             <dt>今</dt>
             <dd>{nowText(d)}</dd>
             <dt>判定</dt>
-            <dd>{d.verdict === null ? "まだ" : VERDICT_LABEL[d.verdict]}</dd>
+            <dd>{d.verdict === null ? "未判定" : VERDICT_LABEL[d.verdict]}</dd>
           </dl>
           <section aria-label="直前の操作">
             <h3>直前の操作 ({d.recentOps.length} 件)</h3>
             {d.recentOps.length === 0 ? (
-              <p>直前の操作は無い</p>
+              <p>直前の操作はありません</p>
             ) : (
               <ol>
                 {d.recentOps.map((op, i) => (
@@ -268,7 +268,7 @@ function StopRecord({ stopId, services, onClose, onJudged }: StopRecordProps) {
           <section aria-label="経緯">
             <h3>経緯</h3>
             {d.updates.length === 0 ? (
-              <p>再開も判定もまだ無い</p>
+              <p>再開と判定の記録はありません</p>
             ) : (
               <ul>
                 {d.updates.map((u, i) => (

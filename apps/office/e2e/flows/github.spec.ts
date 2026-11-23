@@ -214,6 +214,6 @@ test.describe("全体を止める", () => {
     await page.goto("/guard");
     await page.getByRole("main").getByRole("button", { name: "すべての社員を再開する" }).click();
     await expect(page.getByRole("main").getByText(/すべての社員を .+ に再開しました/)).toBeVisible();
-    await expect(page.getByRole("main").getByText("止めている物は無い")).toBeVisible();
+    await expect(page.getByRole("main").getByText("今止まっている物はありません")).toBeVisible();
   });
 });
