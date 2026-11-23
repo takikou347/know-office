@@ -1,6 +1,8 @@
 // 選択肢のマスタデータの形。セレクトの選択肢、名前、入力の確かめを同じ並びから作る (詳細設計の目次)
 import { describe, expect, it } from "vitest";
 import { defineMaster, labelOf, masterSchema, optionsOf } from "../src/master/master.ts";
+import { RECORD_SPANS } from "../src/master/record-span.ts";
+import { RECORD_TABS } from "../src/master/record-tab.ts";
 
 const SIZES = defineMaster([
   { value: "s", label: "小" },
@@ -21,5 +23,12 @@ describe("マスタデータ", () => {
 
   it("値の重なったマスタデータは作らない", () => {
     expect(() => defineMaster([{ value: "s", label: "小" }, { value: "s", label: "小さい" }])).toThrow("重なっている");
+  });
+});
+
+describe("記録のマスタデータ", () => {
+  it("記録のタブと集める期間は、画面の順で値と名前を持つ", () => {
+    expect(optionsOf(RECORD_TABS).map((o) => o.label)).toEqual(["勤怠", "タスク", "費用", "トークン", "エラー"]);
+    expect(optionsOf(RECORD_SPANS)).toEqual([{ value: "month", label: "この月" }, { value: "all", label: "累計" }]);
   });
 });

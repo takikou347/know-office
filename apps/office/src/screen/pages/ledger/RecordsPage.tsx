@@ -1,7 +1,8 @@
 // 記録の画面。勤怠、タスク、費用、トークン、エラーをタブに分け、上で選んだ月の値を出す。勤怠は社員と日の表、タスクと費用とトークンはサービスごとと社員ごとの内訳、エラーは月の稼働率と新しいエラーログで、クエリの trace の要求をたどる (API の records、ログインと記録の 3.6、サービスと拡張の 3.4)
 import { jstDay, systemClock, Uptime } from "@know-office/core";
 import { Grid, Select, Stack, Stat, Tabs } from "knowidea-ui";
-import { useState } from "react";
+import { RECORD_TABS, type RecordTab } from "@know-office/core/master/record-tab";
+import { type ReactNode, useState } from "react";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part, Section } from "../../parts/section.tsx";
 import { ErrorLog, TraceView } from "./ErrorTrail.tsx";
@@ -15,9 +16,7 @@ const MONTHS_SHOWN = 12;
 /** 稼働率の目安。月の稼働率をこの割合と並べて出す */
 const UPTIME_TARGET = 0.999;
 
-const recordTabs = ["attendance", "tasks", "cost", "tokens", "errors"] as const;
-type RecordTab = (typeof recordTabs)[number];
-const isRecordTab = (v: string | null): v is RecordTab => recordTabs.some((t) => t === v);
+const isRecordTab = (v: string | null): v is RecordTab => RECORD_TABS.some((t) => t.value === v);
 
 /**
  * 道の問いから開くタブを決める。tab があればそれ、trace があればエラー、ほかは勤怠
@@ -71,6 +70,23 @@ export function RecordsPage({ query }: RecordsPageProps) {
   const months = recentMonths(today, MONTHS_SHOWN);
   const [month, setMonth] = useState(months[0] ?? today.slice(0, 7));
   const [tab, setTab] = useState<RecordTab>(() => recordTabOf(query));
+  // タブの並びと名前はマスタデータから取り、中身だけをここで決める
+  const contents: Record<RecordTab, ReactNode> = {
+    attendance: <MonthAttendance month={month} today={today} />,
+    tasks: <RecordBreakdown metric="tasks" month={month} />,
+    cost: <RecordBreakdown metric="cost" month={month} />,
+    tokens: <RecordBreakdown metric="tokens" month={month} />,
+    errors: (
+      <Stack gap={6}>
+        <Part title="稼働率">
+          <MonthUptime key={month} month={month} />
+        </Part>
+        <Part title="エラーログ">
+          <ErrorLog />
+        </Part>
+      </Stack>
+    ),
+  };
   return (
     <Section>
       {trace === null ? null : (
@@ -93,26 +109,7 @@ export function RecordsPage({ query }: RecordsPageProps) {
           onValueChange={(v) => {
             if (isRecordTab(v)) setTab(v);
           }}
-          items={[
-            { value: "attendance", label: "勤怠", content: <MonthAttendance month={month} today={today} /> },
-            { value: "tasks", label: "タスク", content: <RecordBreakdown metric="tasks" month={month} /> },
-            { value: "cost", label: "費用", content: <RecordBreakdown metric="cost" month={month} /> },
-            { value: "tokens", label: "トークン", content: <RecordBreakdown metric="tokens" month={month} /> },
-            {
-              value: "errors",
-              label: "エラー",
-              content: (
-                <Stack gap={6}>
-                  <Part title="稼働率">
-                    <MonthUptime key={month} month={month} />
-                  </Part>
-                  <Part title="エラーログ">
-                    <ErrorLog />
-                  </Part>
-                </Stack>
-              ),
-            },
-          ]}
+          items={RECORD_TABS.map((t) => ({ value: t.value, label: t.label, content: contents[t.value] }))}
         />
       </Stack>
     </Section>
