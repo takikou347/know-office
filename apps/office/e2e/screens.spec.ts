@@ -294,3 +294,29 @@ test("目的と組織図で、目的からタスクまでの木と進み具合�
   await org.getByRole("button", { name: "開発担当の説明文を直す" }).click();
   await expect(org.getByRole("textbox", { name: "開発担当の役目の説明文" })).toHaveValue(/未確認/);
 });
+
+test("左上のロゴでホームへ戻り、サイドメニューの開け閉めと明るさを覚える", async ({ page }) => {
+  test.skip(narrow(page), "サイドメニューと左上のロゴは幅 1,024 以上だけに出る");
+  await page.goto("/settings");
+  const side = page.locator("nav:visible");
+  // 左上のロゴと名前はホームへのリンク
+  await page.getByRole("link", { name: "know-office" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
+  // 閉じると名前が見えなくなり、読み込み直しても閉じたまま。開け直すと戻る
+  const toggle = page.getByRole("button", { name: "サイドメニュー" });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "サイドメニュー" })).toHaveAttribute("aria-expanded", "false");
+  await expect(side.getByRole("link", { name: "社員" })).toBeVisible();
+  await page.getByRole("button", { name: "サイドメニュー" }).click();
+  await expect(page.getByRole("button", { name: "サイドメニュー" })).toHaveAttribute("aria-expanded", "true");
+  // 明るさを切り替えると html に付き、読み込み直しても残る
+  const before = await page.evaluate(() => document.documentElement.dataset["theme"] ?? "");
+  await page.getByRole("button", { name: /にする$/ }).click();
+  const after = await page.evaluate(() => document.documentElement.dataset["theme"] ?? "");
+  expect(after).not.toBe(before);
+  expect(["light", "dark"]).toContain(after);
+  await page.reload();
+  expect(await page.evaluate(() => document.documentElement.dataset["theme"])).toBe(after);
+});
