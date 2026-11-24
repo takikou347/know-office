@@ -128,8 +128,11 @@ test.describe("オーナーの指示に合わせる", () => {
     const extracted = async () => Requests.parse(await (await page.request.get(`${FAKES}/anthropic/__fake/requests`)).json()).filter((r) => r.tool_choice?.name === "record_orders").length;
     const before = await extracted();
     const said = `閉じた時の休み ${String(Date.now())}`;
+    // 前の通しのタスクを社員がまだ持っていると、渡る道は次のタスクになる。道によらず、発言の返事が届いてから確かめる
+    const answered = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/api/v1/staff/reviewer/messages"));
     const bubble = await sayToReviewer(page, `今日は休みにして ${said}`);
-    await expect(bubble.getByText(/^(タスクにしました|社員に渡しました)$/)).toBeVisible();
+    expect((await answered).status()).toBe(201);
+    await expect(bubble).toBeVisible();
     await expect(bubble.getByText("を休みにしました")).toHaveCount(0);
     // ゲートウェイは抜き出しのために Claude を呼ばない
     expect(await extracted()).toBe(before);
