@@ -16,7 +16,7 @@ import {
 import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z, type ZodType } from "zod";
-import { toFieldErrors } from "../app.ts";
+import { toFieldErrors } from "../field-errors.ts";
 import { services, serviceSettings, settings } from "../db/main.ts";
 import { clockAt, loadSchedule } from "../work/attendance.ts";
 

@@ -1,14 +1,14 @@
 // ゲートウェイの Hono を作る。入力の検証に落ちた時の返し方と失敗の返し方をそろえる
 import { OpenAPIHono, type Hook } from "@hono/zod-openapi";
-import { AppError, type Clock, type Fetcher, type FieldError, log, systemClock } from "@know-office/core";
+import { AppError, type Clock, type Fetcher, log, systemClock } from "@know-office/core";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
-import type { ZodError } from "zod";
 import { accessProof, admission, guardOf, hookAdmission, loginSession, sameOrigin } from "./auth/middleware.ts";
 import { bodyShape } from "./body.ts";
 import { securityHeaders } from "./headers.ts";
 import type { GateEnv } from "./env.ts";
 import { endpoints } from "./endpoints.ts";
+import { toFieldErrors } from "./field-errors.ts";
 import { revokeTokens, SHARED_TOKENS, type TokenCache } from "./github/app.ts";
 import { accessArchive, vaultArchive } from "./github/archive.ts";
 import { noteGitHubRateLimit } from "./github/limits.ts";
@@ -34,22 +34,6 @@ const countDenied = createMiddleware<GateEnv>(async (c, next) => {
     .countDenied(c.var.clock.now())
     .catch((error: unknown) => log("warn", "denied_not_counted", { traceId: c.var.traceId, error: error instanceof Error ? error.message : "unknown" }));
 });
-
-const TARGET_PREFIX: Record<string, string> = { json: "#", query: "#/query", param: "#/path", header: "#/header", cookie: "#/cookie" };
-
-/**
- * Zod の失敗を項目ごとの JSON Pointer と理由に直す
- * @param error Zod の失敗
- * @param target 入力の置き場所 (json、query、param など)
- * @returns 項目ごとの理由
- */
-export function toFieldErrors(error: ZodError, target: string): FieldError[] {
-  const prefix = TARGET_PREFIX[target] ?? "#";
-  return error.issues.map((issue) => ({
-    pointer: [prefix, ...issue.path.map((p) => String(p).replaceAll("~", "~0").replaceAll("/", "~1"))].join("/"),
-    detail: issue.message,
-  }));
-}
 
 /**
  * 入力の検証に落ちたら 422 validation_failed を投げる
