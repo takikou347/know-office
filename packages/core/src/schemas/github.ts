@@ -279,7 +279,9 @@ export const PullRequestEvent = z.object({ pull_request: z.object({ number: z.nu
 /** issues の通知のうち使う所。プルリクエストも issues で届くので pull_request で見分ける */
 export const IssuesEvent = z
   .object({
-    issue: z.object({ number: z.number().int().positive(), title: z.string().min(1).max(256), body: z.string().max(65_536).nullable().optional(), pull_request: z.unknown().optional() }).loose(),
+    issue: z
+      .object({ number: z.number().int().positive(), title: z.string().min(1).max(256), body: z.string().max(65_536).nullable().optional(), pull_request: z.unknown().optional(), author_association: z.string().max(64).optional() })
+      .loose(),
     sender: z.object({ type: z.string().max(64) }).loose().optional(),
   })
   .loose();

@@ -238,7 +238,7 @@ function changes(env: Bindings, hook: Hook): D1PreparedStatement[] {
 }
 
 /**
- * 選んだリポジトリで開いた Issue を、社長の plan のタスクにする (タスクとレビューの 3.1 の 6)
+ * 選んだリポジトリで持ち主が開いた Issue を、社長の plan のタスクにする (タスクとレビューの 3.1 の 7)
  * 受けた記録を先に 1 文で取り、取れた側だけがタスクを足す。足せなければ記録を消し、GitHub の送り直しで受け直す
  * @param env バインディング
  * @param hook 確かめた通知
@@ -246,7 +246,9 @@ function changes(env: Bindings, hook: Hook): D1PreparedStatement[] {
  */
 async function intakeIssue(env: Bindings, hook: Hook, record: D1PreparedStatement): Promise<void> {
   const issue = IssuesEvent.safeParse(hook.payload);
-  const relevant = hook.action === "opened" && hook.repo !== null && issue.success && issue.data.issue.pull_request === undefined && issue.data.sender?.type !== "Bot";
+  // 公開のリポジトリには誰でも Issue を開けるので、持ち主 (author_association が OWNER) の Issue だけを社員のタスクにする。ほかの人の本文で社員を動かさず、Claude の費用も使わせない
+  const relevant =
+    hook.action === "opened" && hook.repo !== null && issue.success && issue.data.issue.pull_request === undefined && issue.data.sender?.type !== "Bot" && issue.data.issue.author_association === "OWNER";
   if (!relevant || hook.repo === null || !issue.success) {
     await record.run();
     return;

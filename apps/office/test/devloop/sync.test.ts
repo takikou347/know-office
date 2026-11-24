@@ -55,7 +55,7 @@ function featureTree(n: number): { path: string; mode: string; type: string; sha
  */
 async function issueEvent(issue: { number: number; title: string; body: string }, event = "issues", sender = "User"): Promise<void> {
   const app = linkedApp();
-  const payload = { action: event === "issues" ? "opened" : "created", issue, comment: { body: "コメント" }, sender: { type: sender }, repository: { full_name: REPO }, installation: { id: app.installationId } };
+  const payload = { action: event === "issues" ? "opened" : "created", issue: { ...issue, author_association: "OWNER" }, comment: { body: "コメント" }, sender: { type: sender }, repository: { full_name: REPO }, installation: { id: app.installationId } };
   expect((await hook(world, { event, payload, secret: app.webhookSecret })).status).toBe(204);
 }
 

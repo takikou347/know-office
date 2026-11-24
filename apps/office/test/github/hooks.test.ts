@@ -52,10 +52,11 @@ function checkRun(c: Connected, name: string, conclusion: string | null) {
  * issues の opened の通知の本文を作る
  * @param c 連携
  * @param number Issue の番号
+ * @param association 開いた者とリポジトリの関わり
  * @returns 本文
  */
-function issueOpened(c: Connected, number = 7) {
-  return { action: "opened", issue: { number, title: "勤怠の表が崩れる", body: "幅 360 で崩れる" }, repository: { full_name: UI }, installation: { id: c.installationId } };
+function issueOpened(c: Connected, number = 7, association = "OWNER") {
+  return { action: "opened", issue: { number, title: "勤怠の表が崩れる", body: "幅 360 で崩れる", author_association: association }, repository: { full_name: UI }, installation: { id: c.installationId } };
 }
 
 /**
@@ -97,6 +98,16 @@ describe("通知を受ける", () => {
     const c = await connect(world);
     expect((await hook(world, { event: "issues", payload: issueOpened(c), secret: c.webhookSecret })).status).toBe(204);
     expect(await planTasks()).toEqual([{ issue_number: 7, title: "勤怠の表が崩れる" }]);
+  });
+
+  it("公開のリポジトリで持ち主でない人が開いた Issue は、社長のタスクにしない", async () => {
+    const c = await connect(world);
+    for (const [number, association] of [[8, "NONE"], [9, "CONTRIBUTOR"], [10, "COLLABORATOR"]] as const) {
+      expect((await hook(world, { event: "issues", payload: issueOpened(c, number, association), secret: c.webhookSecret })).status).toBe(204);
+    }
+    const { author_association: _, ...noAssociation } = issueOpened(c, 11).issue;
+    expect((await hook(world, { event: "issues", payload: { ...issueOpened(c, 11), issue: noAssociation }, secret: c.webhookSecret })).status).toBe(204);
+    expect(await planTasks()).toEqual([]);
   });
 });
 
