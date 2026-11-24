@@ -92,7 +92,8 @@ const opened: { servers: Server[]; dirs: string[] } = { servers: [], dirs: [] };
 
 afterEach(() => {
   for (const server of opened.servers.splice(0)) server.close();
-  for (const dir of opened.dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // 落とした SDK の子の処理が、消す途中にまだ書いていると ENOTEMPTY になる。Node の rmSync は maxRetries でその失敗を待って消し直す
+  for (const dir of opened.dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /**
