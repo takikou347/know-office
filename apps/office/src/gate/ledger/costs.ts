@@ -83,7 +83,7 @@ export async function costHistory(env: Bindings, now: number): Promise<CostHisto
 const usd = (micro: number) => (micro / 1_000_000).toFixed(6);
 
 /**
- * 費用の推移を CSV にする。月ごとの内訳の行と、最後に累計の行を置く。額はドルで小数 6 桁
+ * 費用の推移を CSV にする。月ごとの内訳の行と、最後に累計の total の行を置く。額はドルで小数 6 桁、改行は RFC 4180 の CRLF
  * @param history 費用の推移と累計
  * @returns CSV の文
  */
@@ -91,7 +91,7 @@ export function costCsv(history: CostHistory): string {
   const rows = [
     "month,claude_usd,cloudflare_usd,total_usd",
     ...history.months.map((m) => `${m.month},${usd(m.claudeMicroUsd)},${usd(m.cloudflareMicroUsd)},${usd(m.totalMicroUsd)}`),
-    `累計,${usd(history.claudeMicroUsd)},${usd(history.cloudflareMicroUsd)},${usd(history.totalMicroUsd)}`,
+    `total,${usd(history.claudeMicroUsd)},${usd(history.cloudflareMicroUsd)},${usd(history.totalMicroUsd)}`,
   ];
-  return `${rows.join("\n")}\n`;
+  return `${rows.join("\r\n")}\r\n`;
 }

@@ -117,10 +117,10 @@ test.describe("記録", () => {
     // CSV は同じ内訳を月ごとに出し、最後に累計の行を置く
     const csv = await page.request.get(await trend.getByRole("link", { name: "月ごとの費用を CSV で出す" }).getAttribute("href") ?? "");
     expect(csv.ok()).toBe(true);
-    const lines = (await csv.text()).trim().split("\n");
+    const lines = (await csv.text()).trim().split("\r\n");
     expect(lines[0]).toBe("month,claude_usd,cloudflare_usd,total_usd");
     expect(lines.at(-2)).toMatch(new RegExp(`^${day.slice(0, 7)},`));
-    expect(lines.at(-1)).toMatch(/^累計,/);
+    expect(lines.at(-1)).toMatch(/^total,/);
     // 内訳は選んだ月の社員ごとと、サービスごとの Claude API の費用
     await expect(part(page, "Claude API の費用の内訳").getByRole("region", { name: "社員ごとの費用" }).or(part(page, "Claude API の費用の内訳").getByRole("region", { name: "サービスごとの費用" }))).toBeVisible();
   });

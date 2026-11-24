@@ -68,6 +68,6 @@ describe("費用の推移", () => {
     const res = await gate.request("/api/v1/records/costs/export", { headers });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/csv");
-    expect((await res.text()).trim().split("\n")).toEqual(["month,claude_usd,cloudflare_usd,total_usd", "2027-01,1.234567,5.000000,6.234567", "累計,1.234567,5.000000,6.234567"]);
+    expect((await res.text()).trim().split("\r\n")).toEqual(["month,claude_usd,cloudflare_usd,total_usd", "2027-01,1.234567,5.000000,6.234567", "total,1.234567,5.000000,6.234567"]);
   });
 });

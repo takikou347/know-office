@@ -5,9 +5,9 @@ import { RECORD_TABS, type RecordTab } from "@know-office/core/master/record-tab
 import { type ReactNode, useState } from "react";
 import { FailedAlert, useLoad } from "../../parts/load.tsx";
 import { Part, Section } from "../../parts/section.tsx";
+import { CostTrend } from "./CostTrend.tsx";
 import { ErrorLog, TraceView } from "./ErrorTrail.tsx";
 import { MonthAttendance } from "./MonthAttendance.tsx";
-import { CostTrend } from "./CostTrend.tsx";
 import { RecordBreakdown } from "./RecordBreakdown.tsx";
 import { monthLabel, recentMonths } from "./month.ts";
 
